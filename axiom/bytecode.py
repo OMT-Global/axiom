@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import struct
 
 from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 
 class Op:
@@ -22,12 +22,20 @@ class Op:
     PRINT = 0x08
     POP = 0x09
     HALT = 0x0A
+    JMP = 0x0B
+    JMP_IF_FALSE = 0x0C
+    CMP_EQ = 0x0D
+    CMP_NE = 0x0E
+    CMP_LT = 0x0F
+    CMP_LE = 0x10
+    CMP_GT = 0x11
+    CMP_GE = 0x12
 
 
 @dataclass(frozen=True)
 class Instr:
     op: int
-    arg: Optional[int] = None  # i64 for CONST, u32 for LOAD/STORE
+    arg: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -55,13 +63,10 @@ class Bytecode:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_I64 missing arg")
                 out += struct.pack("<q", int(ins.arg))
-            elif ins.op in (Op.LOAD, Op.STORE):
+            elif ins.op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE):
                 if ins.arg is None:
-                    raise AxiomCompileError("LOAD/STORE missing arg")
+                    raise AxiomCompileError("opcode missing arg")
                 out += struct.pack("<I", int(ins.arg))
-            else:
-                # no payload
-                pass
 
         return bytes(out)
 
@@ -78,9 +83,8 @@ class Bytecode:
             off += n
             return b
 
-        magic = take(4)
-        if magic != MAGIC:
-            raise ValueError(f"bad magic: {magic!r}")
+        if take(4) != MAGIC:
+            raise ValueError("bad magic")
         major, minor = struct.unpack("<HH", take(4))
         if major != VERSION_MAJOR:
             raise ValueError(f"unsupported major version {major}")
@@ -93,8 +97,7 @@ class Bytecode:
         strings: List[str] = []
         for _ in range(n_strings):
             (blen,) = struct.unpack("<I", take(4))
-            s = take(blen).decode("utf-8")
-            strings.append(s)
+            strings.append(take(blen).decode("utf-8"))
 
         (n_ins,) = struct.unpack("<I", take(4))
         ins: List[Instr] = []
@@ -103,7 +106,7 @@ class Bytecode:
             if op == Op.CONST_I64:
                 (v,) = struct.unpack("<q", take(8))
                 ins.append(Instr(op, int(v)))
-            elif op in (Op.LOAD, Op.STORE):
+            elif op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE):
                 (slot,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(slot)))
             else:
