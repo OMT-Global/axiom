@@ -29,11 +29,20 @@ python -m unittest discover -v
 Supported:
 
 - `let name = <expr>`
+- `name = <expr>` assignment (nearest lexical binding)
 - `print <expr>`
+- block scopes:
+  - `{ ... }` introduces nested lexical scope
+- control flow:
+  - `if <expr> { ... } else { ... }`
+  - `while <expr> { ... }`
 - integer literals
 - variables
 - `+ - * /` with parentheses
+- comparisons: `== != < <= > >=` (results are `0` or `1`)
 - unary `-`
+
+Runtime semantics are int-only; `0` is false and non-zero is true.
 
 Statements can end with `;` or a newline.
 
@@ -52,7 +61,6 @@ See `docs/grammar.md`.
 ## Next steps
 
 - Add types beyond `i64`-like ints
-- Add blocks/scopes + control flow
 - Add functions + call frames
 - Add module/package system + tooling (formatter/LSP)
 - Add a real error reporter (spans -> line/col snippets)
