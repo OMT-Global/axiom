@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axiom-lang"
+version = "0.1.0"
+description = "Axiom language bootstrap: interpreter + bytecode compiler/VM (no LLVM)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "JT"}]
+
+[project.scripts]
+axiom = "axiom.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["axiom*","tests*"]
