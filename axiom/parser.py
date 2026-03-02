@@ -5,8 +5,12 @@ from typing import List
 from .ast import (
     Program,
     LetStmt,
+    AssignStmt,
     PrintStmt,
     ExprStmt,
+    BlockStmt,
+    IfStmt,
+    WhileStmt,
     Expr,
     IntLit,
     VarRef,
@@ -26,6 +30,10 @@ class Parser:
 
     def _peek(self) -> Token:
         return self.toks[self.i]
+
+    def _peek_n(self, n: int) -> Token:
+        idx = min(self.i + n, len(self.toks) - 1)
+        return self.toks[idx]
 
     def _bump(self) -> Token:
         t = self._peek()
@@ -57,30 +65,72 @@ class Parser:
             return self._parse_let()
         if k == TokenKind.PRINT:
             return self._parse_print()
+        if k == TokenKind.LBRACE:
+            return self._parse_block()
+        if k == TokenKind.IF:
+            return self._parse_if()
+        if k == TokenKind.WHILE:
+            return self._parse_while()
+        if k == TokenKind.IDENT and self._peek_n(1).kind == TokenKind.EQ:
+            return self._parse_assign()
         return self._parse_expr_stmt()
 
+    def _parse_block(self) -> BlockStmt:
+        lbrace = self._eat(TokenKind.LBRACE)
+        self._eat_newlines()
+        stmts = []
+        while self._peek().kind not in (TokenKind.RBRACE, TokenKind.EOF):
+            stmts.append(self._parse_stmt())
+            self._eat_newlines()
+        rbrace = self._eat(TokenKind.RBRACE)
+        return BlockStmt(stmts=stmts, span=Span(lbrace.span.start, rbrace.span.end))
+
+    def _parse_if(self) -> IfStmt:
+        start = self._eat(TokenKind.IF).span.start
+        cond = self._parse_expr()
+        then_block = self._parse_block()
+        else_block = None
+        if self._peek().kind == TokenKind.ELSE:
+            self._bump()
+            else_block = self._parse_block()
+            end = else_block.span.end
+        else:
+            end = then_block.span.end
+        return IfStmt(cond=cond, then_block=then_block, else_block=else_block, span=Span(start, end))
+
+    def _parse_while(self) -> WhileStmt:
+        start = self._eat(TokenKind.WHILE).span.start
+        cond = self._parse_expr()
+        body = self._parse_block()
+        return WhileStmt(cond=cond, body=body, span=Span(start, body.span.end))
+
     def _parse_let(self) -> LetStmt:
-        start = self._bump().span.start  # let
+        start = self._bump().span.start
         ident = self._bump()
         if ident.kind != TokenKind.IDENT:
             raise AxiomParseError("expected identifier after 'let'", ident.span)
-        name = str(ident.value)
         self._eat(TokenKind.EQ)
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
-        return LetStmt(name=name, expr=expr, span=Span(start, end))
+        return LetStmt(name=str(ident.value), expr=expr, span=Span(start, end))
+
+    def _parse_assign(self) -> AssignStmt:
+        ident = self._eat(TokenKind.IDENT)
+        self._eat(TokenKind.EQ)
+        expr = self._parse_expr()
+        end = self._parse_terminator(default_end=expr_span(expr).end)
+        return AssignStmt(name=str(ident.value), expr=expr, span=Span(ident.span.start, end))
 
     def _parse_print(self) -> PrintStmt:
-        start = self._bump().span.start  # print
+        start = self._bump().span.start
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
         return PrintStmt(expr=expr, span=Span(start, end))
 
     def _parse_expr_stmt(self) -> ExprStmt:
         expr = self._parse_expr()
-        start = expr_span(expr).start
         end = self._parse_terminator(default_end=expr_span(expr).end)
-        return ExprStmt(expr=expr, span=Span(start, end))
+        return ExprStmt(expr=expr, span=Span(expr_span(expr).start, end))
 
     def _parse_terminator(self, default_end: int) -> int:
         k = self._peek().kind
@@ -90,13 +140,46 @@ class Parser:
             end = self._bump().span.end
             self._eat_newlines()
             return end
-        if k == TokenKind.EOF:
+        if k in (TokenKind.EOF, TokenKind.RBRACE):
             return default_end
-        t = self._peek()
-        raise AxiomParseError("expected ';' or newline", t.span)
+        raise AxiomParseError("expected ';' or newline", self._peek().span)
 
     def _parse_expr(self) -> Expr:
-        return self._parse_add_sub()
+        return self._parse_equality()
+
+    def _parse_equality(self) -> Expr:
+        node = self._parse_comparison()
+        while True:
+            k = self._peek().kind
+            if k == TokenKind.EQEQ:
+                op = BinOp.EQ
+            elif k == TokenKind.NE:
+                op = BinOp.NE
+            else:
+                break
+            self._bump()
+            rhs = self._parse_comparison()
+            node = Binary(op=op, lhs=node, rhs=rhs, span=Span(expr_span(node).start, expr_span(rhs).end))
+        return node
+
+    def _parse_comparison(self) -> Expr:
+        node = self._parse_add_sub()
+        while True:
+            k = self._peek().kind
+            if k == TokenKind.LT:
+                op = BinOp.LT
+            elif k == TokenKind.LE:
+                op = BinOp.LE
+            elif k == TokenKind.GT:
+                op = BinOp.GT
+            elif k == TokenKind.GE:
+                op = BinOp.GE
+            else:
+                break
+            self._bump()
+            rhs = self._parse_add_sub()
+            node = Binary(op=op, lhs=node, rhs=rhs, span=Span(expr_span(node).start, expr_span(rhs).end))
+        return node
 
     def _parse_add_sub(self) -> Expr:
         node = self._parse_mul_div()
@@ -108,10 +191,9 @@ class Parser:
                 op = BinOp.SUB
             else:
                 break
-            op_tok = self._bump()
+            self._bump()
             rhs = self._parse_mul_div()
-            span = Span(expr_span(node).start, expr_span(rhs).end)
-            node = Binary(op=op, lhs=node, rhs=rhs, span=span)
+            node = Binary(op=op, lhs=node, rhs=rhs, span=Span(expr_span(node).start, expr_span(rhs).end))
         return node
 
     def _parse_mul_div(self) -> Expr:
@@ -124,10 +206,9 @@ class Parser:
                 op = BinOp.DIV
             else:
                 break
-            op_tok = self._bump()
+            self._bump()
             rhs = self._parse_factor()
-            span = Span(expr_span(node).start, expr_span(rhs).end)
-            node = Binary(op=op, lhs=node, rhs=rhs, span=span)
+            node = Binary(op=op, lhs=node, rhs=rhs, span=Span(expr_span(node).start, expr_span(rhs).end))
         return node
 
     def _parse_factor(self) -> Expr:
@@ -141,20 +222,16 @@ class Parser:
         if t.kind == TokenKind.MINUS:
             minus = self._bump()
             inner = self._parse_factor()
-            span = Span(minus.span.start, expr_span(inner).end)
-            return UnaryNeg(expr=inner, span=span)
+            return UnaryNeg(expr=inner, span=Span(minus.span.start, expr_span(inner).end))
         if t.kind == TokenKind.LPAREN:
             l = self._bump()
             expr = self._parse_expr()
             r = self._eat(TokenKind.RPAREN)
-            # widen span to include parentheses
-            widened = Span(l.span.start, r.span.end)
-            return _widen_span(expr, widened)
+            return _widen_span(expr, Span(l.span.start, r.span.end))
         raise AxiomParseError("expected expression", t.span)
 
 
 def _widen_span(expr: Expr, span: Span) -> Expr:
-    # Rebuild node with wider span (keeps everything else identical).
     if isinstance(expr, IntLit):
         return IntLit(expr.value, span)
     if isinstance(expr, VarRef):

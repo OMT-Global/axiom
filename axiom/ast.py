@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Union
+from typing import List, Optional, Union
 
 from .errors import Span
 
@@ -21,6 +21,13 @@ class LetStmt:
 
 
 @dataclass(frozen=True)
+class AssignStmt:
+    name: str
+    expr: "Expr"
+    span: Span
+
+
+@dataclass(frozen=True)
 class PrintStmt:
     expr: "Expr"
     span: Span
@@ -32,7 +39,28 @@ class ExprStmt:
     span: Span
 
 
-Stmt = Union[LetStmt, PrintStmt, ExprStmt]
+@dataclass(frozen=True)
+class BlockStmt:
+    stmts: List["Stmt"]
+    span: Span
+
+
+@dataclass(frozen=True)
+class IfStmt:
+    cond: "Expr"
+    then_block: BlockStmt
+    else_block: Optional[BlockStmt]
+    span: Span
+
+
+@dataclass(frozen=True)
+class WhileStmt:
+    cond: "Expr"
+    body: BlockStmt
+    span: Span
+
+
+Stmt = Union[LetStmt, AssignStmt, PrintStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt]
 
 
 # Expressions
@@ -59,6 +87,12 @@ class BinOp(Enum):
     SUB = auto()
     MUL = auto()
     DIV = auto()
+    EQ = auto()
+    NE = auto()
+    LT = auto()
+    LE = auto()
+    GT = auto()
+    GE = auto()
 
 
 @dataclass(frozen=True)
@@ -73,4 +107,4 @@ Expr = Union[IntLit, VarRef, UnaryNeg, Binary]
 
 
 def expr_span(e: Expr) -> Span:
-    return e.span  # all expr nodes have span
+    return e.span

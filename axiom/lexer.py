@@ -17,6 +17,11 @@ class Lexer:
             return None
         return self.src[self.i]
 
+    def _peek_next(self) -> Optional[str]:
+        if self.i + 1 >= self.n:
+            return None
+        return self.src[self.i + 1]
+
     def _bump(self) -> Optional[str]:
         ch = self._peek()
         if ch is None:
@@ -70,6 +75,12 @@ class Lexer:
             return Token(TokenKind.LET, Span(start, end))
         if text == "print":
             return Token(TokenKind.PRINT, Span(start, end))
+        if text == "if":
+            return Token(TokenKind.IF, Span(start, end))
+        if text == "else":
+            return Token(TokenKind.ELSE, Span(start, end))
+        if text == "while":
+            return Token(TokenKind.WHILE, Span(start, end))
         return Token(TokenKind.IDENT, Span(start, end), text)
 
     def next_token(self) -> Token:
@@ -84,7 +95,25 @@ class Lexer:
         if ch == ";":
             return Token(TokenKind.SEMI, Span(start, start + 1))
         if ch == "=":
+            if self._peek() == "=":
+                self.i += 1
+                return Token(TokenKind.EQEQ, Span(start, start + 2))
             return Token(TokenKind.EQ, Span(start, start + 1))
+        if ch == "!":
+            if self._peek() == "=":
+                self.i += 1
+                return Token(TokenKind.NE, Span(start, start + 2))
+            raise AxiomParseError("unexpected character '!'", Span(start, start + 1))
+        if ch == "<":
+            if self._peek() == "=":
+                self.i += 1
+                return Token(TokenKind.LE, Span(start, start + 2))
+            return Token(TokenKind.LT, Span(start, start + 1))
+        if ch == ">":
+            if self._peek() == "=":
+                self.i += 1
+                return Token(TokenKind.GE, Span(start, start + 2))
+            return Token(TokenKind.GT, Span(start, start + 1))
         if ch == "+":
             return Token(TokenKind.PLUS, Span(start, start + 1))
         if ch == "-":
@@ -97,6 +126,10 @@ class Lexer:
             return Token(TokenKind.LPAREN, Span(start, start + 1))
         if ch == ")":
             return Token(TokenKind.RPAREN, Span(start, start + 1))
+        if ch == "{":
+            return Token(TokenKind.LBRACE, Span(start, start + 1))
+        if ch == "}":
+            return Token(TokenKind.RBRACE, Span(start, start + 1))
 
         if ch == "#":
             # comment to end of line (don't consume newline)
@@ -108,7 +141,6 @@ class Lexer:
             return self.next_token()
 
         if ch.isdigit():
-            # rewind one char and lex full number
             self.i -= 1
             return self._lex_number(start)
 

@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from .api import parse_program, compile_to_bytecode
-from .bytecode import Bytecode
+from .bytecode import Bytecode, Op
 from .interpreter import Interpreter
 from .vm import Vm
 from .errors import AxiomError
@@ -14,8 +14,7 @@ from .errors import AxiomError
 def cmd_interp(path: Path) -> int:
     src = path.read_text(encoding="utf-8")
     program = parse_program(src)
-    interp = Interpreter()
-    interp.run(program, sys.stdout)
+    Interpreter().run(program, sys.stdout)
     return 0
 
 
@@ -29,14 +28,32 @@ def cmd_compile(path: Path, out_path: Path) -> int:
 
 def cmd_vm(path: Path) -> int:
     bc = Bytecode.decode(path.read_bytes())
-    vm = Vm(locals_count=bc.locals_count)
-    vm.run(bc, sys.stdout)
+    Vm(locals_count=bc.locals_count).run(bc, sys.stdout)
+    return 0
+
+
+def cmd_run(path: Path) -> int:
+    src = path.read_text(encoding="utf-8")
+    bc = compile_to_bytecode(src)
+    Vm(locals_count=bc.locals_count).run(bc, sys.stdout)
+    return 0
+
+
+def cmd_disasm(path: Path) -> int:
+    bc = Bytecode.decode(path.read_bytes())
+    names = {v: k for k, v in Op.__dict__.items() if k.isupper() and isinstance(v, int)}
+    for idx, ins in enumerate(bc.instructions):
+        name = names.get(ins.op, f"OP_{ins.op}")
+        if ins.arg is None:
+            print(f"{idx:04d} {name}")
+        else:
+            print(f"{idx:04d} {name} {ins.arg}")
     return 0
 
 
 def cmd_check(path: Path) -> int:
     src = path.read_text(encoding="utf-8")
-    _ = compile_to_bytecode(src)  # compilation does basic semantic checks (e.g., undefined vars)
+    _ = compile_to_bytecode(src)
     print("OK", file=sys.stderr)
     return 0
 
@@ -55,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("vm", help="Run bytecode on the VM")
     sp.add_argument("file", type=Path)
 
+    sp = sub.add_parser("run", help="Compile source in-memory and execute on VM")
+    sp.add_argument("file", type=Path)
+
+    sp = sub.add_parser("disasm", help="Disassemble bytecode")
+    sp.add_argument("file", type=Path)
+
     sp = sub.add_parser("check", help="Parse + semantic checks (currently: undefined vars via compilation)")
     sp.add_argument("file", type=Path)
 
@@ -67,6 +90,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_compile(args.file, args.output)
         if args.cmd == "vm":
             return cmd_vm(args.file)
+        if args.cmd == "run":
+            return cmd_run(args.file)
+        if args.cmd == "disasm":
+            return cmd_disasm(args.file)
         if args.cmd == "check":
             return cmd_check(args.file)
         raise AssertionError("unreachable")
