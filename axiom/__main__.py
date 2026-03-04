@@ -159,7 +159,7 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
 
 def cmd_host_list(*, safe_only: bool = False) -> int:
     payload = []
-    for name in HOST_BUILTIN_NAMES:
+    for name in sorted(HOST_BUILTIN_NAMES):
         arity, side_effecting = HOST_BUILTINS[name]
         if safe_only and side_effecting:
             continue
