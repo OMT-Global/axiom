@@ -280,6 +280,26 @@ class CliParityTests(unittest.TestCase):
             vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
             self.assertEqual(vm_out, "42\n")
 
+    def test_package_build_with_nested_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["output"] = "nested/artifact.axb"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            main = project / manifest["main"]
+            main.write_text("print 88\n", encoding="utf-8")
+
+            self._run_cli(["pkg", "build", str(project)], cwd=ROOT)
+            out = project / manifest["out_dir"] / "nested" / "artifact.axb"
+            self.assertTrue(out.exists())
+
+            vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
+            self.assertEqual(vm_out, "88\n")
+
     def test_package_build_fails_when_manifest_invalid_json(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)

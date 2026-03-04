@@ -152,6 +152,7 @@ def build_package(project_root: Path, *, allow_host_side_effects: bool = False) 
         output_name = f"{output}.axb"
 
     out_path = out_dir / output_name
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(bytecode.encode())
     return out_path
 
