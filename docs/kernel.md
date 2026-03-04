@@ -1,4 +1,4 @@
-# Axiom kernel (v0.3)
+# Axiom kernel (v0.4)
 
 ## Values
 - integers only (Python `int` in the seed implementation)
@@ -15,6 +15,7 @@
 - `fn <name>(<params>) { ... }`
 - `return <expr>`
 - function calls: `<name>(<arg1>, ... )`
+- `host.<name>(...)` for host bridge calls (reserved namespace)
 
 ## Expressions
 - integer literals: `123`, `-5`
@@ -23,6 +24,7 @@
 - parentheses: `( ... )`
 - unary negation: `-<expr>`
 - call expressions: `name(arg1, arg2, ...)`
+- host calls: `host.version()`, `host.print(value)`, `host.read(prompt)` (gated)
 
 ## Execution
 - single file program
@@ -31,3 +33,4 @@
 - integer division truncates toward zero
 - functions use explicit call frames with locals + return address
 - every function returns an `int` (implicit `0` if no explicit return is reached)
+- `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled

@@ -26,6 +26,13 @@ from .bytecode import Bytecode, FunctionMeta, Instr, Op
 from .errors import AxiomCompileError
 
 
+_HOST_BUILTINS: Dict[str, tuple[int, bool]] = {
+    "version": (0, False),
+    "print": (1, True),
+    "read": (1, True),
+}
+
+
 @dataclass
 class Compiler:
     scope_stack: List[Dict[str, int]] = field(default_factory=lambda: [{}])
@@ -36,6 +43,11 @@ class Compiler:
     function_defs: List[FunctionDefStmt] = field(default_factory=list)
     functions: List[FunctionMeta] = field(default_factory=list)
     function_locals: Dict[str, int] = field(default_factory=dict)
+    allow_host_side_effects: bool = False
+
+    @property
+    def _host_ids(self) -> Dict[str, int]:
+        return {name: idx for idx, name in enumerate(_HOST_BUILTINS)}
 
     def compile(self, program: Program) -> Bytecode:
         self.scope_stack = [{}]
@@ -207,6 +219,25 @@ class Compiler:
             return
         if isinstance(expr, CallExpr):
             fn_name = expr.callee
+            if fn_name.startswith("host."):
+                host_fn = fn_name[len("host.") :]
+                if host_fn not in _HOST_BUILTINS:
+                    raise AxiomCompileError(f"undefined host function {fn_name!r}", expr.span)
+                arity, side_effectful = _HOST_BUILTINS[host_fn]
+                if side_effectful and not self.allow_host_side_effects:
+                    raise AxiomCompileError(
+                        f"host call {fn_name!r} is side-effecting; pass allow_host_side_effects=True to use it",
+                        expr.span,
+                    )
+                if arity != len(expr.args):
+                    raise AxiomCompileError(
+                        f"host function {fn_name!r} expects {arity} args, got {len(expr.args)}",
+                        expr.span,
+                    )
+                for arg in expr.args:
+                    self._compile_expr(arg, out)
+                out.append(Instr(Op.HOST_CALL, self._host_ids[host_fn]))
+                return
             if fn_name not in self.function_ids:
                 raise AxiomCompileError(f"undefined function {fn_name!r}", expr.span)
             arity = self.function_arities[fn_name]

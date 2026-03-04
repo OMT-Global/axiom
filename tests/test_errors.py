@@ -52,6 +52,21 @@ fn f(a, b) {
 print f(1)
 """)
 
+    def test_compile_host_side_effect_blocked(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("host.print(1)\n")
+
+    def test_runtime_host_version(self) -> None:
+        program = parse_program("print host.version()\n")
+        out = io.StringIO()
+        Interpreter().run(program, out)
+        self.assertEqual(out.getvalue(), "4\n")
+
+    def test_runtime_host_print_requires_explicit_allow(self) -> None:
+        program = parse_program("host.print(1)\n")
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
+
 
 if __name__ == "__main__":
     unittest.main()

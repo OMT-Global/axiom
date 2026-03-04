@@ -4,7 +4,8 @@ This is a **drop-in repo skeleton** to start building a new language called **Ax
 
 - **Stage0**: reference interpreter (correctness + fast iteration)
 - **Stage1**: compiler to **portable bytecode** + a small **stack VM**
-- **Stage2**: (later) self-host the compiler in Axiom
+- **Stage2**: functions + call/return and call frames in Axiom
+- **Stage3**: host-bridge calls (`host.*`) for deterministic tool interop
 
 This repo is intentionally small and test-driven. Everything is **standard-library only** (no deps).
 
@@ -38,6 +39,8 @@ Supported:
   - `while <expr> { ... }`
 - integer literals
 - variables
+- function calls: `name(arg, ...)`
+- host bridge calls: `host.version()`, `host.print(value)` (gated)
 - `+ - * /` with parentheses
 - comparisons: `== != < <= > >=` (results are `0` or `1`)
 - unary `-`

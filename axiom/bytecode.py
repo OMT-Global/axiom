@@ -8,7 +8,7 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 3
+VERSION_MINOR = 4
 
 
 class Op:
@@ -32,6 +32,7 @@ class Op:
     CMP_GE = 0x12
     CALL = 0x13
     RET = 0x14
+    HOST_CALL = 0x15
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,7 @@ class Bytecode:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_I64 missing arg")
                 out += struct.pack("<q", int(ins.arg))
-            elif ins.op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL):
+            elif ins.op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL, Op.HOST_CALL):
                 if ins.arg is None:
                     raise AxiomCompileError("opcode missing arg")
                 out += struct.pack("<I", int(ins.arg))
@@ -133,7 +134,7 @@ class Bytecode:
             if op == Op.CONST_I64:
                 (v,) = struct.unpack("<q", take(8))
                 ins.append(Instr(op, int(v)))
-            elif op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL):
+            elif op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL, Op.HOST_CALL):
                 (slot,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(slot)))
             else:
