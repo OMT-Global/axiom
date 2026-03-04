@@ -12,7 +12,9 @@ PROGRAMS_DIR = ROOT / "tests" / "programs"
 
 
 class CliParityTests(unittest.TestCase):
-    def _run_cli(self, args: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    def _run_cli(
+        self, args: list[str], *, cwd: Path, expect_code: int = 0
+    ) -> subprocess.CompletedProcess[str]:
         proc = subprocess.run(
             [sys.executable, "-m", "axiom", *args],
             capture_output=True,
@@ -21,8 +23,8 @@ class CliParityTests(unittest.TestCase):
         )
         self.assertEqual(
             proc.returncode,
-            0,
-            msg=f"{' '.join(args)} failed: {proc.stdout}\n{proc.stderr}",
+            expect_code,
+            msg=f"{' '.join(args)} failed (expected {expect_code}): {proc.stdout}\n{proc.stderr}",
         )
         return proc
 
@@ -45,6 +47,43 @@ class CliParityTests(unittest.TestCase):
         path = PROGRAMS_DIR / "arith.ax"
         proc = self._run_cli(["check", str(path)], cwd=ROOT)
         self.assertIn("OK", proc.stderr)
+
+    def test_host_bridge_side_effects_require_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "host_print.ax"
+            bc = Path(td) / "host_print.axb"
+            src.write_text("host.print(9)\n", encoding="utf-8")
+
+            proc = self._run_cli(["interp", str(src)], cwd=ROOT, expect_code=1)
+            self.assertIn("side-effecting", proc.stderr)
+
+            proc = self._run_cli(
+                ["interp", str(src), "--allow-host-side-effects"], cwd=ROOT
+            )
+            self.assertEqual(proc.stdout, "9\n")
+
+            proc = self._run_cli(
+                ["compile", str(src), "-o", str(bc)], cwd=ROOT, expect_code=1
+            )
+            self.assertIn("side-effecting", proc.stderr)
+
+            proc = self._run_cli(
+                ["compile", str(src), "-o", str(bc), "--allow-host-side-effects"],
+                cwd=ROOT,
+            )
+            self.assertIn("wrote", proc.stderr)
+
+            proc = self._run_cli(["vm", str(bc)], cwd=ROOT, expect_code=1)
+            self.assertIn("side-effecting", proc.stderr)
+
+            proc = self._run_cli(["vm", str(bc), "--allow-host-side-effects"], cwd=ROOT)
+            self.assertEqual(proc.stdout, "9\n")
+
+            proc = self._run_cli(["run", str(src)], cwd=ROOT, expect_code=1)
+            self.assertIn("side-effecting", proc.stderr)
+
+            proc = self._run_cli(["run", str(src), "--allow-host-side-effects"], cwd=ROOT)
+            self.assertEqual(proc.stdout, "9\n")
 
 
 if __name__ == "__main__":
