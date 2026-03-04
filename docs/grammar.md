@@ -17,7 +17,7 @@ stmt           := let_stmt
                | expr_stmt ;
 
 import_stmt    := "import" STRING terminator ;
-fn_stmt        := "fn" IDENT "(" params? ")" block ;  # IDENT may not be "host"
+fn_stmt        := "fn" IDENT "(" params? ")" block ;  # IDENT and params may not be "host"
 params         := IDENT ("," IDENT)* ;
 return_stmt    := "return" expr terminator ;
 let_stmt       := "let" IDENT "=" expr terminator ;

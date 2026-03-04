@@ -54,6 +54,7 @@ Supported:
   - `while <expr> { ... }`
 - integer literals
 - variables
+- identifiers named `host` are reserved (`let host`, function parameters, and function names)
 - function calls: `name(arg, ...)`
 - `import "path"` for file-level module loading (resolved relative to importing file)
 - host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)

@@ -40,6 +40,7 @@ class Compiler:
     function_locals: Dict[str, int] = field(default_factory=dict)
     allow_host_side_effects: bool = False
     RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
+    RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
 
     def compile(self, program: Program) -> Bytecode:
         self.scope_stack = [{}]
@@ -126,6 +127,8 @@ class Compiler:
         raise AxiomCompileError(f"undefined variable {name!r}", span)
 
     def _slot_for_let(self, name: str, span) -> int:
+        if name in self.RESERVED_IDENTIFIER_NAMES:
+            raise AxiomCompileError(f"reserved identifier {name!r}", span)
         current = self.scope_stack[-1]
         if name in current:
             return current[name]
@@ -136,6 +139,8 @@ class Compiler:
         return slot
 
     def _slot_for_param(self, name: str, span) -> None:
+        if name in self.RESERVED_IDENTIFIER_NAMES:
+            raise AxiomCompileError(f"reserved identifier {name!r}", span)
         current = self.scope_stack[-1]
         if name in current:
             raise AxiomCompileError(f"duplicate parameter {name!r}", span)
