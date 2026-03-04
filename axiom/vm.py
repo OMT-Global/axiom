@@ -6,7 +6,7 @@ from typing import List, Optional, TextIO
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-from .host import HOST_BUILTIN_BY_ID, call_host_builtin_id
+from .host import HOST_BUILTINS, HOST_BUILTIN_BY_ID, call_host_builtin, call_host_builtin_id
 
 
 @dataclass
@@ -108,15 +108,28 @@ class Vm:
             elif i.op == Op.HOST_CALL:
                 if i.arg is None:
                     raise AxiomRuntimeError("host call missing arg")
-                host_fn_id = int(i.arg)
-                if host_fn_id not in HOST_BUILTIN_BY_ID:
-                    raise AxiomRuntimeError(f"invalid host function id {host_fn_id}")
-                builtin = HOST_BUILTIN_BY_ID[host_fn_id]
-                arg_count = builtin.arity
-                side_effectful = builtin.side_effecting
+                host_ref = int(i.arg)
+                if bytecode.version_minor < 6:
+                    host_fn_name = None
+                    host_fn_id = host_ref
+                    if host_fn_id not in HOST_BUILTIN_BY_ID:
+                        raise AxiomRuntimeError(f"invalid host function id {host_fn_id}")
+                    builtin = HOST_BUILTIN_BY_ID[host_fn_id]
+                    arg_count = builtin.arity
+                    side_effectful = builtin.side_effecting
+                else:
+                    try:
+                        host_fn_name = bytecode.strings[host_ref]
+                    except IndexError as e:
+                        raise AxiomRuntimeError(f"invalid host function index {host_ref}") from e
+                    if host_fn_name not in HOST_BUILTINS:
+                        raise AxiomRuntimeError(f"undefined host function {host_fn_name!r}")
+                    arg_count, side_effectful = HOST_BUILTINS[host_fn_name]
+                    host_fn_id = None
+
                 if len(self.stack) < arg_count:
                     raise AxiomRuntimeError(
-                        f"call to host function id {host_fn_id} with {len(self.stack)} values on stack"
+                        f"call to host function with {len(self.stack)} values on stack"
                     )
                 if side_effectful and not self.allow_host_side_effects:
                     raise AxiomRuntimeError(
@@ -124,7 +137,10 @@ class Vm:
                     )
                 args = [self.stack.pop() for _ in range(arg_count)]
                 args.reverse()
-                result = self._call_host_fn(host_fn_id, args, out)
+                if host_fn_name is None:
+                    result = self._call_host_fn(host_fn_id, args, out)
+                else:
+                    result = self._call_host_fn_name(host_fn_name, args, out)
                 self.stack.append(result)
             elif i.op == Op.RET:
                 if not self.stack:
@@ -171,5 +187,11 @@ class Vm:
             raise AxiomRuntimeError(f"unknown host function id {fn_id}")
         try:
             return call_host_builtin_id(fn_id, args, out)
+        except ValueError as e:
+            raise AxiomRuntimeError(str(e)) from e
+
+    def _call_host_fn_name(self, name: str, args: List[int], out: TextIO) -> int:
+        try:
+            return call_host_builtin(name, args, out)
         except ValueError as e:
             raise AxiomRuntimeError(str(e)) from e

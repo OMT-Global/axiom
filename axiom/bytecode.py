@@ -8,7 +8,7 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 5
+VERSION_MINOR = 6
 
 
 class Op:
@@ -55,6 +55,7 @@ class Bytecode:
     instructions: List[Instr]
     locals_count: int
     functions: List[FunctionMeta]
+    version_minor: int = VERSION_MINOR
 
     def encode(self) -> bytes:
         out = bytearray()
@@ -140,4 +141,10 @@ class Bytecode:
             else:
                 ins.append(Instr(op, None))
 
-        return Bytecode(strings=strings, instructions=ins, locals_count=int(locals_count), functions=functions)
+        return Bytecode(
+            strings=strings,
+            instructions=ins,
+            locals_count=int(locals_count),
+            functions=functions,
+            version_minor=minor,
+        )

@@ -25,7 +25,7 @@ from .ast import (
 )
 from .bytecode import Bytecode, FunctionMeta, Instr, Op
 from .errors import AxiomCompileError
-from .host import HOST_BUILTINS, HOST_BUILTIN_IDS
+from .host import HOST_BUILTINS
 
 
 @dataclass
@@ -39,10 +39,6 @@ class Compiler:
     functions: List[FunctionMeta] = field(default_factory=list)
     function_locals: Dict[str, int] = field(default_factory=dict)
     allow_host_side_effects: bool = False
-
-    @property
-    def _host_ids(self) -> Dict[str, int]:
-        return HOST_BUILTIN_IDS
 
     def compile(self, program: Program) -> Bytecode:
         self.scope_stack = [{}]
@@ -236,7 +232,7 @@ class Compiler:
                     )
                 for arg in expr.args:
                     self._compile_expr(arg, out)
-                out.append(Instr(Op.HOST_CALL, self._host_ids[host_fn]))
+                out.append(Instr(Op.HOST_CALL, self._intern(host_fn)))
                 return
             if fn_name not in self.function_ids:
                 raise AxiomCompileError(f"undefined function {fn_name!r}", expr.span)

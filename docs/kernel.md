@@ -1,4 +1,4 @@
-# Axiom kernel (v0.5)
+# Axiom kernel (v0.6)
 
 ## Values
 - integers only (Python `int` in the seed implementation)
@@ -38,3 +38,5 @@
 - functions use explicit call frames with locals + return address
 - every function returns an `int` (implicit `0` if no explicit return is reached)
 - `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
+- `host` call payloads in bytecode are name-based (string table index) starting at
+  bytecode `v0.6` to preserve behavior if host registry order changes.
