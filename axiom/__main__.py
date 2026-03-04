@@ -55,9 +55,9 @@ def cmd_disasm(path: Path) -> int:
     return 0
 
 
-def cmd_check(path: Path) -> int:
+def cmd_check(path: Path, *, allow_host_side_effects: bool) -> int:
     src = path.read_text(encoding="utf-8")
-    _ = compile_to_bytecode(src)
+    _ = compile_to_bytecode(src, allow_host_side_effects=allow_host_side_effects)
     print("OK", file=sys.stderr)
     return 0
 
@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("check", help="Parse + semantic checks (currently: undefined vars via compilation)")
     sp.add_argument("file", type=Path)
+    sp.add_argument("--allow-host-side-effects", action="store_true")
 
     args = p.parse_args(argv)
 
@@ -107,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "disasm":
             return cmd_disasm(args.file)
         if args.cmd == "check":
-            return cmd_check(args.file)
+            return cmd_check(args.file, allow_host_side_effects=args.allow_host_side_effects)
         raise AssertionError("unreachable")
     except AxiomError as e:
         print(f"error: {e}", file=sys.stderr)
