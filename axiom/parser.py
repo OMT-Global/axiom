@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from .ast import (
     Program,
@@ -28,10 +28,18 @@ from .token import Token, TokenKind
 
 
 class Parser:
-    def __init__(self, toks: List[Token]):
+    def __init__(
+        self,
+        toks: List[Token],
+        *,
+        source: Optional[str] = None,
+        source_path: Optional[str] = None,
+    ):
         self.toks = toks
         self.i = 0
         self.function_depth = 0
+        self.source = source
+        self.source_path = source_path
 
     def _peek(self) -> Token:
         return self.toks[self.i]
@@ -48,7 +56,12 @@ class Parser:
     def _eat(self, kind: TokenKind) -> Token:
         t = self._peek()
         if t.kind != kind:
-            raise AxiomParseError(f"expected {kind.name}, got {t.kind.name}", t.span)
+            raise AxiomParseError(
+                f"expected {kind.name}, got {t.kind.name}",
+                t.span,
+                source=self.source,
+                path=self.source_path,
+            )
         self.i += 1
         return t
 
@@ -73,7 +86,12 @@ class Parser:
         }:
             self.i += 1
             return t.kind.name.lower()
-        raise AxiomParseError("expected identifier", t.span)
+        raise AxiomParseError(
+            "expected identifier",
+            t.span,
+            source=self.source,
+            path=self.source_path,
+        )
 
     def parse_program(self) -> Program:
         stmts = []
@@ -95,7 +113,12 @@ class Parser:
             return self._parse_print()
         if k == TokenKind.RETURN:
             if self.function_depth == 0:
-                raise AxiomParseError("return outside function", self._peek().span)
+                raise AxiomParseError(
+                    "return outside function",
+                    self._peek().span,
+                    source=self.source,
+                    path=self.source_path,
+                )
             return self._parse_return()
         if k == TokenKind.LBRACE:
             return self._parse_block()
@@ -111,9 +134,19 @@ class Parser:
         start = self._eat(TokenKind.FN).span.start
         name = self._eat(TokenKind.IDENT)
         if name.kind != TokenKind.IDENT:
-            raise AxiomParseError("expected function name", name.span)
+            raise AxiomParseError(
+                "expected function name",
+                name.span,
+                source=self.source,
+                path=self.source_path,
+            )
         if name.value == "host":
-            raise AxiomParseError("function name cannot be 'host'", name.span)
+            raise AxiomParseError(
+                "function name cannot be 'host'",
+                name.span,
+                source=self.source,
+                path=self.source_path,
+            )
         self._eat(TokenKind.LPAREN)
 
         params: List[str] = []
@@ -121,9 +154,19 @@ class Parser:
             while True:
                 ident = self._eat(TokenKind.IDENT)
                 if ident.kind != TokenKind.IDENT:
-                    raise AxiomParseError("expected parameter name", ident.span)
+                    raise AxiomParseError(
+                        "expected parameter name",
+                        ident.span,
+                        source=self.source,
+                        path=self.source_path,
+                    )
                 if ident.value == "host":
-                    raise AxiomParseError("parameter name cannot be 'host'", ident.span)
+                    raise AxiomParseError(
+                        "parameter name cannot be 'host'",
+                        ident.span,
+                        source=self.source,
+                        path=self.source_path,
+                    )
                 params.append(str(ident.value))
                 if self._peek().kind == TokenKind.COMMA:
                     self._bump()
@@ -133,7 +176,12 @@ class Parser:
 
         # allow duplicate parameter names only if source author wrote them; catch for deterministic errors.
         if len(set(params)) != len(params):
-            raise AxiomParseError("duplicate function parameter name", name.span)
+            raise AxiomParseError(
+                "duplicate function parameter name",
+                name.span,
+                source=self.source,
+                path=self.source_path,
+            )
 
         self.function_depth += 1
         try:
@@ -175,9 +223,19 @@ class Parser:
         start = self._bump().span.start
         ident = self._bump()
         if ident.kind != TokenKind.IDENT:
-            raise AxiomParseError("expected identifier after 'let'", ident.span)
+            raise AxiomParseError(
+                "expected identifier after 'let'",
+                ident.span,
+                source=self.source,
+                path=self.source_path,
+            )
         if ident.value == "host":
-            raise AxiomParseError("identifier cannot be 'host'", ident.span)
+            raise AxiomParseError(
+                "identifier cannot be 'host'",
+                ident.span,
+                source=self.source,
+                path=self.source_path,
+            )
         self._eat(TokenKind.EQ)
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
@@ -187,14 +245,24 @@ class Parser:
         start = self._eat(TokenKind.IMPORT).span.start
         path = self._eat(TokenKind.STRING)
         if not isinstance(path.value, str):
-            raise AxiomParseError("expected import path string", path.span)
+            raise AxiomParseError(
+                "expected import path string",
+                path.span,
+                source=self.source,
+                path=self.source_path,
+            )
         end = self._parse_terminator(default_end=path.span.end)
         return ImportStmt(path=path.value, span=Span(start, end))
 
     def _parse_assign(self) -> AssignStmt:
         ident = self._eat(TokenKind.IDENT)
         if ident.value == "host":
-            raise AxiomParseError("identifier cannot be 'host'", ident.span)
+            raise AxiomParseError(
+                "identifier cannot be 'host'",
+                ident.span,
+                source=self.source,
+                path=self.source_path,
+            )
         self._eat(TokenKind.EQ)
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
@@ -227,7 +295,12 @@ class Parser:
             return end
         if k in (TokenKind.EOF, TokenKind.RBRACE):
             return default_end
-        raise AxiomParseError("expected ';' or newline", self._peek().span)
+        raise AxiomParseError(
+            "expected ';' or newline",
+            self._peek().span,
+            source=self.source,
+            path=self.source_path,
+        )
 
     def _parse_expr(self) -> Expr:
         return self._parse_equality()
@@ -321,7 +394,12 @@ class Parser:
                 rparen = self._eat(TokenKind.RPAREN)
                 return CallExpr(callee=callee, args=args, span=Span(tok.span.start, rparen.span.end))
             if "." in callee:
-                raise AxiomParseError("call expected after dotted name", t.span)
+                raise AxiomParseError(
+                    "call expected after dotted name",
+                    t.span,
+                    source=self.source,
+                    path=self.source_path,
+                )
             return VarRef(str(tok.value), tok.span)
         if t.kind == TokenKind.MINUS:
             minus = self._bump()
@@ -332,7 +410,12 @@ class Parser:
             expr = self._parse_expr()
             r = self._eat(TokenKind.RPAREN)
             return _widen_span(expr, Span(l.span.start, r.span.end))
-        raise AxiomParseError("expected expression", t.span)
+        raise AxiomParseError(
+            "expected expression",
+            t.span,
+            source=self.source,
+            path=self.source_path,
+        )
 
 
 def _widen_span(expr: Expr, span: Span) -> Expr:

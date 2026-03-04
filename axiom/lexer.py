@@ -7,8 +7,9 @@ from .token import Token, TokenKind
 
 
 class Lexer:
-    def __init__(self, src: str):
+    def __init__(self, src: str, path: Optional[str] = None):
         self.src = src
+        self.path = path
         self.i = 0
         self.n = len(src)
 
@@ -59,7 +60,12 @@ class Lexer:
         try:
             v = int(text, 10)
         except ValueError as e:
-            raise AxiomParseError(f"invalid int literal {text!r}: {e}", Span(start, end))
+            raise AxiomParseError(
+                f"invalid int literal {text!r}: {e}",
+                Span(start, end),
+                source=self.src,
+                path=self.path,
+            )
         return Token(TokenKind.INT, Span(start, end), v)
 
     def _lex_ident_or_kw(self, start: int) -> Token:
@@ -94,14 +100,24 @@ class Lexer:
         while True:
             ch = self._peek()
             if ch is None:
-                raise AxiomParseError("unterminated string literal", Span(start, self.i))
+                raise AxiomParseError(
+                    "unterminated string literal",
+                    Span(start, self.i),
+                    source=self.src,
+                    path=self.path,
+                )
             self.i += 1
             if ch == '"':
                 break
             if ch == "\\":
                 esc = self._peek()
                 if esc is None:
-                    raise AxiomParseError("unterminated escape sequence", Span(start, self.i))
+                    raise AxiomParseError(
+                        "unterminated escape sequence",
+                        Span(start, self.i),
+                        source=self.src,
+                        path=self.path,
+                    )
                 self.i += 1
                 if esc == "n":
                     chars.append("\n")
@@ -140,7 +156,12 @@ class Lexer:
             if self._peek() == "=":
                 self.i += 1
                 return Token(TokenKind.NE, Span(start, start + 2))
-            raise AxiomParseError("unexpected character '!'", Span(start, start + 1))
+            raise AxiomParseError(
+                "unexpected character '!'",
+                Span(start, start + 1),
+                source=self.src,
+                path=self.path,
+            )
         if ch == "<":
             if self._peek() == "=":
                 self.i += 1
@@ -191,7 +212,12 @@ class Lexer:
             self.i -= 1
             return self._lex_ident_or_kw(start)
 
-        raise AxiomParseError(f"unexpected character {ch!r}", Span(start, start + 1))
+        raise AxiomParseError(
+            f"unexpected character {ch!r}",
+            Span(start, start + 1),
+            source=self.src,
+            path=self.path,
+        )
 
     def tokenize(self) -> List[Token]:
         toks: List[Token] = []

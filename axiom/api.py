@@ -15,9 +15,13 @@ def parse_file(path: Path) -> Program:
     return _load_program_file(Path(path).resolve(), set(), set())
 
 
-def parse_program(src: str) -> Program:
-    toks = Lexer(src).tokenize()
-    return Parser(toks).parse_program()
+def parse_program(src: str, path: Path | str | None = None) -> Program:
+    toks = Lexer(src, path=str(path) if path is not None else None).tokenize()
+    return Parser(
+        toks,
+        source=src,
+        source_path=str(path) if path is not None else None,
+    ).parse_program()
 
 
 def compile_to_bytecode(
@@ -26,7 +30,7 @@ def compile_to_bytecode(
     allow_host_side_effects: bool = False,
     allowed_host_calls: Optional[Set[str]] = None,
 ) -> Bytecode:
-    program = parse_program(src)
+    program = parse_program(src, path=None)
     return Compiler(
         allow_host_side_effects=allow_host_side_effects,
         allowed_host_calls=allowed_host_calls,
@@ -57,7 +61,7 @@ def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Progr
 
     loading.add(path)
     src = path.read_text(encoding="utf-8")
-    program = parse_program(src)
+    program = parse_program(src, path=path)
 
     stmts = []
     for stmt in program.stmts:
