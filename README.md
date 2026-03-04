@@ -35,6 +35,7 @@ python -m unittest discover -v
 # Create package scaffold and build output artifact
 python -m axiom pkg init .
 python -m axiom pkg build .
+python -m axiom pkg check .
 ```
 
 See `docs/package.md` for manifest format and build behavior.
@@ -81,8 +82,8 @@ See `docs/grammar.md`.
 ## Next steps
 
 - Add types beyond `i64`-like ints
-- Add functions + call frames
-- Add module/package system + tooling (formatter/LSP)
+- Extend diagnostics and tooling
+- Host-native package tooling hardening
 - Add a real error reporter (spans -> line/col snippets)
 
 See `docs/roadmap.md`.
