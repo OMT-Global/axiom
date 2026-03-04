@@ -381,6 +381,13 @@ class Parser:
                 self._bump()
                 callee_parts.append(self._eat_name_token())
             callee = ".".join(callee_parts)
+            if "." in callee and callee_parts[0] != "host":
+                raise AxiomParseError(
+                    "only host namespace calls are supported",
+                    tok.span,
+                    source=self.source,
+                    path=self.source_path,
+                )
             if self._peek().kind == TokenKind.LPAREN:
                 self._bump()
                 args = []
