@@ -10,6 +10,7 @@ Current supported fields:
 - `version` (required, string): Package semantic version.
 - `main` (optional, default: `src/main.ax`): Source file entrypoint, relative to project root.
 - `out_dir` (optional, default: `dist`): Directory for compiled bytecode artifacts.
+- `main` and `out_dir` must be relative paths and may not contain `..` parent segments.
 - `output` (optional, string): Custom output filename or path inside `out_dir`.
   - Must be a relative path and may not traverse parent directories (no `..`).
   - If omitted, output defaults to `<name>.axb`.
