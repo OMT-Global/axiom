@@ -326,6 +326,30 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
             self.assertIn("parent traversal", proc.stderr.lower())
 
+    def test_package_build_rejects_absolute_main_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["main"] = "/tmp/main.ax"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("absolute", proc.stderr.lower())
+
+    def test_package_build_rejects_parent_traversal_out_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["out_dir"] = "../outside"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("parent traversal", proc.stderr.lower())
+
     def test_package_build_fails_when_manifest_invalid_json(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
