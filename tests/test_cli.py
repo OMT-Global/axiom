@@ -97,6 +97,17 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["run", str(src), "--allow-host-side-effects"], cwd=ROOT)
             self.assertEqual(proc.stdout, "9\n")
 
+    def test_host_list_command(self) -> None:
+        proc = self._run_cli(["host", "list"], cwd=ROOT)
+        payload = json.loads(proc.stdout)
+        self.assertTrue(isinstance(payload, list))
+        names = {entry["name"] for entry in payload}
+        self.assertIn("version", names)
+        self.assertIn("print", names)
+        version_entry = next(e for e in payload if e["name"] == "version")
+        self.assertEqual(version_entry["arity"], 0)
+        self.assertFalse(version_entry["side_effecting"])
+
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             mod = Path(td) / "math_module.ax"

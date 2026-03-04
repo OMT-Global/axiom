@@ -10,6 +10,7 @@ from .bytecode import Bytecode, Op
 from .interpreter import Interpreter
 from .vm import Vm
 from .errors import AxiomError
+from .host import HOST_BUILTINS, HOST_BUILTIN_NAMES
 from .packaging import (
     build_package,
     clean_package,
@@ -122,6 +123,17 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
     return 0
 
 
+def cmd_host_list() -> int:
+    payload = []
+    for name in HOST_BUILTIN_NAMES:
+        arity, side_effecting = HOST_BUILTINS[name]
+        payload.append(
+            {"name": name, "arity": arity, "side_effecting": side_effecting}
+        )
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="axiom", description="Axiom language tool (stage0 interpreter + stage1 compiler/VM)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -172,6 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     pkg.add_parser("clean", help="Delete package artifacts").add_argument(
         "path", type=Path, default=Path("."), nargs="?"
     )
+    sp_host = sub.add_parser("host", help="Host bridge helpers")
+    host = sp_host.add_subparsers(dest="host_cmd", required=True)
+    host.add_parser("list", help="List registered host capabilities")
 
     args = p.parse_args(argv)
 
@@ -211,6 +226,10 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_pkg_clean(args.path)
             if args.pkg_cmd == "run":
                 return cmd_pkg_run(args.path, allow_host_side_effects=args.allow_host_side_effects)
+            raise AssertionError("unreachable")
+        if args.cmd == "host":
+            if args.host_cmd == "list":
+                return cmd_host_list()
             raise AssertionError("unreachable")
         raise AssertionError("unreachable")
     except AxiomError as e:
