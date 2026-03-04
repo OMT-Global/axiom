@@ -5,7 +5,26 @@ from typing import Optional, Set
 
 from .lexer import Lexer
 from .parser import Parser
-from .ast import ImportStmt, Program
+from .ast import (
+    Binary,
+    BlockStmt,
+    CallExpr,
+    Expr,
+    FunctionDefStmt,
+    ImportStmt,
+    IntLit,
+    IfStmt,
+    Program,
+    ReturnStmt,
+    UnaryNeg,
+    VarRef,
+    WhileStmt,
+    AssignStmt,
+    PrintStmt,
+    LetStmt,
+    ExprStmt,
+    Stmt,
+)
 from .compiler import Compiler
 from .bytecode import Bytecode
 from .errors import AxiomCompileError
@@ -71,7 +90,10 @@ def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Progr
                 raise AxiomCompileError(
                     f"cannot resolve import file {import_path}", stmt.span
                 )
-            stmts.extend(_load_program_file(import_path, seen, loading).stmts)
+            imported = _load_program_file(import_path, seen, loading)
+            stmts.extend(
+                _namespace_module_program(imported, _import_alias_from_path(import_path)).stmts
+            )
         else:
             stmts.append(stmt)
 
@@ -94,3 +116,72 @@ def _resolve_import_path(raw: str, base_path: Path) -> Path:
     if not candidate.is_absolute():
         candidate = base_path.parent / candidate
     return candidate
+
+
+def _import_alias_from_path(path: Path) -> str:
+    return path.stem
+
+
+def _namespace_module_program(program: Program, module_alias: str) -> Program:
+    fn_names = {
+        stmt.name: f"{module_alias}.{stmt.name}"
+        for stmt in program.stmts
+        if isinstance(stmt, FunctionDefStmt)
+    }
+
+    def _rewrite_expr(expr: Expr):
+        if isinstance(expr, IntLit):
+            return expr
+        if isinstance(expr, VarRef):
+            return expr
+        if isinstance(expr, UnaryNeg):
+            return UnaryNeg(expr=_rewrite_expr(expr.expr), span=expr.span)
+        if isinstance(expr, Binary):
+            return Binary(
+                op=expr.op,
+                lhs=_rewrite_expr(expr.lhs),
+                rhs=_rewrite_expr(expr.rhs),
+                span=expr.span,
+            )
+        if isinstance(expr, CallExpr):
+            callee = fn_names.get(expr.callee, expr.callee)
+            return CallExpr(
+                callee=callee,
+                args=[_rewrite_expr(arg) for arg in expr.args],
+                span=expr.span,
+            )
+        raise AssertionError("unknown expr")
+
+    def _rewrite_stmt(stmt: Stmt):
+        if isinstance(stmt, FunctionDefStmt):
+            return FunctionDefStmt(
+                name=fn_names[stmt.name],
+                params=stmt.params,
+                body=_rewrite_stmt(stmt.body),
+                span=stmt.span,
+            )
+        if isinstance(stmt, LetStmt):
+            return LetStmt(name=stmt.name, expr=_rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, AssignStmt):
+            return AssignStmt(name=stmt.name, expr=_rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, ReturnStmt):
+            return ReturnStmt(expr=_rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, PrintStmt):
+            return PrintStmt(expr=_rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, ExprStmt):
+            return ExprStmt(expr=_rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, BlockStmt):
+            return BlockStmt(stmts=[_rewrite_stmt(s) for s in stmt.stmts], span=stmt.span)
+        if isinstance(stmt, IfStmt):
+            return IfStmt(
+                cond=_rewrite_expr(stmt.cond),
+                then_block=_rewrite_stmt(stmt.then_block),
+                else_block=_rewrite_stmt(stmt.else_block) if stmt.else_block else None,
+                span=stmt.span,
+            )
+        if isinstance(stmt, WhileStmt):
+            return WhileStmt(cond=_rewrite_expr(stmt.cond), body=_rewrite_stmt(stmt.body), span=stmt.span)
+        return stmt
+
+    stmts = [_rewrite_stmt(stmt) for stmt in program.stmts]
+    return Program(stmts=stmts)

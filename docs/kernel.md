@@ -16,7 +16,9 @@
 - `return <expr>`
 - `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
   - Import paths must be relative and must not use parent traversal (`..`).
+  - Imported modules are namespaced by file stem (for example `import "math_utils"` exposes `math_utils.fn_name`).
 - function calls: `<name>(<arg1>, ... )`
+- namespaced function calls: `<module>.<name>(...)`
 - identifiers named `host` are reserved for host namespace (`let host`, parameters, and function names are rejected)
 - `host.<name>(...)` for host bridge calls (reserved namespace)
 - Host calls are resolved from a registry. Add custom capabilities via

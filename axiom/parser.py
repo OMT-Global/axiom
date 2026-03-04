@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional
 
 from .ast import (
@@ -38,6 +39,7 @@ class Parser:
         self.toks = toks
         self.i = 0
         self.function_depth = 0
+        self.imported_modules: set[str] = set()
         self.source = source
         self.source_path = source_path
 
@@ -251,6 +253,22 @@ class Parser:
                 source=self.source,
                 path=self.source_path,
             )
+        alias = Path(path.value).stem
+        if not alias:
+            raise AxiomParseError(
+                "invalid import path for namespace",
+                path.span,
+                source=self.source,
+                path=self.source_path,
+            )
+        if alias == "host":
+            raise AxiomParseError(
+                "import namespace cannot be 'host'",
+                path.span,
+                source=self.source,
+                path=self.source_path,
+            )
+        self.imported_modules.add(alias)
         end = self._parse_terminator(default_end=path.span.end)
         return ImportStmt(path=path.value, span=Span(start, end))
 
@@ -382,12 +400,13 @@ class Parser:
                 callee_parts.append(self._eat_name_token())
             callee = ".".join(callee_parts)
             if "." in callee and callee_parts[0] != "host":
-                raise AxiomParseError(
-                    "only host namespace calls are supported",
-                    tok.span,
-                    source=self.source,
-                    path=self.source_path,
-                )
+                if callee_parts[0] not in self.imported_modules:
+                    raise AxiomParseError(
+                        "only host or imported module calls are supported",
+                        tok.span,
+                        source=self.source,
+                        path=self.source_path,
+                    )
             if self._peek().kind == TokenKind.LPAREN:
                 self._bump()
                 args = []
