@@ -24,13 +24,7 @@ from .ast import (
 )
 from .bytecode import Bytecode, FunctionMeta, Instr, Op
 from .errors import AxiomCompileError
-
-
-_HOST_BUILTINS: Dict[str, tuple[int, bool]] = {
-    "version": (0, False),
-    "print": (1, True),
-    "read": (1, True),
-}
+from .host import HOST_BUILTINS, HOST_BUILTIN_IDS
 
 
 @dataclass
@@ -47,7 +41,7 @@ class Compiler:
 
     @property
     def _host_ids(self) -> Dict[str, int]:
-        return {name: idx for idx, name in enumerate(_HOST_BUILTINS)}
+        return HOST_BUILTIN_IDS
 
     def compile(self, program: Program) -> Bytecode:
         self.scope_stack = [{}]
@@ -221,9 +215,9 @@ class Compiler:
             fn_name = expr.callee
             if fn_name.startswith("host."):
                 host_fn = fn_name[len("host.") :]
-                if host_fn not in _HOST_BUILTINS:
+                if host_fn not in HOST_BUILTINS:
                     raise AxiomCompileError(f"undefined host function {fn_name!r}", expr.span)
-                arity, side_effectful = _HOST_BUILTINS[host_fn]
+                arity, side_effectful = HOST_BUILTINS[host_fn]
                 if side_effectful and not self.allow_host_side_effects:
                     raise AxiomCompileError(
                         f"host call {fn_name!r} is side-effecting; pass allow_host_side_effects=True to use it",

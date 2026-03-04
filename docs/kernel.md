@@ -1,4 +1,4 @@
-# Axiom kernel (v0.4)
+# Axiom kernel (v0.5)
 
 ## Values
 - integers only (Python `int` in the seed implementation)
@@ -24,7 +24,7 @@
 - parentheses: `( ... )`
 - unary negation: `-<expr>`
 - call expressions: `name(arg1, arg2, ...)`
-- host calls: `host.version()`, `host.print(value)`, `host.read(prompt)` (gated)
+- host calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated for side effects only)
 
 ## Execution
 - single file program

@@ -283,11 +283,11 @@ class Parser:
             return IntLit(int(tok.value), tok.span)
         if t.kind == TokenKind.IDENT:
             tok = self._bump()
-            callee = str(tok.value)
-            if self._peek().kind == TokenKind.DOT:
+            callee_parts = [str(tok.value)]
+            while self._peek().kind == TokenKind.DOT:
                 self._bump()
-                field = self._eat_name_token()
-                callee = f"{callee}.{field}"
+                callee_parts.append(self._eat_name_token())
+            callee = ".".join(callee_parts)
             if self._peek().kind == TokenKind.LPAREN:
                 self._bump()
                 args = []
