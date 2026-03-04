@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import builtins as py_builtins
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Callable, Dict, List, TextIO, Tuple
 
@@ -130,10 +132,15 @@ def host_capabilities(safe_only: bool = False) -> List[Dict[str, object]]:
 
 
 def host_contract_metadata(safe_only: bool = False) -> Dict[str, object]:
+    caps = host_capabilities(safe_only=safe_only)
+    signature = hashlib.sha256(
+        json.dumps(caps, sort_keys=True).encode("utf-8")
+    ).hexdigest()
     return {
         "schema_version": 1,
         "runtime_version_minor": VERSION_MINOR,
-        "capabilities": host_capabilities(safe_only=safe_only),
+        "capabilities": caps,
+        "capabilities_signature": signature,
     }
 
 
