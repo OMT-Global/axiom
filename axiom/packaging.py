@@ -66,10 +66,6 @@ def load_manifest(project_root: Path) -> PackageManifest:
     return _as_manifest(payload, path)
 
 
-def default_manifest(name: str) -> PackageManifest:
-    return PackageManifest(name=name, version=DEFAULT_VERSION)
-
-
 def manifest_to_dict(manifest: PackageManifest) -> dict[str, str | None]:
     payload: dict[str, str | None] = {
         "name": manifest.name,
@@ -89,8 +85,8 @@ def write_default_manifest(project_root: Path, manifest: PackageManifest) -> Pac
     return manifest
 
 
-def write_default_entry(project_root: Path) -> Path:
-    path = project_root / DEFAULT_MAIN
+def write_default_entry(project_root: Path, main: str) -> Path:
+    path = project_root / main
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text("print 0\n", encoding="utf-8")
@@ -98,7 +94,14 @@ def write_default_entry(project_root: Path) -> Path:
 
 
 def init_package(
-    project_root: Path, *, name: Optional[str] = None, force: bool = False
+    project_root: Path,
+    *,
+    name: Optional[str] = None,
+    version: Optional[str] = None,
+    main: Optional[str] = None,
+    out_dir: Optional[str] = None,
+    output: Optional[str] = None,
+    force: bool = False,
 ) -> PackageManifest:
     project_root = project_root.resolve()
     project_root.mkdir(parents=True, exist_ok=True)
@@ -106,10 +109,31 @@ def init_package(
         raise AxiomCompileError(
             f"package manifest already exists at {manifest_path(project_root)}"
         )
+    if name is not None and (not isinstance(name, str) or not name):
+        raise AxiomCompileError("package name must be a non-empty string")
+    version = version if version is not None else DEFAULT_VERSION
+    main = main if main is not None else DEFAULT_MAIN
+    out_dir = out_dir if out_dir is not None else DEFAULT_OUT_DIR
+    if not isinstance(version, str) or not version:
+        raise AxiomCompileError("package version must be a non-empty string")
+    if not isinstance(main, str) or not main:
+        raise AxiomCompileError("package main must be a non-empty string")
+    if not isinstance(out_dir, str) or not out_dir:
+        raise AxiomCompileError("package out_dir must be a non-empty string")
+    if output is not None and (not isinstance(output, str) or not output):
+        raise AxiomCompileError("package output must be a non-empty string when provided")
     pkg_name = name if name else (project_root.name or DEFAULT_NAME)
-    manifest = default_manifest(pkg_name)
+    if not pkg_name:
+        pkg_name = DEFAULT_NAME
+    manifest = PackageManifest(
+        name=pkg_name,
+        version=version,
+        main=main,
+        out_dir=out_dir,
+        output=output,
+    )
     write_default_manifest(project_root, manifest)
-    write_default_entry(project_root)
+    write_default_entry(project_root, manifest.main)
     return manifest
 
 

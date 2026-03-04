@@ -138,6 +138,35 @@ class CliParityTests(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload["name"], "demo")
 
+    def test_package_init_with_manifest_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(
+                [
+                    "pkg",
+                    "init",
+                    str(project),
+                    "--name",
+                    "demo",
+                    "--version",
+                    "2.0.0",
+                    "--main",
+                    "src/app/main.ax",
+                    "--out-dir",
+                    "build",
+                    "--output",
+                    "bundle.axb",
+                ],
+                cwd=ROOT,
+            )
+            manifest = json.loads((project / "axiom.pkg").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["name"], "demo")
+            self.assertEqual(manifest["version"], "2.0.0")
+            self.assertEqual(manifest["main"], "src/app/main.ax")
+            self.assertEqual(manifest["out_dir"], "build")
+            self.assertEqual(manifest["output"], "bundle.axb")
+            self.assertTrue((project / "src" / "app" / "main.ax").exists())
+
     def test_package_init_force_rewrites_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
