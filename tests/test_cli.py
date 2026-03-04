@@ -108,6 +108,14 @@ class CliParityTests(unittest.TestCase):
         self.assertEqual(version_entry["arity"], 0)
         self.assertFalse(version_entry["side_effecting"])
 
+        safe_proc = self._run_cli(["host", "list", "--safe-only"], cwd=ROOT)
+        safe_payload = json.loads(safe_proc.stdout)
+        self.assertTrue(isinstance(safe_payload, list))
+        self.assertTrue(all(not entry["side_effecting"] for entry in safe_payload))
+        safe_names = {entry["name"] for entry in safe_payload}
+        self.assertIn("version", safe_names)
+        self.assertNotIn("print", safe_names)
+
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             mod = Path(td) / "math_module.ax"

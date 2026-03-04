@@ -28,6 +28,8 @@ python -m axiom pkg run .
 
 # Inspect host bridge capabilities for tooling
 python -m axiom host list
+# Inspect only deterministic host calls for agentic tooling
+python -m axiom host list --safe-only
 
 # Run conformance tests (interpreter vs VM + expected output)
 python -m unittest discover -v
@@ -59,6 +61,7 @@ Supported:
 - `import "path"` for file-level module loading (resolved relative to importing file)
   - Import paths must be relative and may not use parent traversal (`..`).
 - host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)
+- deterministic host calls are available without runtime flags; side-effecting host calls require the explicit `--allow-host-side-effects` option
 - host bridge calls are registry-backed, and new `host.*` functions can be added with
   `axiom.host.register_host_builtin(name, arity, side_effecting, handler)`.
 - `+ - * /` with parentheses

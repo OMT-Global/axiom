@@ -55,6 +55,16 @@ print x
         with self.assertRaises(AxiomParseError):
             compile_to_bytecode("return 1\n")
 
+    def test_parse_error_includes_path_and_location(self) -> None:
+        src = "let x = 1\nreturn 1\n"
+        with self.assertRaises(AxiomParseError) as cm:
+            parse_program(src, path=Path("bad-program.ax"))
+        msg = str(cm.exception)
+        self.assertIn("bad-program.ax:2:1", msg)
+        self.assertIn("return outside function", msg)
+        self.assertIn("return 1", msg)
+        self.assertIn("^", msg)
+
     def test_compile_undefined_function(self) -> None:
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("print unknown(1)\n")

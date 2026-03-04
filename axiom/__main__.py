@@ -157,10 +157,12 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
     return 0
 
 
-def cmd_host_list() -> int:
+def cmd_host_list(*, safe_only: bool = False) -> int:
     payload = []
     for name in HOST_BUILTIN_NAMES:
         arity, side_effecting = HOST_BUILTINS[name]
+        if safe_only and side_effecting:
+            continue
         payload.append(
             {"name": name, "arity": arity, "side_effecting": side_effecting}
         )
@@ -231,7 +233,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     sp_host = sub.add_parser("host", help="Host bridge helpers")
     host = sp_host.add_subparsers(dest="host_cmd", required=True)
-    host.add_parser("list", help="List registered host capabilities")
+    host_list = host.add_parser("list", help="List registered host capabilities")
+    host_list.add_argument(
+        "--safe-only",
+        action="store_true",
+        help="Show only non-side-effecting host functions",
+    )
 
     args = p.parse_args(argv)
 
@@ -281,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
             raise AssertionError("unreachable")
         if args.cmd == "host":
             if args.host_cmd == "list":
-                return cmd_host_list()
+                return cmd_host_list(safe_only=args.safe_only)
             raise AssertionError("unreachable")
         raise AssertionError("unreachable")
     except AxiomError as e:
