@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional, TextIO
-import builtins
 
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-from .host import HOST_BUILTIN_BY_ID, HOST_BUILTINS, HOST_VERSION
+from .host import HOST_BUILTIN_BY_ID, call_host_builtin_id
 
 
 @dataclass
@@ -170,36 +169,7 @@ class Vm:
     def _call_host_fn(self, fn_id: int, args: List[int], out: TextIO) -> int:
         if fn_id not in HOST_BUILTIN_BY_ID:
             raise AxiomRuntimeError(f"unknown host function id {fn_id}")
-        builtin = HOST_BUILTIN_BY_ID[fn_id]
-        if builtin.name == "version":
-            return HOST_VERSION
-        if builtin.name == "print":
-            if not self.allow_host_side_effects:
-                raise AxiomRuntimeError(
-                    "host call 1 is side-effecting; enable allow_host_side_effects"
-                )
-            if len(args) != 1:
-                raise AxiomRuntimeError(f"host.call 1 expected 1 arg, got {len(args)}")
-            out.write(f"{args[0]}\n")
-            return 0
-        if builtin.name == "read":
-            if not self.allow_host_side_effects:
-                raise AxiomRuntimeError(
-                    "host call 2 is side-effecting; enable allow_host_side_effects"
-                )
-            if len(args) != 1:
-                raise AxiomRuntimeError(f"host.call 2 expected 1 arg, got {len(args)}")
-            prompt = str(args[0])
-            try:
-                line = builtins.input(prompt)
-            except EOFError:
-                return 0
-            try:
-                return int(line.strip())
-            except ValueError as e:
-                raise AxiomRuntimeError(f"host.read expected integer input: {line!r}") from e
-        if builtin.name == "abs":
-            return abs(args[0])
-        if builtin.name == "math.abs":
-            return abs(args[0])
-        raise AxiomRuntimeError(f"unknown host function id {fn_id}")
+        try:
+            return call_host_builtin_id(fn_id, args, out)
+        except ValueError as e:
+            raise AxiomRuntimeError(str(e)) from e

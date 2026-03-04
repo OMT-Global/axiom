@@ -10,6 +10,7 @@ from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
 from axiom.bytecode import VERSION_MINOR
+from axiom.host import register_host_builtin, reset_host_builtins
 
 
 class ErrorTests(unittest.TestCase):
@@ -68,6 +69,31 @@ print f(1)
             compile_to_bytecode("host.abs(1, 2)\n")
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.math.abs()\n")
+
+    def test_compile_custom_host_builtin(self) -> None:
+        def double(args: list[int], _out) -> int:
+            return args[0] * 2
+
+        register_host_builtin("double", 1, False, double)
+        try:
+            program = parse_program("print host.double(21)\n")
+            out = io.StringIO()
+            Interpreter().run(program, out)
+            self.assertEqual(out.getvalue(), "42\n")
+
+            bc = compile_to_bytecode("print host.double(21)\n")
+            vm_out = io.StringIO()
+            Vm(locals_count=bc.locals_count).run(bc, vm_out)
+            self.assertEqual(vm_out.getvalue(), "42\n")
+        finally:
+            reset_host_builtins()
+
+    def test_host_registry_duplicate_name(self) -> None:
+        def noop(args: list[int], _out) -> int:
+            return 0
+
+        with self.assertRaises(ValueError):
+            register_host_builtin("print", 0, False, noop)
 
     def test_compile_missing_import(self) -> None:
         with tempfile.TemporaryDirectory() as td:

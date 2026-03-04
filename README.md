@@ -43,6 +43,8 @@ Supported:
 - function calls: `name(arg, ...)`
 - `import "path"` for file-level module loading (resolved relative to importing file)
 - host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)
+- host bridge calls are registry-backed, and new `host.*` functions can be added with
+  `axiom.host.register_host_builtin(name, arity, side_effecting, handler)`.
 - `+ - * /` with parentheses
 - comparisons: `== != < <= > >=` (results are `0` or `1`)
 - unary `-`

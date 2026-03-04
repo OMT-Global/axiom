@@ -17,6 +17,9 @@
 - `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
 - function calls: `<name>(<arg1>, ... )`
 - `host.<name>(...)` for host bridge calls (reserved namespace)
+- Host calls are resolved from a registry. Add custom capabilities via
+  `axiom.host.register_host_builtin(name, arity, side_effecting, handler)` where
+  `handler(args: list[int], out: TextIO) -> int`.
 
 ## Expressions
 - integer literals: `123`, `-5`
