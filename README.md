@@ -28,6 +28,8 @@ python -m axiom pkg run .
 
 # Inspect host bridge capabilities for tooling
 python -m axiom host list
+# Inspect the full host contract (schema + runtime version + capabilities) for tooling
+python -m axiom host describe
 # Inspect only deterministic host calls for agentic tooling
 python -m axiom host list --safe-only
 
