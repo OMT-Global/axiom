@@ -31,6 +31,8 @@ python -m axiom pkg init .
 python -m axiom pkg build .
 ```
 
+See `docs/package.md` for manifest format and build behavior.
+
 ## Axiom v0 language subset
 
 Supported:
