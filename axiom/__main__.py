@@ -66,8 +66,25 @@ def cmd_check(path: Path, *, allow_host_side_effects: bool) -> int:
     return 0
 
 
-def cmd_pkg_init(path: Path, *, name: str | None = None, force: bool = False) -> int:
-    manifest = init_package(path, name=name, force=force)
+def cmd_pkg_init(
+    path: Path,
+    *,
+    name: str | None = None,
+    version: str | None = None,
+    main: str | None = None,
+    out_dir: str | None = None,
+    output: str | None = None,
+    force: bool = False,
+) -> int:
+    manifest = init_package(
+        path,
+        name=name,
+        version=version,
+        main=main,
+        out_dir=out_dir,
+        output=output,
+        force=force,
+    )
     print(f"initialized package {manifest.name} in {path}", file=sys.stderr)
     return 0
 
@@ -126,6 +143,10 @@ def main(argv: list[str] | None = None) -> int:
     sp_init = pkg.add_parser("init", help="Create a package manifest and default source entry")
     sp_init.add_argument("path", type=Path, default=Path("."), nargs="?")
     sp_init.add_argument("--name")
+    sp_init.add_argument("--version", default=None)
+    sp_init.add_argument("--main", default=None)
+    sp_init.add_argument("--out-dir", default=None)
+    sp_init.add_argument("--output", default=None)
     sp_init.add_argument("--force", action="store_true")
     sp_build = pkg.add_parser("build", help="Build package bytecode")
     sp_build.add_argument("path", type=Path, default=Path("."), nargs="?")
@@ -159,7 +180,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "pkg":
             if args.pkg_cmd == "init":
                 return cmd_pkg_init(
-                    args.path, name=args.name, force=args.force
+                    args.path,
+                    name=args.name,
+                    version=args.version,
+                    main=args.main,
+                    out_dir=args.out_dir,
+                    output=args.output,
+                    force=args.force,
                 )
             if args.pkg_cmd == "build":
                 return cmd_pkg_build(args.path, allow_host_side_effects=args.allow_host_side_effects)

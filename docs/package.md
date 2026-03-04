@@ -29,7 +29,7 @@ Example manifest:
 ## CLI
 
 ```bash
-python -m axiom pkg init /path/to/project --name demo
+python -m axiom pkg init /path/to/project --name demo --version 0.1.0
 python -m axiom pkg build /path/to/project
 python -m axiom pkg manifest /path/to/project
 ```
@@ -38,7 +38,14 @@ python -m axiom pkg manifest /path/to/project
 
 - `axiom.pkg` (with default values)
 - `src/main.ax` (only if missing) with `print 0` fallback body
-- Pass `--force` to regenerate `axiom.pkg` when it already exists.
+Options:
+
+- `--name`
+- `--version` (default `0.1.0`)
+- `--main` (default `src/main.ax`)
+- `--out-dir` (default `dist`)
+- `--output` (optional explicit artifact filename)
+- `--force` to regenerate `axiom.pkg` when it already exists.
 
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.
 
