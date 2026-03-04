@@ -40,6 +40,7 @@ class Parser:
         self.i = 0
         self.function_depth = 0
         self.imported_modules: set[str] = set()
+        self.imported_paths: set[str] = set()
         self.source = source
         self.source_path = source_path
 
@@ -253,6 +254,14 @@ class Parser:
                 source=self.source,
                 path=self.source_path,
             )
+        if path.value in self.imported_paths:
+            raise AxiomParseError(
+                "duplicate import path",
+                path.span,
+                source=self.source,
+                path=self.source_path,
+            )
+        self.imported_paths.add(path.value)
         default_alias = Path(path.value).stem
         if not default_alias:
             raise AxiomParseError(
