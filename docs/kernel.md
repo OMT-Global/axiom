@@ -47,6 +47,7 @@
 - `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
 - non-side-effecting host calls can be used in deterministic tool pipelines without flags
 - `python -m axiom host list --safe-only` enumerates host calls that are safe by default
+- `python -m axiom host describe` returns machine-readable host contract metadata for deterministic agents
 - `host` call payloads in bytecode are name-based (string table index) starting at
   bytecode `v0.6` to preserve behavior if host registry order changes.
 - `python -m axiom host list` enumerates the currently registered host capabilities.

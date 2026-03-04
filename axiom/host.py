@@ -113,4 +113,28 @@ def call_host_builtin_id(host_fn_id: int, args: List[int], out: TextIO) -> int:
     return HOST_BUILTIN_BY_ID[host_fn_id].handler(args, out)
 
 
+def host_capabilities(safe_only: bool = False) -> List[Dict[str, object]]:
+    payload: List[Dict[str, object]] = []
+    for name in sorted(HOST_BUILTIN_NAMES):
+        arity, side_effecting = HOST_BUILTINS[name]
+        if safe_only and side_effecting:
+            continue
+        payload.append(
+            {
+                "name": name,
+                "arity": arity,
+                "side_effecting": side_effecting,
+            }
+        )
+    return payload
+
+
+def host_contract_metadata(safe_only: bool = False) -> Dict[str, object]:
+    return {
+        "schema_version": 1,
+        "runtime_version_minor": VERSION_MINOR,
+        "capabilities": host_capabilities(safe_only=safe_only),
+    }
+
+
 _rebuild_host_tables()

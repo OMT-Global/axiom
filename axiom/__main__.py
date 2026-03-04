@@ -10,7 +10,7 @@ from .bytecode import Bytecode, Op
 from .interpreter import Interpreter
 from .vm import Vm
 from .errors import AxiomError
-from .host import HOST_BUILTINS, HOST_BUILTIN_NAMES
+from .host import host_capabilities, host_contract_metadata
 from .packaging import (
     build_package,
     clean_package,
@@ -158,14 +158,13 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
 
 
 def cmd_host_list(*, safe_only: bool = False) -> int:
-    payload = []
-    for name in sorted(HOST_BUILTIN_NAMES):
-        arity, side_effecting = HOST_BUILTINS[name]
-        if safe_only and side_effecting:
-            continue
-        payload.append(
-            {"name": name, "arity": arity, "side_effecting": side_effecting}
-        )
+    payload = host_capabilities(safe_only=safe_only)
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_host_describe(*, safe_only: bool = False) -> int:
+    payload = host_contract_metadata(safe_only=safe_only)
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -239,6 +238,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Show only non-side-effecting host functions",
     )
+    host_desc = host.add_parser("describe", help="Describe host contract for tooling")
+    host_desc.add_argument(
+        "--safe-only",
+        action="store_true",
+        help="Include only non-side-effecting host functions",
+    )
 
     args = p.parse_args(argv)
 
@@ -289,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "host":
             if args.host_cmd == "list":
                 return cmd_host_list(safe_only=args.safe_only)
+            if args.host_cmd == "describe":
+                return cmd_host_describe(safe_only=args.safe_only)
             raise AssertionError("unreachable")
         raise AssertionError("unreachable")
     except AxiomError as e:

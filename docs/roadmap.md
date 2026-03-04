@@ -27,6 +27,6 @@
 - Package/build tooling skeleton (`axiom.pkg`, `axiom pkg init`, `axiom pkg build`)
 - Package command coverage (`check`, `host` side-effect gating, CLI checks)
 
-## Phase 6
+## Phase 6 ✅
 - Stable host-tooling contracts for long-running agentic workflows
 - Module namespace strategy for future large-language agent compositions

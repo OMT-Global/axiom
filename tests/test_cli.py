@@ -117,6 +117,25 @@ class CliParityTests(unittest.TestCase):
         self.assertIn("version", safe_names)
         self.assertNotIn("print", safe_names)
 
+    def test_host_describe_command(self) -> None:
+        proc = self._run_cli(["host", "describe"], cwd=ROOT)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertIn("runtime_version_minor", payload)
+        self.assertIn("capabilities", payload)
+        caps = payload["capabilities"]
+        self.assertTrue(isinstance(caps, list))
+        names = {entry["name"] for entry in caps}
+        self.assertIn("version", names)
+        self.assertIn("print", names)
+
+        safe_proc = self._run_cli(["host", "describe", "--safe-only"], cwd=ROOT)
+        safe_payload = json.loads(safe_proc.stdout)
+        self.assertEqual(safe_payload["schema_version"], 1)
+        safe_caps = safe_payload["capabilities"]
+        self.assertTrue(isinstance(safe_caps, list))
+        self.assertTrue(all(not entry["side_effecting"] for entry in safe_caps))
+
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             mod = Path(td) / "math_module.ax"
