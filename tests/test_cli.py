@@ -355,6 +355,19 @@ class CliParityTests(unittest.TestCase):
             ).stdout
             self.assertEqual(vm_out, "9\n")
 
+    def test_package_check_rejects_empty_host_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["allowed_host_calls"] = []
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (project / manifest["main"]).write_text("host.abs(-1)\n", encoding="utf-8")
+
+            proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("not permitted by package policy", proc.stderr)
+
     def test_package_build_output_override_flag(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)

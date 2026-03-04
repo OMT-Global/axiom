@@ -105,6 +105,9 @@ print f(1)
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.abs(-5)\n", allowed_host_calls={"print"})
 
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("host.abs(-5)\n", allowed_host_calls=set())
+
         bc = compile_to_bytecode("print host.abs(-5)\n", allowed_host_calls={"abs"})
         out = io.StringIO()
         Vm(locals_count=bc.locals_count).run(bc, out)
