@@ -10,6 +10,10 @@ Current supported fields:
 - `version` (required, string): Package semantic version.
 - `main` (optional, default: `src/main.ax`): Source file entrypoint, relative to project root.
 - `out_dir` (optional, default: `dist`): Directory for compiled bytecode artifacts.
+- `allowed_host_calls` (optional): Explicit allowlist of host calls permitted in package builds.
+  - Each entry is a string matching host call suffixes without the `host.` prefix
+    (for example, `print`, `abs`, `math.abs`).
+  - When present, package compilation fails if source uses any host call not in the allowlist.
 - `main` and `out_dir` must be relative paths and may not contain `..` parent segments.
 - `output` (optional, string): Custom output filename or path inside `out_dir`.
   - Must be a relative path and may not traverse parent directories (no `..`).
@@ -24,7 +28,8 @@ Example manifest:
   "version": "0.1.0",
   "main": "src/main.ax",
   "out_dir": "dist",
-  "output": "artifact.axb"
+  "output": "artifact.axb",
+  "allowed_host_calls": ["version", "abs", "math.abs"]
 }
 ```
 
@@ -49,6 +54,7 @@ Options:
 - `--main` (default `src/main.ax`)
 - `--out-dir` (default `dist`)
 - `--output` (optional explicit artifact filename)
+- `--allowed-host-call` (repeatable; each entry is a call suffix like `print` or `math.abs`)
 - `--force` to regenerate `axiom.pkg` when it already exists.
 
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.

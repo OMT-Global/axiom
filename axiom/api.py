@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Set
+from typing import Optional, Set
 
 from .lexer import Lexer
 from .parser import Parser
@@ -20,15 +20,29 @@ def parse_program(src: str) -> Program:
     return Parser(toks).parse_program()
 
 
-def compile_to_bytecode(src: str, *, allow_host_side_effects: bool = False) -> Bytecode:
+def compile_to_bytecode(
+    src: str,
+    *,
+    allow_host_side_effects: bool = False,
+    allowed_host_calls: Optional[Set[str]] = None,
+) -> Bytecode:
     program = parse_program(src)
-    return Compiler(allow_host_side_effects=allow_host_side_effects).compile(program)
+    return Compiler(
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    ).compile(program)
 
 
-def compile_file(path: Path, *, allow_host_side_effects: bool = False) -> Bytecode:
-    return Compiler(allow_host_side_effects=allow_host_side_effects).compile(
-        parse_file(path)
-    )
+def compile_file(
+    path: Path,
+    *,
+    allow_host_side_effects: bool = False,
+    allowed_host_calls: Optional[Set[str]] = None,
+) -> Bytecode:
+    return Compiler(
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    ).compile(parse_file(path))
 
 
 def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Program:

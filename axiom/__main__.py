@@ -75,6 +75,7 @@ def cmd_pkg_init(
     main: str | None = None,
     out_dir: str | None = None,
     output: str | None = None,
+    allowed_host_calls: list[str] | None = None,
     force: bool = False,
 ) -> int:
     manifest = init_package(
@@ -84,6 +85,7 @@ def cmd_pkg_init(
         main=main,
         out_dir=out_dir,
         output=output,
+        allowed_host_calls=allowed_host_calls,
         force=force,
     )
     print(f"initialized package {manifest.name} in {path}", file=sys.stderr)
@@ -111,7 +113,14 @@ def cmd_pkg_manifest(path: Path) -> int:
 def cmd_pkg_check(path: Path, *, allow_host_side_effects: bool) -> int:
     manifest = load_manifest(path)
     entry = path.resolve() / manifest.main
-    _ = compile_file(entry, allow_host_side_effects=allow_host_side_effects)
+    allowed_host_calls = (
+        set(manifest.allowed_host_calls) if manifest.allowed_host_calls else None
+    )
+    _ = compile_file(
+        entry,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    )
     print("OK", file=sys.stderr)
     return 0
 
@@ -129,7 +138,14 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
     project_root = path.resolve()
     manifest = load_manifest(project_root)
     entry = project_root / manifest.main
-    bytecode = compile_file(entry, allow_host_side_effects=allow_host_side_effects)
+    allowed_host_calls = (
+        set(manifest.allowed_host_calls) if manifest.allowed_host_calls else None
+    )
+    bytecode = compile_file(
+        entry,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    )
     Vm(
         locals_count=bytecode.locals_count,
         allow_host_side_effects=allow_host_side_effects,
@@ -185,6 +201,13 @@ def main(argv: list[str] | None = None) -> int:
     sp_init.add_argument("--main", default=None)
     sp_init.add_argument("--out-dir", default=None)
     sp_init.add_argument("--output", default=None)
+    sp_init.add_argument(
+        "--allowed-host-call",
+        action="append",
+        default=None,
+        metavar="HOSTCALL",
+        help="Allowlist host call (e.g. print, abs, math.abs)",
+    )
     sp_init.add_argument("--force", action="store_true")
     sp_build = pkg.add_parser("build", help="Build package bytecode")
     sp_build.add_argument("path", type=Path, default=Path("."), nargs="?")
@@ -234,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
                     main=args.main,
                     out_dir=args.out_dir,
                     output=args.output,
+                    allowed_host_calls=args.allowed_host_call,
                     force=args.force,
                 )
             if args.pkg_cmd == "build":
