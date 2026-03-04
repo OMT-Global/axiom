@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -262,7 +263,7 @@ class Parser:
                 path=self.source_path,
             )
         self.imported_paths.add(path.value)
-        default_alias = Path(path.value).stem
+        default_alias = _derive_import_alias(path.value)
         if not default_alias:
             raise AxiomParseError(
                 "invalid import path for namespace",
@@ -470,6 +471,28 @@ class Parser:
             source=self.source,
             path=self.source_path,
         )
+
+
+_NON_ID_CHARS = re.compile(r"[^0-9A-Za-z_]")
+
+
+def _normalize_identifier_part(part: str) -> str:
+    normalized = _NON_ID_CHARS.sub("_", part)
+    if not normalized:
+        return ""
+    if normalized[0].isdigit():
+        normalized = f"m_{normalized}"
+    return normalized
+
+
+def _derive_import_alias(raw_path: str) -> str:
+    path = Path(raw_path)
+    no_ext = path.with_suffix("")
+    parts = [p for p in no_ext.parts if p not in (".", "")]
+    if not parts:
+        return ""
+    normalized_parts = [_normalize_identifier_part(part) for part in parts if part not in ("",)]
+    return ".".join(part for part in normalized_parts if part)
 
 
 def _widen_span(expr: Expr, span: Span) -> Expr:
