@@ -15,6 +15,7 @@
 - `fn <name>(<params>) { ... }`
 - `return <expr>`
 - `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
+  - Import paths must be relative and must not use parent traversal (`..`).
 - function calls: `<name>(<arg1>, ... )`
 - identifiers named `host` are reserved for host namespace (`let host`, parameters, and function names are rejected)
 - `host.<name>(...)` for host bridge calls (reserved namespace)

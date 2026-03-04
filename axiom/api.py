@@ -78,6 +78,10 @@ def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Progr
 
 def _resolve_import_path(raw: str, base_path: Path) -> Path:
     candidate = Path(raw)
+    if candidate.is_absolute():
+        raise AxiomCompileError(f"absolute import paths are not allowed: {raw!r}")
+    if any(part == ".." for part in candidate.parts):
+        raise AxiomCompileError(f"parent traversal in import path is not allowed: {raw!r}")
     if candidate.suffix == "":
         candidate = candidate.with_suffix(".ax")
     if candidate.suffix not in (".ax", ".AX"):
