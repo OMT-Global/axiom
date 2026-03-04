@@ -205,6 +205,27 @@ print f(1)
             with self.assertRaises(AxiomParseError):
                 compile_file(root.joinpath("main.ax"))
 
+    def test_compile_import_transitive_namespace_collision(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("shared_module.ax").write_text(
+                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+            )
+            root.joinpath("inner_module.ax").write_text(
+                'import "shared_module" as shared\nfn square(a) { return shared.add(a, a) }\n',
+                encoding="utf-8",
+            )
+            root.joinpath("outer_module.ax").write_text(
+                'import "shared_module" as shared\nfn add(a, b) { return a + b }\n',
+                encoding="utf-8",
+            )
+            root.joinpath("main.ax").write_text(
+                'import "outer_module"\nimport "inner_module"\n',
+                encoding="utf-8",
+            )
+            with self.assertRaises(AxiomCompileError):
+                compile_file(root.joinpath("main.ax"))
+
     def test_compile_import_alias_host_reserved(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
