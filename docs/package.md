@@ -11,6 +11,7 @@ Current supported fields:
 - `main` (optional, default: `src/main.ax`): Source file entrypoint, relative to project root.
 - `out_dir` (optional, default: `dist`): Directory for compiled bytecode artifacts.
 - `output` (optional, string): Custom output filename or path inside `out_dir`.
+  - Must be a relative path and may not traverse parent directories (no `..`).
   - If omitted, output defaults to `<name>.axb`.
   - If it does not end with `.axb`, `.axb` is appended.
 
