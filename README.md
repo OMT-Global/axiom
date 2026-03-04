@@ -23,6 +23,9 @@ python -m axiom compile examples/arith.ax -o /tmp/arith.axb
 # Run bytecode on the VM (stage1)
 python -m axiom vm /tmp/arith.axb
 
+# Run package main from manifest (stage3 planning)
+python -m axiom pkg run .
+
 # Run conformance tests (interpreter vs VM + expected output)
 python -m unittest discover -v
 

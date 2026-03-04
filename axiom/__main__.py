@@ -110,6 +110,18 @@ def cmd_pkg_clean(path: Path) -> int:
     return 0
 
 
+def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
+    project_root = path.resolve()
+    manifest = load_manifest(project_root)
+    entry = project_root / manifest.main
+    bytecode = compile_file(entry, allow_host_side_effects=allow_host_side_effects)
+    Vm(
+        locals_count=bytecode.locals_count,
+        allow_host_side_effects=allow_host_side_effects,
+    ).run(bytecode, sys.stdout)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="axiom", description="Axiom language tool (stage0 interpreter + stage1 compiler/VM)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -151,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
     sp_build = pkg.add_parser("build", help="Build package bytecode")
     sp_build.add_argument("path", type=Path, default=Path("."), nargs="?")
     sp_build.add_argument("--allow-host-side-effects", action="store_true")
+    sp_run = pkg.add_parser("run", help="Run package main source via manifest")
+    sp_run.add_argument("path", type=Path, default=Path("."), nargs="?")
+    sp_run.add_argument("--allow-host-side-effects", action="store_true")
     pkg.add_parser("manifest", help="Print package manifest JSON").add_argument(
         "path", type=Path, default=Path("."), nargs="?"
     )
@@ -194,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_pkg_manifest(args.path)
             if args.pkg_cmd == "clean":
                 return cmd_pkg_clean(args.path)
+            if args.pkg_cmd == "run":
+                return cmd_pkg_run(args.path, allow_host_side_effects=args.allow_host_side_effects)
             raise AssertionError("unreachable")
         raise AssertionError("unreachable")
     except AxiomError as e:
