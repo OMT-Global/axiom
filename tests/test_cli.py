@@ -254,6 +254,14 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
             self.assertIn("parent traversal in import path", proc.stderr.lower())
 
+    def test_package_check_rejects_absolute_import_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            (project / "src" / "main.ax").write_text('import "/etc/hosts"\n', encoding="utf-8")
+            proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("absolute import path", proc.stderr.lower())
+
     def test_package_init_force_rewrites_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
