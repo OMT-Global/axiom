@@ -161,6 +161,21 @@ print f(1)
             with self.assertRaises(AxiomCompileError):
                 compile_file(root.joinpath("a.ax"))
 
+    def test_compile_rejects_absolute_import(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("main.ax").write_text('import "/etc/hosts"\n', encoding="utf-8")
+            with self.assertRaises(AxiomCompileError):
+                compile_file(root.joinpath("main.ax"))
+
+    def test_compile_rejects_parent_traversal_import(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("mod.ax").write_text('print 0\n', encoding="utf-8")
+            root.joinpath("main.ax").write_text('import "../mod"\n', encoding="utf-8")
+            with self.assertRaises(AxiomCompileError):
+                compile_file(root.joinpath("main.ax"))
+
     def test_runtime_host_version(self) -> None:
         program = parse_program("print host.version()\n")
         out = io.StringIO()
