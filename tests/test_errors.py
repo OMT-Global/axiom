@@ -56,16 +56,42 @@ print f(1)
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.print(1)\n")
 
+    def test_compile_host_side_effect_allowed(self) -> None:
+        compile_to_bytecode("host.print(1)\n", allow_host_side_effects=True)
+
     def test_runtime_host_version(self) -> None:
         program = parse_program("print host.version()\n")
         out = io.StringIO()
         Interpreter().run(program, out)
         self.assertEqual(out.getvalue(), "4\n")
 
+    def test_vm_host_version(self) -> None:
+        bc = compile_to_bytecode("print host.version()\n")
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, out)
+        self.assertEqual(out.getvalue(), "4\n")
+
     def test_runtime_host_print_requires_explicit_allow(self) -> None:
         program = parse_program("host.print(1)\n")
         with self.assertRaises(AxiomRuntimeError):
             Interpreter().run(program, io.StringIO())
+
+    def test_runtime_host_print_requires_explicit_allow_vm(self) -> None:
+        bc = compile_to_bytecode("host.print(1)\n", allow_host_side_effects=True)
+        with self.assertRaises(AxiomRuntimeError):
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+
+    def test_runtime_host_print_with_allow(self) -> None:
+        program = parse_program("host.print(1)\n")
+        out = io.StringIO()
+        Interpreter(allow_host_side_effects=True).run(program, out)
+        self.assertEqual(out.getvalue(), "1\n")
+
+    def test_runtime_host_print_with_allow_vm(self) -> None:
+        bc = compile_to_bytecode("host.print(1)\n", allow_host_side_effects=True)
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
+        self.assertEqual(out.getvalue(), "1\n")
 
 
 if __name__ == "__main__":
