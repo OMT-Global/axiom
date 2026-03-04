@@ -52,6 +52,7 @@ Options:
 - `--force` to regenerate `axiom.pkg` when it already exists.
 
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.
+`--output` overrides the manifest output path for that invocation only.
 
 `pkg check` validates `axiom.pkg` and compiles the manifest `main` entrypoint.
 Host side-effecting host calls (for example `host.print`) obey the global
