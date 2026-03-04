@@ -3,13 +3,20 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import json
 
 from .api import parse_file, compile_file
 from .bytecode import Bytecode, Op
 from .interpreter import Interpreter
 from .vm import Vm
 from .errors import AxiomError
-from .packaging import init_package, build_package
+from .packaging import (
+    build_package,
+    clean_package,
+    init_package,
+    load_manifest,
+    manifest_to_dict,
+)
 
 
 def cmd_interp(path: Path, *, allow_host_side_effects: bool) -> int:
@@ -59,8 +66,8 @@ def cmd_check(path: Path, *, allow_host_side_effects: bool) -> int:
     return 0
 
 
-def cmd_pkg_init(path: Path, *, name: str | None = None) -> int:
-    manifest = init_package(path, name=name)
+def cmd_pkg_init(path: Path, *, name: str | None = None, force: bool = False) -> int:
+    manifest = init_package(path, name=name, force=force)
     print(f"initialized package {manifest.name} in {path}", file=sys.stderr)
     return 0
 
@@ -68,6 +75,21 @@ def cmd_pkg_init(path: Path, *, name: str | None = None) -> int:
 def cmd_pkg_build(path: Path, *, allow_host_side_effects: bool) -> int:
     out_path = build_package(path, allow_host_side_effects=allow_host_side_effects)
     print(f"wrote {out_path} ({out_path.stat().st_size} bytes)", file=sys.stderr)
+    return 0
+
+
+def cmd_pkg_manifest(path: Path) -> int:
+    manifest = load_manifest(path)
+    print(json.dumps(manifest_to_dict(manifest), indent=2))
+    return 0
+
+
+def cmd_pkg_clean(path: Path) -> int:
+    removed = clean_package(path)
+    if removed:
+        print(f"removed package artifacts in {path}")
+    else:
+        print(f"nothing to clean for package in {path}")
     return 0
 
 
@@ -104,9 +126,16 @@ def main(argv: list[str] | None = None) -> int:
     sp_init = pkg.add_parser("init", help="Create a package manifest and default source entry")
     sp_init.add_argument("path", type=Path, default=Path("."), nargs="?")
     sp_init.add_argument("--name")
+    sp_init.add_argument("--force", action="store_true")
     sp_build = pkg.add_parser("build", help="Build package bytecode")
     sp_build.add_argument("path", type=Path, default=Path("."), nargs="?")
     sp_build.add_argument("--allow-host-side-effects", action="store_true")
+    pkg.add_parser("manifest", help="Print package manifest JSON").add_argument(
+        "path", type=Path, default=Path("."), nargs="?"
+    )
+    pkg.add_parser("clean", help="Delete package artifacts").add_argument(
+        "path", type=Path, default=Path("."), nargs="?"
+    )
 
     args = p.parse_args(argv)
 
@@ -129,9 +158,15 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_check(args.file, allow_host_side_effects=args.allow_host_side_effects)
         if args.cmd == "pkg":
             if args.pkg_cmd == "init":
-                return cmd_pkg_init(args.path, name=args.name)
+                return cmd_pkg_init(
+                    args.path, name=args.name, force=args.force
+                )
             if args.pkg_cmd == "build":
                 return cmd_pkg_build(args.path, allow_host_side_effects=args.allow_host_side_effects)
+            if args.pkg_cmd == "manifest":
+                return cmd_pkg_manifest(args.path)
+            if args.pkg_cmd == "clean":
+                return cmd_pkg_clean(args.path)
             raise AssertionError("unreachable")
         raise AssertionError("unreachable")
     except AxiomError as e:

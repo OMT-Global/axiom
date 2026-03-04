@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
 from typing import Optional
 
 from .api import compile_file
@@ -69,9 +70,8 @@ def default_manifest(name: str) -> PackageManifest:
     return PackageManifest(name=name, version=DEFAULT_VERSION)
 
 
-def write_default_manifest(project_root: Path, manifest: PackageManifest) -> PackageManifest:
-    path = manifest_path(project_root)
-    payload = {
+def manifest_to_dict(manifest: PackageManifest) -> dict[str, str | None]:
+    payload: dict[str, str | None] = {
         "name": manifest.name,
         "version": manifest.version,
         "main": manifest.main,
@@ -79,6 +79,12 @@ def write_default_manifest(project_root: Path, manifest: PackageManifest) -> Pac
     }
     if manifest.output is not None:
         payload["output"] = manifest.output
+    return payload
+
+
+def write_default_manifest(project_root: Path, manifest: PackageManifest) -> PackageManifest:
+    path = manifest_path(project_root)
+    payload = manifest_to_dict(manifest)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return manifest
 
@@ -91,10 +97,12 @@ def write_default_entry(project_root: Path) -> Path:
     return path
 
 
-def init_package(project_root: Path, *, name: Optional[str] = None) -> PackageManifest:
+def init_package(
+    project_root: Path, *, name: Optional[str] = None, force: bool = False
+) -> PackageManifest:
     project_root = project_root.resolve()
     project_root.mkdir(parents=True, exist_ok=True)
-    if manifest_path(project_root).exists():
+    if manifest_path(project_root).exists() and not force:
         raise AxiomCompileError(
             f"package manifest already exists at {manifest_path(project_root)}"
         )
@@ -122,3 +130,15 @@ def build_package(project_root: Path, *, allow_host_side_effects: bool = False) 
     out_path = out_dir / output_name
     out_path.write_bytes(bytecode.encode())
     return out_path
+
+
+def clean_package(project_root: Path) -> bool:
+    project_root = project_root.resolve()
+    manifest = load_manifest(project_root)
+    out_dir = project_root / manifest.out_dir
+    if not out_dir.exists():
+        return False
+    if out_dir.is_file():
+        raise AxiomCompileError(f"package out_dir is not a directory: {out_dir}")
+    shutil.rmtree(out_dir)
+    return True

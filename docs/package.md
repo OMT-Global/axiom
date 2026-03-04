@@ -31,11 +31,17 @@ Example manifest:
 ```bash
 python -m axiom pkg init /path/to/project --name demo
 python -m axiom pkg build /path/to/project
+python -m axiom pkg manifest /path/to/project
 ```
 
 `pkg init` creates:
 
-- `axiom.pkg` if missing
+- `axiom.pkg` (with default values)
 - `src/main.ax` (only if missing) with `print 0` fallback body
+- Pass `--force` to regenerate `axiom.pkg` when it already exists.
 
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.
+
+`pkg manifest` prints normalized manifest JSON.
+
+`pkg clean` removes the configured `out_dir` directory entirely.
