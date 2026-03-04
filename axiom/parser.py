@@ -253,24 +253,43 @@ class Parser:
                 source=self.source,
                 path=self.source_path,
             )
-        alias = Path(path.value).stem
-        if not alias:
+        default_alias = Path(path.value).stem
+        if not default_alias:
             raise AxiomParseError(
                 "invalid import path for namespace",
                 path.span,
                 source=self.source,
                 path=self.source_path,
             )
-        if alias == "host":
+        if default_alias == "host":
             raise AxiomParseError(
                 "import namespace cannot be 'host'",
                 path.span,
                 source=self.source,
                 path=self.source_path,
             )
+
+        alias = default_alias
+        if self._peek().kind == TokenKind.AS:
+            self._bump()
+            alias = self._eat_name_token()
+            if alias == "host":
+                raise AxiomParseError(
+                    "import namespace cannot be 'host'",
+                    path.span,
+                    source=self.source,
+                    path=self.source_path,
+                )
+        if alias in self.imported_modules:
+            raise AxiomParseError(
+                "duplicate import namespace",
+                path.span,
+                source=self.source,
+                path=self.source_path,
+            )
         self.imported_modules.add(alias)
         end = self._parse_terminator(default_end=path.span.end)
-        return ImportStmt(path=path.value, span=Span(start, end))
+        return ImportStmt(path=path.value, alias=alias, span=Span(start, end))
 
     def _parse_assign(self) -> AssignStmt:
         ident = self._eat(TokenKind.IDENT)

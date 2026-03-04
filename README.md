@@ -58,7 +58,7 @@ Supported:
 - variables
 - identifiers named `host` are reserved (`let host`, function parameters, and function names)
 - function calls: `name(arg, ...)`
-- `import "path"` for file-level module loading (resolved relative to importing file)
+- `import "path"` (or `import "path" as alias`) for file-level module loading (resolved relative to importing file)
   - Import paths must be relative and may not use parent traversal (`..`).
 - host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)
 - deterministic host calls are available without runtime flags; side-effecting host calls require the explicit `--allow-host-side-effects` option

@@ -81,6 +81,8 @@ class Lexer:
             return Token(TokenKind.LET, Span(start, end))
         if text == "import":
             return Token(TokenKind.IMPORT, Span(start, end))
+        if text == "as":
+            return Token(TokenKind.AS, Span(start, end))
         if text == "fn":
             return Token(TokenKind.FN, Span(start, end))
         if text == "print":

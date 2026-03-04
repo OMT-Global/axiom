@@ -92,7 +92,7 @@ def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Progr
                 )
             imported = _load_program_file(import_path, seen, loading)
             stmts.extend(
-                _namespace_module_program(imported, _import_alias_from_path(import_path)).stmts
+                _namespace_module_program(imported, stmt.alias).stmts
             )
         else:
             stmts.append(stmt)
@@ -116,10 +116,6 @@ def _resolve_import_path(raw: str, base_path: Path) -> Path:
     if not candidate.is_absolute():
         candidate = base_path.parent / candidate
     return candidate
-
-
-def _import_alias_from_path(path: Path) -> str:
-    return path.stem
 
 
 def _namespace_module_program(program: Program, module_alias: str) -> Program:
