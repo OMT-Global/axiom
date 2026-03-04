@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 import tempfile
+import json
 import unittest
 
 
@@ -108,6 +109,41 @@ class CliParityTests(unittest.TestCase):
             self.assertEqual(proc.stdout, "13\n")
             proc = self._run_cli(["run", str(main)], cwd=ROOT)
             self.assertEqual(proc.stdout, "13\n")
+
+    def test_package_init_and_build(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+
+            manifest_path = project / "axiom.pkg"
+            self.assertTrue(manifest_path.exists())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["name"], "demo")
+
+            main = project / "src" / "main.ax"
+            main.write_text("print 12\n", encoding="utf-8")
+
+            self._run_cli(["pkg", "build", str(project)], cwd=ROOT)
+            out = project / manifest["out_dir"] / "demo.axb"
+            self.assertTrue(out.exists())
+
+            vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
+            self.assertEqual(vm_out, "12\n")
+
+    def test_package_init_requires_clean_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            proc = self._run_cli(
+                ["pkg", "init", str(project), "--name", "demo"], cwd=ROOT, expect_code=1
+            )
+            self.assertIn("package manifest already exists", proc.stderr)
+
+    def test_package_build_requires_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("missing package manifest", proc.stderr)
 
 
 if __name__ == "__main__":
