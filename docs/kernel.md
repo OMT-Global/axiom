@@ -1,4 +1,4 @@
-# Axiom kernel (v0.2)
+# Axiom kernel (v0.3)
 
 ## Values
 - integers only (Python `int` in the seed implementation)
@@ -12,6 +12,9 @@
 - `{ ... }` introduces a nested lexical scope
 - `if <expr> { ... } else { ... }`
 - `while <expr> { ... }`
+- `fn <name>(<params>) { ... }`
+- `return <expr>`
+- function calls: `<name>(<arg1>, ... )`
 
 ## Expressions
 - integer literals: `123`, `-5`
@@ -19,9 +22,12 @@
 - binary ops: `+ - * / == != < <= > >=`
 - parentheses: `( ... )`
 - unary negation: `-<expr>`
+- call expressions: `name(arg1, arg2, ...)`
 
 ## Execution
 - single file program
 - lexical scopes resolve from innermost to outermost
 - all variables must be defined before use
 - integer division truncates toward zero
+- functions use explicit call frames with locals + return address
+- every function returns an `int` (implicit `0` if no explicit return is reached)

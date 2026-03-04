@@ -9,7 +9,9 @@ from .errors import Span
 
 class TokenKind(Enum):
     LET = auto()
+    FN = auto()
     PRINT = auto()
+    RETURN = auto()
     IF = auto()
     ELSE = auto()
     WHILE = auto()
@@ -28,6 +30,7 @@ class TokenKind(Enum):
     MINUS = auto()
     STAR = auto()
     SLASH = auto()
+    COMMA = auto()
     LPAREN = auto()
     RPAREN = auto()
     LBRACE = auto()

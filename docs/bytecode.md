@@ -1,4 +1,4 @@
-# Axiom bytecode format (AXBC v0.2)
+# Axiom bytecode format (AXBC v0.3)
 
 This project uses a tiny custom binary format (no deps) to keep the bootstrap surface small.
 
@@ -8,8 +8,14 @@ All integers are little-endian.
 
 - 4 bytes: magic `AXBC`
 - u16: version_major (currently 0)
-- u16: version_minor (currently 2)
+- u16: version_minor (currently 3)
 - u32: locals_count
+- u32: function_count (K)
+- K times:
+  - u32: function_name_index (string table index)
+  - u32: entry_ip (instruction index)
+  - u32: arity
+  - u32: locals_count
 - u32: string_table_count (N)
 - N times:
   - u32: byte_len
@@ -39,3 +45,5 @@ All integers are little-endian.
 - 0x10 CMP_LE
 - 0x11 CMP_GT
 - 0x12 CMP_GE
+- 0x13 CALL            (u32 function index)
+- 0x14 RET

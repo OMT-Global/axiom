@@ -8,7 +8,7 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 
 
 class Op:
@@ -30,6 +30,16 @@ class Op:
     CMP_LE = 0x10
     CMP_GT = 0x11
     CMP_GE = 0x12
+    CALL = 0x13
+    RET = 0x14
+
+
+@dataclass(frozen=True)
+class FunctionMeta:
+    name_index: int
+    entry: int
+    arity: int
+    locals_count: int
 
 
 @dataclass(frozen=True)
@@ -43,12 +53,20 @@ class Bytecode:
     strings: List[str]
     instructions: List[Instr]
     locals_count: int
+    functions: List[FunctionMeta]
 
     def encode(self) -> bytes:
         out = bytearray()
         out += MAGIC
         out += struct.pack("<HH", VERSION_MAJOR, VERSION_MINOR)
         out += struct.pack("<I", self.locals_count)
+
+        out += struct.pack("<I", len(self.functions))
+        for f in self.functions:
+            out += struct.pack("<I", f.name_index)
+            out += struct.pack("<I", f.entry)
+            out += struct.pack("<I", f.arity)
+            out += struct.pack("<I", f.locals_count)
 
         out += struct.pack("<I", len(self.strings))
         for s in self.strings:
@@ -63,7 +81,7 @@ class Bytecode:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_I64 missing arg")
                 out += struct.pack("<q", int(ins.arg))
-            elif ins.op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE):
+            elif ins.op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL):
                 if ins.arg is None:
                     raise AxiomCompileError("opcode missing arg")
                 out += struct.pack("<I", int(ins.arg))
@@ -93,6 +111,15 @@ class Bytecode:
 
         (locals_count,) = struct.unpack("<I", take(4))
 
+        (n_functions,) = struct.unpack("<I", take(4))
+        functions: List[FunctionMeta] = []
+        for _ in range(n_functions):
+            (name_index,) = struct.unpack("<I", take(4))
+            (entry,) = struct.unpack("<I", take(4))
+            (arity,) = struct.unpack("<I", take(4))
+            (func_locals_count,) = struct.unpack("<I", take(4))
+            functions.append(FunctionMeta(name_index=int(name_index), entry=int(entry), arity=int(arity), locals_count=int(func_locals_count)))
+
         (n_strings,) = struct.unpack("<I", take(4))
         strings: List[str] = []
         for _ in range(n_strings):
@@ -106,10 +133,10 @@ class Bytecode:
             if op == Op.CONST_I64:
                 (v,) = struct.unpack("<q", take(8))
                 ins.append(Instr(op, int(v)))
-            elif op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE):
+            elif op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL):
                 (slot,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(slot)))
             else:
                 ins.append(Instr(op, None))
 
-        return Bytecode(strings=strings, instructions=ins, locals_count=int(locals_count))
+        return Bytecode(strings=strings, instructions=ins, locals_count=int(locals_count), functions=functions)

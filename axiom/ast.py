@@ -14,6 +14,20 @@ class Program:
 
 # Statements
 @dataclass(frozen=True)
+class FunctionDefStmt:
+    name: str
+    params: List[str]
+    body: "BlockStmt"
+    span: Span
+
+
+@dataclass(frozen=True)
+class ReturnStmt:
+    expr: "Expr"
+    span: Span
+
+
+@dataclass(frozen=True)
 class LetStmt:
     name: str
     expr: "Expr"
@@ -60,7 +74,17 @@ class WhileStmt:
     span: Span
 
 
-Stmt = Union[LetStmt, AssignStmt, PrintStmt, ExprStmt, BlockStmt, IfStmt, WhileStmt]
+Stmt = Union[
+    LetStmt,
+    AssignStmt,
+    PrintStmt,
+    ReturnStmt,
+    ExprStmt,
+    BlockStmt,
+    IfStmt,
+    WhileStmt,
+    FunctionDefStmt,
+]
 
 
 # Expressions
@@ -79,6 +103,13 @@ class VarRef:
 @dataclass(frozen=True)
 class UnaryNeg:
     expr: "Expr"
+    span: Span
+
+
+@dataclass(frozen=True)
+class CallExpr:
+    callee: str
+    args: List["Expr"]
     span: Span
 
 
@@ -103,7 +134,7 @@ class Binary:
     span: Span
 
 
-Expr = Union[IntLit, VarRef, UnaryNeg, Binary]
+Expr = Union[IntLit, VarRef, UnaryNeg, Binary, CallExpr]
 
 
 def expr_span(e: Expr) -> Span:

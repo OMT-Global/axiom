@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, TextIO
+from typing import List, Optional, TextIO
 
-from .bytecode import Bytecode, Op
+from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
+
+
+@dataclass
+class _Frame:
+    locals: List[int]
+    ret_ip: int
 
 
 @dataclass
@@ -13,15 +19,24 @@ class Vm:
     locals_count: int
     stack: List[int] = field(default_factory=list)
     locals: List[int] = field(default_factory=list)
+    functions: Optional[List[FunctionMeta]] = None
+    frames: List[_Frame] = field(default_factory=list)
     ip: int = 0
 
     def __post_init__(self) -> None:
-        if not self.locals:
-            self.locals = [0] * int(self.locals_count)
+        if self.locals_count < 0:
+            raise ValueError("locals_count must be non-negative")
 
     def run(self, bytecode: Bytecode, out: TextIO) -> None:
-        self.ip = 0
+        if self.functions is None:
+            self.functions = bytecode.functions
+
+        self.locals = [0] * bytecode.locals_count
         self.stack = []
+        self.frames = []
+        current_locals = self.locals
+
+        self.ip = 0
         ins = bytecode.instructions
         while self.ip < len(ins):
             i = ins[self.ip]
@@ -31,16 +46,16 @@ class Vm:
                 self.stack.append(int(i.arg))
             elif i.op == Op.LOAD:
                 slot = int(i.arg)
-                if slot >= len(self.locals):
+                if slot >= len(current_locals):
                     raise AxiomRuntimeError(f"bad LOAD slot {slot}")
-                self.stack.append(self.locals[slot])
+                self.stack.append(current_locals[slot])
             elif i.op == Op.STORE:
                 slot = int(i.arg)
-                if slot >= len(self.locals):
+                if slot >= len(current_locals):
                     raise AxiomRuntimeError(f"bad STORE slot {slot}")
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on STORE")
-                self.locals[slot] = self.stack.pop()
+                current_locals[slot] = self.stack.pop()
             elif i.op in (Op.ADD, Op.SUB, Op.MUL, Op.DIV):
                 b, a = self._pop2()
                 if i.op == Op.ADD:
@@ -67,6 +82,37 @@ class Vm:
                     self.stack.append(to_bool_int(a > b))
                 else:
                     self.stack.append(to_bool_int(a >= b))
+            elif i.op == Op.CALL:
+                call_idx = int(i.arg)
+                functions = self.functions if self.functions is not None else []
+                if call_idx < 0 or call_idx >= len(functions):
+                    raise AxiomRuntimeError(f"bad call target {call_idx}")
+                fn = functions[call_idx]
+                if len(self.stack) < fn.arity:
+                    raise AxiomRuntimeError(
+                        f"call to {fn.arity}-arg function with {len(self.stack)} values on stack"
+                    )
+
+                args = [self.stack.pop() for _ in range(fn.arity)]
+                args.reverse()
+
+                new_locals = [0] * fn.locals_count
+                for index, value in enumerate(args):
+                    new_locals[index] = value
+
+                self.frames.append(_Frame(locals=current_locals, ret_ip=self.ip))
+                current_locals = new_locals
+                self.ip = fn.entry
+            elif i.op == Op.RET:
+                if not self.stack:
+                    raise AxiomRuntimeError("stack underflow on RET")
+                if not self.frames:
+                    raise AxiomRuntimeError("return outside function")
+                result = self.stack.pop()
+                frame = self.frames.pop()
+                current_locals = frame.locals
+                self.ip = frame.ret_ip
+                self.stack.append(result)
             elif i.op == Op.JMP:
                 self.ip = int(i.arg)
             elif i.op == Op.JMP_IF_FALSE:

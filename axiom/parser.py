@@ -7,6 +7,8 @@ from .ast import (
     LetStmt,
     AssignStmt,
     PrintStmt,
+    ReturnStmt,
+    FunctionDefStmt,
     ExprStmt,
     BlockStmt,
     IfStmt,
@@ -14,6 +16,7 @@ from .ast import (
     Expr,
     IntLit,
     VarRef,
+    CallExpr,
     UnaryNeg,
     Binary,
     BinOp,
@@ -27,6 +30,7 @@ class Parser:
     def __init__(self, toks: List[Token]):
         self.toks = toks
         self.i = 0
+        self.function_depth = 0
 
     def _peek(self) -> Token:
         return self.toks[self.i]
@@ -63,8 +67,14 @@ class Parser:
         k = self._peek().kind
         if k == TokenKind.LET:
             return self._parse_let()
+        if k == TokenKind.FN:
+            return self._parse_function_def()
         if k == TokenKind.PRINT:
             return self._parse_print()
+        if k == TokenKind.RETURN:
+            if self.function_depth == 0:
+                raise AxiomParseError("return outside function", self._peek().span)
+            return self._parse_return()
         if k == TokenKind.LBRACE:
             return self._parse_block()
         if k == TokenKind.IF:
@@ -74,6 +84,37 @@ class Parser:
         if k == TokenKind.IDENT and self._peek_n(1).kind == TokenKind.EQ:
             return self._parse_assign()
         return self._parse_expr_stmt()
+
+    def _parse_function_def(self) -> FunctionDefStmt:
+        start = self._eat(TokenKind.FN).span.start
+        name = self._eat(TokenKind.IDENT)
+        if name.kind != TokenKind.IDENT:
+            raise AxiomParseError("expected function name", name.span)
+        self._eat(TokenKind.LPAREN)
+
+        params: List[str] = []
+        if self._peek().kind != TokenKind.RPAREN:
+            while True:
+                ident = self._eat(TokenKind.IDENT)
+                if ident.kind != TokenKind.IDENT:
+                    raise AxiomParseError("expected parameter name", ident.span)
+                params.append(str(ident.value))
+                if self._peek().kind == TokenKind.COMMA:
+                    self._bump()
+                    continue
+                break
+        self._eat(TokenKind.RPAREN)
+
+        # allow duplicate parameter names only if source author wrote them; catch for deterministic errors.
+        if len(set(params)) != len(params):
+            raise AxiomParseError("duplicate function parameter name", name.span)
+
+        self.function_depth += 1
+        try:
+            body = self._parse_block()
+        finally:
+            self.function_depth -= 1
+        return FunctionDefStmt(name=str(name.value), params=params, body=body, span=Span(start, body.span.end))
 
     def _parse_block(self) -> BlockStmt:
         lbrace = self._eat(TokenKind.LBRACE)
@@ -126,6 +167,12 @@ class Parser:
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
         return PrintStmt(expr=expr, span=Span(start, end))
+
+    def _parse_return(self) -> ReturnStmt:
+        start = self._bump().span.start
+        expr = self._parse_expr()
+        end = self._parse_terminator(default_end=expr_span(expr).end)
+        return ReturnStmt(expr=expr, span=Span(start, end))
 
     def _parse_expr_stmt(self) -> ExprStmt:
         expr = self._parse_expr()
@@ -218,6 +265,18 @@ class Parser:
             return IntLit(int(tok.value), tok.span)
         if t.kind == TokenKind.IDENT:
             tok = self._bump()
+            if self._peek().kind == TokenKind.LPAREN:
+                self._bump()
+                args = []
+                if self._peek().kind != TokenKind.RPAREN:
+                    while True:
+                        args.append(self._parse_expr())
+                        if self._peek().kind == TokenKind.COMMA:
+                            self._bump()
+                            continue
+                        break
+                rparen = self._eat(TokenKind.RPAREN)
+                return CallExpr(callee=str(tok.value), args=args, span=Span(tok.span.start, rparen.span.end))
             return VarRef(str(tok.value), tok.span)
         if t.kind == TokenKind.MINUS:
             minus = self._bump()
@@ -236,6 +295,8 @@ def _widen_span(expr: Expr, span: Span) -> Expr:
         return IntLit(expr.value, span)
     if isinstance(expr, VarRef):
         return VarRef(expr.name, span)
+    if isinstance(expr, CallExpr):
+        return CallExpr(callee=expr.callee, args=expr.args, span=span)
     if isinstance(expr, UnaryNeg):
         return UnaryNeg(expr=expr.expr, span=span)
     if isinstance(expr, Binary):

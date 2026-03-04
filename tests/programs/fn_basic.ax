@@ -1,0 +1,7 @@
+fn add(a, b) {
+  return a + b
+}
+
+let x = 2
+let y = 5
+print add(x, y)

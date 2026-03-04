@@ -73,8 +73,12 @@ class Lexer:
         text = self.src[start:end]
         if text == "let":
             return Token(TokenKind.LET, Span(start, end))
+        if text == "fn":
+            return Token(TokenKind.FN, Span(start, end))
         if text == "print":
             return Token(TokenKind.PRINT, Span(start, end))
+        if text == "return":
+            return Token(TokenKind.RETURN, Span(start, end))
         if text == "if":
             return Token(TokenKind.IF, Span(start, end))
         if text == "else":
@@ -122,6 +126,8 @@ class Lexer:
             return Token(TokenKind.STAR, Span(start, start + 1))
         if ch == "/":
             return Token(TokenKind.SLASH, Span(start, start + 1))
+        if ch == ",":
+            return Token(TokenKind.COMMA, Span(start, start + 1))
         if ch == "(":
             return Token(TokenKind.LPAREN, Span(start, start + 1))
         if ch == ")":

@@ -3,7 +3,7 @@ import io
 
 from axiom.api import compile_to_bytecode
 from axiom.api import parse_program
-from axiom.errors import AxiomCompileError, AxiomRuntimeError
+from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
 
@@ -34,6 +34,23 @@ print x
         out = io.StringIO()
         Interpreter().run(program, out)
         self.assertEqual(out.getvalue(), "1\n")
+
+    def test_return_outside_function_parse_error(self) -> None:
+        with self.assertRaises(AxiomParseError):
+            compile_to_bytecode("return 1\n")
+
+    def test_compile_undefined_function(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("print unknown(1)\n")
+
+    def test_compile_arity_mismatch(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("""
+fn f(a, b) {
+  return a + b
+}
+print f(1)
+""")
 
 
 if __name__ == "__main__":

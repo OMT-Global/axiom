@@ -1,4 +1,4 @@
-# Axiom grammar (v0.2)
+# Axiom grammar (v0.3)
 
 Whitespace is generally ignored except newlines, which can terminate statements.
 
@@ -7,12 +7,17 @@ program        := stmt* EOF ;
 
 stmt           := let_stmt
                | assign_stmt
+               | fn_stmt
+               | return_stmt
                | print_stmt
                | if_stmt
                | while_stmt
                | block
                | expr_stmt ;
 
+fn_stmt        := "fn" IDENT "(" params? ")" block ;
+params         := IDENT ("," IDENT)* ;
+return_stmt    := "return" expr terminator ;
 let_stmt       := "let" IDENT "=" expr terminator ;
 assign_stmt    := IDENT "=" expr terminator ;
 print_stmt     := "print" expr terminator ;
@@ -20,6 +25,8 @@ if_stmt        := "if" expr block ("else" block)? ;
 while_stmt     := "while" expr block ;
 block          := "{" NEWLINE* stmt* "}" ;
 expr_stmt      := expr terminator ;
+call_expr      := IDENT "(" args? ")" ;
+args           := expr ("," expr)* ;
 
 terminator     := ";" | NEWLINE | EOF ;
 
@@ -29,7 +36,7 @@ comparison     := term (("<" | "<=" | ">" | ">=") term)* ;
 term           := factor (("+" | "-") factor)* ;
 factor         := unary (("*" | "/") unary)* ;
 unary          := "-" unary | primary ;
-primary        := INT | IDENT | "(" expr ")" ;
+primary        := INT | IDENT | call_expr | "(" expr ")" ;
 ```
 
 Comments start with `#` and run to end-of-line.
