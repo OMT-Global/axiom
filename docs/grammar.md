@@ -27,7 +27,7 @@ if_stmt        := "if" expr block ("else" block)? ;
 while_stmt     := "while" expr block ;
 block          := "{" NEWLINE* stmt* "}" ;
 expr_stmt      := expr terminator ;
-call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace restricted to host.*
+call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace: host.* or imported module.*
 args           := expr ("," expr)* ;
 
 terminator     := ";" | NEWLINE | EOF ;

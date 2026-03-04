@@ -123,7 +123,7 @@ class CliParityTests(unittest.TestCase):
             mod.write_text("fn add(a, b) {\n  return a + b\n}\n", encoding="utf-8")
 
             main = Path(td) / "main.ax"
-            main.write_text('import "math_module"\nprint add(6, 7)\n', encoding="utf-8")
+            main.write_text('import "math_module"\nprint math_module.add(6, 7)\n', encoding="utf-8")
 
             proc = self._run_cli(["interp", str(main)], cwd=ROOT)
             self.assertEqual(proc.stdout, "13\n")

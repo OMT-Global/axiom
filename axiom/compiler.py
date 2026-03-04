@@ -249,8 +249,12 @@ class Compiler:
                 out.append(Instr(Op.HOST_CALL, self._intern(host_fn)))
                 return
             if "." in fn_name:
-                raise AxiomCompileError(f"only host namespace calls are supported: {fn_name!r}", expr.span)
-            if fn_name not in self.function_ids:
+                # Module-qualified calls (e.g. module.fn) are supported when sourced from imports.
+                if fn_name not in self.function_ids:
+                    raise AxiomCompileError(
+                        f"undefined function {fn_name!r}", expr.span
+                    )
+            elif fn_name not in self.function_ids:
                 raise AxiomCompileError(f"undefined function {fn_name!r}", expr.span)
             arity = self.function_arities[fn_name]
             if arity != len(expr.args):
