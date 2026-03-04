@@ -29,6 +29,7 @@ while_stmt     := "while" expr block ;
 block          := "{" NEWLINE* stmt* "}" ;
 expr_stmt      := expr terminator ;
 call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace: host.* or imported module.*
+                  # each import path may appear at most once per file, and alias names must be unique.
 args           := expr ("," expr)* ;
 
 terminator     := ";" | NEWLINE | EOF ;
