@@ -16,6 +16,10 @@ Current supported fields:
   - Values with an optional `host.` prefix are normalized to the suffix form.
   - When present, package compilation fails if source uses any host call not in the allowlist.
   - An empty list denies all host calls.
+- `host_contract_signature` (optional): optional pin of expected host contract metadata signature.
+  - Included by `pkg init` from the current runtime.
+  - If present in a manifest, `pkg check`, `pkg build`, and `pkg run` validate that
+    the runtime host signature matches the pinned value.
 - `main` and `out_dir` must be relative paths and may not contain `..` parent segments.
 - `output` (optional, string): Custom output filename or path inside `out_dir`.
   - Must be a relative path and may not traverse parent directories (no `..`).
@@ -31,7 +35,8 @@ Example manifest:
   "main": "src/main.ax",
   "out_dir": "dist",
   "output": "artifact.axb",
-  "allowed_host_calls": ["version", "abs", "math.abs"]
+  "allowed_host_calls": ["version", "abs", "math.abs"],
+  "host_contract_signature": "8f6..."
 }
 ```
 

@@ -7,6 +7,7 @@ import hashlib
 import tempfile
 import json
 import unittest
+from axiom.host import host_contract_metadata
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,6 +205,14 @@ class CliParityTests(unittest.TestCase):
             vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
             self.assertEqual(vm_out, "12\n")
 
+    def test_package_init_includes_host_contract_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest = json.loads((project / "axiom.pkg").read_text(encoding="utf-8"))
+            expected_signature = host_contract_metadata()["capabilities_signature"]
+            self.assertEqual(manifest["host_contract_signature"], expected_signature)
+
     def test_package_manifest_command(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
@@ -268,6 +277,18 @@ class CliParityTests(unittest.TestCase):
             )
             manifest = json.loads((project / "axiom.pkg").read_text(encoding="utf-8"))
             self.assertEqual(manifest["allowed_host_calls"], ["print", "math.abs"])
+
+    def test_package_check_rejects_host_contract_signature_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["host_contract_signature"] = "0" * 64
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (project / manifest["main"]).write_text("print 9\n", encoding="utf-8")
+            proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("host_contract_signature mismatch", proc.stderr)
 
     def test_package_check_command(self) -> None:
         with tempfile.TemporaryDirectory() as td:

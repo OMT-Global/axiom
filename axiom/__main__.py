@@ -16,6 +16,7 @@ from .packaging import (
     clean_package,
     init_package,
     load_manifest,
+    _validate_project_host_contract,
     manifest_to_dict,
 )
 
@@ -112,7 +113,9 @@ def cmd_pkg_manifest(path: Path) -> int:
 
 def cmd_pkg_check(path: Path, *, allow_host_side_effects: bool) -> int:
     manifest = load_manifest(path)
-    entry = path.resolve() / manifest.main
+    project_root = path.resolve()
+    _validate_project_host_contract(manifest, project_root)
+    entry = project_root / manifest.main
     allowed_host_calls = (
         set(manifest.allowed_host_calls)
         if manifest.allowed_host_calls is not None
@@ -139,6 +142,7 @@ def cmd_pkg_clean(path: Path) -> int:
 def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
     project_root = path.resolve()
     manifest = load_manifest(project_root)
+    _validate_project_host_contract(manifest, project_root)
     entry = project_root / manifest.main
     allowed_host_calls = (
         set(manifest.allowed_host_calls)

@@ -7,6 +7,7 @@ import shutil
 from typing import List, Optional
 
 from .api import compile_file
+from .host import host_contract_metadata
 from .errors import AxiomCompileError
 
 
@@ -25,6 +26,7 @@ class PackageManifest:
     out_dir: str = DEFAULT_OUT_DIR
     output: Optional[str] = None
     allowed_host_calls: Optional[List[str]] = None
+    host_contract_signature: Optional[str] = None
 
 
 def manifest_path(project_root: Path) -> Path:
@@ -86,6 +88,21 @@ def _validate_host_calls(value: object, path: Path) -> Optional[List[str]]:
     return host_calls
 
 
+def _validate_host_contract_signature(value: object, path: Path) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise AxiomCompileError(
+            f"package manifest {path} has invalid host_contract_signature"
+        )
+    lowered = value.lower()
+    if len(lowered) != 64 or any(c not in "0123456789abcdef" for c in lowered):
+        raise AxiomCompileError(
+            f"package manifest {path} has invalid host_contract_signature"
+        )
+    return lowered
+
+
 def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     if not isinstance(data, dict):
         raise AxiomCompileError(f"invalid package manifest in {path}")
@@ -103,6 +120,9 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
         raise AxiomCompileError(f"package manifest {path} has invalid out_dir")
     out_dir = _validate_relative_path(out_dir, path, "out_dir")
     allowed_host_calls = _validate_host_calls(data.get("allowed_host_calls"), path)
+    host_contract_signature = _validate_host_contract_signature(
+        data.get("host_contract_signature"), path
+    )
     if output is not None:
         if not isinstance(output, str):
             raise AxiomCompileError(f"package manifest {path} has invalid output")
@@ -115,7 +135,21 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
         out_dir=out_dir,
         output=output if isinstance(output, str) else None,
         allowed_host_calls=allowed_host_calls,
+        host_contract_signature=host_contract_signature,
     )
+
+
+def _validate_project_host_contract(
+    manifest: PackageManifest, path: Path
+) -> None:
+    if manifest.host_contract_signature is None:
+        return
+    runtime_signature = str(host_contract_metadata()["capabilities_signature"])
+    if manifest.host_contract_signature != runtime_signature:
+        raise AxiomCompileError(
+            f"package manifest {path} has host_contract_signature mismatch: "
+            f"expected {manifest.host_contract_signature}, runtime {runtime_signature}"
+        )
 
 
 def load_manifest(project_root: Path) -> PackageManifest:
@@ -140,6 +174,8 @@ def manifest_to_dict(manifest: PackageManifest) -> dict[str, object]:
         payload["output"] = manifest.output
     if manifest.allowed_host_calls is not None:
         payload["allowed_host_calls"] = manifest.allowed_host_calls
+    if manifest.host_contract_signature is not None:
+        payload["host_contract_signature"] = manifest.host_contract_signature
     return payload
 
 
@@ -166,6 +202,7 @@ def init_package(
     main: Optional[str] = None,
     out_dir: Optional[str] = None,
     output: Optional[str] = None,
+    host_contract_signature: Optional[str] = None,
     allowed_host_calls: Optional[List[str]] = None,
     force: bool = False,
 ) -> PackageManifest:
@@ -192,6 +229,11 @@ def init_package(
         raise AxiomCompileError("package output must be a non-empty string when provided")
     if output is not None:
         output = _validate_output(output, project_root / MANIFEST_FILENAME)
+    if host_contract_signature is None:
+        host_contract_signature = str(host_contract_metadata()["capabilities_signature"])
+    host_contract_signature = _validate_host_contract_signature(
+        host_contract_signature, project_root / MANIFEST_FILENAME
+    )
     if allowed_host_calls is None:
         allowed_host_calls = None
     elif not isinstance(allowed_host_calls, list):
@@ -206,6 +248,7 @@ def init_package(
         main=main,
         out_dir=out_dir,
         output=output,
+        host_contract_signature=host_contract_signature,
         allowed_host_calls=allowed_host_calls,
     )
     write_default_manifest(project_root, manifest)
@@ -221,6 +264,7 @@ def build_package(
 ) -> Path:
     project_root = project_root.resolve()
     manifest = load_manifest(project_root)
+    _validate_project_host_contract(manifest, manifest_path(project_root))
     entry = project_root / manifest.main
     allowed_host_calls = (
         set(manifest.allowed_host_calls)
