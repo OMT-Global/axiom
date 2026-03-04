@@ -100,6 +100,10 @@ print f(1)
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.unknown(1)\n")
 
+    def test_compile_non_host_namespace_call(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("foo.bar(1)\n")
+
     def test_host_registry_duplicate_name(self) -> None:
         def noop(args: list[int], _out) -> int:
             return 0
@@ -167,6 +171,11 @@ print f(1)
         out = io.StringIO()
         Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
         self.assertEqual(out.getvalue(), "1\n")
+
+    def test_runtime_non_host_namespace_call(self) -> None:
+        program = parse_program("foo.bar(1)\n")
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
 
     @patch("builtins.input", return_value="41")
     def test_runtime_host_read_with_allow(self, fake_input) -> None:

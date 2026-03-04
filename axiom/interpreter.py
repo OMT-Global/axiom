@@ -120,6 +120,8 @@ class Interpreter:
     def _call(self, fn_name: str, args: List[int], out: TextIO) -> int:
         if fn_name.startswith("host."):
             return self._call_host(fn_name, args, out)
+        if "." in fn_name:
+            raise AxiomRuntimeError("only host namespace calls are supported for dotted call syntax")
         if fn_name not in self.functions:
             raise AxiomRuntimeError(f"undefined function {fn_name!r}")
         fn = self.functions[fn_name]
