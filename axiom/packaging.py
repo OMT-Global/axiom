@@ -47,6 +47,24 @@ def _validate_output(output: str, path: Path) -> str:
     return output
 
 
+def _validate_relative_path(value: str, path: Path, field_name: str) -> str:
+    if not value:
+        raise AxiomCompileError(f"package manifest {path} has invalid {field_name}")
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        raise AxiomCompileError(
+            f"package manifest {path} has invalid {field_name}: absolute paths are not allowed"
+        )
+
+    if any(part == ".." for part in candidate.parts):
+        raise AxiomCompileError(
+            f"package manifest {path} has invalid {field_name}: parent traversal is not allowed"
+        )
+
+    return value
+
+
 def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     if not isinstance(data, dict):
         raise AxiomCompileError(f"invalid package manifest in {path}")
@@ -57,10 +75,12 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     main = data.get("main", DEFAULT_MAIN)
     out_dir = data.get("out_dir", DEFAULT_OUT_DIR)
     output = data.get("output")
-    if not isinstance(main, str) or not main:
+    if not isinstance(main, str):
         raise AxiomCompileError(f"package manifest {path} has invalid main")
-    if not isinstance(out_dir, str) or not out_dir:
+    main = _validate_relative_path(main, path, "main")
+    if not isinstance(out_dir, str):
         raise AxiomCompileError(f"package manifest {path} has invalid out_dir")
+    out_dir = _validate_relative_path(out_dir, path, "out_dir")
     if output is not None:
         if not isinstance(output, str):
             raise AxiomCompileError(f"package manifest {path} has invalid output")
@@ -134,6 +154,8 @@ def init_package(
     version = version if version is not None else DEFAULT_VERSION
     main = main if main is not None else DEFAULT_MAIN
     out_dir = out_dir if out_dir is not None else DEFAULT_OUT_DIR
+    main = _validate_relative_path(main, project_root / MANIFEST_FILENAME, "main")
+    out_dir = _validate_relative_path(out_dir, project_root / MANIFEST_FILENAME, "out_dir")
     if not isinstance(version, str) or not version:
         raise AxiomCompileError("package version must be a non-empty string")
     if not isinstance(main, str) or not main:
