@@ -428,8 +428,9 @@ class Parser:
                 self._bump()
                 callee_parts.append(self._eat_name_token())
             callee = ".".join(callee_parts)
-            if "." in callee and callee_parts[0] != "host":
-                if callee_parts[0] not in self.imported_modules:
+            if "." in callee and not callee.startswith("host."):
+                module_name, sep, _fn_name = callee.rpartition(".")
+                if module_name not in self.imported_modules:
                     raise AxiomParseError(
                         "only host or imported module calls are supported",
                         tok.span,
