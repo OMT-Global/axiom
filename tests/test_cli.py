@@ -193,6 +193,21 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT)
             self.assertIn("OK", proc.stderr)
 
+    def test_package_check_command_respects_host_effect_gating(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            (project / "src" / "main.ax").write_text("host.print(9)\n", encoding="utf-8")
+
+            proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("side-effecting", proc.stderr)
+
+            proc = self._run_cli(
+                ["pkg", "check", str(project), "--allow-host-side-effects"],
+                cwd=ROOT,
+            )
+            self.assertIn("OK", proc.stderr)
+
     def test_package_init_force_rewrites_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
