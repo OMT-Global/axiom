@@ -11,31 +11,35 @@ from .vm import Vm
 from .errors import AxiomError
 
 
-def cmd_interp(path: Path) -> int:
+def cmd_interp(path: Path, *, allow_host_side_effects: bool) -> int:
     src = path.read_text(encoding="utf-8")
     program = parse_program(src)
-    Interpreter().run(program, sys.stdout)
+    Interpreter(allow_host_side_effects=allow_host_side_effects).run(program, sys.stdout)
     return 0
 
 
-def cmd_compile(path: Path, out_path: Path) -> int:
+def cmd_compile(path: Path, out_path: Path, *, allow_host_side_effects: bool) -> int:
     src = path.read_text(encoding="utf-8")
-    bc = compile_to_bytecode(src)
+    bc = compile_to_bytecode(src, allow_host_side_effects=allow_host_side_effects)
     out_path.write_bytes(bc.encode())
     print(f"wrote {out_path} ({out_path.stat().st_size} bytes)", file=sys.stderr)
     return 0
 
 
-def cmd_vm(path: Path) -> int:
+def cmd_vm(path: Path, *, allow_host_side_effects: bool) -> int:
     bc = Bytecode.decode(path.read_bytes())
-    Vm(locals_count=bc.locals_count).run(bc, sys.stdout)
+    Vm(locals_count=bc.locals_count, allow_host_side_effects=allow_host_side_effects).run(
+        bc, sys.stdout
+    )
     return 0
 
 
-def cmd_run(path: Path) -> int:
+def cmd_run(path: Path, *, allow_host_side_effects: bool) -> int:
     src = path.read_text(encoding="utf-8")
-    bc = compile_to_bytecode(src)
-    Vm(locals_count=bc.locals_count).run(bc, sys.stdout)
+    bc = compile_to_bytecode(src, allow_host_side_effects=allow_host_side_effects)
+    Vm(locals_count=bc.locals_count, allow_host_side_effects=allow_host_side_effects).run(
+        bc, sys.stdout
+    )
     return 0
 
 
@@ -64,16 +68,20 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("interp", help="Run Axiom source via the interpreter")
     sp.add_argument("file", type=Path)
+    sp.add_argument("--allow-host-side-effects", action="store_true")
 
     sp = sub.add_parser("compile", help="Compile Axiom source to bytecode (.axb)")
     sp.add_argument("file", type=Path)
     sp.add_argument("-o", "--output", required=True, type=Path)
+    sp.add_argument("--allow-host-side-effects", action="store_true")
 
     sp = sub.add_parser("vm", help="Run bytecode on the VM")
     sp.add_argument("file", type=Path)
+    sp.add_argument("--allow-host-side-effects", action="store_true")
 
     sp = sub.add_parser("run", help="Compile source in-memory and execute on VM")
     sp.add_argument("file", type=Path)
+    sp.add_argument("--allow-host-side-effects", action="store_true")
 
     sp = sub.add_parser("disasm", help="Disassemble bytecode")
     sp.add_argument("file", type=Path)
@@ -85,13 +93,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.cmd == "interp":
-            return cmd_interp(args.file)
+            return cmd_interp(args.file, allow_host_side_effects=args.allow_host_side_effects)
         if args.cmd == "compile":
-            return cmd_compile(args.file, args.output)
+            return cmd_compile(
+                args.file,
+                args.output,
+                allow_host_side_effects=args.allow_host_side_effects,
+            )
         if args.cmd == "vm":
-            return cmd_vm(args.file)
+            return cmd_vm(args.file, allow_host_side_effects=args.allow_host_side_effects)
         if args.cmd == "run":
-            return cmd_run(args.file)
+            return cmd_run(args.file, allow_host_side_effects=args.allow_host_side_effects)
         if args.cmd == "disasm":
             return cmd_disasm(args.file)
         if args.cmd == "check":

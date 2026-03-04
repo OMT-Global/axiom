@@ -12,6 +12,6 @@ def parse_program(src: str) -> Program:
     return Parser(toks).parse_program()
 
 
-def compile_to_bytecode(src: str) -> Bytecode:
+def compile_to_bytecode(src: str, *, allow_host_side_effects: bool = False) -> Bytecode:
     program = parse_program(src)
-    return Compiler().compile(program)
+    return Compiler(allow_host_side_effects=allow_host_side_effects).compile(program)

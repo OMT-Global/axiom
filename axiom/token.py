@@ -30,6 +30,7 @@ class TokenKind(Enum):
     MINUS = auto()
     STAR = auto()
     SLASH = auto()
+    DOT = auto()
     COMMA = auto()
     LPAREN = auto()
     RPAREN = auto()

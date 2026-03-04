@@ -26,6 +26,13 @@ from .errors import AxiomCompileError, AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
 
 
+_HOST_BUILTINS: Dict[str, tuple[int, bool]] = {
+    "version": (0, False),
+    "print": (1, True),
+    "read": (1, True),
+}
+
+
 @dataclass
 class _FunctionReturn(Exception):
     value: int
@@ -38,6 +45,7 @@ class Interpreter:
     functions: Dict[str, FunctionDefStmt] = field(default_factory=dict)
     function_depth: int = 0
     call_stack: List[Tuple[List[Dict[str, int]], int]] = field(default_factory=list)
+    allow_host_side_effects: bool = False
 
     def run(self, program: Program, out: TextIO) -> None:
         self.global_scope = {}
@@ -113,6 +121,8 @@ class Interpreter:
         raise AxiomRuntimeError(f"undefined variable {name!r}", span)
 
     def _call(self, fn_name: str, args: List[int], out: TextIO) -> int:
+        if fn_name.startswith("host."):
+            return self._call_host(fn_name, args, out)
         if fn_name not in self.functions:
             raise AxiomRuntimeError(f"undefined function {fn_name!r}")
         fn = self.functions[fn_name]
@@ -136,6 +146,37 @@ class Interpreter:
             return int(exc.value)
         finally:
             self.scopes, self.function_depth = self.call_stack.pop()
+
+    def _call_host(self, fn_name: str, args: List[int], out: TextIO) -> int:
+        host_name = fn_name[len("host.") :]
+        if host_name not in _HOST_BUILTINS:
+            raise AxiomRuntimeError(f"undefined host function {fn_name!r}")
+        arity, side_effect = _HOST_BUILTINS[host_name]
+        if arity != len(args):
+            raise AxiomRuntimeError(
+                f"host function {fn_name!r} expects {arity} args, got {len(args)}"
+            )
+        if side_effect and not self.allow_host_side_effects:
+            raise AxiomRuntimeError(
+                f"host call {fn_name!r} is side-effecting; enable allow_host_side_effects"
+            )
+        if host_name == "version":
+            return 4
+        if host_name == "print":
+            out.write(f"{args[0]}\n")
+            return 0
+        if host_name == "read":
+            try:
+                line = input()
+            except EOFError:
+                return 0
+            try:
+                return int(line.strip())
+            except ValueError as e:
+                raise AxiomRuntimeError(
+                    f"host.read expected integer input: {line!r}",
+                ) from e
+        raise AxiomRuntimeError(f"unsupported host function {fn_name!r}")
 
     def _eval(self, expr: Expr, out: TextIO) -> int:
         if isinstance(expr, IntLit):

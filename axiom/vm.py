@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional, TextIO
+import builtins
 
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
+
+
+_HOST_BUILTINS: List[tuple[int, bool]] = [
+    (0, False),  # version
+    (1, True),   # print
+    (1, True),   # read
+]
 
 
 @dataclass
@@ -22,6 +30,7 @@ class Vm:
     functions: Optional[List[FunctionMeta]] = None
     frames: List[_Frame] = field(default_factory=list)
     ip: int = 0
+    allow_host_side_effects: bool = False
 
     def __post_init__(self) -> None:
         if self.locals_count < 0:
@@ -103,6 +112,24 @@ class Vm:
                 self.frames.append(_Frame(locals=current_locals, ret_ip=self.ip))
                 current_locals = new_locals
                 self.ip = fn.entry
+            elif i.op == Op.HOST_CALL:
+                if i.arg is None:
+                    raise AxiomRuntimeError("host call missing arg")
+                if i.arg < 0 or i.arg >= len(_HOST_BUILTINS):
+                    raise AxiomRuntimeError(f"invalid host function id {i.arg}")
+                arg_count, side_effectful = _HOST_BUILTINS[i.arg]
+                if len(self.stack) < arg_count:
+                    raise AxiomRuntimeError(
+                        f"call to host function id {i.arg} with {len(self.stack)} values on stack"
+                    )
+                if side_effectful and not self.allow_host_side_effects:
+                    raise AxiomRuntimeError(
+                        "host function is side-effecting; enable allow_host_side_effects"
+                    )
+                args = [self.stack.pop() for _ in range(arg_count)]
+                args.reverse()
+                result = self._call_host_fn(i.arg, args, out)
+                self.stack.append(result)
             elif i.op == Op.RET:
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on RET")
@@ -142,3 +169,33 @@ class Vm:
         b = self.stack.pop()
         a = self.stack.pop()
         return int(b), int(a)
+
+    def _call_host_fn(self, fn_id: int, args: List[int], out: TextIO) -> int:
+        if fn_id == 0:
+            return 4
+        if fn_id == 1:
+            if not self.allow_host_side_effects:
+                raise AxiomRuntimeError(
+                    "host call 1 is side-effecting; enable allow_host_side_effects"
+                )
+            if len(args) != 1:
+                raise AxiomRuntimeError(f"host.call 1 expected 1 arg, got {len(args)}")
+            out.write(f"{args[0]}\n")
+            return 0
+        if fn_id == 2:
+            if not self.allow_host_side_effects:
+                raise AxiomRuntimeError(
+                    "host call 2 is side-effecting; enable allow_host_side_effects"
+                )
+            if len(args) != 1:
+                raise AxiomRuntimeError(f"host.call 2 expected 1 arg, got {len(args)}")
+            prompt = str(args[0])
+            try:
+                line = builtins.input(prompt)
+            except EOFError:
+                return 0
+            try:
+                return int(line.strip())
+            except ValueError as e:
+                raise AxiomRuntimeError(f"host.read expected integer input: {line!r}") from e
+        raise AxiomRuntimeError(f"unknown host function id {fn_id}")

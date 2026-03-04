@@ -126,6 +126,8 @@ class Lexer:
             return Token(TokenKind.STAR, Span(start, start + 1))
         if ch == "/":
             return Token(TokenKind.SLASH, Span(start, start + 1))
+        if ch == ".":
+            return Token(TokenKind.DOT, Span(start, start + 1))
         if ch == ",":
             return Token(TokenKind.COMMA, Span(start, start + 1))
         if ch == "(":

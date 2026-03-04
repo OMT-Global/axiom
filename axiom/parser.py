@@ -55,6 +55,24 @@ class Parser:
         while self._peek().kind == TokenKind.NEWLINE:
             self.i += 1
 
+    def _eat_name_token(self) -> str:
+        t = self._peek()
+        if t.kind == TokenKind.IDENT:
+            self.i += 1
+            return str(t.value)
+        if t.kind in {
+            TokenKind.LET,
+            TokenKind.FN,
+            TokenKind.PRINT,
+            TokenKind.RETURN,
+            TokenKind.IF,
+            TokenKind.ELSE,
+            TokenKind.WHILE,
+        }:
+            self.i += 1
+            return t.kind.name.lower()
+        raise AxiomParseError("expected identifier", t.span)
+
     def parse_program(self) -> Program:
         stmts = []
         self._eat_newlines()
@@ -265,6 +283,11 @@ class Parser:
             return IntLit(int(tok.value), tok.span)
         if t.kind == TokenKind.IDENT:
             tok = self._bump()
+            callee = str(tok.value)
+            if self._peek().kind == TokenKind.DOT:
+                self._bump()
+                field = self._eat_name_token()
+                callee = f"{callee}.{field}"
             if self._peek().kind == TokenKind.LPAREN:
                 self._bump()
                 args = []
@@ -276,7 +299,9 @@ class Parser:
                             continue
                         break
                 rparen = self._eat(TokenKind.RPAREN)
-                return CallExpr(callee=str(tok.value), args=args, span=Span(tok.span.start, rparen.span.end))
+                return CallExpr(callee=callee, args=args, span=Span(tok.span.start, rparen.span.end))
+            if "." in callee:
+                raise AxiomParseError("call expected after dotted name", t.span)
             return VarRef(str(tok.value), tok.span)
         if t.kind == TokenKind.MINUS:
             minus = self._bump()
