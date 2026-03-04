@@ -112,6 +112,8 @@ class Parser:
         name = self._eat(TokenKind.IDENT)
         if name.kind != TokenKind.IDENT:
             raise AxiomParseError("expected function name", name.span)
+        if name.value == "host":
+            raise AxiomParseError("function name cannot be 'host'", name.span)
         self._eat(TokenKind.LPAREN)
 
         params: List[str] = []
@@ -120,6 +122,8 @@ class Parser:
                 ident = self._eat(TokenKind.IDENT)
                 if ident.kind != TokenKind.IDENT:
                     raise AxiomParseError("expected parameter name", ident.span)
+                if ident.value == "host":
+                    raise AxiomParseError("parameter name cannot be 'host'", ident.span)
                 params.append(str(ident.value))
                 if self._peek().kind == TokenKind.COMMA:
                     self._bump()
@@ -172,6 +176,8 @@ class Parser:
         ident = self._bump()
         if ident.kind != TokenKind.IDENT:
             raise AxiomParseError("expected identifier after 'let'", ident.span)
+        if ident.value == "host":
+            raise AxiomParseError("identifier cannot be 'host'", ident.span)
         self._eat(TokenKind.EQ)
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
@@ -187,6 +193,8 @@ class Parser:
 
     def _parse_assign(self) -> AssignStmt:
         ident = self._eat(TokenKind.IDENT)
+        if ident.value == "host":
+            raise AxiomParseError("identifier cannot be 'host'", ident.span)
         self._eat(TokenKind.EQ)
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)

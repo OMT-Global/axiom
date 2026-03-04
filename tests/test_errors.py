@@ -6,6 +6,17 @@ import tempfile
 
 from axiom.api import compile_to_bytecode, compile_file
 from axiom.api import parse_program
+from axiom.ast import (
+    AssignStmt,
+    BlockStmt,
+    FunctionDefStmt,
+    IntLit,
+    LetStmt,
+    Program,
+    ReturnStmt,
+    Span,
+    VarRef,
+)
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
@@ -48,11 +59,23 @@ print x
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("print unknown(1)\n")
 
-    def test_compile_reserved_host_function_name(self) -> None:
-        with self.assertRaises(AxiomCompileError):
+    def test_parse_reserved_host_function_name(self) -> None:
+        with self.assertRaises(AxiomParseError):
             compile_to_bytecode("""
 fn host() {
   return 1
+}
+""")
+
+    def test_parse_reserved_host_identifier(self) -> None:
+        with self.assertRaises(AxiomParseError):
+            compile_to_bytecode("let host = 1\n")
+        with self.assertRaises(AxiomParseError):
+            compile_to_bytecode("host = 1\n")
+        with self.assertRaises(AxiomParseError):
+            compile_to_bytecode("""
+fn f(host) {
+  return host
 }
 """)
 
@@ -174,6 +197,59 @@ print f(1)
 
     def test_runtime_non_host_namespace_call(self) -> None:
         program = parse_program("foo.bar(1)\n")
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
+
+    def test_runtime_reserved_host_identifier_let(self) -> None:
+        program = Program(
+            [LetStmt(name="host", expr=IntLit(1, Span(0, 1)), span=Span(0, 1))]
+        )
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
+
+    def test_runtime_reserved_host_identifier_param(self) -> None:
+        program = Program(
+            [
+                FunctionDefStmt(
+                    name="f",
+                    params=["host"],
+                    body=BlockStmt(
+                        stmts=[
+                            ReturnStmt(expr=VarRef(name="host", span=Span(0, 4)), span=Span(0, 4))
+                        ],
+                        span=Span(0, 6),
+                    ),
+                    span=Span(0, 8),
+                )
+            ]
+        )
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
+
+    def test_runtime_reserved_host_identifier_assign(self) -> None:
+        program = Program(
+            [
+                LetStmt(name="x", expr=IntLit(1, Span(0, 1)), span=Span(0, 1)),
+                AssignStmt(name="host", expr=IntLit(2, Span(2, 3)), span=Span(2, 4)),
+            ]
+        )
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
+
+    def test_runtime_reserved_host_function_name(self) -> None:
+        program = Program(
+            [
+                FunctionDefStmt(
+                    name="host",
+                    params=[],
+                    body=BlockStmt(
+                        stmts=[ReturnStmt(expr=IntLit(0, Span(0, 1)), span=Span(0, 1))],
+                        span=Span(0, 3),
+                    ),
+                    span=Span(0, 5),
+                )
+            ]
+        )
         with self.assertRaises(AxiomRuntimeError):
             Interpreter().run(program, io.StringIO())
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, TextIO, Tuple
+from typing import ClassVar, Dict, List, TextIO, Tuple
 
 from .ast import (
     Program,
@@ -35,6 +35,8 @@ class _FunctionReturn(Exception):
 
 @dataclass
 class Interpreter:
+    RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
+
     scopes: List[Dict[str, int]] = field(default_factory=lambda: [{}])
     global_scope: Dict[str, int] = field(default_factory=dict)
     functions: Dict[str, FunctionDefStmt] = field(default_factory=dict)
@@ -51,6 +53,11 @@ class Interpreter:
 
         for stmt in program.stmts:
             if isinstance(stmt, FunctionDefStmt):
+                for name in stmt.params:
+                    if name in self.RESERVED_IDENTIFIER_NAMES:
+                        raise AxiomRuntimeError(f"reserved identifier {name!r}")
+                if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
+                    raise AxiomRuntimeError(f"reserved function name {stmt.name!r}")
                 if stmt.name in self.functions:
                     raise AxiomCompileError(f"duplicate function {stmt.name!r}", stmt.span)
                 self.functions[stmt.name] = stmt
@@ -62,6 +69,8 @@ class Interpreter:
 
     def _exec_stmt(self, stmt, out: TextIO) -> None:
         if isinstance(stmt, LetStmt):
+            if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
+                raise AxiomRuntimeError(f"reserved identifier {stmt.name!r}")
             self.scopes[-1][stmt.name] = self._eval(stmt.expr, out)
             return
         if isinstance(stmt, AssignStmt):
@@ -111,6 +120,8 @@ class Interpreter:
         raise AxiomRuntimeError(f"undefined variable {name!r}", span)
 
     def _assign(self, name: str, value: int, span) -> None:
+        if name in self.RESERVED_IDENTIFIER_NAMES:
+            raise AxiomRuntimeError(f"reserved identifier {name!r}")
         for scope in reversed(self.scopes):
             if name in scope:
                 scope[name] = value
@@ -134,6 +145,8 @@ class Interpreter:
 
         param_scope: Dict[str, int] = {}
         for index, name in enumerate(fn.params):
+            if name in self.RESERVED_IDENTIFIER_NAMES:
+                raise AxiomRuntimeError(f"reserved identifier {name!r}")
             param_scope[name] = args[index]
         self.scopes = [param_scope, self.global_scope]
         self.function_depth += 1
