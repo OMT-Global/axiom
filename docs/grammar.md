@@ -1,4 +1,4 @@
-# Axiom grammar (v0.5)
+# Axiom grammar (v0.6)
 
 Whitespace is generally ignored except newlines, which can terminate statements.
 

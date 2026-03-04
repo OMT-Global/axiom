@@ -1,4 +1,4 @@
-# Axiom bytecode format (AXBC v0.5)
+# Axiom bytecode format (AXBC v0.6)
 
 This project uses a tiny custom binary format (no deps) to keep the bootstrap surface small.
 
@@ -8,7 +8,7 @@ All integers are little-endian.
 
 - 4 bytes: magic `AXBC`
 - u16: version_major (currently 0)
-- u16: version_minor (currently 5)
+- u16: version_minor (currently 6)
 - u32: locals_count
 - u32: function_count (K)
 - K times:
@@ -47,15 +47,15 @@ All integers are little-endian.
 - 0x12 CMP_GE
 - 0x13 CALL            (u32 function index)
 - 0x14 RET
-- 0x15 HOST_CALL       (u32 builtin index)
+- 0x15 HOST_CALL       (u32 host name index)
 
-Host builtin indices:
+In `v0.6+`, the `HOST_CALL` operand is a string table index for the
+host name (for example `abs` in `host.abs`), resolved at runtime through
+`axiom.host` registry.
 
-- 0 => host.version
-- 1 => host.print
-- 2 => host.read
-- 3 => host.abs
-- 4 => host.math.abs
+Builtins available at runtime are still assigned by registry order for
+API visibility and host APIs, but bytecode stores names so call-site stability
+does not depend on numeric host-id ordering across compilation and execution.
 
-Custom host capabilities can be appended by registering via `axiom.host.register_host_builtin`.
-Host builtin indices are assigned in registry order.
+Custom host capabilities can be appended by registering via
+`axiom.host.register_host_builtin`.

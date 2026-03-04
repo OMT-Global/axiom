@@ -9,7 +9,7 @@ from axiom.api import parse_program
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
-from axiom.bytecode import VERSION_MINOR
+from axiom.bytecode import Op, VERSION_MINOR
 from axiom.host import register_host_builtin, reset_host_builtins
 
 
@@ -125,6 +125,14 @@ print f(1)
         out = io.StringIO()
         Vm(locals_count=bc.locals_count).run(bc, out)
         self.assertEqual(out.getvalue(), "12\n")
+
+    def test_vm_host_call_by_name(self) -> None:
+        bc = compile_to_bytecode("print host.abs(-12)\n")
+        host_calls = [i for i in bc.instructions if i.op == Op.HOST_CALL]
+        self.assertEqual(len(host_calls), 1)
+        host_name_index = host_calls[0].arg
+        self.assertIsNotNone(host_name_index)
+        self.assertEqual(bc.strings[int(host_name_index)], "abs")
 
     def test_runtime_host_print_requires_explicit_allow(self) -> None:
         program = parse_program("host.print(1)\n")
