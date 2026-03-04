@@ -146,7 +146,7 @@ print f(1)
             compile_to_bytecode("host.unknown(1)\n")
 
     def test_compile_non_host_namespace_call(self) -> None:
-        with self.assertRaises(AxiomCompileError):
+        with self.assertRaises(AxiomParseError):
             compile_to_bytecode("foo.bar(1)\n")
 
     def test_host_registry_duplicate_name(self) -> None:
@@ -241,9 +241,8 @@ print f(1)
         self.assertEqual(out.getvalue(), "1\n")
 
     def test_runtime_non_host_namespace_call(self) -> None:
-        program = parse_program("foo.bar(1)\n")
-        with self.assertRaises(AxiomRuntimeError):
-            Interpreter().run(program, io.StringIO())
+        with self.assertRaises(AxiomParseError):
+            parse_program("foo.bar(1)\n")
 
     def test_runtime_reserved_host_identifier_let(self) -> None:
         program = Program(
