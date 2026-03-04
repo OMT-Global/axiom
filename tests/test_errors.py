@@ -21,7 +21,7 @@ from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
 from axiom.bytecode import Op, VERSION_MINOR
-from axiom.host import register_host_builtin, reset_host_builtins
+from axiom.host import register_host_builtin, reset_host_builtins, unregister_host_builtin
 
 
 class ErrorTests(unittest.TestCase):
@@ -140,6 +140,31 @@ print f(1)
             self.assertEqual(vm_out.getvalue(), "42\n")
         finally:
             reset_host_builtins()
+
+    def test_unregister_custom_host_builtin(self) -> None:
+        def triple(args: list[int], _out) -> int:
+            return args[0] * 3
+
+        register_host_builtin("triple", 1, False, triple)
+        try:
+            program = parse_program("print host.triple(7)\n")
+            out = io.StringIO()
+            Interpreter().run(program, out)
+            self.assertEqual(out.getvalue(), "21\n")
+
+            unregister_host_builtin("triple")
+            with self.assertRaises(AxiomCompileError):
+                compile_to_bytecode("print host.triple(7)\n")
+        finally:
+            reset_host_builtins()
+
+    def test_unregister_default_host_builtin_not_allowed(self) -> None:
+        with self.assertRaises(ValueError):
+            unregister_host_builtin("print")
+
+    def test_unregister_unknown_host_builtin(self) -> None:
+        with self.assertRaises(KeyError):
+            unregister_host_builtin("missing")
 
     def test_compile_unknown_host_function(self) -> None:
         with self.assertRaises(AxiomCompileError):

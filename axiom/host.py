@@ -84,6 +84,19 @@ def register_host_builtin(name: str, arity: int, side_effecting: bool, handler: 
     _rebuild_host_tables()
 
 
+def unregister_host_builtin(name: str) -> None:
+    if any(entry.name == name for entry in _DEFAULT_HOST_BUILTINS):
+        raise ValueError(f"cannot unregister builtin {name!r}")
+
+    for idx, entry in enumerate(_HOST_BUILTINS_LIST):
+        if entry.name == name:
+            del _HOST_BUILTINS_LIST[idx]
+            _rebuild_host_tables()
+            return
+
+    raise KeyError(f"host builtin {name!r} does not exist")
+
+
 def reset_host_builtins() -> None:
     del _HOST_BUILTINS_LIST[:]
     _HOST_BUILTINS_LIST.extend(_DEFAULT_HOST_BUILTINS)
