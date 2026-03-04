@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
-from typing import Optional
+from typing import List, Optional
 
 from .api import compile_file
 from .errors import AxiomCompileError
@@ -24,6 +24,7 @@ class PackageManifest:
     main: str = DEFAULT_MAIN
     out_dir: str = DEFAULT_OUT_DIR
     output: Optional[str] = None
+    allowed_host_calls: Optional[List[str]] = None
 
 
 def manifest_path(project_root: Path) -> Path:
@@ -65,6 +66,21 @@ def _validate_relative_path(value: str, path: Path, field_name: str) -> str:
     return value
 
 
+def _validate_host_calls(value: object, path: Path) -> List[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AxiomCompileError(f"package manifest {path} has invalid allowed_host_calls")
+    host_calls: List[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise AxiomCompileError(
+                f"package manifest {path} has invalid allowed_host_calls entry {item!r}"
+            )
+        host_calls.append(item)
+    return host_calls
+
+
 def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     if not isinstance(data, dict):
         raise AxiomCompileError(f"invalid package manifest in {path}")
@@ -81,6 +97,7 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     if not isinstance(out_dir, str):
         raise AxiomCompileError(f"package manifest {path} has invalid out_dir")
     out_dir = _validate_relative_path(out_dir, path, "out_dir")
+    allowed_host_calls = _validate_host_calls(data.get("allowed_host_calls"), path)
     if output is not None:
         if not isinstance(output, str):
             raise AxiomCompileError(f"package manifest {path} has invalid output")
@@ -92,6 +109,7 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
         main=main,
         out_dir=out_dir,
         output=output if isinstance(output, str) else None,
+        allowed_host_calls=allowed_host_calls,
     )
 
 
@@ -106,8 +124,8 @@ def load_manifest(project_root: Path) -> PackageManifest:
     return _as_manifest(payload, path)
 
 
-def manifest_to_dict(manifest: PackageManifest) -> dict[str, str | None]:
-    payload: dict[str, str | None] = {
+def manifest_to_dict(manifest: PackageManifest) -> dict[str, object]:
+    payload: dict[str, object] = {
         "name": manifest.name,
         "version": manifest.version,
         "main": manifest.main,
@@ -115,6 +133,8 @@ def manifest_to_dict(manifest: PackageManifest) -> dict[str, str | None]:
     }
     if manifest.output is not None:
         payload["output"] = manifest.output
+    if manifest.allowed_host_calls:
+        payload["allowed_host_calls"] = manifest.allowed_host_calls
     return payload
 
 
@@ -141,6 +161,7 @@ def init_package(
     main: Optional[str] = None,
     out_dir: Optional[str] = None,
     output: Optional[str] = None,
+    allowed_host_calls: Optional[List[str]] = None,
     force: bool = False,
 ) -> PackageManifest:
     project_root = project_root.resolve()
@@ -166,6 +187,11 @@ def init_package(
         raise AxiomCompileError("package output must be a non-empty string when provided")
     if output is not None:
         output = _validate_output(output, project_root / MANIFEST_FILENAME)
+    if allowed_host_calls is None:
+        allowed_host_calls = []
+    elif not isinstance(allowed_host_calls, list):
+        raise AxiomCompileError("package allowed_host_calls must be a list of strings when provided")
+    allowed_host_calls = _validate_host_calls(allowed_host_calls, project_root / MANIFEST_FILENAME)
     pkg_name = name if name else (project_root.name or DEFAULT_NAME)
     if not pkg_name:
         pkg_name = DEFAULT_NAME
@@ -175,6 +201,7 @@ def init_package(
         main=main,
         out_dir=out_dir,
         output=output,
+        allowed_host_calls=allowed_host_calls or None,
     )
     write_default_manifest(project_root, manifest)
     write_default_entry(project_root, manifest.main)
@@ -182,12 +209,22 @@ def init_package(
 
 
 def build_package(
-    project_root: Path, *, allow_host_side_effects: bool = False, output: Optional[str] = None
+    project_root: Path,
+    *,
+    allow_host_side_effects: bool = False,
+    output: Optional[str] = None,
 ) -> Path:
     project_root = project_root.resolve()
     manifest = load_manifest(project_root)
     entry = project_root / manifest.main
-    bytecode = compile_file(entry, allow_host_side_effects=allow_host_side_effects)
+    allowed_host_calls = (
+        set(manifest.allowed_host_calls) if manifest.allowed_host_calls else None
+    )
+    bytecode = compile_file(
+        entry,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    )
     out_dir = project_root / manifest.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 

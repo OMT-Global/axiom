@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List
+from typing import ClassVar, Dict, List, Optional, Set
 
 from .ast import (
     Program,
@@ -39,6 +39,7 @@ class Compiler:
     functions: List[FunctionMeta] = field(default_factory=list)
     function_locals: Dict[str, int] = field(default_factory=dict)
     allow_host_side_effects: bool = False
+    allowed_host_calls: Optional[Set[str]] = None
     RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
     RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
 
@@ -227,6 +228,11 @@ class Compiler:
                 host_fn = fn_name[len("host.") :]
                 if host_fn not in HOST_BUILTINS:
                     raise AxiomCompileError(f"undefined host function {fn_name!r}", expr.span)
+                if self.allowed_host_calls is not None and host_fn not in self.allowed_host_calls:
+                    raise AxiomCompileError(
+                        f"host call {fn_name!r} is not permitted by package policy",
+                        expr.span,
+                    )
                 arity, side_effectful = HOST_BUILTINS[host_fn]
                 if side_effectful and not self.allow_host_side_effects:
                     raise AxiomCompileError(

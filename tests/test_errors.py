@@ -101,6 +101,15 @@ print f(1)
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.math.abs()\n")
 
+    def test_compile_host_allowed_list_enforcement(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("host.abs(-5)\n", allowed_host_calls={"print"})
+
+        bc = compile_to_bytecode("print host.abs(-5)\n", allowed_host_calls={"abs"})
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, out)
+        self.assertEqual(out.getvalue(), "5\n")
+
     def test_compile_custom_host_builtin(self) -> None:
         def double(args: list[int], _out) -> int:
             return args[0] * 2
