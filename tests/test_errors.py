@@ -1,8 +1,10 @@
 import unittest
 import io
 from unittest.mock import patch
+from pathlib import Path
+import tempfile
 
-from axiom.api import compile_to_bytecode
+from axiom.api import compile_to_bytecode, compile_file
 from axiom.api import parse_program
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
@@ -66,6 +68,13 @@ print f(1)
             compile_to_bytecode("host.abs(1, 2)\n")
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.math.abs()\n")
+
+    def test_compile_missing_import(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("main.ax").write_text('import "missing.ax"\n', encoding="utf-8")
+            with self.assertRaises(AxiomCompileError):
+                compile_file(root.joinpath("main.ax"))
 
     def test_runtime_host_version(self) -> None:
         program = parse_program("print host.version()\n")

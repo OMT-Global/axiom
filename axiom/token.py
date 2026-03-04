@@ -8,6 +8,7 @@ from .errors import Span
 
 
 class TokenKind(Enum):
+    IMPORT = auto()
     LET = auto()
     FN = auto()
     PRINT = auto()
@@ -24,6 +25,7 @@ class TokenKind(Enum):
     LE = auto()
     GT = auto()
     GE = auto()
+    STRING = auto()
     SEMI = auto()
     NEWLINE = auto()
     PLUS = auto()

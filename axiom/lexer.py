@@ -73,6 +73,8 @@ class Lexer:
         text = self.src[start:end]
         if text == "let":
             return Token(TokenKind.LET, Span(start, end))
+        if text == "import":
+            return Token(TokenKind.IMPORT, Span(start, end))
         if text == "fn":
             return Token(TokenKind.FN, Span(start, end))
         if text == "print":
@@ -86,6 +88,37 @@ class Lexer:
         if text == "while":
             return Token(TokenKind.WHILE, Span(start, end))
         return Token(TokenKind.IDENT, Span(start, end), text)
+
+    def _lex_string(self, start: int) -> Token:
+        chars: List[str] = []
+        while True:
+            ch = self._peek()
+            if ch is None:
+                raise AxiomParseError("unterminated string literal", Span(start, self.i))
+            self.i += 1
+            if ch == '"':
+                break
+            if ch == "\\":
+                esc = self._peek()
+                if esc is None:
+                    raise AxiomParseError("unterminated escape sequence", Span(start, self.i))
+                self.i += 1
+                if esc == "n":
+                    chars.append("\n")
+                elif esc == "r":
+                    chars.append("\r")
+                elif esc == "t":
+                    chars.append("\t")
+                elif esc == "\\":
+                    chars.append("\\")
+                elif esc == '"':
+                    chars.append('"')
+                else:
+                    chars.append(esc)
+            else:
+                chars.append(ch)
+        end = self.i
+        return Token(TokenKind.STRING, Span(start, end), "".join(chars))
 
     def next_token(self) -> Token:
         self._skip_spaces()
@@ -130,6 +163,8 @@ class Lexer:
             return Token(TokenKind.DOT, Span(start, start + 1))
         if ch == ",":
             return Token(TokenKind.COMMA, Span(start, start + 1))
+        if ch == '"':
+            return self._lex_string(start)
         if ch == "(":
             return Token(TokenKind.LPAREN, Span(start, start + 1))
         if ch == ")":
