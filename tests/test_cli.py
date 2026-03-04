@@ -208,6 +208,24 @@ class CliParityTests(unittest.TestCase):
             )
             self.assertIn("OK", proc.stderr)
 
+    def test_package_check_command_fails_without_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            proc = self._run_cli(
+                ["pkg", "check", str(project)], cwd=ROOT, expect_code=1
+            )
+            self.assertIn("missing package manifest", proc.stderr)
+
+    def test_package_check_command_fails_with_invalid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+
+            manifest = project / "axiom.pkg"
+            manifest.write_text("{invalid json}", encoding="utf-8")
+            proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("invalid package manifest", proc.stderr)
+
     def test_package_init_force_rewrites_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
