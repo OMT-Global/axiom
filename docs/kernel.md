@@ -21,7 +21,8 @@
 - `host.<name>(...)` for host bridge calls (reserved namespace)
 - Host calls are resolved from a registry. Add custom capabilities via
   `axiom.host.register_host_builtin(name, arity, side_effecting, handler)` where
-  `handler(args: list[int], out: TextIO) -> int`.
+  `handler(args: list[int], out: TextIO) -> int`, and remove custom capabilities via
+  `axiom.host.unregister_host_builtin(name)`.
 
 ## Expressions
 - integer literals: `123`, `-5`
