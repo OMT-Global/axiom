@@ -104,6 +104,7 @@ class CliParityTests(unittest.TestCase):
         names = {entry["name"] for entry in payload}
         self.assertIn("version", names)
         self.assertIn("print", names)
+        self.assertEqual([entry["name"] for entry in payload], sorted(names))
         version_entry = next(e for e in payload if e["name"] == "version")
         self.assertEqual(version_entry["arity"], 0)
         self.assertFalse(version_entry["side_effecting"])
