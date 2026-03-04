@@ -174,6 +174,47 @@ print f(1)
         with self.assertRaises(AxiomParseError):
             compile_to_bytecode("foo.bar(1)\n")
 
+    def test_compile_import_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("math_module.ax").write_text(
+                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+            )
+            root.joinpath("main.ax").write_text(
+                'import "math_module" as math\nprint math.add(11, 9)\n',
+                encoding="utf-8",
+            )
+            bc = compile_file(root.joinpath("main.ax"))
+            out = io.StringIO()
+            Vm(locals_count=bc.locals_count).run(bc, out)
+            self.assertEqual(out.getvalue(), "20\n")
+
+    def test_compile_import_duplicate_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("math_module.ax").write_text(
+                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+            )
+            root.joinpath("other_module.ax").write_text(
+                "fn sub(a, b) { return a - b }\n", encoding="utf-8"
+            )
+            root.joinpath("main.ax").write_text(
+                'import "math_module" as shared\nimport "other_module" as shared\n',
+                encoding="utf-8",
+            )
+            with self.assertRaises(AxiomParseError):
+                compile_file(root.joinpath("main.ax"))
+
+    def test_compile_import_alias_host_reserved(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("math_module.ax").write_text(
+                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+            )
+            root.joinpath("main.ax").write_text('import "math_module" as host\n', encoding="utf-8")
+            with self.assertRaises(AxiomParseError):
+                compile_file(root.joinpath("main.ax"))
+
     def test_host_registry_duplicate_name(self) -> None:
         def noop(args: list[int], _out) -> int:
             return 0

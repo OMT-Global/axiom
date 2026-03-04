@@ -56,6 +56,7 @@ class ExprStmt:
 @dataclass(frozen=True)
 class ImportStmt:
     path: str
+    alias: str
     span: Span
 
 

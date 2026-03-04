@@ -130,6 +130,22 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["run", str(main)], cwd=ROOT)
             self.assertEqual(proc.stdout, "13\n")
 
+    def test_imported_modules_execute_with_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            mod = Path(td) / "math_module.ax"
+            mod.write_text("fn add(a, b) {\n  return a + b\n}\n", encoding="utf-8")
+
+            main = Path(td) / "main.ax"
+            main.write_text(
+                'import "math_module" as MATH\nprint MATH.add(9, 8)\n',
+                encoding="utf-8",
+            )
+
+            proc = self._run_cli(["interp", str(main)], cwd=ROOT)
+            self.assertEqual(proc.stdout, "17\n")
+            proc = self._run_cli(["run", str(main)], cwd=ROOT)
+            self.assertEqual(proc.stdout, "17\n")
+
     def test_package_init_and_build(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)

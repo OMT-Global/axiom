@@ -15,6 +15,7 @@ class TokenKind(Enum):
     RETURN = auto()
     IF = auto()
     ELSE = auto()
+    AS = auto()
     WHILE = auto()
     IDENT = auto()
     INT = auto()
