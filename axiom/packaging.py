@@ -66,9 +66,9 @@ def _validate_relative_path(value: str, path: Path, field_name: str) -> str:
     return value
 
 
-def _validate_host_calls(value: object, path: Path) -> List[str]:
+def _validate_host_calls(value: object, path: Path) -> Optional[List[str]]:
     if value is None:
-        return []
+        return None
     if not isinstance(value, list):
         raise AxiomCompileError(f"package manifest {path} has invalid allowed_host_calls")
     host_calls: List[str] = []
@@ -77,7 +77,12 @@ def _validate_host_calls(value: object, path: Path) -> List[str]:
             raise AxiomCompileError(
                 f"package manifest {path} has invalid allowed_host_calls entry {item!r}"
             )
-        host_calls.append(item)
+        normalized = item[5:] if item.startswith("host.") else item
+        if not normalized:
+            raise AxiomCompileError(
+                f"package manifest {path} has invalid allowed_host_calls entry {item!r}"
+            )
+        host_calls.append(normalized)
     return host_calls
 
 
@@ -133,7 +138,7 @@ def manifest_to_dict(manifest: PackageManifest) -> dict[str, object]:
     }
     if manifest.output is not None:
         payload["output"] = manifest.output
-    if manifest.allowed_host_calls:
+    if manifest.allowed_host_calls is not None:
         payload["allowed_host_calls"] = manifest.allowed_host_calls
     return payload
 
@@ -188,7 +193,7 @@ def init_package(
     if output is not None:
         output = _validate_output(output, project_root / MANIFEST_FILENAME)
     if allowed_host_calls is None:
-        allowed_host_calls = []
+        allowed_host_calls = None
     elif not isinstance(allowed_host_calls, list):
         raise AxiomCompileError("package allowed_host_calls must be a list of strings when provided")
     allowed_host_calls = _validate_host_calls(allowed_host_calls, project_root / MANIFEST_FILENAME)
@@ -201,7 +206,7 @@ def init_package(
         main=main,
         out_dir=out_dir,
         output=output,
-        allowed_host_calls=allowed_host_calls or None,
+        allowed_host_calls=allowed_host_calls,
     )
     write_default_manifest(project_root, manifest)
     write_default_entry(project_root, manifest.main)
@@ -218,7 +223,9 @@ def build_package(
     manifest = load_manifest(project_root)
     entry = project_root / manifest.main
     allowed_host_calls = (
-        set(manifest.allowed_host_calls) if manifest.allowed_host_calls else None
+        set(manifest.allowed_host_calls)
+        if manifest.allowed_host_calls is not None
+        else None
     )
     bytecode = compile_file(
         entry,

@@ -114,7 +114,9 @@ def cmd_pkg_check(path: Path, *, allow_host_side_effects: bool) -> int:
     manifest = load_manifest(path)
     entry = path.resolve() / manifest.main
     allowed_host_calls = (
-        set(manifest.allowed_host_calls) if manifest.allowed_host_calls else None
+        set(manifest.allowed_host_calls)
+        if manifest.allowed_host_calls is not None
+        else None
     )
     _ = compile_file(
         entry,
@@ -139,7 +141,9 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
     manifest = load_manifest(project_root)
     entry = project_root / manifest.main
     allowed_host_calls = (
-        set(manifest.allowed_host_calls) if manifest.allowed_host_calls else None
+        set(manifest.allowed_host_calls)
+        if manifest.allowed_host_calls is not None
+        else None
     )
     bytecode = compile_file(
         entry,

@@ -13,7 +13,9 @@ Current supported fields:
 - `allowed_host_calls` (optional): Explicit allowlist of host calls permitted in package builds.
   - Each entry is a string matching host call suffixes without the `host.` prefix
     (for example, `print`, `abs`, `math.abs`).
+  - Values with an optional `host.` prefix are normalized to the suffix form.
   - When present, package compilation fails if source uses any host call not in the allowlist.
+  - An empty list denies all host calls.
 - `main` and `out_dir` must be relative paths and may not contain `..` parent segments.
 - `output` (optional, string): Custom output filename or path inside `out_dir`.
   - Must be a relative path and may not traverse parent directories (no `..`).
