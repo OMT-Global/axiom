@@ -26,6 +26,9 @@ python -m axiom vm /tmp/arith.axb
 # Run package main from manifest (stage3 planning)
 python -m axiom pkg run .
 
+# Inspect host bridge capabilities for tooling
+python -m axiom host list
+
 # Run conformance tests (interpreter vs VM + expected output)
 python -m unittest discover -v
 

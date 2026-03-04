@@ -40,3 +40,4 @@
 - `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
 - `host` call payloads in bytecode are name-based (string table index) starting at
   bytecode `v0.6` to preserve behavior if host registry order changes.
+- `python -m axiom host list` enumerates the currently registered host capabilities.
