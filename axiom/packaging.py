@@ -30,6 +30,23 @@ def manifest_path(project_root: Path) -> Path:
     return project_root / MANIFEST_FILENAME
 
 
+def _validate_output(output: str, path: Path) -> str:
+    if not output:
+        raise AxiomCompileError(f"package manifest {path} has invalid output")
+
+    if Path(output).is_absolute():
+        raise AxiomCompileError(
+            f"package manifest {path} has invalid output path: absolute paths are not allowed"
+        )
+
+    if any(part == ".." for part in Path(output).parts):
+        raise AxiomCompileError(
+            f"package manifest {path} has invalid output path: parent traversal is not allowed"
+        )
+
+    return output
+
+
 def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     if not isinstance(data, dict):
         raise AxiomCompileError(f"invalid package manifest in {path}")
@@ -44,8 +61,11 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
         raise AxiomCompileError(f"package manifest {path} has invalid main")
     if not isinstance(out_dir, str) or not out_dir:
         raise AxiomCompileError(f"package manifest {path} has invalid out_dir")
-    if output is not None and (not isinstance(output, str) or not output):
-        raise AxiomCompileError(f"package manifest {path} has invalid output")
+    if output is not None:
+        if not isinstance(output, str):
+            raise AxiomCompileError(f"package manifest {path} has invalid output")
+        output = _validate_output(output, path)
+
     return PackageManifest(
         name=str(data["name"]),
         version=str(data["version"]),
@@ -120,8 +140,10 @@ def init_package(
         raise AxiomCompileError("package main must be a non-empty string")
     if not isinstance(out_dir, str) or not out_dir:
         raise AxiomCompileError("package out_dir must be a non-empty string")
-    if output is not None and (not isinstance(output, str) or not output):
+    if output is not None and not isinstance(output, str):
         raise AxiomCompileError("package output must be a non-empty string when provided")
+    if output is not None:
+        output = _validate_output(output, project_root / MANIFEST_FILENAME)
     pkg_name = name if name else (project_root.name or DEFAULT_NAME)
     if not pkg_name:
         pkg_name = DEFAULT_NAME
