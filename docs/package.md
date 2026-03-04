@@ -52,6 +52,8 @@ Options:
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.
 
 `pkg check` validates `axiom.pkg` and compiles the manifest `main` entrypoint.
+Host side-effecting host calls (for example `host.print`) obey the global
+`--allow-host-side-effects` flag.
 
 `pkg run` reads `axiom.pkg`, compiles `main`, and executes it in the VM immediately.
 
