@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import ClassVar, Dict, List
 
 from .ast import (
     Program,
@@ -39,6 +39,7 @@ class Compiler:
     functions: List[FunctionMeta] = field(default_factory=list)
     function_locals: Dict[str, int] = field(default_factory=dict)
     allow_host_side_effects: bool = False
+    RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
 
     def compile(self, program: Program) -> Bytecode:
         self.scope_stack = [{}]
@@ -81,6 +82,8 @@ class Compiler:
         )
 
     def _register_function(self, fn: FunctionDefStmt) -> None:
+        if fn.name in self.RESERVED_FUNCTION_NAMES:
+            raise AxiomCompileError(f"reserved function name {fn.name!r}", fn.span)
         if fn.name in self.function_ids:
             raise AxiomCompileError(f"duplicate function {fn.name!r}", fn.span)
         self.function_ids[fn.name] = len(self.function_defs)
