@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List
 
+from .bytecode import VERSION_MINOR
+
 
 @dataclass(frozen=True)
 class HostBuiltin:
@@ -23,3 +25,4 @@ HOST_BUILTINS = {entry.name: (entry.arity, entry.side_effecting) for entry in _H
 HOST_BUILTIN_NAMES = [entry.name for entry in _HOST_BUILTINS_LIST]
 HOST_BUILTIN_IDS = {entry.name: idx for idx, entry in enumerate(_HOST_BUILTINS_LIST)}
 HOST_BUILTIN_BY_ID = {idx: entry for idx, entry in enumerate(_HOST_BUILTINS_LIST)}
+HOST_VERSION = VERSION_MINOR

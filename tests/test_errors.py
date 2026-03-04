@@ -7,6 +7,7 @@ from axiom.api import parse_program
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
+from axiom.bytecode import VERSION_MINOR
 
 
 class ErrorTests(unittest.TestCase):
@@ -64,7 +65,7 @@ print f(1)
         program = parse_program("print host.version()\n")
         out = io.StringIO()
         Interpreter().run(program, out)
-        self.assertEqual(out.getvalue(), "4\n")
+        self.assertEqual(out.getvalue(), f"{VERSION_MINOR}\n")
 
     def test_runtime_host_abs(self) -> None:
         program = parse_program("print host.abs(-12)\n")
@@ -76,7 +77,7 @@ print f(1)
         bc = compile_to_bytecode("print host.version()\n")
         out = io.StringIO()
         Vm(locals_count=bc.locals_count).run(bc, out)
-        self.assertEqual(out.getvalue(), "4\n")
+        self.assertEqual(out.getvalue(), f"{VERSION_MINOR}\n")
 
     def test_vm_host_abs(self) -> None:
         bc = compile_to_bytecode("print host.abs(-12)\n")

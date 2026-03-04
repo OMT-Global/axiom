@@ -7,7 +7,7 @@ import builtins
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-from .host import HOST_BUILTIN_BY_ID, HOST_BUILTINS
+from .host import HOST_BUILTIN_BY_ID, HOST_BUILTINS, HOST_VERSION
 
 
 @dataclass
@@ -172,7 +172,7 @@ class Vm:
             raise AxiomRuntimeError(f"unknown host function id {fn_id}")
         builtin = HOST_BUILTIN_BY_ID[fn_id]
         if builtin.name == "version":
-            return 4
+            return HOST_VERSION
         if builtin.name == "print":
             if not self.allow_host_side_effects:
                 raise AxiomRuntimeError(
