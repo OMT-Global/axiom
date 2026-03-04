@@ -61,6 +61,12 @@ print f(1)
     def test_compile_host_side_effect_allowed(self) -> None:
         compile_to_bytecode("host.print(1)\n", allow_host_side_effects=True)
 
+    def test_compile_host_arity_mismatch(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("host.abs(1, 2)\n")
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("host.math.abs()\n")
+
     def test_runtime_host_version(self) -> None:
         program = parse_program("print host.version()\n")
         out = io.StringIO()
