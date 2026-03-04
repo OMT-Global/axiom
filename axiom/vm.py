@@ -7,13 +7,7 @@ import builtins
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-
-
-_HOST_BUILTINS: List[tuple[int, bool]] = [
-    (0, False),  # version
-    (1, True),   # print
-    (1, True),   # read
-]
+from .host import HOST_BUILTIN_BY_ID, HOST_BUILTINS
 
 
 @dataclass
@@ -115,12 +109,15 @@ class Vm:
             elif i.op == Op.HOST_CALL:
                 if i.arg is None:
                     raise AxiomRuntimeError("host call missing arg")
-                if i.arg < 0 or i.arg >= len(_HOST_BUILTINS):
-                    raise AxiomRuntimeError(f"invalid host function id {i.arg}")
-                arg_count, side_effectful = _HOST_BUILTINS[i.arg]
+                host_fn_id = int(i.arg)
+                if host_fn_id not in HOST_BUILTIN_BY_ID:
+                    raise AxiomRuntimeError(f"invalid host function id {host_fn_id}")
+                builtin = HOST_BUILTIN_BY_ID[host_fn_id]
+                arg_count = builtin.arity
+                side_effectful = builtin.side_effecting
                 if len(self.stack) < arg_count:
                     raise AxiomRuntimeError(
-                        f"call to host function id {i.arg} with {len(self.stack)} values on stack"
+                        f"call to host function id {host_fn_id} with {len(self.stack)} values on stack"
                     )
                 if side_effectful and not self.allow_host_side_effects:
                     raise AxiomRuntimeError(
@@ -128,7 +125,7 @@ class Vm:
                     )
                 args = [self.stack.pop() for _ in range(arg_count)]
                 args.reverse()
-                result = self._call_host_fn(i.arg, args, out)
+                result = self._call_host_fn(host_fn_id, args, out)
                 self.stack.append(result)
             elif i.op == Op.RET:
                 if not self.stack:
@@ -171,9 +168,12 @@ class Vm:
         return int(b), int(a)
 
     def _call_host_fn(self, fn_id: int, args: List[int], out: TextIO) -> int:
-        if fn_id == 0:
+        if fn_id not in HOST_BUILTIN_BY_ID:
+            raise AxiomRuntimeError(f"unknown host function id {fn_id}")
+        builtin = HOST_BUILTIN_BY_ID[fn_id]
+        if builtin.name == "version":
             return 4
-        if fn_id == 1:
+        if builtin.name == "print":
             if not self.allow_host_side_effects:
                 raise AxiomRuntimeError(
                     "host call 1 is side-effecting; enable allow_host_side_effects"
@@ -182,7 +182,7 @@ class Vm:
                 raise AxiomRuntimeError(f"host.call 1 expected 1 arg, got {len(args)}")
             out.write(f"{args[0]}\n")
             return 0
-        if fn_id == 2:
+        if builtin.name == "read":
             if not self.allow_host_side_effects:
                 raise AxiomRuntimeError(
                     "host call 2 is side-effecting; enable allow_host_side_effects"
@@ -198,4 +198,8 @@ class Vm:
                 return int(line.strip())
             except ValueError as e:
                 raise AxiomRuntimeError(f"host.read expected integer input: {line!r}") from e
+        if builtin.name == "abs":
+            return abs(args[0])
+        if builtin.name == "math.abs":
+            return abs(args[0])
         raise AxiomRuntimeError(f"unknown host function id {fn_id}")

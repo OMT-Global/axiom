@@ -24,13 +24,7 @@ from .ast import (
 )
 from .errors import AxiomCompileError, AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-
-
-_HOST_BUILTINS: Dict[str, tuple[int, bool]] = {
-    "version": (0, False),
-    "print": (1, True),
-    "read": (1, True),
-}
+from .host import HOST_BUILTINS
 
 
 @dataclass
@@ -149,9 +143,9 @@ class Interpreter:
 
     def _call_host(self, fn_name: str, args: List[int], out: TextIO) -> int:
         host_name = fn_name[len("host.") :]
-        if host_name not in _HOST_BUILTINS:
+        if host_name not in HOST_BUILTINS:
             raise AxiomRuntimeError(f"undefined host function {fn_name!r}")
-        arity, side_effect = _HOST_BUILTINS[host_name]
+        arity, side_effect = HOST_BUILTINS[host_name]
         if arity != len(args):
             raise AxiomRuntimeError(
                 f"host function {fn_name!r} expects {arity} args, got {len(args)}"
@@ -177,6 +171,10 @@ class Interpreter:
                 raise AxiomRuntimeError(
                     f"host.read expected integer input: {line!r}",
                 ) from e
+        if host_name == "abs":
+            return abs(args[0])
+        if host_name == "math.abs":
+            return abs(args[0])
         raise AxiomRuntimeError(f"unsupported host function {fn_name!r}")
 
     def _eval(self, expr: Expr, out: TextIO) -> int:

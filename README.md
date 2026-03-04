@@ -6,6 +6,7 @@ This is a **drop-in repo skeleton** to start building a new language called **Ax
 - **Stage1**: compiler to **portable bytecode** + a small **stack VM**
 - **Stage2**: functions + call/return and call frames in Axiom
 - **Stage3**: host-bridge calls (`host.*`) for deterministic tool interop
+- **Stage4**: host capability registry and stable host tool namespace (`host.abs`)
 
 This repo is intentionally small and test-driven. Everything is **standard-library only** (no deps).
 
@@ -40,7 +41,7 @@ Supported:
 - integer literals
 - variables
 - function calls: `name(arg, ...)`
-- host bridge calls: `host.version()`, `host.print(value)` (gated)
+- host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)
 - `+ - * /` with parentheses
 - comparisons: `== != < <= > >=` (results are `0` or `1`)
 - unary `-`

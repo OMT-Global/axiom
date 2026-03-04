@@ -1,4 +1,4 @@
-# Axiom grammar (v0.4)
+# Axiom grammar (v0.5)
 
 Whitespace is generally ignored except newlines, which can terminate statements.
 
@@ -25,7 +25,7 @@ if_stmt        := "if" expr block ("else" block)? ;
 while_stmt     := "while" expr block ;
 block          := "{" NEWLINE* stmt* "}" ;
 expr_stmt      := expr terminator ;
-call_expr      := IDENT ("." IDENT)? "(" args? ")" ;
+call_expr      := IDENT ("." IDENT)* "(" args? ")" ;
 args           := expr ("," expr)* ;
 
 terminator     := ";" | NEWLINE | EOF ;

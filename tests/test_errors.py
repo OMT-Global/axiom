@@ -66,11 +66,23 @@ print f(1)
         Interpreter().run(program, out)
         self.assertEqual(out.getvalue(), "4\n")
 
+    def test_runtime_host_abs(self) -> None:
+        program = parse_program("print host.abs(-12)\n")
+        out = io.StringIO()
+        Interpreter().run(program, out)
+        self.assertEqual(out.getvalue(), "12\n")
+
     def test_vm_host_version(self) -> None:
         bc = compile_to_bytecode("print host.version()\n")
         out = io.StringIO()
         Vm(locals_count=bc.locals_count).run(bc, out)
         self.assertEqual(out.getvalue(), "4\n")
+
+    def test_vm_host_abs(self) -> None:
+        bc = compile_to_bytecode("print host.abs(-12)\n")
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, out)
+        self.assertEqual(out.getvalue(), "12\n")
 
     def test_runtime_host_print_requires_explicit_allow(self) -> None:
         program = parse_program("host.print(1)\n")

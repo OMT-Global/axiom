@@ -16,5 +16,8 @@
 - Package/build tool skeleton
 
 ## Phase 3
-- Self-host compiler subsystems in Axiom (stage2)
-- Reproducible builds + bootstrap story
+- Host bridges for tool interoperability
+- Stable bytecode + VM/runtime parity for host calls
+
+## Phase 4
+- Built-in host capability registry for agentic extensibility
