@@ -138,6 +138,14 @@ class CliParityTests(unittest.TestCase):
             payload = json.loads(proc.stdout)
             self.assertEqual(payload["name"], "demo")
 
+    def test_package_run_executes_main(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            (project / "src" / "main.ax").write_text("print 7\n", encoding="utf-8")
+            proc = self._run_cli(["pkg", "run", str(project)], cwd=ROOT)
+            self.assertEqual(proc.stdout, "7\n")
+
     def test_package_init_with_manifest_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
