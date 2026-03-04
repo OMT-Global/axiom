@@ -368,6 +368,35 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
             self.assertIn("not permitted by package policy", proc.stderr)
 
+    def test_package_check_allows_host_call_with_host_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["allowed_host_calls"] = ["host.print"]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            (project / manifest["main"]).write_text("host.print(9)\n", encoding="utf-8")
+
+            proc = self._run_cli(
+                ["pkg", "check", str(project), "--allow-host-side-effects"], cwd=ROOT
+            )
+            self.assertIn("OK", proc.stderr)
+
+            self._run_cli(["pkg", "run", str(project), "--allow-host-side-effects"], cwd=ROOT)
+
+    def test_package_init_rejects_invalid_allowed_host_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["allowed_host_calls"] = ["host."]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("invalid allowed_host_calls entry", proc.stderr)
+
     def test_package_build_output_override_flag(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
