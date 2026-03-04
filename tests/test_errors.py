@@ -141,6 +141,14 @@ print f(1)
             with self.assertRaises(AxiomCompileError):
                 compile_file(root.joinpath("main.ax"))
 
+    def test_compile_circular_import(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("a.ax").write_text('import "b"\n', encoding="utf-8")
+            root.joinpath("b.ax").write_text('import "a"\n', encoding="utf-8")
+            with self.assertRaises(AxiomCompileError):
+                compile_file(root.joinpath("a.ax"))
+
     def test_runtime_host_version(self) -> None:
         program = parse_program("print host.version()\n")
         out = io.StringIO()
