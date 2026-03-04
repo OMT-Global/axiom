@@ -139,6 +139,42 @@ class CliParityTests(unittest.TestCase):
             )
             self.assertIn("package manifest already exists", proc.stderr)
 
+    def test_package_build_with_custom_manifest_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+
+            manifest_path = project / "axiom.pkg"
+            manifest = {
+                "name": "demo",
+                "version": "9.9.9",
+                "main": "src/app.ax",
+                "out_dir": "build",
+                "output": "artifact.axb",
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            main = project / "src" / "app.ax"
+            main.parent.mkdir(parents=True, exist_ok=True)
+            main.write_text("print 42\n", encoding="utf-8")
+
+            self._run_cli(["pkg", "build", str(project)], cwd=ROOT)
+            out = project / "build" / "artifact.axb"
+            self.assertTrue(out.exists())
+
+            vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
+            self.assertEqual(vm_out, "42\n")
+
+    def test_package_build_fails_when_manifest_invalid_json(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+
+            manifest = project / "axiom.pkg"
+            manifest.write_text("{", encoding="utf-8")
+            proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("invalid package manifest", proc.stderr)
+
     def test_package_build_requires_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
