@@ -32,6 +32,7 @@ Example manifest:
 python -m axiom pkg init /path/to/project --name demo --version 0.1.0
 python -m axiom pkg build /path/to/project
 python -m axiom pkg manifest /path/to/project
+python -m axiom pkg check /path/to/project
 python -m axiom pkg run /path/to/project
 ```
 
@@ -49,6 +50,8 @@ Options:
 - `--force` to regenerate `axiom.pkg` when it already exists.
 
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.
+
+`pkg check` validates `axiom.pkg` and compiles the manifest `main` entrypoint.
 
 `pkg run` reads `axiom.pkg`, compiles `main`, and executes it in the VM immediately.
 

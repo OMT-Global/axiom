@@ -102,6 +102,14 @@ def cmd_pkg_manifest(path: Path) -> int:
     return 0
 
 
+def cmd_pkg_check(path: Path, *, allow_host_side_effects: bool) -> int:
+    manifest = load_manifest(path)
+    entry = path.resolve() / manifest.main
+    _ = compile_file(entry, allow_host_side_effects=allow_host_side_effects)
+    print("OK", file=sys.stderr)
+    return 0
+
+
 def cmd_pkg_clean(path: Path) -> int:
     removed = clean_package(path)
     if removed:
@@ -181,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     pkg.add_parser("manifest", help="Print package manifest JSON").add_argument(
         "path", type=Path, default=Path("."), nargs="?"
     )
+    sp_check = pkg.add_parser("check", help="Check package manifest and compile main")
+    sp_check.add_argument("path", type=Path, default=Path("."), nargs="?")
+    sp_check.add_argument("--allow-host-side-effects", action="store_true")
     pkg.add_parser("clean", help="Delete package artifacts").add_argument(
         "path", type=Path, default=Path("."), nargs="?"
     )
@@ -222,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_pkg_build(args.path, allow_host_side_effects=args.allow_host_side_effects)
             if args.pkg_cmd == "manifest":
                 return cmd_pkg_manifest(args.path)
+            if args.pkg_cmd == "check":
+                return cmd_pkg_check(args.path, allow_host_side_effects=args.allow_host_side_effects)
             if args.pkg_cmd == "clean":
                 return cmd_pkg_clean(args.path)
             if args.pkg_cmd == "run":
