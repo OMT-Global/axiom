@@ -48,6 +48,14 @@ print x
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("print unknown(1)\n")
 
+    def test_compile_reserved_host_function_name(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("""
+fn host() {
+  return 1
+}
+""")
+
     def test_compile_arity_mismatch(self) -> None:
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("""
@@ -87,6 +95,10 @@ print f(1)
             self.assertEqual(vm_out.getvalue(), "42\n")
         finally:
             reset_host_builtins()
+
+    def test_compile_unknown_host_function(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("host.unknown(1)\n")
 
     def test_host_registry_duplicate_name(self) -> None:
         def noop(args: list[int], _out) -> int:

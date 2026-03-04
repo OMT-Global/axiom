@@ -16,6 +16,7 @@
 - `return <expr>`
 - `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
 - function calls: `<name>(<arg1>, ... )`
+- function names cannot be `host` (reserved for host namespace)
 - `host.<name>(...)` for host bridge calls (reserved namespace)
 - Host calls are resolved from a registry. Add custom capabilities via
   `axiom.host.register_host_builtin(name, arity, side_effecting, handler)` where
