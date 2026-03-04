@@ -300,6 +300,48 @@ class CliParityTests(unittest.TestCase):
             vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
             self.assertEqual(vm_out, "88\n")
 
+    def test_package_build_output_override_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            main = project / "src" / "main.ax"
+            main.write_text("print 9\n", encoding="utf-8")
+
+            self._run_cli(
+                [
+                    "pkg",
+                    "build",
+                    str(project),
+                    "--output",
+                    "cli/nested.axb",
+                ],
+                cwd=ROOT,
+            )
+            out = project / "dist" / "cli" / "nested.axb"
+            self.assertTrue(out.exists())
+
+            vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
+            self.assertEqual(vm_out, "9\n")
+
+    def test_package_build_rejects_absolute_output_override(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            (project / "src" / "main.ax").write_text("print 1\n", encoding="utf-8")
+
+            proc = self._run_cli(
+                [
+                    "pkg",
+                    "build",
+                    str(project),
+                    "--output",
+                    "/tmp/cli.axb",
+                ],
+                cwd=ROOT,
+                expect_code=1,
+            )
+            self.assertIn("absolute", proc.stderr.lower())
+
     def test_package_build_rejects_absolute_output_path(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)

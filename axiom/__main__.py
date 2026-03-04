@@ -90,8 +90,14 @@ def cmd_pkg_init(
     return 0
 
 
-def cmd_pkg_build(path: Path, *, allow_host_side_effects: bool) -> int:
-    out_path = build_package(path, allow_host_side_effects=allow_host_side_effects)
+def cmd_pkg_build(
+    path: Path, *, allow_host_side_effects: bool, output: str | None = None
+) -> int:
+    out_path = build_package(
+        path,
+        allow_host_side_effects=allow_host_side_effects,
+        output=output,
+    )
     print(f"wrote {out_path} ({out_path.stat().st_size} bytes)", file=sys.stderr)
     return 0
 
@@ -183,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     sp_build = pkg.add_parser("build", help="Build package bytecode")
     sp_build.add_argument("path", type=Path, default=Path("."), nargs="?")
     sp_build.add_argument("--allow-host-side-effects", action="store_true")
+    sp_build.add_argument("--output", default=None)
     sp_run = pkg.add_parser("run", help="Run package main source via manifest")
     sp_run.add_argument("path", type=Path, default=Path("."), nargs="?")
     sp_run.add_argument("--allow-host-side-effects", action="store_true")
@@ -230,7 +237,11 @@ def main(argv: list[str] | None = None) -> int:
                     force=args.force,
                 )
             if args.pkg_cmd == "build":
-                return cmd_pkg_build(args.path, allow_host_side_effects=args.allow_host_side_effects)
+                return cmd_pkg_build(
+                    args.path,
+                    allow_host_side_effects=args.allow_host_side_effects,
+                    output=args.output,
+                )
             if args.pkg_cmd == "manifest":
                 return cmd_pkg_manifest(args.path)
             if args.pkg_cmd == "check":

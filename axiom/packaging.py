@@ -181,7 +181,9 @@ def init_package(
     return manifest
 
 
-def build_package(project_root: Path, *, allow_host_side_effects: bool = False) -> Path:
+def build_package(
+    project_root: Path, *, allow_host_side_effects: bool = False, output: Optional[str] = None
+) -> Path:
     project_root = project_root.resolve()
     manifest = load_manifest(project_root)
     entry = project_root / manifest.main
@@ -189,11 +191,13 @@ def build_package(project_root: Path, *, allow_host_side_effects: bool = False) 
     out_dir = project_root / manifest.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    output = manifest.output or manifest.name
-    if output.endswith(".axb"):
-        output_name = output
+    selected_output = output if output is not None else manifest.output or manifest.name
+    validated_output = _validate_output(selected_output, manifest_path(project_root))
+
+    if validated_output.endswith(".axb"):
+        output_name = validated_output
     else:
-        output_name = f"{output}.axb"
+        output_name = f"{validated_output}.axb"
 
     out_path = out_dir / output_name
     out_path.parent.mkdir(parents=True, exist_ok=True)
