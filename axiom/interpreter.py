@@ -24,7 +24,7 @@ from .ast import (
 )
 from .errors import AxiomCompileError, AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-from .host import HOST_BUILTINS
+from .host import HOST_BUILTINS, HOST_VERSION
 
 
 @dataclass
@@ -155,7 +155,7 @@ class Interpreter:
                 f"host call {fn_name!r} is side-effecting; enable allow_host_side_effects"
             )
         if host_name == "version":
-            return 4
+            return HOST_VERSION
         if host_name == "print":
             out.write(f"{args[0]}\n")
             return 0
