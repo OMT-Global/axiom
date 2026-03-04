@@ -56,3 +56,6 @@ Host builtin indices:
 - 2 => host.read
 - 3 => host.abs
 - 4 => host.math.abs
+
+Custom host capabilities can be appended by registering via `axiom.host.register_host_builtin`.
+Host builtin indices are assigned in registry order.

@@ -25,7 +25,7 @@ from .ast import (
 )
 from .errors import AxiomCompileError, AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
-from .host import HOST_BUILTINS, HOST_VERSION
+from .host import HOST_BUILTINS, call_host_builtin
 
 
 @dataclass
@@ -157,28 +157,10 @@ class Interpreter:
             raise AxiomRuntimeError(
                 f"host call {fn_name!r} is side-effecting; enable allow_host_side_effects"
             )
-        if host_name == "version":
-            return HOST_VERSION
-        if host_name == "print":
-            out.write(f"{args[0]}\n")
-            return 0
-        if host_name == "read":
-            prompt = str(args[0])
-            try:
-                line = input(prompt)
-            except EOFError:
-                return 0
-            try:
-                return int(line.strip())
-            except ValueError as e:
-                raise AxiomRuntimeError(
-                    f"host.read expected integer input: {line!r}",
-                ) from e
-        if host_name == "abs":
-            return abs(args[0])
-        if host_name == "math.abs":
-            return abs(args[0])
-        raise AxiomRuntimeError(f"unsupported host function {fn_name!r}")
+        try:
+            return call_host_builtin(host_name, args, out)
+        except ValueError as e:
+            raise AxiomRuntimeError(str(e)) from e
 
     def _eval(self, expr: Expr, out: TextIO) -> int:
         if isinstance(expr, IntLit):
