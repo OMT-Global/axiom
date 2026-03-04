@@ -14,7 +14,6 @@
 - Functions + call frames
 - Module system
   - file-based `import` (prototype: compile-time inlining)
-- Package/build tool skeleton
 
 ## Phase 3
 - Host bridges for tool interoperability
@@ -22,3 +21,6 @@
 
 ## Phase 4
 - Built-in host capability registry for agentic extensibility
+
+## Phase 5
+- Package/build tooling skeleton (`axiom.pkg`, `axiom pkg init`, `axiom pkg build`)

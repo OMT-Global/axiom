@@ -7,6 +7,7 @@ This is a **drop-in repo skeleton** to start building a new language called **Ax
 - **Stage2**: functions + call/return and call frames in Axiom
 - **Stage3**: host-bridge calls (`host.*`) for deterministic tool interop
 - **Stage4**: host capability registry and stable host tool namespace (`host.abs`)
+- **Phase5**: package/build tooling scaffold
 
 This repo is intentionally small and test-driven. Everything is **standard-library only** (no deps).
 
@@ -24,6 +25,10 @@ python -m axiom vm /tmp/arith.axb
 
 # Run conformance tests (interpreter vs VM + expected output)
 python -m unittest discover -v
+
+# Create package scaffold and build output artifact
+python -m axiom pkg init .
+python -m axiom pkg build .
 ```
 
 ## Axiom v0 language subset
