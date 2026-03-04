@@ -130,6 +130,33 @@ class CliParityTests(unittest.TestCase):
             vm_out = self._run_cli(["vm", str(out)], cwd=ROOT).stdout
             self.assertEqual(vm_out, "12\n")
 
+    def test_package_manifest_command(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            proc = self._run_cli(["pkg", "manifest", str(project)], cwd=ROOT)
+            payload = json.loads(proc.stdout)
+            self.assertEqual(payload["name"], "demo")
+
+    def test_package_init_force_rewrites_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "first"], cwd=ROOT)
+            self._run_cli(["pkg", "init", str(project), "--name", "second", "--force"], cwd=ROOT)
+            manifest = json.loads((project / "axiom.pkg").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["name"], "second")
+
+    def test_package_clean_removes_out_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            (project / "src" / "main.ax").write_text("print 1\n", encoding="utf-8")
+
+            self._run_cli(["pkg", "build", str(project)], cwd=ROOT)
+            self.assertTrue((project / "dist").exists())
+            self._run_cli(["pkg", "clean", str(project)], cwd=ROOT)
+            self.assertFalse((project / "dist").exists())
+
     def test_package_init_requires_clean_directory(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
