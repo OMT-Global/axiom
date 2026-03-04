@@ -21,6 +21,8 @@
 
 ## Phase 4
 - Built-in host capability registry for agentic extensibility
+- Reserve host namespace for tool calls and reject dotted non-host calls
 
 ## Phase 5
 - Package/build tooling skeleton (`axiom.pkg`, `axiom pkg init`, `axiom pkg build`)
+- Package command coverage (`check`, `host` side-effect gating, CLI checks)
