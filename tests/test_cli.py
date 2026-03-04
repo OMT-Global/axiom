@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+import hashlib
 import tempfile
 import json
 import unittest
@@ -123,11 +124,17 @@ class CliParityTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], 1)
         self.assertIn("runtime_version_minor", payload)
         self.assertIn("capabilities", payload)
+        self.assertIn("capabilities_signature", payload)
         caps = payload["capabilities"]
         self.assertTrue(isinstance(caps, list))
         names = {entry["name"] for entry in caps}
         self.assertIn("version", names)
         self.assertIn("print", names)
+        self.assertIsInstance(payload["capabilities_signature"], str)
+        self.assertEqual(
+            payload["capabilities_signature"],
+            hashlib.sha256(json.dumps(caps, sort_keys=True).encode("utf-8")).hexdigest(),
+        )
 
         safe_proc = self._run_cli(["host", "describe", "--safe-only"], cwd=ROOT)
         safe_payload = json.loads(safe_proc.stdout)
@@ -135,6 +142,18 @@ class CliParityTests(unittest.TestCase):
         safe_caps = safe_payload["capabilities"]
         self.assertTrue(isinstance(safe_caps, list))
         self.assertTrue(all(not entry["side_effecting"] for entry in safe_caps))
+        self.assertNotEqual(payload["capabilities_signature"], safe_payload["capabilities_signature"])
+        self.assertEqual(
+            safe_payload["capabilities_signature"],
+            hashlib.sha256(json.dumps(safe_caps, sort_keys=True).encode("utf-8")).hexdigest(),
+        )
+        # signature must be stable across repeated invocations with same registry state
+        second_proc = self._run_cli(["host", "describe"], cwd=ROOT)
+        second_payload = json.loads(second_proc.stdout)
+        self.assertEqual(
+            second_payload["capabilities_signature"],
+            payload["capabilities_signature"],
+        )
 
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:

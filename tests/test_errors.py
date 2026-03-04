@@ -21,7 +21,7 @@ from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
 from axiom.bytecode import Op, VERSION_MINOR
-from axiom.host import register_host_builtin, reset_host_builtins, unregister_host_builtin
+from axiom.host import host_contract_metadata, register_host_builtin, reset_host_builtins, unregister_host_builtin
 
 
 class ErrorTests(unittest.TestCase):
@@ -429,6 +429,23 @@ print f(1)
         Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
         self.assertEqual(out.getvalue(), "41\n")
         fake_input.assert_called_once_with("123")
+
+    def test_host_contract_signature_tracks_capability_state(self) -> None:
+        base = host_contract_metadata()
+        base_signature = base["capabilities_signature"]
+
+        def probe(_args: list[int], _out) -> int:
+            return 7
+
+        register_host_builtin("sig_probe", 0, False, probe)
+        try:
+            with_probe = host_contract_metadata()
+            self.assertNotEqual(base_signature, with_probe["capabilities_signature"])
+            self.assertIn("capabilities_signature", with_probe)
+            self.assertEqual(with_probe["schema_version"], 1)
+            self.assertIn("sig_probe", {e["name"] for e in with_probe["capabilities"]})
+        finally:
+            reset_host_builtins()
 
 
 if __name__ == "__main__":
