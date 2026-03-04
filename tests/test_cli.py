@@ -48,6 +48,17 @@ class CliParityTests(unittest.TestCase):
         proc = self._run_cli(["check", str(path)], cwd=ROOT)
         self.assertIn("OK", proc.stderr)
 
+    def test_check_can_allow_host_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "host_print.ax"
+            src.write_text("host.print(9)\n", encoding="utf-8")
+            proc = self._run_cli(["check", str(src)], cwd=ROOT, expect_code=1)
+            self.assertIn("side-effecting", proc.stderr)
+            proc = self._run_cli(
+                ["check", str(src), "--allow-host-side-effects"], cwd=ROOT
+            )
+            self.assertIn("OK", proc.stderr)
+
     def test_host_bridge_side_effects_require_flag(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             src = Path(td) / "host_print.ax"
