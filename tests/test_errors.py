@@ -1,5 +1,6 @@
 import unittest
 import io
+from unittest.mock import patch
 
 from axiom.api import compile_to_bytecode
 from axiom.api import parse_program
@@ -92,6 +93,22 @@ print f(1)
         out = io.StringIO()
         Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
         self.assertEqual(out.getvalue(), "1\n")
+
+    @patch("builtins.input", return_value="41")
+    def test_runtime_host_read_with_allow(self, fake_input) -> None:
+        program = parse_program("print host.read(123)\n")
+        out = io.StringIO()
+        Interpreter(allow_host_side_effects=True).run(program, out)
+        self.assertEqual(out.getvalue(), "41\n")
+        fake_input.assert_called_once_with("123")
+
+    @patch("builtins.input", return_value="41")
+    def test_runtime_host_read_with_allow_vm(self, fake_input) -> None:
+        bc = compile_to_bytecode("print host.read(123)\n", allow_host_side_effects=True)
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
+        self.assertEqual(out.getvalue(), "41\n")
+        fake_input.assert_called_once_with("123")
 
 
 if __name__ == "__main__":

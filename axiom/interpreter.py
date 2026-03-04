@@ -166,8 +166,9 @@ class Interpreter:
             out.write(f"{args[0]}\n")
             return 0
         if host_name == "read":
+            prompt = str(args[0])
             try:
-                line = input()
+                line = input(prompt)
             except EOFError:
                 return 0
             try:
