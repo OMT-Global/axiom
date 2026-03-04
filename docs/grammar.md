@@ -7,6 +7,7 @@ program        := stmt* EOF ;
 
 stmt           := let_stmt
                | assign_stmt
+               | import_stmt
                | fn_stmt
                | return_stmt
                | print_stmt
@@ -15,6 +16,7 @@ stmt           := let_stmt
                | block
                | expr_stmt ;
 
+import_stmt    := "import" STRING terminator ;
 fn_stmt        := "fn" IDENT "(" params? ")" block ;
 params         := IDENT ("," IDENT)* ;
 return_stmt    := "return" expr terminator ;
@@ -37,6 +39,7 @@ term           := factor (("+" | "-") factor)* ;
 factor         := unary (("*" | "/") unary)* ;
 unary          := "-" unary | primary ;
 primary        := INT | IDENT | call_expr | "(" expr ")" ;
+STRING         := double-quoted UTF-8 string ;
 ```
 
 Comments start with `#` and run to end-of-line.

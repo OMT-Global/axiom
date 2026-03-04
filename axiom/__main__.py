@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .api import parse_program, compile_to_bytecode
+from .api import parse_file, compile_file
 from .bytecode import Bytecode, Op
 from .interpreter import Interpreter
 from .vm import Vm
@@ -12,15 +12,13 @@ from .errors import AxiomError
 
 
 def cmd_interp(path: Path, *, allow_host_side_effects: bool) -> int:
-    src = path.read_text(encoding="utf-8")
-    program = parse_program(src)
+    program = parse_file(path)
     Interpreter(allow_host_side_effects=allow_host_side_effects).run(program, sys.stdout)
     return 0
 
 
 def cmd_compile(path: Path, out_path: Path, *, allow_host_side_effects: bool) -> int:
-    src = path.read_text(encoding="utf-8")
-    bc = compile_to_bytecode(src, allow_host_side_effects=allow_host_side_effects)
+    bc = compile_file(path, allow_host_side_effects=allow_host_side_effects)
     out_path.write_bytes(bc.encode())
     print(f"wrote {out_path} ({out_path.stat().st_size} bytes)", file=sys.stderr)
     return 0
@@ -35,8 +33,7 @@ def cmd_vm(path: Path, *, allow_host_side_effects: bool) -> int:
 
 
 def cmd_run(path: Path, *, allow_host_side_effects: bool) -> int:
-    src = path.read_text(encoding="utf-8")
-    bc = compile_to_bytecode(src, allow_host_side_effects=allow_host_side_effects)
+    bc = compile_file(path, allow_host_side_effects=allow_host_side_effects)
     Vm(locals_count=bc.locals_count, allow_host_side_effects=allow_host_side_effects).run(
         bc, sys.stdout
     )
@@ -56,8 +53,7 @@ def cmd_disasm(path: Path) -> int:
 
 
 def cmd_check(path: Path, *, allow_host_side_effects: bool) -> int:
-    src = path.read_text(encoding="utf-8")
-    _ = compile_to_bytecode(src, allow_host_side_effects=allow_host_side_effects)
+    _ = compile_file(path, allow_host_side_effects=allow_host_side_effects)
     print("OK", file=sys.stderr)
     return 0
 

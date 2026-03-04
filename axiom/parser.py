@@ -9,6 +9,7 @@ from .ast import (
     PrintStmt,
     ReturnStmt,
     FunctionDefStmt,
+    ImportStmt,
     ExprStmt,
     BlockStmt,
     IfStmt,
@@ -62,6 +63,7 @@ class Parser:
             return str(t.value)
         if t.kind in {
             TokenKind.LET,
+            TokenKind.IMPORT,
             TokenKind.FN,
             TokenKind.PRINT,
             TokenKind.RETURN,
@@ -85,6 +87,8 @@ class Parser:
         k = self._peek().kind
         if k == TokenKind.LET:
             return self._parse_let()
+        if k == TokenKind.IMPORT:
+            return self._parse_import()
         if k == TokenKind.FN:
             return self._parse_function_def()
         if k == TokenKind.PRINT:
@@ -172,6 +176,14 @@ class Parser:
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
         return LetStmt(name=str(ident.value), expr=expr, span=Span(start, end))
+
+    def _parse_import(self) -> ImportStmt:
+        start = self._eat(TokenKind.IMPORT).span.start
+        path = self._eat(TokenKind.STRING)
+        if not isinstance(path.value, str):
+            raise AxiomParseError("expected import path string", path.span)
+        end = self._parse_terminator(default_end=path.span.end)
+        return ImportStmt(path=path.value, span=Span(start, end))
 
     def _parse_assign(self) -> AssignStmt:
         ident = self._eat(TokenKind.IDENT)

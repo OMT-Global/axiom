@@ -54,6 +54,12 @@ class ExprStmt:
 
 
 @dataclass(frozen=True)
+class ImportStmt:
+    path: str
+    span: Span
+
+
+@dataclass(frozen=True)
 class BlockStmt:
     stmts: List["Stmt"]
     span: Span
@@ -77,6 +83,7 @@ class WhileStmt:
 Stmt = Union[
     LetStmt,
     AssignStmt,
+    ImportStmt,
     PrintStmt,
     ReturnStmt,
     ExprStmt,

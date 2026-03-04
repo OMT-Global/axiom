@@ -14,6 +14,7 @@
 - `while <expr> { ... }`
 - `fn <name>(<params>) { ... }`
 - `return <expr>`
+- `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
 - function calls: `<name>(<arg1>, ... )`
 - `host.<name>(...)` for host bridge calls (reserved namespace)
 

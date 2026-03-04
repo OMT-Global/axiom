@@ -6,6 +6,7 @@ from typing import Dict, List
 from .ast import (
     Program,
     LetStmt,
+    ImportStmt,
     AssignStmt,
     PrintStmt,
     ExprStmt,
@@ -167,6 +168,11 @@ class Compiler:
             self._compile_expr(stmt.expr, out)
             out.append(Instr(Op.POP))
             return
+        if isinstance(stmt, ImportStmt):
+            raise AxiomCompileError(
+                "import statements are only supported in file-based compilation",
+                stmt.span,
+            )
         if isinstance(stmt, BlockStmt):
             self.scope_stack.append({})
             try:

@@ -6,6 +6,7 @@ from typing import Dict, List, TextIO, Tuple
 from .ast import (
     Program,
     LetStmt,
+    ImportStmt,
     AssignStmt,
     PrintStmt,
     ReturnStmt,
@@ -77,6 +78,8 @@ class Interpreter:
         if isinstance(stmt, ExprStmt):
             self._eval(stmt.expr, out)
             return
+        if isinstance(stmt, ImportStmt):
+            raise AxiomRuntimeError("import statements are only supported in file-based parsing")
         if isinstance(stmt, BlockStmt):
             self.scopes.append({})
             try:

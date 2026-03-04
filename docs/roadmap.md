@@ -13,6 +13,7 @@
 ## Phase 2
 - Functions + call frames
 - Module system
+  - file-based `import` (prototype: compile-time inlining)
 - Package/build tool skeleton
 
 ## Phase 3
