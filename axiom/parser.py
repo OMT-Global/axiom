@@ -278,7 +278,7 @@ class Parser:
                 source=self.source,
                 path=self.source_path,
             )
-        if default_alias == "host":
+        if default_alias == "host" or default_alias.startswith("host."):
             raise AxiomParseError(
                 "import namespace cannot be 'host'",
                 path.span,
@@ -290,7 +290,7 @@ class Parser:
         if self._peek().kind == TokenKind.AS:
             self._bump()
             alias = self._eat_name_token()
-            if alias == "host":
+            if alias == "host" or alias.startswith("host."):
                 raise AxiomParseError(
                     "import namespace cannot be 'host'",
                     path.span,
