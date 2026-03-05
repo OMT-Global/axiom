@@ -280,10 +280,13 @@ print f(1)
                 compile_file(root.joinpath("main.ax"))
 
     def test_compile_import_alias_host_reserved(self) -> None:
-        with self.assertRaises(AxiomParseError):
+        with self.assertRaises(AxiomParseError) as cm:
             parse_program('import "host/foo"\n')
-        with self.assertRaises(AxiomParseError):
+        self.assertIn("import namespace cannot be 'host'", str(cm.exception))
+
+        with self.assertRaises(AxiomParseError) as cm:
             compile_to_bytecode('import "math_module" as host.tools\n')
+        self.assertIn("import namespace cannot be 'host'", str(cm.exception))
 
     def test_host_registry_duplicate_name(self) -> None:
         def noop(args: list[int], _out) -> int:

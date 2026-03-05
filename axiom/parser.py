@@ -97,6 +97,13 @@ class Parser:
             path=self.source_path,
         )
 
+    def _eat_qualified_name(self) -> str:
+        parts = [self._eat_name_token()]
+        while self._peek().kind == TokenKind.DOT:
+            self._bump()
+            parts.append(self._eat_name_token())
+        return ".".join(parts)
+
     def parse_program(self) -> Program:
         stmts = []
         self._eat_newlines()
@@ -289,7 +296,7 @@ class Parser:
         alias = default_alias
         if self._peek().kind == TokenKind.AS:
             self._bump()
-            alias = self._eat_name_token()
+            alias = self._eat_qualified_name()
             if alias == "host" or alias.startswith("host."):
                 raise AxiomParseError(
                     "import namespace cannot be 'host'",
