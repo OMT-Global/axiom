@@ -1,0 +1,15 @@
+fn sum_to_n() {
+  let total = 0
+
+  fn walk(n) {
+    if n <= 0 {
+      return total
+    }
+    total = total + n
+    return walk(n - 1)
+  }
+
+  return walk(4)
+}
+
+print sum_to_n()

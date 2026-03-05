@@ -1,0 +1,11 @@
+fn outer_shadow() {
+  let value = 1
+  fn inner() {
+    let value = 100
+    value = value + 1
+    return value
+  }
+  return value + inner()
+}
+
+print outer_shadow()

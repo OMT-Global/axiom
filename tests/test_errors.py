@@ -131,6 +131,57 @@ fn f(a, b) {
 print f(1)
 """)
 
+    def test_compile_closure_undefined_capture(self) -> None:
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode("""
+fn outer() {
+  fn inner() {
+    return missing + 1
+  }
+  return inner()
+}
+""")
+
+    def test_runtime_closure_capture_reads_writes(self) -> None:
+        program = parse_program(
+            """
+fn counter() {
+  let value = 0
+  fn inc() {
+    value = value + 1
+    return value
+  }
+  inc()
+  inc()
+  return value
+}
+
+print counter()
+"""
+        )
+        out = io.StringIO()
+        Interpreter().run(program, out)
+        self.assertEqual(out.getvalue(), "2\n")
+        bc = compile_to_bytecode(
+            """
+fn counter() {
+  let value = 0
+  fn inc() {
+    value = value + 1
+    return value
+  }
+  inc()
+  inc()
+  return value
+}
+
+print counter()
+"""
+        )
+        vm_out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, vm_out)
+        self.assertEqual(vm_out.getvalue(), "2\n")
+
     def test_compile_host_side_effect_blocked(self) -> None:
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.print(1)\n")

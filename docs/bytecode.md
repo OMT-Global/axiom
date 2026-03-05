@@ -1,4 +1,4 @@
-# Axiom bytecode format (AXBC v0.6)
+# Axiom bytecode format (AXBC v0.7)
 
 This project uses a tiny custom binary format (no deps) to keep the bootstrap surface small.
 
@@ -8,7 +8,7 @@ All integers are little-endian.
 
 - 4 bytes: magic `AXBC`
 - u16: version_major (currently 0)
-- u16: version_minor (currently 6)
+- u16: version_minor (currently 7)
 - u32: locals_count
 - u32: function_count (K)
 - K times:
@@ -16,6 +16,11 @@ All integers are little-endian.
   - u32: entry_ip (instruction index)
   - u32: arity
   - u32: locals_count
+  - if `version_minor >= 7`:
+    - u32: upvalue_count
+    - upvalue_count entries:
+      - u8: 1 if upvalue is from a local slot, 0 if from an outer upvalue
+      - u32: upvalue index (local slot or outer upvalue slot)
 - u32: string_table_count (N)
 - N times:
   - u32: byte_len
@@ -48,10 +53,22 @@ All integers are little-endian.
 - 0x13 CALL            (u32 function index)
 - 0x14 RET
 - 0x15 HOST_CALL       (u32 host name index)
+- 0x16 LOAD_UPVALUE    (u32 upvalue index)
+- 0x17 STORE_UPVALUE   (u32 upvalue index)
+- 0x18 CLOSE_UPVALUE
+
+In `v0.7+`, function metadata may include upvalue descriptors for lexical
+captures. During call setup, captured upvalues are bound against the current frame.
 
 In `v0.6+`, the `HOST_CALL` operand is a string table index for the
 host name (for example `abs` in `host.abs`), resolved at runtime through
 `axiom.host` registry.
+
+For closures:
+
+- `LOAD_UPVALUE` reads from an upvalue cell.
+- `STORE_UPVALUE` writes to an upvalue cell.
+- `CLOSE_UPVALUE` is reserved for future closure lifecycle support; it is currently a no-op.
 
 Builtins available at runtime are still assigned by registry order for
 API visibility and host APIs, but bytecode stores names so call-site stability

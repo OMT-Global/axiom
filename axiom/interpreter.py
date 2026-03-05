@@ -194,7 +194,7 @@ class Interpreter:
                 raise AxiomRuntimeError(f"reserved identifier {name!r}")
             param_scope[name] = args[index]
 
-        self.scopes = [param_scope, self.global_scope]
+        self.scopes.append(param_scope)
         self.function_scope_stack = self.function_scopes.get(
             fn_name, [param_scope]
         )

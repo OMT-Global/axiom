@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, TextIO
+from typing import Dict, List, Optional, TextIO
 
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
@@ -10,18 +10,29 @@ from .host import HOST_BUILTINS, HOST_BUILTIN_BY_ID, call_host_builtin, call_hos
 
 
 @dataclass
+class _Cell:
+    value: int
+
+
+@dataclass
 class _Frame:
-    locals: List[int]
+    locals: List[_Cell]
+    upvalues: List[_Cell]
     ret_ip: int
+    function_index: Optional[int]
 
 
 @dataclass
 class Vm:
     locals_count: int
     stack: List[int] = field(default_factory=list)
-    locals: List[int] = field(default_factory=list)
     functions: Optional[List[FunctionMeta]] = None
     frames: List[_Frame] = field(default_factory=list)
+    _locals: List[_Cell] = field(default_factory=list)
+    _upvalues: List[_Cell] = field(default_factory=list)
+    _current_function: Optional[int] = None
+    _strings: List[str] = field(default_factory=list)
+    _function_name_to_index: Dict[str, int] = field(default_factory=dict)
     ip: int = 0
     allow_host_side_effects: bool = False
 
@@ -33,11 +44,17 @@ class Vm:
         if self.functions is None:
             self.functions = bytecode.functions
 
-        self.locals = [0] * bytecode.locals_count
+        self._locals = [_Cell(0) for _ in range(bytecode.locals_count)]
+        self._upvalues = []
+        self._current_function = None
+        self._strings = bytecode.strings
         self.stack = []
         self.frames = []
-        current_locals = self.locals
-
+        self._function_name_to_index = {}
+        if self.functions is not None:
+            self._function_name_to_index = {
+                self._strings[f.name_index]: i for i, f in enumerate(self.functions)
+            }
         self.ip = 0
         ins = bytecode.instructions
         while self.ip < len(ins):
@@ -47,17 +64,21 @@ class Vm:
             if i.op == Op.CONST_I64:
                 self.stack.append(int(i.arg))
             elif i.op == Op.LOAD:
-                slot = int(i.arg)
-                if slot >= len(current_locals):
-                    raise AxiomRuntimeError(f"bad LOAD slot {slot}")
-                self.stack.append(current_locals[slot])
+                slot = self._to_slot(i.arg)
+                self.stack.append(self._current_slot_value(slot, in_upvalue=False))
             elif i.op == Op.STORE:
-                slot = int(i.arg)
-                if slot >= len(current_locals):
-                    raise AxiomRuntimeError(f"bad STORE slot {slot}")
+                slot = self._to_slot(i.arg)
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on STORE")
-                current_locals[slot] = self.stack.pop()
+                self._set_slot_value(slot, self.stack.pop(), in_upvalue=False)
+            elif i.op == Op.LOAD_UPVALUE:
+                slot = self._to_slot(i.arg)
+                self.stack.append(self._current_slot_value(slot, in_upvalue=True))
+            elif i.op == Op.STORE_UPVALUE:
+                slot = self._to_slot(i.arg)
+                if not self.stack:
+                    raise AxiomRuntimeError("stack underflow on STORE_UPVALUE")
+                self._set_slot_value(slot, self.stack.pop(), in_upvalue=True)
             elif i.op in (Op.ADD, Op.SUB, Op.MUL, Op.DIV):
                 b, a = self._pop2()
                 if i.op == Op.ADD:
@@ -98,12 +119,23 @@ class Vm:
                 args = [self.stack.pop() for _ in range(fn.arity)]
                 args.reverse()
 
-                new_locals = [0] * fn.locals_count
+                new_locals = [_Cell(0) for _ in range(fn.locals_count)]
                 for index, value in enumerate(args):
-                    new_locals[index] = value
+                    new_locals[index].value = value
 
-                self.frames.append(_Frame(locals=current_locals, ret_ip=self.ip))
-                current_locals = new_locals
+                new_upvalues = self._build_call_upvalues(call_idx, fn)
+
+                self.frames.append(
+                    _Frame(
+                        locals=self._locals,
+                        upvalues=self._upvalues,
+                        ret_ip=self.ip,
+                        function_index=self._current_function,
+                    )
+                )
+                self._locals = new_locals
+                self._upvalues = new_upvalues
+                self._current_function = call_idx
                 self.ip = fn.entry
             elif i.op == Op.HOST_CALL:
                 if i.arg is None:
@@ -149,7 +181,9 @@ class Vm:
                     raise AxiomRuntimeError("return outside function")
                 result = self.stack.pop()
                 frame = self.frames.pop()
-                current_locals = frame.locals
+                self._locals = frame.locals
+                self._upvalues = frame.upvalues
+                self._current_function = frame.function_index
                 self.ip = frame.ret_ip
                 self.stack.append(result)
             elif i.op == Op.JMP:
@@ -170,6 +204,8 @@ class Vm:
                 self.stack.pop()
             elif i.op == Op.HALT:
                 return
+            elif i.op == Op.CLOSE_UPVALUE:
+                continue
             else:
                 raise AxiomRuntimeError(f"unknown opcode {i.op}")
 
@@ -195,3 +231,75 @@ class Vm:
             return call_host_builtin(name, args, out)
         except ValueError as e:
             raise AxiomRuntimeError(str(e)) from e
+
+    def _current_slot_value(self, slot: int, *, in_upvalue: bool) -> int:
+        if in_upvalue:
+            if slot >= len(self._upvalues):
+                raise AxiomRuntimeError(f"bad UPVALUE slot {slot}")
+            return self._upvalues[slot].value
+        if slot >= len(self._locals):
+            raise AxiomRuntimeError(f"bad LOAD slot {slot}")
+        return self._locals[slot].value
+
+    def _set_slot_value(self, slot: int, value: int, *, in_upvalue: bool) -> None:
+        if in_upvalue:
+            if slot >= len(self._upvalues):
+                raise AxiomRuntimeError(f"bad UPVALUE slot {slot}")
+            self._upvalues[slot].value = value
+            return
+        if slot >= len(self._locals):
+            raise AxiomRuntimeError(f"bad STORE slot {slot}")
+        self._locals[slot].value = value
+
+    def _to_slot(self, raw_slot: Optional[int]) -> int:
+        if raw_slot is None:
+            raise AxiomRuntimeError("missing slot")
+        return int(raw_slot)
+
+    def _build_call_upvalues(self, fn_index: int, fn: FunctionMeta) -> List[_Cell]:
+        if not fn.upvalues:
+            return []
+        parent_fn_index = self._parent_function_index(fn_index)
+        parent_locals, parent_upvalues = self._find_frame_context(parent_fn_index)
+        upvalues: List[_Cell] = []
+        for upvalue in fn.upvalues:
+            if upvalue.from_local:
+                if upvalue.index >= len(parent_locals):
+                    raise AxiomRuntimeError(f"bad function upvalue slot {upvalue.index}")
+                upvalues.append(parent_locals[upvalue.index])
+            else:
+                if upvalue.index >= len(parent_upvalues):
+                    raise AxiomRuntimeError(f"bad function upvalue index {upvalue.index}")
+                upvalues.append(parent_upvalues[upvalue.index])
+        return upvalues
+
+    def _find_frame_context(
+        self, function_index: Optional[int]
+    ) -> tuple[List[_Cell], List[_Cell]]:
+        if function_index is None:
+            return (self._locals, self._upvalues)
+        if self._current_function == function_index:
+            return (self._locals, self._upvalues)
+        for frame in reversed(self.frames):
+            if frame.function_index == function_index:
+                return (frame.locals, frame.upvalues)
+        raise AxiomRuntimeError(
+            f"closure parent frame {function_index} not found during call"
+        )
+
+    def _parent_function_index(self, fn_index: int) -> Optional[int]:
+        if self.functions is None:
+            return None
+        if fn_index < 0 or fn_index >= len(self.functions):
+            raise AxiomRuntimeError(f"bad function index {fn_index}")
+        fn_name_index = self.functions[fn_index].name_index
+        if fn_name_index < 0 or fn_name_index >= len(self._strings):
+            raise AxiomRuntimeError(f"bad function name index {fn_name_index}")
+        qualified_name = self._strings[fn_name_index]
+        if "." not in qualified_name:
+            return None
+        parent_name = qualified_name.rsplit(".", 1)[0]
+        parent_index = self._function_name_to_index.get(parent_name)
+        if parent_index is None:
+            raise AxiomRuntimeError(f"bad parent function {parent_name!r} for {qualified_name!r}")
+        return parent_index
