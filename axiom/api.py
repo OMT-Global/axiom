@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Set
+from typing import Iterable, List, Optional, Sequence, Set
 
 from .lexer import Lexer
 from .parser import Parser
@@ -30,8 +30,13 @@ from .bytecode import Bytecode
 from .errors import AxiomCompileError, Span
 
 
-def parse_file(path: Path) -> Program:
-    return _load_program_file(Path(path).resolve(), set(), set())
+def parse_file(
+    path: Path, module_search_paths: Optional[Sequence[Path]] = None
+) -> Program:
+    normalized_search_paths = _normalize_module_search_paths(module_search_paths)
+    return _load_program_file(
+        Path(path).resolve(), set(), set(), module_search_paths=normalized_search_paths
+    )
 
 
 def parse_program(src: str, path: Path | str | None = None) -> Program:
@@ -61,11 +66,14 @@ def compile_file(
     *,
     allow_host_side_effects: bool = False,
     allowed_host_calls: Optional[Set[str]] = None,
+    module_search_paths: Optional[Sequence[Path]] = None,
 ) -> Bytecode:
     return Compiler(
         allow_host_side_effects=allow_host_side_effects,
         allowed_host_calls=allowed_host_calls,
-    ).compile(parse_file(path))
+    ).compile(
+        parse_file(path, module_search_paths=module_search_paths)
+    )
 
 
 def _load_program_file(
@@ -76,6 +84,7 @@ def _load_program_file(
     import_source: Optional[str] = None,
     import_span: Optional[Span] = None,
     importer_path: Optional[Path] = None,
+    module_search_paths: Optional[Sequence[Path]] = None,
 ) -> Program:
     if path in seen:
         return Program(stmts=[])
@@ -108,7 +117,9 @@ def _load_program_file(
     for stmt in program.stmts:
         if isinstance(stmt, ImportStmt):
             try:
-                import_path = _resolve_import_path(stmt.path, path)
+                import_path = _resolve_import_path(
+                    stmt.path, path, module_search_paths=module_search_paths
+                )
             except AxiomCompileError as e:
                 raise AxiomCompileError(
                     str(e),
@@ -131,6 +142,7 @@ def _load_program_file(
                 import_source=src,
                 import_span=stmt.span,
                 importer_path=path,
+                module_search_paths=module_search_paths,
             )
             _validate_module_file(imported, import_path, source=import_source)
             stmts.extend(_namespace_module_program(imported, stmt.alias).stmts)
@@ -142,7 +154,9 @@ def _load_program_file(
     return Program(stmts=stmts)
 
 
-def _resolve_import_path(raw: str, base_path: Path) -> Path:
+def _resolve_import_path(
+    raw: str, base_path: Path, module_search_paths: Optional[Sequence[Path]] = None
+) -> Path:
     candidate = Path(raw)
     if candidate.is_absolute():
         raise AxiomCompileError(f"absolute import paths are not allowed: {raw!r}")
@@ -153,9 +167,26 @@ def _resolve_import_path(raw: str, base_path: Path) -> Path:
     if candidate.suffix not in (".ax", ".AX"):
         # preserve prior behavior for module names that may include dots
         candidate = Path(str(candidate) + ".ax")
-    if not candidate.is_absolute():
-        candidate = base_path.parent / candidate
-    return candidate
+
+    search_paths = [base_path.parent]
+    search_paths.extend(module_search_paths or [])
+
+    for root in search_paths:
+        candidate_path = root / candidate
+        if candidate_path.exists():
+            return candidate_path
+    raise AxiomCompileError(f"cannot resolve import file {candidate}")
+
+
+def _normalize_module_search_paths(
+    paths: Optional[Iterable[Path]] = None,
+) -> Optional[Sequence[Path]]:
+    if paths is None:
+        return None
+    normalized: List[Path] = []
+    for item in paths:
+        normalized.append(item)
+    return normalized
 
 
 def _namespace_module_program(program: Program, module_alias: str) -> Program:

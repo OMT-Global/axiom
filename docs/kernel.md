@@ -1,4 +1,4 @@
-# Axiom kernel (v0.6)
+# Axiom kernel (v0.7)
 
 ## Values
 - integers only (Python `int` in the seed implementation)
@@ -14,6 +14,7 @@
 - `while <expr> { ... }`
 - `fn <name>(<params>) { ... }`
 - `return <expr>`
+- nested functions capture outer bindings by reference (lexical closures)
 - `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
   - Import paths must be relative and must not use parent traversal (`..`).
   - A single file may import each module path at most once.
@@ -44,7 +45,7 @@
 - lexical scopes resolve from innermost to outermost
 - all variables must be defined before use
 - integer division truncates toward zero
-- functions use explicit call frames with locals + return address
+- functions use explicit call frames with locals + return address + captured upvalues
 - every function returns an `int` (implicit `0` if no explicit return is reached)
 - `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
 - non-side-effecting host calls can be used in deterministic tool pipelines without flags

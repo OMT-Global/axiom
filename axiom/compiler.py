@@ -23,9 +23,15 @@ from .ast import (
     Binary,
     BinOp,
 )
-from .bytecode import Bytecode, FunctionMeta, Instr, Op
+from .bytecode import Bytecode, FunctionMeta, ModuleMeta, Instr, Op, Upvalue
 from .errors import AxiomCompileError
 from .host import HOST_BUILTINS
+
+
+@dataclass(frozen=True)
+class BindingRef:
+    from_local: bool
+    index: int
 
 
 @dataclass
@@ -37,12 +43,18 @@ class Compiler:
     function_arities: Dict[str, int] = field(default_factory=dict)
     function_defs: Dict[str, FunctionDefStmt] = field(default_factory=dict)
     function_decl_order: List[str] = field(default_factory=list)
-    functions: List[FunctionMeta] = field(default_factory=list)
+    function_metas: Dict[str, FunctionMeta] = field(default_factory=dict)
     function_locals: Dict[str, int] = field(default_factory=dict)
+    function_upvalues: Dict[str, List[Upvalue]] = field(default_factory=dict)
+    function_upvalue_indices: Dict[str, Dict[str, int]] = field(default_factory=dict)
     function_scopes: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
     function_scope_stack: List[Dict[str, str]] = field(default_factory=lambda: [{}])
+    compiled_functions: Set[str] = field(default_factory=set)
     allow_host_side_effects: bool = False
     allowed_host_calls: Optional[Set[str]] = None
+    _parent_bindings: Dict[str, BindingRef] = field(default_factory=dict)
+    _current_upvalue_map: Dict[str, int] = field(default_factory=dict)
+    _current_upvalues: List[Upvalue] = field(default_factory=list)
     RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
     RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
 
@@ -54,38 +66,60 @@ class Compiler:
         self.function_arities = {}
         self.function_defs = {}
         self.function_decl_order = []
-        self.functions = []
+        self.function_metas = {}
         self.function_locals = {}
+        self.function_upvalues = {}
+        self.function_upvalue_indices = {}
         self.function_scopes = {}
         self.function_scope_stack = [{}]
+        self.compiled_functions = set()
+        self._parent_bindings = {}
+        self._current_upvalue_map = {}
+        self._current_upvalues = []
 
         global_scope = self._collect_functions(program.stmts, [], [])
         self.function_scope_stack = [global_scope]
 
         out: List[Instr] = []
         for stmt in program.stmts:
-            if isinstance(stmt, FunctionDefStmt):
-                continue
             self._compile_stmt(stmt, out, in_function=False, in_toplevel=True)
         out.append(Instr(Op.HALT))
 
         for fn_name in self.function_decl_order:
-            entry = len(out)
-            self._compile_function(self.function_defs[fn_name], out, fn_name)
-            self.functions.append(
-                FunctionMeta(
-                    name_index=self._intern(fn_name),
-                    entry=entry,
-                    arity=self.function_arities[fn_name],
-                    locals_count=self.function_locals[fn_name],
+            if fn_name not in self.compiled_functions:
+                raise AxiomCompileError(f"function {fn_name!r} was not compiled")
+
+        ordered_functions: List[FunctionMeta] = []
+        for fn_name in self.function_decl_order:
+            meta = self.function_metas.get(fn_name)
+            if meta is None:
+                raise AxiomCompileError(
+                    f"internal compiler failure: missing function {fn_name!r}"
                 )
+            ordered_functions.append(meta)
+
+        module_map: Dict[str, List[int]] = {}
+        for index, function_meta in enumerate(ordered_functions):
+            function_name = self.strings[function_meta.name_index]
+            if "." in function_name:
+                namespace = function_name.rsplit(".", 1)[0]
+                if namespace:
+                    module_map.setdefault(namespace, []).append(index)
+
+        module_metas = [
+            ModuleMeta(
+                namespace_index=self._intern(namespace),
+                function_indices=indices,
             )
+            for namespace, indices in sorted(module_map.items())
+        ]
 
         return Bytecode(
             strings=list(self.strings),
             instructions=out,
             locals_count=self.next_slot,
-            functions=self.functions,
+            functions=ordered_functions,
+            modules=module_metas,
         )
 
     def _qualify(self, parts: List[str]) -> str:
@@ -136,15 +170,33 @@ class Compiler:
         return local_scope
 
     def _compile_function(
-        self, fn: FunctionDefStmt, out: List[Instr], fn_name: str
+        self,
+        fn: FunctionDefStmt,
+        out: List[Instr],
+        fn_name: str,
+        parent_bindings: Dict[str, BindingRef],
     ) -> None:
-        locals_count_before = self.next_slot
-        scope_stack_before = self.scope_stack
-        function_scope_stack_before = self.function_scope_stack
+        if fn_name in self.compiled_functions:
+            return
+        self.compiled_functions.add(fn_name)
+
+        saved_scope_stack = self.scope_stack
+        saved_next_slot = self.next_slot
+        saved_function_scope_stack = self.function_scope_stack
+        saved_parent_bindings = self._parent_bindings
+        saved_upvalue_map = self._current_upvalue_map
+        saved_upvalues = self._current_upvalues
 
         self.scope_stack = [{}]
         self.next_slot = 0
         self.function_scope_stack = self.function_scopes.get(fn_name, [self.scope_stack[-1]])
+        self._current_upvalues = []
+        self._current_upvalue_map = {}
+        self._parent_bindings = {}
+
+        for name, source in parent_bindings.items():
+            up_idx = self._ensure_upvalue(name, source)
+            self._parent_bindings[name] = BindingRef(False, up_idx)
 
         for p in fn.params:
             self._slot_for_param(p, fn.span)
@@ -158,10 +210,22 @@ class Compiler:
 
         function_locals = self.next_slot
         self.function_locals[fn_name] = function_locals
+        self.function_upvalues[fn_name] = list(self._current_upvalues)
+        self.function_upvalue_indices[fn_name] = dict(self._current_upvalue_map)
+        self.function_metas[fn_name] = FunctionMeta(
+            name_index=self._intern(fn_name),
+            entry=function_start,
+            arity=self.function_arities[fn_name],
+            locals_count=function_locals,
+            upvalues=list(self._current_upvalues),
+        )
 
-        self.scope_stack = scope_stack_before
-        self.next_slot = locals_count_before
-        self.function_scope_stack = function_scope_stack_before
+        self.scope_stack = saved_scope_stack
+        self.next_slot = saved_next_slot
+        self.function_scope_stack = saved_function_scope_stack
+        self._parent_bindings = saved_parent_bindings
+        self._current_upvalue_map = saved_upvalue_map
+        self._current_upvalues = saved_upvalues
 
     def _intern(self, s: str) -> int:
         try:
@@ -170,11 +234,32 @@ class Compiler:
             self.strings.append(s)
             return len(self.strings) - 1
 
-    def _resolve_slot(self, name: str, span) -> int:
+    def _ensure_upvalue(self, name: str, source: BindingRef) -> int:
+        existing = self._current_upvalue_map.get(name)
+        if existing is not None:
+            return existing
+        index = len(self._current_upvalues)
+        self._current_upvalues.append(
+            Upvalue(from_local=source.from_local, index=source.index)
+        )
+        self._current_upvalue_map[name] = index
+        return index
+
+    def _visible_bindings(self) -> Dict[str, BindingRef]:
+        bindings = dict(self._parent_bindings)
+        for scope in self.scope_stack:
+            for name, slot in scope.items():
+                bindings[name] = BindingRef(True, slot)
+        return bindings
+
+    def _resolve_var(self, name: str, span) -> tuple[int, bool]:
         for scope in reversed(self.scope_stack):
             if name in scope:
-                return scope[name]
-        raise AxiomCompileError(f"undefined variable {name!r}", span)
+                return scope[name], True
+        source = self._parent_bindings.get(name)
+        if source is None:
+            raise AxiomCompileError(f"undefined variable {name!r}", span)
+        return source.index, False
 
     def _slot_for_let(self, name: str, span) -> int:
         if name in self.RESERVED_IDENTIFIER_NAMES:
@@ -206,7 +291,8 @@ class Compiler:
             return
         if isinstance(stmt, AssignStmt):
             self._compile_expr(stmt.expr, out)
-            out.append(Instr(Op.STORE, self._resolve_slot(stmt.name, stmt.span)))
+            slot, is_local = self._resolve_var(stmt.name, stmt.span)
+            out.append(Instr(Op.STORE if is_local else Op.STORE_UPVALUE, slot))
             return
         if isinstance(stmt, ReturnStmt):
             if not in_function:
@@ -236,6 +322,16 @@ class Compiler:
                 self.scope_stack.pop()
             return
         if isinstance(stmt, FunctionDefStmt):
+            skip_idx = len(out)
+            out.append(Instr(Op.JMP, 0))
+            fn_name = self._resolve_function(stmt.name, stmt.span)
+            self._compile_function(
+                self.function_defs[fn_name],
+                out,
+                fn_name,
+                self._visible_bindings(),
+            )
+            out[skip_idx] = Instr(Op.JMP, len(out))
             return
         if isinstance(stmt, IfStmt):
             self._compile_expr(stmt.cond, out)
@@ -267,7 +363,8 @@ class Compiler:
             out.append(Instr(Op.CONST_I64, expr.value))
             return
         if isinstance(expr, VarRef):
-            out.append(Instr(Op.LOAD, self._resolve_slot(expr.name, expr.span)))
+            slot, is_local = self._resolve_var(expr.name, expr.span)
+            out.append(Instr(Op.LOAD if is_local else Op.LOAD_UPVALUE, slot))
             return
         if isinstance(expr, CallExpr):
             fn_name = self._resolve_function(expr.callee, expr.span)

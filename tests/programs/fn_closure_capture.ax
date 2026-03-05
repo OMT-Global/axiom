@@ -1,0 +1,12 @@
+fn capture_counter() {
+  let value = 0
+  fn inc() {
+    value = value + 1
+    return value
+  }
+  inc()
+  inc()
+  return value
+}
+
+print capture_counter()

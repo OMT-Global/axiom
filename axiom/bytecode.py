@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 import struct
 
@@ -8,7 +8,7 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 6
+VERSION_MINOR = 7
 
 
 class Op:
@@ -33,6 +33,15 @@ class Op:
     CALL = 0x13
     RET = 0x14
     HOST_CALL = 0x15
+    LOAD_UPVALUE = 0x16
+    STORE_UPVALUE = 0x17
+    CLOSE_UPVALUE = 0x18
+
+
+@dataclass(frozen=True)
+class Upvalue:
+    from_local: bool
+    index: int
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,13 @@ class FunctionMeta:
     entry: int
     arity: int
     locals_count: int
+    upvalues: List[Upvalue] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ModuleMeta:
+    namespace_index: int
+    function_indices: List[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -55,6 +71,7 @@ class Bytecode:
     instructions: List[Instr]
     locals_count: int
     functions: List[FunctionMeta]
+    modules: List[ModuleMeta] = field(default_factory=list)
     version_minor: int = VERSION_MINOR
 
     def encode(self) -> bytes:
@@ -69,6 +86,11 @@ class Bytecode:
             out += struct.pack("<I", f.entry)
             out += struct.pack("<I", f.arity)
             out += struct.pack("<I", f.locals_count)
+            if self.version_minor >= 7:
+                out += struct.pack("<I", len(f.upvalues))
+                for upvalue in f.upvalues:
+                    out += struct.pack("<B", 1 if upvalue.from_local else 0)
+                    out += struct.pack("<I", upvalue.index)
 
         out += struct.pack("<I", len(self.strings))
         for s in self.strings:
@@ -83,10 +105,27 @@ class Bytecode:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_I64 missing arg")
                 out += struct.pack("<q", int(ins.arg))
-            elif ins.op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL, Op.HOST_CALL):
+            elif ins.op in (
+                Op.LOAD,
+                Op.STORE,
+                Op.JMP,
+                Op.JMP_IF_FALSE,
+                Op.CALL,
+                Op.HOST_CALL,
+                Op.LOAD_UPVALUE,
+                Op.STORE_UPVALUE,
+            ):
                 if ins.arg is None:
                     raise AxiomCompileError("opcode missing arg")
                 out += struct.pack("<I", int(ins.arg))
+
+        out += struct.pack("<I", len(self.modules))
+        if self.version_minor >= 7:
+            for module in self.modules:
+                out += struct.pack("<I", module.namespace_index)
+                out += struct.pack("<I", len(module.function_indices))
+                for function_index in module.function_indices:
+                    out += struct.pack("<I", int(function_index))
 
         return bytes(out)
 
@@ -120,7 +159,22 @@ class Bytecode:
             (entry,) = struct.unpack("<I", take(4))
             (arity,) = struct.unpack("<I", take(4))
             (func_locals_count,) = struct.unpack("<I", take(4))
-            functions.append(FunctionMeta(name_index=int(name_index), entry=int(entry), arity=int(arity), locals_count=int(func_locals_count)))
+            upvalues: List[Upvalue] = []
+            if minor >= 7:
+                (upvalue_count,) = struct.unpack("<I", take(4))
+                for _ in range(upvalue_count):
+                    (from_local,) = struct.unpack("<B", take(1))
+                    (index,) = struct.unpack("<I", take(4))
+                    upvalues.append(Upvalue(bool(from_local), int(index)))
+            functions.append(
+                FunctionMeta(
+                    name_index=int(name_index),
+                    entry=int(entry),
+                    arity=int(arity),
+                    locals_count=int(func_locals_count),
+                    upvalues=upvalues,
+                )
+            )
 
         (n_strings,) = struct.unpack("<I", take(4))
         strings: List[str] = []
@@ -135,16 +189,43 @@ class Bytecode:
             if op == Op.CONST_I64:
                 (v,) = struct.unpack("<q", take(8))
                 ins.append(Instr(op, int(v)))
-            elif op in (Op.LOAD, Op.STORE, Op.JMP, Op.JMP_IF_FALSE, Op.CALL, Op.HOST_CALL):
+            elif op in (
+                Op.LOAD,
+                Op.STORE,
+                Op.JMP,
+                Op.JMP_IF_FALSE,
+                Op.CALL,
+                Op.HOST_CALL,
+                Op.LOAD_UPVALUE,
+                Op.STORE_UPVALUE,
+            ):
                 (slot,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(slot)))
             else:
                 ins.append(Instr(op, None))
+
+        modules: List[ModuleMeta] = []
+        if minor >= 7 and off < len(mv):
+            (n_modules,) = struct.unpack("<I", take(4))
+            for _ in range(n_modules):
+                (namespace_index,) = struct.unpack("<I", take(4))
+                (n_entries,) = struct.unpack("<I", take(4))
+                function_indices: List[int] = []
+                for _ in range(n_entries):
+                    (function_index,) = struct.unpack("<I", take(4))
+                    function_indices.append(int(function_index))
+                modules.append(
+                    ModuleMeta(
+                        namespace_index=int(namespace_index),
+                        function_indices=function_indices,
+                    )
+                )
 
         return Bytecode(
             strings=strings,
             instructions=ins,
             locals_count=int(locals_count),
             functions=functions,
+            modules=modules,
             version_minor=minor,
         )
