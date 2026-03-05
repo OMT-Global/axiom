@@ -118,6 +118,9 @@ class CliParityTests(unittest.TestCase):
         safe_names = {entry["name"] for entry in safe_payload}
         self.assertIn("version", safe_names)
         self.assertNotIn("print", safe_names)
+        compact_proc = self._run_cli(["host", "list", "--compact"], cwd=ROOT)
+        compact_payload = json.loads(compact_proc.stdout)
+        self.assertEqual(payload, compact_payload)
 
     def test_host_describe_command(self) -> None:
         proc = self._run_cli(["host", "describe"], cwd=ROOT)
@@ -155,6 +158,9 @@ class CliParityTests(unittest.TestCase):
             second_payload["capabilities_signature"],
             payload["capabilities_signature"],
         )
+        compact_proc = self._run_cli(["host", "describe", "--compact"], cwd=ROOT)
+        compact_payload = json.loads(compact_proc.stdout)
+        self.assertEqual(payload, compact_payload)
 
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:
