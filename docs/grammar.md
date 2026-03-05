@@ -18,6 +18,7 @@ stmt           := let_stmt
 
 import_stmt    := "import" STRING terminator ;      # default module namespace from path, using dots for path separators
                | "import" STRING "as" IDENT terminator ;  # explicit alias
+               # imported modules are function-only and may contain imports plus fn declarations.
 fn_stmt        := "fn" IDENT "(" params? ")" block ;  # IDENT and params may not be "host"
 params         := IDENT ("," IDENT)* ;
 return_stmt    := "return" expr terminator ;
