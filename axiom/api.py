@@ -27,7 +27,7 @@ from .ast import (
 )
 from .compiler import Compiler
 from .bytecode import Bytecode
-from .errors import AxiomCompileError
+from .errors import AxiomCompileError, Span
 
 
 def parse_file(path: Path) -> Program:
@@ -68,14 +68,36 @@ def compile_file(
     ).compile(parse_file(path))
 
 
-def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Program:
+def _load_program_file(
+    path: Path,
+    seen: Set[Path],
+    loading: Set[Path],
+    *,
+    import_source: Optional[str] = None,
+    import_span: Optional[Span] = None,
+    importer_path: Optional[Path] = None,
+) -> Program:
     if path in seen:
         return Program(stmts=[])
 
     if path in loading:
+        if import_span is not None and import_source is not None and importer_path is not None:
+            raise AxiomCompileError(
+                f"circular import of {path}",
+                import_span,
+                source=import_source,
+                path=str(importer_path),
+            )
         raise AxiomCompileError(f"circular import of {path}")
 
     if not path.exists():
+        if import_span is not None and import_source is not None and importer_path is not None:
+            raise AxiomCompileError(
+                f"cannot resolve import file {path}",
+                import_span,
+                source=import_source,
+                path=str(importer_path),
+            )
         raise AxiomCompileError(f"cannot resolve import file {path}")
 
     loading.add(path)
@@ -85,13 +107,31 @@ def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Progr
     stmts = []
     for stmt in program.stmts:
         if isinstance(stmt, ImportStmt):
-            import_path = _resolve_import_path(stmt.path, path)
+            try:
+                import_path = _resolve_import_path(stmt.path, path)
+            except AxiomCompileError as e:
+                raise AxiomCompileError(
+                    str(e),
+                    stmt.span,
+                    source=src,
+                    path=str(path),
+                ) from e
             if not import_path.exists():
                 raise AxiomCompileError(
-                    f"cannot resolve import file {import_path}", stmt.span
+                    f"cannot resolve import file {import_path}",
+                    stmt.span,
+                    source=src,
+                    path=str(path),
                 )
             import_source = import_path.read_text(encoding="utf-8")
-            imported = _load_program_file(import_path, seen, loading)
+            imported = _load_program_file(
+                import_path,
+                seen,
+                loading,
+                import_source=src,
+                import_span=stmt.span,
+                importer_path=path,
+            )
             _validate_module_file(imported, import_path, source=import_source)
             stmts.extend(_namespace_module_program(imported, stmt.alias).stmts)
         else:
