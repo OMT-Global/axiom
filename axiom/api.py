@@ -90,8 +90,9 @@ def _load_program_file(path: Path, seen: Set[Path], loading: Set[Path]) -> Progr
                 raise AxiomCompileError(
                     f"cannot resolve import file {import_path}", stmt.span
                 )
+            import_source = import_path.read_text(encoding="utf-8")
             imported = _load_program_file(import_path, seen, loading)
-            _validate_module_file(imported, import_path)
+            _validate_module_file(imported, import_path, source=import_source)
             stmts.extend(_namespace_module_program(imported, stmt.alias).stmts)
         else:
             stmts.append(stmt)
@@ -182,7 +183,9 @@ def _namespace_module_program(program: Program, module_alias: str) -> Program:
     return Program(stmts=stmts)
 
 
-def _validate_module_file(program: Program, import_path: Path) -> None:
+def _validate_module_file(
+    program: Program, import_path: Path, source: Optional[str] = None
+) -> None:
     for stmt in program.stmts:
         if isinstance(stmt, (FunctionDefStmt, ImportStmt)):
             continue
@@ -190,4 +193,5 @@ def _validate_module_file(program: Program, import_path: Path) -> None:
             f"imported module {import_path} may only contain imports and function declarations",
             stmt.span,
             path=str(import_path),
+            source=source,
         )
