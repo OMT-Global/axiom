@@ -1,0 +1,21 @@
+fn inner() {
+  return 2
+}
+
+fn outer() {
+  fn inner() {
+    return 1
+  }
+
+  fn fact(n) {
+    if n <= 1 {
+      return 1
+    }
+    return n * fact(n - 1)
+  }
+
+  return inner() + fact(4)
+}
+
+print outer()
+print inner()

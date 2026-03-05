@@ -22,6 +22,7 @@
   - Optional aliasing is supported: `import "math_utils" as mu` exposes `mu.fn_name`.
 - function calls: `<name>(<arg1>, ... )`
 - namespaced function calls: `<module>.<name>(...)`
+- nested function declarations are supported; function names resolve lexically (nearest function scope first)
 - identifiers named `host` are reserved for host namespace (`let host`, parameters, and function names are rejected)
 - `host.<name>(...)` for host bridge calls (reserved namespace)
 - Host calls are resolved from a registry. Add custom capabilities via

@@ -9,9 +9,9 @@ from .ast import (
     ImportStmt,
     AssignStmt,
     PrintStmt,
-    ExprStmt,
     ReturnStmt,
     FunctionDefStmt,
+    ExprStmt,
     BlockStmt,
     IfStmt,
     WhileStmt,
@@ -35,9 +35,12 @@ class Compiler:
     strings: List[str] = field(default_factory=list)
     function_ids: Dict[str, int] = field(default_factory=dict)
     function_arities: Dict[str, int] = field(default_factory=dict)
-    function_defs: List[FunctionDefStmt] = field(default_factory=list)
+    function_defs: Dict[str, FunctionDefStmt] = field(default_factory=dict)
+    function_decl_order: List[str] = field(default_factory=list)
     functions: List[FunctionMeta] = field(default_factory=list)
     function_locals: Dict[str, int] = field(default_factory=dict)
+    function_scopes: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
+    function_scope_stack: List[Dict[str, str]] = field(default_factory=lambda: [{}])
     allow_host_side_effects: bool = False
     allowed_host_calls: Optional[Set[str]] = None
     RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
@@ -49,13 +52,15 @@ class Compiler:
         self.strings = []
         self.function_ids = {}
         self.function_arities = {}
-        self.function_defs = []
+        self.function_defs = {}
+        self.function_decl_order = []
         self.functions = []
         self.function_locals = {}
+        self.function_scopes = {}
+        self.function_scope_stack = [{}]
 
-        for stmt in program.stmts:
-            if isinstance(stmt, FunctionDefStmt):
-                self._register_function(stmt)
+        global_scope = self._collect_functions(program.stmts, [], [])
+        self.function_scope_stack = [global_scope]
 
         out: List[Instr] = []
         for stmt in program.stmts:
@@ -64,15 +69,15 @@ class Compiler:
             self._compile_stmt(stmt, out, in_function=False, in_toplevel=True)
         out.append(Instr(Op.HALT))
 
-        for fn in self.function_defs:
+        for fn_name in self.function_decl_order:
             entry = len(out)
-            self._compile_function(fn, out)
+            self._compile_function(self.function_defs[fn_name], out, fn_name)
             self.functions.append(
                 FunctionMeta(
-                    name_index=self._intern(fn.name),
+                    name_index=self._intern(fn_name),
                     entry=entry,
-                    arity=len(fn.params),
-                    locals_count=self.function_locals[fn.name],
+                    arity=self.function_arities[fn_name],
+                    locals_count=self.function_locals[fn_name],
                 )
             )
 
@@ -83,25 +88,68 @@ class Compiler:
             functions=self.functions,
         )
 
-    def _register_function(self, fn: FunctionDefStmt) -> None:
-        if fn.name in self.RESERVED_FUNCTION_NAMES:
-            raise AxiomCompileError(f"reserved function name {fn.name!r}", fn.span)
-        if fn.name in self.function_ids:
-            raise AxiomCompileError(f"duplicate function {fn.name!r}", fn.span)
-        self.function_ids[fn.name] = len(self.function_defs)
-        self.function_arities[fn.name] = len(fn.params)
-        self.function_defs.append(fn)
+    def _qualify(self, parts: List[str]) -> str:
+        return ".".join(parts)
 
-    def _compile_function(self, fn: FunctionDefStmt, out: List[Instr]) -> None:
+    def _collect_functions(
+        self, stmts: List, scope_chain: List[Dict[str, str]], scope_path: List[str]
+    ) -> Dict[str, str]:
+        local_scope: Dict[str, str] = {}
+
+        for stmt in stmts:
+            if not isinstance(stmt, FunctionDefStmt):
+                continue
+            if stmt.name in self.RESERVED_FUNCTION_NAMES:
+                raise AxiomCompileError(
+                    f"reserved function name {stmt.name!r}", stmt.span
+                )
+            if stmt.name in local_scope:
+                raise AxiomCompileError(f"duplicate function {stmt.name!r}", stmt.span)
+
+            qual_name = self._qualify(scope_path + [stmt.name])
+            if qual_name in self.function_ids:
+                raise AxiomCompileError(
+                    f"duplicate function {qual_name!r}", stmt.span
+                )
+
+            self.function_ids[qual_name] = len(self.function_decl_order)
+            self.function_arities[qual_name] = len(stmt.params)
+            self.function_defs[qual_name] = stmt
+            self.function_decl_order.append(qual_name)
+            local_scope[stmt.name] = qual_name
+
+        current_chain = scope_chain + [local_scope]
+
+        for stmt in stmts:
+            if not isinstance(stmt, FunctionDefStmt):
+                continue
+            qual_name = self._qualify(scope_path + [stmt.name])
+            body_scope_chain = current_chain + [{stmt.name: qual_name}]
+            body_locals = self._collect_functions(
+                stmt.body.stmts, body_scope_chain, scope_path + [stmt.name]
+            )
+            self.function_scopes[qual_name] = body_scope_chain + [
+                body_locals,
+                {stmt.name: qual_name},
+            ]
+
+        return local_scope
+
+    def _compile_function(
+        self, fn: FunctionDefStmt, out: List[Instr], fn_name: str
+    ) -> None:
         locals_count_before = self.next_slot
         scope_stack_before = self.scope_stack
+        function_scope_stack_before = self.function_scope_stack
+
         self.scope_stack = [{}]
         self.next_slot = 0
-        function_start = len(out)
+        self.function_scope_stack = self.function_scopes.get(fn_name, [self.scope_stack[-1]])
 
         for p in fn.params:
             self._slot_for_param(p, fn.span)
 
+        function_start = len(out)
         for stmt in fn.body.stmts:
             self._compile_stmt(stmt, out, in_function=True, in_toplevel=False)
         if len(out) == function_start or out[-1].op != Op.RET:
@@ -109,10 +157,11 @@ class Compiler:
             out.append(Instr(Op.RET))
 
         function_locals = self.next_slot
-        self.function_locals[fn.name] = function_locals
+        self.function_locals[fn_name] = function_locals
 
         self.scope_stack = scope_stack_before
         self.next_slot = locals_count_before
+        self.function_scope_stack = function_scope_stack_before
 
     def _intern(self, s: str) -> int:
         try:
@@ -187,8 +236,6 @@ class Compiler:
                 self.scope_stack.pop()
             return
         if isinstance(stmt, FunctionDefStmt):
-            if not in_toplevel:
-                raise AxiomCompileError("nested function definitions are not supported", stmt.span)
             return
         if isinstance(stmt, IfStmt):
             self._compile_expr(stmt.cond, out)
@@ -223,7 +270,7 @@ class Compiler:
             out.append(Instr(Op.LOAD, self._resolve_slot(expr.name, expr.span)))
             return
         if isinstance(expr, CallExpr):
-            fn_name = expr.callee
+            fn_name = self._resolve_function(expr.callee, expr.span)
             if fn_name.startswith("host."):
                 host_fn = fn_name[len("host.") :]
                 if host_fn not in HOST_BUILTINS:
@@ -248,13 +295,8 @@ class Compiler:
                     self._compile_expr(arg, out)
                 out.append(Instr(Op.HOST_CALL, self._intern(host_fn)))
                 return
-            if "." in fn_name:
-                # Module-qualified calls (e.g. module.fn) are supported when sourced from imports.
-                if fn_name not in self.function_ids:
-                    raise AxiomCompileError(
-                        f"undefined function {fn_name!r}", expr.span
-                    )
-            elif fn_name not in self.function_ids:
+
+            if fn_name not in self.function_ids:
                 raise AxiomCompileError(f"undefined function {fn_name!r}", expr.span)
             arity = self.function_arities[fn_name]
             if arity != len(expr.args):
@@ -298,3 +340,14 @@ class Compiler:
                 raise AssertionError("unknown binop")
             return
         raise AssertionError("unknown expr")
+
+    def _resolve_function(self, fn_name: str, span) -> str:
+        if fn_name.startswith("host."):
+            return fn_name
+        if "." not in fn_name:
+            for scope in reversed(self.function_scope_stack):
+                if fn_name in scope:
+                    return scope[fn_name]
+        if fn_name in self.function_ids:
+            return fn_name
+        raise AxiomCompileError(f"undefined function {fn_name!r}", span)

@@ -23,7 +23,7 @@ from .ast import (
     Binary,
     BinOp,
 )
-from .errors import AxiomCompileError, AxiomRuntimeError
+from .errors import AxiomRuntimeError
 from .intops import trunc_div, to_bool_int
 from .host import HOST_BUILTINS, call_host_builtin
 
@@ -40,8 +40,12 @@ class Interpreter:
     scopes: List[Dict[str, int]] = field(default_factory=lambda: [{}])
     global_scope: Dict[str, int] = field(default_factory=dict)
     functions: Dict[str, FunctionDefStmt] = field(default_factory=dict)
+    function_scope_stack: List[Dict[str, str]] = field(default_factory=lambda: [{}])
+    function_scopes: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
     function_depth: int = 0
-    call_stack: List[Tuple[List[Dict[str, int]], int]] = field(default_factory=list)
+    call_stack: List[Tuple[List[Dict[str, int]], int, List[Dict[str, str]]]] = field(
+        default_factory=list
+    )
     allow_host_side_effects: bool = False
 
     def run(self, program: Program, out: TextIO) -> None:
@@ -50,22 +54,65 @@ class Interpreter:
         self.call_stack = []
         self.function_depth = 0
         self.functions = {}
+        self.function_scopes = {}
+        self.function_scope_stack = [{}]
 
-        for stmt in program.stmts:
-            if isinstance(stmt, FunctionDefStmt):
-                for name in stmt.params:
-                    if name in self.RESERVED_IDENTIFIER_NAMES:
-                        raise AxiomRuntimeError(f"reserved identifier {name!r}")
-                if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
-                    raise AxiomRuntimeError(f"reserved function name {stmt.name!r}")
-                if stmt.name in self.functions:
-                    raise AxiomCompileError(f"duplicate function {stmt.name!r}", stmt.span)
-                self.functions[stmt.name] = stmt
+        global_scope = self._collect_functions(program.stmts, [], [])
+        self.function_scope_stack = [global_scope]
 
         for stmt in program.stmts:
             if isinstance(stmt, FunctionDefStmt):
                 continue
             self._exec_stmt(stmt, out)
+
+    def _collect_functions(
+        self, stmts: List, scope_chain: List[Dict[str, str]], scope_path: List[str]
+    ) -> Dict[str, str]:
+        local_scope: Dict[str, str] = {}
+
+        for stmt in stmts:
+            if not isinstance(stmt, FunctionDefStmt):
+                continue
+            if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
+                raise AxiomRuntimeError(f"reserved function name {stmt.name!r}")
+            if any(param in self.RESERVED_IDENTIFIER_NAMES for param in stmt.params):
+                for param in stmt.params:
+                    if param in self.RESERVED_IDENTIFIER_NAMES:
+                        raise AxiomRuntimeError(f"reserved identifier {param!r}")
+            if stmt.name in local_scope:
+                raise AxiomRuntimeError(f"duplicate function {stmt.name!r}")
+
+            qual_name = ".".join(scope_path + [stmt.name])
+            if qual_name in self.functions:
+                raise AxiomRuntimeError(f"duplicate function {qual_name!r}")
+
+            self.functions[qual_name] = stmt
+            local_scope[stmt.name] = qual_name
+
+        current_chain = scope_chain + [local_scope]
+
+        for stmt in stmts:
+            if not isinstance(stmt, FunctionDefStmt):
+                continue
+            qual_name = ".".join(scope_path + [stmt.name])
+            body_scope_chain = current_chain + [{stmt.name: qual_name}]
+            body_locals = self._collect_functions(
+                stmt.body.stmts, body_scope_chain, scope_path + [stmt.name]
+            )
+            self.function_scopes[qual_name] = body_scope_chain + [
+                body_locals,
+                {stmt.name: qual_name},
+            ]
+
+        return local_scope
+
+    def _resolve_function(self, name: str) -> str:
+        if "." in name and name in self.functions:
+            return name
+        for scope in reversed(self.function_scope_stack):
+            if name in scope:
+                return scope[name]
+        raise AxiomRuntimeError(f"undefined function {name!r}")
 
     def _exec_stmt(self, stmt, out: TextIO) -> None:
         if isinstance(stmt, LetStmt):
@@ -98,7 +145,6 @@ class Interpreter:
                 self.scopes.pop()
             return
         if isinstance(stmt, FunctionDefStmt):
-            # function declarations are pre-collected in Interpreter.run()
             return
         if isinstance(stmt, IfStmt):
             cond = self._eval(stmt.cond, out)
@@ -131,6 +177,7 @@ class Interpreter:
     def _call(self, fn_name: str, args: List[int], out: TextIO) -> int:
         if fn_name.startswith("host."):
             return self._call_host(fn_name, args, out)
+        fn_name = self._resolve_function(fn_name)
         if fn_name not in self.functions:
             raise AxiomRuntimeError(f"undefined function {fn_name!r}")
         fn = self.functions[fn_name]
@@ -139,14 +186,18 @@ class Interpreter:
                 f"function {fn_name!r} expects {len(fn.params)} args, got {len(args)}"
             )
 
-        self.call_stack.append((self.scopes, self.function_depth))
+        self.call_stack.append((self.scopes, self.function_depth, self.function_scope_stack))
 
         param_scope: Dict[str, int] = {}
         for index, name in enumerate(fn.params):
             if name in self.RESERVED_IDENTIFIER_NAMES:
                 raise AxiomRuntimeError(f"reserved identifier {name!r}")
             param_scope[name] = args[index]
+
         self.scopes = [param_scope, self.global_scope]
+        self.function_scope_stack = self.function_scopes.get(
+            fn_name, [param_scope]
+        )
         self.function_depth += 1
 
         try:
@@ -155,7 +206,7 @@ class Interpreter:
         except _FunctionReturn as exc:
             return int(exc.value)
         finally:
-            self.scopes, self.function_depth = self.call_stack.pop()
+            self.scopes, self.function_depth, self.function_scope_stack = self.call_stack.pop()
 
     def _call_host(self, fn_name: str, args: List[int], out: TextIO) -> int:
         host_name = fn_name[len("host.") :]
