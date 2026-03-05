@@ -204,6 +204,21 @@ print f(1)
             Vm(locals_count=bc.locals_count).run(bc, out)
             self.assertEqual(out.getvalue(), "20\n")
 
+    def test_compile_import_dotted_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("math_module.ax").write_text(
+                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+            )
+            root.joinpath("main.ax").write_text(
+                'import "math_module" as tools.math\nprint tools.math.add(4, 5)\n',
+                encoding="utf-8",
+            )
+            bc = compile_file(root.joinpath("main.ax"))
+            out = io.StringIO()
+            Vm(locals_count=bc.locals_count).run(bc, out)
+            self.assertEqual(out.getvalue(), "9\n")
+
     def test_compile_imported_module_top_level_statement_disallowed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
