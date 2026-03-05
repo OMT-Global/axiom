@@ -161,15 +161,21 @@ def cmd_pkg_run(path: Path, *, allow_host_side_effects: bool) -> int:
     return 0
 
 
-def cmd_host_list(*, safe_only: bool = False) -> int:
+def cmd_host_list(*, safe_only: bool = False, compact: bool = False) -> int:
     payload = host_capabilities(safe_only=safe_only)
-    print(json.dumps(payload, indent=2))
+    if compact:
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
-def cmd_host_describe(*, safe_only: bool = False) -> int:
+def cmd_host_describe(*, safe_only: bool = False, compact: bool = False) -> int:
     payload = host_contract_metadata(safe_only=safe_only)
-    print(json.dumps(payload, indent=2))
+    if compact:
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 
@@ -242,11 +248,21 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Show only non-side-effecting host functions",
     )
+    host_list.add_argument(
+        "--compact",
+        action="store_true",
+        help="Print compact JSON for machine parsing",
+    )
     host_desc = host.add_parser("describe", help="Describe host contract for tooling")
     host_desc.add_argument(
         "--safe-only",
         action="store_true",
         help="Include only non-side-effecting host functions",
+    )
+    host_desc.add_argument(
+        "--compact",
+        action="store_true",
+        help="Print compact JSON for machine parsing",
     )
 
     args = p.parse_args(argv)
@@ -297,9 +313,9 @@ def main(argv: list[str] | None = None) -> int:
             raise AssertionError("unreachable")
         if args.cmd == "host":
             if args.host_cmd == "list":
-                return cmd_host_list(safe_only=args.safe_only)
+                return cmd_host_list(safe_only=args.safe_only, compact=args.compact)
             if args.host_cmd == "describe":
-                return cmd_host_describe(safe_only=args.safe_only)
+                return cmd_host_describe(safe_only=args.safe_only, compact=args.compact)
             raise AssertionError("unreachable")
         raise AssertionError("unreachable")
     except AxiomError as e:
