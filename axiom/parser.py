@@ -135,6 +135,13 @@ class Parser:
         return self._parse_expr_stmt()
 
     def _parse_function_def(self) -> FunctionDefStmt:
+        if self.function_depth > 0:
+            raise AxiomParseError(
+                "nested function definitions are not supported",
+                self._peek().span,
+                source=self.source,
+                path=self.source_path,
+            )
         start = self._eat(TokenKind.FN).span.start
         name = self._eat(TokenKind.IDENT)
         if name.kind != TokenKind.IDENT:
