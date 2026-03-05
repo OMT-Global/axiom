@@ -224,8 +224,13 @@ print f(1)
             root = Path(td)
             root.joinpath("math_module.ax").write_text("print 9\n", encoding="utf-8")
             root.joinpath("main.ax").write_text('import "math_module"\n', encoding="utf-8")
-            with self.assertRaises(AxiomCompileError):
+            with self.assertRaises(AxiomCompileError) as cm:
                 compile_file(root.joinpath("main.ax"))
+            msg = str(cm.exception)
+            self.assertIn("imported module", msg)
+            self.assertIn("print 9", msg)
+            self.assertIn("math_module.ax:1", msg)
+            self.assertIn("^", msg)
 
     def test_compile_import_duplicate_namespace(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -314,16 +319,26 @@ print f(1)
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("main.ax").write_text('import "missing.ax"\n', encoding="utf-8")
-            with self.assertRaises(AxiomCompileError):
+            with self.assertRaises(AxiomCompileError) as cm:
                 compile_file(root.joinpath("main.ax"))
+            msg = str(cm.exception)
+            self.assertIn("cannot resolve import file", msg)
+            self.assertIn("main.ax:1", msg)
+            self.assertIn("import \"missing.ax\"", msg)
+            self.assertIn("^", msg)
 
     def test_compile_circular_import(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("a.ax").write_text('import "b"\n', encoding="utf-8")
             root.joinpath("b.ax").write_text('import "a"\n', encoding="utf-8")
-            with self.assertRaises(AxiomCompileError):
+            with self.assertRaises(AxiomCompileError) as cm:
                 compile_file(root.joinpath("a.ax"))
+            msg = str(cm.exception)
+            self.assertIn("circular import", msg)
+            self.assertIn("b.ax:1", msg)
+            self.assertIn("import \"a\"", msg)
+            self.assertIn("^", msg)
 
     def test_compile_rejects_absolute_import(self) -> None:
         with tempfile.TemporaryDirectory() as td:
