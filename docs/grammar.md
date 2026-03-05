@@ -16,8 +16,9 @@ stmt           := let_stmt
                | block
                | expr_stmt ;
 
-import_stmt    := "import" STRING terminator ;      # default module namespace from path, using dots for path separators
-               | "import" STRING "as" IDENT terminator ;  # explicit alias
+import_stmt    := "import" STRING terminator ;                      # default module namespace from path, using dots for path separators
+               | "import" STRING "as" qualified_ident terminator ;  # explicit alias
+qualified_ident := IDENT ("." IDENT)* ;
                # imported modules are function-only and may contain imports plus fn declarations.
 fn_stmt        := "fn" IDENT "(" params? ")" block ;  # IDENT and params may not be "host"
 params         := IDENT ("," IDENT)* ;
