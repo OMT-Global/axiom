@@ -89,20 +89,38 @@ fn f(host) {
 }
 """)
 
-    def test_nested_function_definition_parse_error(self) -> None:
-        with self.assertRaises(AxiomParseError) as cm:
-            compile_to_bytecode(
-                """
+    def test_nested_function_definition_support(self) -> None:
+        program = parse_program(
+            """
 fn outer() {
   fn inner() {
     return 1
   }
-  return inner()
+  return inner() + 1
 }
+
+print outer()
 """
-            )
-        msg = str(cm.exception)
-        self.assertIn("nested function definitions are not supported", msg)
+        )
+        interp_out = io.StringIO()
+        Interpreter().run(program, interp_out)
+        self.assertEqual(interp_out.getvalue(), "2\n")
+
+        bc = compile_to_bytecode(
+            """
+fn outer() {
+  fn inner() {
+    return 1
+  }
+  return inner() + 1
+}
+
+print outer()
+"""
+        )
+        vm_out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, vm_out)
+        self.assertEqual(vm_out.getvalue(), "2\n")
 
     def test_compile_arity_mismatch(self) -> None:
         with self.assertRaises(AxiomCompileError):
