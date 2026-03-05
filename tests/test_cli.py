@@ -301,6 +301,17 @@ class CliParityTests(unittest.TestCase):
             proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
             self.assertIn("host_contract_signature mismatch", proc.stderr)
 
+    def test_package_build_rejects_invalid_host_contract_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["host_contract_signature"] = "bad"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("invalid host_contract_signature", proc.stderr)
+
     def test_package_run_rejects_host_contract_signature_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             project = Path(td)
@@ -321,6 +332,17 @@ class CliParityTests(unittest.TestCase):
             manifest["host_contract_signature"] = "not-a-valid-signature"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT, expect_code=1)
+            self.assertIn("invalid host_contract_signature", proc.stderr)
+
+    def test_package_run_rejects_invalid_host_contract_signature(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            manifest_path = project / "axiom.pkg"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["host_contract_signature"] = "bad"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            proc = self._run_cli(["pkg", "run", str(project)], cwd=ROOT, expect_code=1)
             self.assertIn("invalid host_contract_signature", proc.stderr)
 
     def test_package_check_command(self) -> None:
