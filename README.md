@@ -1,13 +1,15 @@
-# Axiom (VM-first bootstrap skeleton, no LLVM)
+# Axiom (VM-first bootstrap runtime and tooling, no LLVM)
 
-This is a **drop-in repo skeleton** to start building a new language called **Axiom** using the VM-first bootstrap path (Option A):
+This repo now covers the VM-first bootstrap path through package tooling and
+host contracts:
 
-- **Stage0**: reference interpreter (correctness + fast iteration)
-- **Stage1**: compiler to **portable bytecode** + a small **stack VM**
-- **Stage2**: functions + call/return and call frames in Axiom
-- **Stage3**: host-bridge calls (`host.*`) for deterministic tool interop
-- **Stage4**: host capability registry and stable host tool namespace (`host.abs`)
-- **Phase5**: package/build tooling scaffold
+- **Phase 0**: reference interpreter, portable bytecode compiler, stack VM, and conformance tests
+- **Phase 1**: blocks/scopes, control flow, and span-aware diagnostics
+- **Phase 2**: functions, call frames, lexical closures, and file-based modules
+- **Phase 3**: deterministic `host.*` bridge calls with interpreter/VM parity
+- **Phase 4**: registry-backed host capabilities and reserved host namespace rules
+- **Phase 5**: package manifest, build helpers, and CLI package commands
+- **Phase 6**: stable host contract metadata and package-level host contract checks
 
 This repo is intentionally small and test-driven. Everything is **standard-library only** (no deps).
 
@@ -23,7 +25,7 @@ python -m axiom compile examples/arith.ax -o /tmp/arith.axb
 # Run bytecode on the VM (stage1)
 python -m axiom vm /tmp/arith.axb
 
-# Run package main from manifest (stage3 planning)
+# Run package main from manifest
 python -m axiom pkg run .
 
 # Inspect host bridge capabilities for tooling
@@ -91,8 +93,8 @@ See `docs/grammar.md`.
 ## Next steps
 
 - Add types beyond `i64`-like ints
-- Extend diagnostics and tooling
-- Host-native package tooling hardening
-- Add a real error reporter (spans -> line/col snippets)
+- Extend diagnostics beyond single-span snippets (for example import traces and richer runtime context)
+- Continue host-native package tooling hardening
+- Improve module/package ergonomics for larger multi-file programs
 
 See `docs/roadmap.md`.

@@ -10,6 +10,14 @@ class Span:
     end: int
 
 
+@dataclass(frozen=True)
+class DiagnosticNote:
+    message: str
+    span: Optional[Span] = None
+    source: Optional[str] = None
+    path: Optional[str] = None
+
+
 def _line_col(source: str, offset: int) -> tuple[int, int]:
     if offset < 0:
         offset = 0
@@ -38,31 +46,70 @@ class AxiomError(Exception):
         span: Optional[Span] = None,
         source: Optional[str] = None,
         path: Optional[str] = None,
+        notes: Optional[list[DiagnosticNote]] = None,
     ):
         super().__init__(message)
         self.message = message
         self.span = span
         self.source = source
         self.path = path
+        self.notes = list(notes) if notes is not None else []
 
-    def __str__(self) -> str:
-        if self.span is None:
-            return self.message
-        if self.source is not None:
-            line, col = _line_col(self.source, self.span.start)
-            if self.path is not None:
-                location = f"{self.path}:{line}:{col}"
+    def add_note(
+        self,
+        message: str,
+        *,
+        span: Optional[Span] = None,
+        source: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> None:
+        self.notes.append(
+            DiagnosticNote(message=message, span=span, source=source, path=path)
+        )
+
+    @staticmethod
+    def _render_block(
+        message: str,
+        span: Optional[Span],
+        source: Optional[str],
+        path: Optional[str],
+        *,
+        prefix: str = "",
+    ) -> str:
+        label = f"{prefix}{message}"
+        if span is None:
+            return label
+        if source is not None:
+            line, col = _line_col(source, span.start)
+            if path is not None:
+                location = f"{path}:{line}:{col}"
             else:
                 location = f"{line}:{col}"
-            line_num, text = _line_text(self.source, self.span.start)
-            width = max(1, self.span.end - self.span.start)
+            line_num, text = _line_text(source, span.start)
+            width = max(1, span.end - span.start)
             pointer = " " * (col - 1) + "^" * width
             return (
-                f"{self.message} (at {location})\n"
+                f"{label} (at {location})\n"
                 f"  {line_num:>4} | {text}\n"
                 f"      | {pointer}"
             )
-        return f"{self.message} (span {self.span.start}:{self.span.end})"
+        return f"{label} (span {span.start}:{span.end})"
+
+    def __str__(self) -> str:
+        blocks = [
+            self._render_block(self.message, self.span, self.source, self.path)
+        ]
+        for note in self.notes:
+            blocks.append(
+                self._render_block(
+                    note.message,
+                    note.span,
+                    note.source,
+                    note.path,
+                    prefix="note: ",
+                )
+            )
+        return "\n".join(blocks)
 
 
 class AxiomParseError(AxiomError):

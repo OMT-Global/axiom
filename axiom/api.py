@@ -27,7 +27,7 @@ from .ast import (
 )
 from .compiler import Compiler
 from .bytecode import Bytecode
-from .errors import AxiomCompileError, Span
+from .errors import AxiomCompileError, AxiomError, Span
 
 
 def parse_file(
@@ -110,48 +110,84 @@ def _load_program_file(
         raise AxiomCompileError(f"cannot resolve import file {path}")
 
     loading.add(path)
-    src = path.read_text(encoding="utf-8")
-    program = parse_program(src, path=path)
+    try:
+        src = path.read_text(encoding="utf-8")
+        program = parse_program(src, path=path)
 
-    stmts = []
-    for stmt in program.stmts:
-        if isinstance(stmt, ImportStmt):
-            try:
-                import_path = _resolve_import_path(
-                    stmt.path, path, module_search_paths=module_search_paths
+        stmts = []
+        for stmt in program.stmts:
+            if isinstance(stmt, ImportStmt):
+                try:
+                    import_path = _resolve_import_path(
+                        stmt.path, path, module_search_paths=module_search_paths
+                    )
+                except AxiomCompileError as e:
+                    raise AxiomCompileError(
+                        e.message,
+                        stmt.span,
+                        source=src,
+                        path=str(path),
+                    ) from e
+                if not import_path.exists():
+                    raise AxiomCompileError(
+                        f"cannot resolve import file {import_path}",
+                        stmt.span,
+                        source=src,
+                        path=str(path),
+                    )
+                imported_source = import_path.read_text(encoding="utf-8")
+                imported = _load_program_file(
+                    import_path,
+                    seen,
+                    loading,
+                    import_source=src,
+                    import_span=stmt.span,
+                    importer_path=path,
+                    module_search_paths=module_search_paths,
                 )
-            except AxiomCompileError as e:
-                raise AxiomCompileError(
-                    str(e),
-                    stmt.span,
-                    source=src,
-                    path=str(path),
-                ) from e
-            if not import_path.exists():
-                raise AxiomCompileError(
-                    f"cannot resolve import file {import_path}",
-                    stmt.span,
-                    source=src,
-                    path=str(path),
-                )
-            import_source = import_path.read_text(encoding="utf-8")
-            imported = _load_program_file(
-                import_path,
-                seen,
-                loading,
-                import_source=src,
-                import_span=stmt.span,
-                importer_path=path,
-                module_search_paths=module_search_paths,
-            )
-            _validate_module_file(imported, import_path, source=import_source)
-            stmts.extend(_namespace_module_program(imported, stmt.alias).stmts)
-        else:
-            stmts.append(stmt)
+                try:
+                    _validate_module_file(imported, import_path, source=imported_source)
+                except AxiomError as e:
+                    _attach_import_note(
+                        e,
+                        import_source=src,
+                        import_span=stmt.span,
+                        importer_path=path,
+                    )
+                    raise
+                stmts.extend(_namespace_module_program(imported, stmt.alias).stmts)
+            else:
+                stmts.append(stmt)
+    except AxiomError as e:
+        _attach_import_note(
+            e,
+            import_source=import_source,
+            import_span=import_span,
+            importer_path=importer_path,
+        )
+        raise
+    finally:
+        loading.discard(path)
 
-    loading.remove(path)
     seen.add(path)
     return Program(stmts=stmts)
+
+
+def _attach_import_note(
+    error: AxiomError,
+    *,
+    import_source: Optional[str],
+    import_span: Optional[Span],
+    importer_path: Optional[Path],
+) -> None:
+    if import_source is None or import_span is None or importer_path is None:
+        return
+    error.add_note(
+        "imported from here",
+        span=import_span,
+        source=import_source,
+        path=str(importer_path),
+    )
 
 
 def _resolve_import_path(

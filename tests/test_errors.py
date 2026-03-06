@@ -299,6 +299,9 @@ print counter()
             self.assertIn("imported module", msg)
             self.assertIn("print 9", msg)
             self.assertIn("math_module.ax:1", msg)
+            self.assertIn("note: imported from here", msg)
+            self.assertIn("main.ax:1", msg)
+            self.assertIn('import "math_module"', msg)
             self.assertIn("^", msg)
 
     def test_compile_import_duplicate_namespace(self) -> None:
@@ -408,6 +411,26 @@ print counter()
             self.assertIn("b.ax:1", msg)
             self.assertIn("import \"a\"", msg)
             self.assertIn("^", msg)
+
+    def test_compile_transitive_import_parse_error_includes_full_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("bad.ax").write_text("return 1\n", encoding="utf-8")
+            root.joinpath("middle.ax").write_text(
+                'import "bad"\nfn ok() { return 1 }\n',
+                encoding="utf-8",
+            )
+            root.joinpath("main.ax").write_text('import "middle"\n', encoding="utf-8")
+            with self.assertRaises(AxiomParseError) as cm:
+                compile_file(root.joinpath("main.ax"))
+            msg = str(cm.exception)
+            self.assertIn("return outside function", msg)
+            self.assertIn("bad.ax:1:1", msg)
+            self.assertIn("middle.ax:1:1", msg)
+            self.assertIn("main.ax:1:1", msg)
+            self.assertIn('import "bad"', msg)
+            self.assertIn('import "middle"', msg)
+            self.assertEqual(msg.count("note: imported from here"), 2)
 
     def test_compile_rejects_absolute_import(self) -> None:
         with tempfile.TemporaryDirectory() as td:
