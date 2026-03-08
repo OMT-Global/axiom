@@ -1,14 +1,14 @@
-# Axiom kernel (v0.7)
+# Axiom kernel (v0.8)
 
 ## Values
-- integers only (Python `int` in the seed implementation)
-- conditions use truthiness: `0` is false, non-zero is true
+- integers and strings (Python `int` and `str` in the seed implementation)
+- conditions use int truthiness only: `0` is false, non-zero is true
 - comparisons produce `0` or `1`
 
 ## Statements
 - `let <ident> = <expr>` binds in the current lexical scope
 - `<ident> = <expr>` assigns to nearest existing lexical binding
-- `print <expr>` prints the integer result plus a newline
+- `print <expr>` prints the formatted value plus a newline
 - `{ ... }` introduces a nested lexical scope
 - `if <expr> { ... } else { ... }`
 - `while <expr> { ... }`
@@ -27,18 +27,19 @@
 - identifiers named `host` are reserved for host namespace (`let host`, parameters, and function names are rejected)
 - `host.<name>(...)` for host bridge calls (reserved namespace)
 - Host calls are resolved from a registry. Add custom capabilities via
-  `axiom.host.register_host_builtin(name, arity, side_effecting, handler)` where
-  `handler(args: list[int], out: TextIO) -> int`, and remove custom capabilities via
+  `axiom.host.register_host_builtin(name, arity, side_effecting, handler, arg_kinds=..., return_kind=...)` where
+  `handler(args: list[Value], out: TextIO) -> Value`, and remove custom capabilities via
   `axiom.host.unregister_host_builtin(name)`.
 
 ## Expressions
 - integer literals: `123`, `-5`
+- string literals: `"hello"`, `"hello\naxiom"`
 - variables: `x`
 - binary ops: `+ - * / == != < <= > >=`
 - parentheses: `( ... )`
 - unary negation: `-<expr>`
 - call expressions: `name(arg1, arg2, ...)`
-- host calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.abs(value)`, `host.math.abs(value)` (gated for side effects only)
+- host calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.int.parse(text)`, `host.abs(value)`, `host.math.abs(value)` (gated for side effects only)
 
 ## Execution
 - single file program
@@ -46,14 +47,16 @@
 - all variables must be defined before use
 - integer division truncates toward zero
 - functions use explicit call frames with locals + return address + captured upvalues
-- every function returns an `int` (implicit `0` if no explicit return is reached)
+- every function returns a value (`int` or `string`; implicit `0` if no explicit return is reached)
 - `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
+- `host.read` returns a string; `host.int.parse` converts a string to an int
 - non-side-effecting host calls can be used in deterministic tool pipelines without flags
 - `python -m axiom host list --safe-only` enumerates host calls that are safe by default
 - `python -m axiom host describe` returns machine-readable host contract metadata for deterministic agents:
   - `schema_version`
   - `runtime_version_minor`
   - `capabilities`
+  - per-capability `arg_kinds` and `return_kind`
   - `capabilities_signature` (`sha256` hash of sorted capabilities payload for change detection)
 - `host` call payloads in bytecode are name-based (string table index) starting at
   bytecode `v0.6` to preserve behavior if host registry order changes.

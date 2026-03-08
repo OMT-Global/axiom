@@ -13,6 +13,7 @@ from .ast import (
     FunctionDefStmt,
     ImportStmt,
     IntLit,
+    StringLit,
     IfStmt,
     Program,
     ReturnStmt,
@@ -234,6 +235,8 @@ def _namespace_module_program(program: Program, module_alias: str) -> Program:
 
     def _rewrite_expr(expr: Expr):
         if isinstance(expr, IntLit):
+            return expr
+        if isinstance(expr, StringLit):
             return expr
         if isinstance(expr, VarRef):
             return expr

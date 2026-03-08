@@ -1,4 +1,4 @@
-# Axiom grammar (v0.7)
+# Axiom grammar (v0.8)
 
 Whitespace is generally ignored except newlines, which can terminate statements.
 
@@ -42,7 +42,7 @@ comparison     := term (("<" | "<=" | ">" | ">=") term)* ;
 term           := factor (("+" | "-") factor)* ;
 factor         := unary (("*" | "/") unary)* ;
 unary          := "-" unary | primary ;
-primary        := INT | IDENT | call_expr | "(" expr ")" ;
+primary        := INT | STRING | IDENT | call_expr | "(" expr ")" ;
 STRING         := double-quoted UTF-8 string ;
 ```
 

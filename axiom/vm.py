@@ -5,13 +5,27 @@ from typing import Dict, List, Optional, TextIO
 
 from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
-from .intops import trunc_div, to_bool_int
 from .host import HOST_BUILTINS, HOST_BUILTIN_BY_ID, call_host_builtin, call_host_builtin_id
+from .values import (
+    Value,
+    add_values,
+    compare_eq,
+    compare_ge,
+    compare_gt,
+    compare_le,
+    compare_lt,
+    compare_ne,
+    div_values,
+    mul_values,
+    render_value,
+    require_condition_int,
+    sub_values,
+)
 
 
 @dataclass
 class _Cell:
-    value: int
+    value: Value
 
 
 @dataclass
@@ -25,7 +39,7 @@ class _Frame:
 @dataclass
 class Vm:
     locals_count: int
-    stack: List[int] = field(default_factory=list)
+    stack: List[Value] = field(default_factory=list)
     functions: Optional[List[FunctionMeta]] = None
     frames: List[_Frame] = field(default_factory=list)
     _locals: List[_Cell] = field(default_factory=list)
@@ -63,6 +77,13 @@ class Vm:
 
             if i.op == Op.CONST_I64:
                 self.stack.append(int(i.arg))
+            elif i.op == Op.CONST_STRING:
+                if i.arg is None:
+                    raise AxiomRuntimeError("string constant missing arg")
+                index = int(i.arg)
+                if index < 0 or index >= len(self._strings):
+                    raise AxiomRuntimeError(f"bad CONST_STRING index {index}")
+                self.stack.append(self._strings[index])
             elif i.op == Op.LOAD:
                 slot = self._to_slot(i.arg)
                 self.stack.append(self._current_slot_value(slot, in_upvalue=False))
@@ -81,30 +102,34 @@ class Vm:
                 self._set_slot_value(slot, self.stack.pop(), in_upvalue=True)
             elif i.op in (Op.ADD, Op.SUB, Op.MUL, Op.DIV):
                 b, a = self._pop2()
-                if i.op == Op.ADD:
-                    self.stack.append(a + b)
-                elif i.op == Op.SUB:
-                    self.stack.append(a - b)
-                elif i.op == Op.MUL:
-                    self.stack.append(a * b)
-                else:
-                    if b == 0:
-                        raise AxiomRuntimeError("division by zero")
-                    self.stack.append(trunc_div(a, b))
+                try:
+                    if i.op == Op.ADD:
+                        self.stack.append(add_values(a, b, context="operator '+'"))
+                    elif i.op == Op.SUB:
+                        self.stack.append(sub_values(a, b, context="operator '-'"))
+                    elif i.op == Op.MUL:
+                        self.stack.append(mul_values(a, b, context="operator '*'"))
+                    else:
+                        self.stack.append(div_values(a, b, context="operator '/'"))
+                except ValueError as e:
+                    raise AxiomRuntimeError(str(e)) from e
             elif i.op in (Op.CMP_EQ, Op.CMP_NE, Op.CMP_LT, Op.CMP_LE, Op.CMP_GT, Op.CMP_GE):
                 b, a = self._pop2()
-                if i.op == Op.CMP_EQ:
-                    self.stack.append(to_bool_int(a == b))
-                elif i.op == Op.CMP_NE:
-                    self.stack.append(to_bool_int(a != b))
-                elif i.op == Op.CMP_LT:
-                    self.stack.append(to_bool_int(a < b))
-                elif i.op == Op.CMP_LE:
-                    self.stack.append(to_bool_int(a <= b))
-                elif i.op == Op.CMP_GT:
-                    self.stack.append(to_bool_int(a > b))
-                else:
-                    self.stack.append(to_bool_int(a >= b))
+                try:
+                    if i.op == Op.CMP_EQ:
+                        self.stack.append(compare_eq(a, b))
+                    elif i.op == Op.CMP_NE:
+                        self.stack.append(compare_ne(a, b))
+                    elif i.op == Op.CMP_LT:
+                        self.stack.append(compare_lt(a, b, context="operator '<'"))
+                    elif i.op == Op.CMP_LE:
+                        self.stack.append(compare_le(a, b, context="operator '<='"))
+                    elif i.op == Op.CMP_GT:
+                        self.stack.append(compare_gt(a, b, context="operator '>'"))
+                    else:
+                        self.stack.append(compare_ge(a, b, context="operator '>='"))
+                except ValueError as e:
+                    raise AxiomRuntimeError(str(e)) from e
             elif i.op == Op.CALL:
                 call_idx = int(i.arg)
                 functions = self.functions if self.functions is not None else []
@@ -156,7 +181,9 @@ class Vm:
                         raise AxiomRuntimeError(f"invalid host function index {host_ref}") from e
                     if host_fn_name not in HOST_BUILTINS:
                         raise AxiomRuntimeError(f"undefined host function {host_fn_name!r}")
-                    arg_count, side_effectful = HOST_BUILTINS[host_fn_name]
+                    builtin = HOST_BUILTINS[host_fn_name]
+                    arg_count = builtin.arity
+                    side_effectful = builtin.side_effecting
                     host_fn_id = None
 
                 if len(self.stack) < arg_count:
@@ -192,12 +219,15 @@ class Vm:
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on JMP_IF_FALSE")
                 cond = self.stack.pop()
-                if cond == 0:
-                    self.ip = int(i.arg)
+                try:
+                    if require_condition_int(cond) == 0:
+                        self.ip = int(i.arg)
+                except ValueError as e:
+                    raise AxiomRuntimeError(str(e)) from e
             elif i.op == Op.PRINT:
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on PRINT")
-                out.write(f"{self.stack.pop()}\n")
+                out.write(f"{render_value(self.stack.pop())}\n")
             elif i.op == Op.POP:
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on POP")
@@ -211,14 +241,14 @@ class Vm:
 
         raise AxiomRuntimeError("no HALT encountered")
 
-    def _pop2(self) -> tuple[int, int]:
+    def _pop2(self) -> tuple[Value, Value]:
         if len(self.stack) < 2:
             raise AxiomRuntimeError("stack underflow")
         b = self.stack.pop()
         a = self.stack.pop()
-        return int(b), int(a)
+        return b, a
 
-    def _call_host_fn(self, fn_id: int, args: List[int], out: TextIO) -> int:
+    def _call_host_fn(self, fn_id: int, args: List[Value], out: TextIO) -> Value:
         if fn_id not in HOST_BUILTIN_BY_ID:
             raise AxiomRuntimeError(f"unknown host function id {fn_id}")
         try:
@@ -226,13 +256,13 @@ class Vm:
         except ValueError as e:
             raise AxiomRuntimeError(str(e)) from e
 
-    def _call_host_fn_name(self, name: str, args: List[int], out: TextIO) -> int:
+    def _call_host_fn_name(self, name: str, args: List[Value], out: TextIO) -> Value:
         try:
             return call_host_builtin(name, args, out)
         except ValueError as e:
             raise AxiomRuntimeError(str(e)) from e
 
-    def _current_slot_value(self, slot: int, *, in_upvalue: bool) -> int:
+    def _current_slot_value(self, slot: int, *, in_upvalue: bool) -> Value:
         if in_upvalue:
             if slot >= len(self._upvalues):
                 raise AxiomRuntimeError(f"bad UPVALUE slot {slot}")
@@ -241,7 +271,7 @@ class Vm:
             raise AxiomRuntimeError(f"bad LOAD slot {slot}")
         return self._locals[slot].value
 
-    def _set_slot_value(self, slot: int, value: int, *, in_upvalue: bool) -> None:
+    def _set_slot_value(self, slot: int, value: Value, *, in_upvalue: bool) -> None:
         if in_upvalue:
             if slot >= len(self._upvalues):
                 raise AxiomRuntimeError(f"bad UPVALUE slot {slot}")

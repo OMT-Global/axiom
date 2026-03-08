@@ -20,6 +20,7 @@ Current supported fields:
   - Included by `pkg init` from the current runtime.
   - If present in a manifest, `pkg check`, `pkg build`, and `pkg run` validate that
     the runtime host signature matches the pinned value.
+  - The signature covers the full capability payload, including `arg_kinds` and `return_kind`.
 - `main` and `out_dir` must be relative paths and may not contain `..` parent segments.
 - `output` (optional, string): Custom output filename or path inside `out_dir`.
   - Must be a relative path and may not traverse parent directories (no `..`).
@@ -35,7 +36,7 @@ Example manifest:
   "main": "src/main.ax",
   "out_dir": "dist",
   "output": "artifact.axb",
-  "allowed_host_calls": ["version", "abs", "math.abs"],
+  "allowed_host_calls": ["version", "abs", "math.abs", "int.parse"],
   "host_contract_signature": "8f6..."
 }
 ```
@@ -70,6 +71,8 @@ Options:
 `pkg check` validates `axiom.pkg` and compiles the manifest `main` entrypoint.
 Host side-effecting host calls (for example `host.print`) obey the global
 `--allow-host-side-effects` flag.
+`host.read` returns a string value; numeric input should flow through
+`host.int.parse(host.read(...))`.
 
 `pkg run` reads `axiom.pkg`, compiles `main`, and executes it in the VM immediately.
 

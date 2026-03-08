@@ -7,7 +7,7 @@
 
 ## Phase 1 ✅
 - Blocks and scopes
-- If/else, while, boolean type
+- If/else, while, int-truthy control flow
 - Better diagnostics + spans -> line/col snippets
 
 ## Phase 2 ✅
@@ -31,7 +31,12 @@
 - Stable host-tooling contracts for long-running agentic workflows
 - Module namespace strategy for future large-language agent compositions
 
-## Phase 7 (next)
-- Richer diagnostics and developer tooling beyond single-span error snippets
-- Types beyond int-only runtime semantics
+## Phase 7 ✅
+- Import-trace diagnostics plus obvious static type-mismatch checks
+- Mixed `int | string` runtime values, string literals, and bytecode `v0.8`
+- Typed host capability metadata and string-aware host I/O
+
+## Phase 8 (next)
+- Explicit types and broader value kinds beyond `int | string`
+- Collections and first-class function values
 - Package and module ergonomics for larger multi-file programs

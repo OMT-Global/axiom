@@ -81,6 +81,12 @@ def cmd_disasm(path: Path) -> int:
         name = names.get(ins.op, f"OP_{ins.op}")
         if ins.arg is None:
             print(f"{idx:04d} {name}")
+        elif ins.op == Op.CONST_STRING:
+            try:
+                value = bc.strings[int(ins.arg)]
+            except (IndexError, TypeError, ValueError):
+                value = "<invalid-string-index>"
+            print(f"{idx:04d} {name} {ins.arg} {value!r}")
         else:
             print(f"{idx:04d} {name} {ins.arg}")
     return 0
@@ -236,7 +242,10 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("disasm", help="Disassemble bytecode")
     sp.add_argument("file", type=Path)
 
-    sp = sub.add_parser("check", help="Parse + semantic checks (currently: undefined vars via compilation)")
+    sp = sub.add_parser(
+        "check",
+        help="Parse + semantic checks (compilation plus obvious static type mismatches)",
+    )
     sp.add_argument("file", type=Path)
     sp.add_argument("--allow-host-side-effects", action="store_true")
     sp.add_argument("--module-path", action="append", default=None)

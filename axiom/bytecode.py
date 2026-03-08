@@ -8,11 +8,12 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 7
+VERSION_MINOR = 8
 
 
 class Op:
     CONST_I64 = 0x01
+    CONST_STRING = 0x19
     LOAD = 0x02
     STORE = 0x03
     ADD = 0x04
@@ -77,7 +78,7 @@ class Bytecode:
     def encode(self) -> bytes:
         out = bytearray()
         out += MAGIC
-        out += struct.pack("<HH", VERSION_MAJOR, VERSION_MINOR)
+        out += struct.pack("<HH", VERSION_MAJOR, self.version_minor)
         out += struct.pack("<I", self.locals_count)
 
         out += struct.pack("<I", len(self.functions))
@@ -105,6 +106,12 @@ class Bytecode:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_I64 missing arg")
                 out += struct.pack("<q", int(ins.arg))
+            elif ins.op == Op.CONST_STRING:
+                if ins.arg is None:
+                    raise AxiomCompileError("CONST_STRING missing arg")
+                if self.version_minor < 8:
+                    raise AxiomCompileError("CONST_STRING requires bytecode version 0.8+")
+                out += struct.pack("<I", int(ins.arg))
             elif ins.op in (
                 Op.LOAD,
                 Op.STORE,
@@ -189,6 +196,11 @@ class Bytecode:
             if op == Op.CONST_I64:
                 (v,) = struct.unpack("<q", take(8))
                 ins.append(Instr(op, int(v)))
+            elif op == Op.CONST_STRING:
+                if minor < 8:
+                    raise ValueError("CONST_STRING requires bytecode version 0.8+")
+                (index,) = struct.unpack("<I", take(4))
+                ins.append(Instr(op, int(index)))
             elif op in (
                 Op.LOAD,
                 Op.STORE,

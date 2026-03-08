@@ -20,7 +20,7 @@ from axiom.ast import (
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
-from axiom.bytecode import Op, VERSION_MINOR
+from axiom.bytecode import Bytecode, Instr, Op, VERSION_MINOR
 from axiom.host import host_contract_metadata, register_host_builtin, reset_host_builtins, unregister_host_builtin
 
 
@@ -206,6 +206,26 @@ print counter()
         out = io.StringIO()
         Vm(locals_count=bc.locals_count).run(bc, out)
         self.assertEqual(out.getvalue(), "5\n")
+
+    def test_compile_rejects_mixed_addition_when_statically_known(self) -> None:
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode('print 1 + "x"\n')
+        self.assertIn("matching int or string operands", str(cm.exception))
+
+    def test_compile_rejects_string_comparison_when_statically_known(self) -> None:
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode('print "a" < "b"\n')
+        self.assertIn("operator '<' expects int operands", str(cm.exception))
+
+    def test_compile_rejects_string_condition_when_statically_known(self) -> None:
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode('if "ready" { print 1 }\n')
+        self.assertIn("condition expects int value, got string", str(cm.exception))
+
+    def test_compile_rejects_host_parse_int_argument_type_mismatch(self) -> None:
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode("print host.int.parse(7)\n")
+        self.assertIn("expects string, got int", str(cm.exception))
 
     def test_compile_custom_host_builtin(self) -> None:
         def double(args: list[int], _out) -> int:
@@ -479,6 +499,35 @@ print counter()
         self.assertIsNotNone(host_name_index)
         self.assertEqual(bc.strings[int(host_name_index)], "abs")
 
+    def test_string_literals_roundtrip_through_bytecode(self) -> None:
+        bc = compile_to_bytecode('print "hello\\naxiom"\n')
+        string_ops = [i for i in bc.instructions if i.op == Op.CONST_STRING]
+        self.assertEqual(len(string_ops), 1)
+        self.assertEqual(bc.strings[int(string_ops[0].arg)], "hello\naxiom")
+
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, out)
+        self.assertEqual(out.getvalue(), "hello\naxiom\n")
+
+    def test_bytecode_decode_keeps_v7_compatibility(self) -> None:
+        legacy = Bytecode(
+            strings=[],
+            instructions=[
+                Instr(Op.CONST_I64, 41),
+                Instr(Op.PRINT),
+                Instr(Op.HALT),
+            ],
+            locals_count=0,
+            functions=[],
+            version_minor=7,
+        )
+        decoded = Bytecode.decode(legacy.encode())
+        self.assertEqual(decoded.version_minor, 7)
+
+        out = io.StringIO()
+        Vm(locals_count=decoded.locals_count).run(decoded, out)
+        self.assertEqual(out.getvalue(), "41\n")
+
     def test_runtime_host_print_requires_explicit_allow(self) -> None:
         program = parse_program("host.print(1)\n")
         with self.assertRaises(AxiomRuntimeError):
@@ -500,6 +549,12 @@ print counter()
         out = io.StringIO()
         Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
         self.assertEqual(out.getvalue(), "1\n")
+
+    def test_runtime_host_print_string_with_allow_vm(self) -> None:
+        bc = compile_to_bytecode('host.print("hi")\n', allow_host_side_effects=True)
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
+        self.assertEqual(out.getvalue(), "hi\n")
 
     def test_runtime_non_host_namespace_call(self) -> None:
         with self.assertRaises(AxiomParseError):
@@ -573,6 +628,35 @@ print counter()
         Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
         self.assertEqual(out.getvalue(), "41\n")
         fake_input.assert_called_once_with("123")
+
+    @patch("builtins.input", return_value="41")
+    def test_runtime_host_read_parse_int_with_allow_vm(self, fake_input) -> None:
+        bc = compile_to_bytecode(
+            'print host.int.parse(host.read("num> "))\n',
+            allow_host_side_effects=True,
+        )
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count, allow_host_side_effects=True).run(bc, out)
+        self.assertEqual(out.getvalue(), "41\n")
+        fake_input.assert_called_once_with("num> ")
+
+    def test_runtime_string_condition_requires_int(self) -> None:
+        src = """
+fn choose(cond) {
+  if cond {
+    print 1
+  }
+}
+
+choose("yes")
+"""
+        program = parse_program(src)
+        with self.assertRaises(AxiomRuntimeError):
+            Interpreter().run(program, io.StringIO())
+
+        bc = compile_to_bytecode(src)
+        with self.assertRaises(AxiomRuntimeError):
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
 
     def test_host_contract_signature_tracks_capability_state(self) -> None:
         base = host_contract_metadata()

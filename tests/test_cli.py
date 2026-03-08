@@ -110,6 +110,14 @@ class CliParityTests(unittest.TestCase):
         version_entry = next(e for e in payload if e["name"] == "version")
         self.assertEqual(version_entry["arity"], 0)
         self.assertFalse(version_entry["side_effecting"])
+        self.assertEqual(version_entry["arg_kinds"], [])
+        self.assertEqual(version_entry["return_kind"], "int")
+        print_entry = next(e for e in payload if e["name"] == "print")
+        self.assertEqual(print_entry["arg_kinds"], ["value"])
+        self.assertEqual(print_entry["return_kind"], "int")
+        parse_entry = next(e for e in payload if e["name"] == "int.parse")
+        self.assertEqual(parse_entry["arg_kinds"], ["string"])
+        self.assertEqual(parse_entry["return_kind"], "int")
 
         safe_proc = self._run_cli(["host", "list", "--safe-only"], cwd=ROOT)
         safe_payload = json.loads(safe_proc.stdout)
@@ -117,7 +125,9 @@ class CliParityTests(unittest.TestCase):
         self.assertTrue(all(not entry["side_effecting"] for entry in safe_payload))
         safe_names = {entry["name"] for entry in safe_payload}
         self.assertIn("version", safe_names)
+        self.assertIn("int.parse", safe_names)
         self.assertNotIn("print", safe_names)
+        self.assertNotIn("read", safe_names)
         compact_proc = self._run_cli(["host", "list", "--compact"], cwd=ROOT)
         compact_payload = json.loads(compact_proc.stdout)
         self.assertEqual(payload, compact_payload)
@@ -134,6 +144,7 @@ class CliParityTests(unittest.TestCase):
         names = {entry["name"] for entry in caps}
         self.assertIn("version", names)
         self.assertIn("print", names)
+        self.assertIn("int.parse", names)
         self.assertIsInstance(payload["capabilities_signature"], str)
         self.assertEqual(
             payload["capabilities_signature"],
@@ -161,6 +172,26 @@ class CliParityTests(unittest.TestCase):
         compact_proc = self._run_cli(["host", "describe", "--compact"], cwd=ROOT)
         compact_payload = json.loads(compact_proc.stdout)
         self.assertEqual(payload, compact_payload)
+
+    def test_string_program_cli_roundtrip_and_disasm(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "string.ax"
+            bc = Path(td) / "string.axb"
+            src.write_text('print "hello, axiom"\n', encoding="utf-8")
+
+            interp_proc = self._run_cli(["interp", str(src)], cwd=ROOT)
+            self.assertEqual(interp_proc.stdout, "hello, axiom\n")
+
+            self._run_cli(["compile", str(src), "-o", str(bc)], cwd=ROOT)
+            vm_proc = self._run_cli(["vm", str(bc)], cwd=ROOT)
+            self.assertEqual(vm_proc.stdout, "hello, axiom\n")
+
+            run_proc = self._run_cli(["run", str(src)], cwd=ROOT)
+            self.assertEqual(run_proc.stdout, "hello, axiom\n")
+
+            disasm_proc = self._run_cli(["disasm", str(bc)], cwd=ROOT)
+            self.assertIn("CONST_STRING", disasm_proc.stdout)
+            self.assertIn("'hello, axiom'", disasm_proc.stdout)
 
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -234,6 +265,21 @@ class CliParityTests(unittest.TestCase):
             (project / "src" / "main.ax").write_text("print 7\n", encoding="utf-8")
             proc = self._run_cli(["pkg", "run", str(project)], cwd=ROOT)
             self.assertEqual(proc.stdout, "7\n")
+
+    def test_package_build_and_run_string_program(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            self._run_cli(["pkg", "init", str(project), "--name", "demo"], cwd=ROOT)
+            (project / "src" / "main.ax").write_text('print "ship it"\n', encoding="utf-8")
+
+            check_proc = self._run_cli(["pkg", "check", str(project)], cwd=ROOT)
+            self.assertIn("OK", check_proc.stderr)
+
+            build_proc = self._run_cli(["pkg", "build", str(project)], cwd=ROOT)
+            self.assertIn("wrote", build_proc.stderr)
+
+            run_proc = self._run_cli(["pkg", "run", str(project)], cwd=ROOT)
+            self.assertEqual(run_proc.stdout, "ship it\n")
 
     def test_package_init_with_manifest_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as td:

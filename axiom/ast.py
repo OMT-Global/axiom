@@ -103,6 +103,12 @@ class IntLit:
 
 
 @dataclass(frozen=True)
+class StringLit:
+    value: str
+    span: Span
+
+
+@dataclass(frozen=True)
 class VarRef:
     name: str
     span: Span
@@ -142,7 +148,7 @@ class Binary:
     span: Span
 
 
-Expr = Union[IntLit, VarRef, UnaryNeg, Binary, CallExpr]
+Expr = Union[IntLit, StringLit, VarRef, UnaryNeg, Binary, CallExpr]
 
 
 def expr_span(e: Expr) -> Span:

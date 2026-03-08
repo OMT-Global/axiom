@@ -18,6 +18,7 @@ from .ast import (
     WhileStmt,
     Expr,
     IntLit,
+    StringLit,
     VarRef,
     CallExpr,
     UnaryNeg,
@@ -428,6 +429,9 @@ class Parser:
         if t.kind == TokenKind.INT:
             tok = self._bump()
             return IntLit(int(tok.value), tok.span)
+        if t.kind == TokenKind.STRING:
+            tok = self._bump()
+            return StringLit(str(tok.value), tok.span)
         if t.kind == TokenKind.IDENT:
             tok = self._bump()
             callee_parts = [str(tok.value)]
@@ -506,6 +510,8 @@ def _derive_import_alias(raw_path: str) -> str:
 def _widen_span(expr: Expr, span: Span) -> Expr:
     if isinstance(expr, IntLit):
         return IntLit(expr.value, span)
+    if isinstance(expr, StringLit):
+        return StringLit(expr.value, span)
     if isinstance(expr, VarRef):
         return VarRef(expr.name, span)
     if isinstance(expr, CallExpr):
