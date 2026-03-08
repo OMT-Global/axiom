@@ -58,6 +58,24 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_struct_literals_and_field_access() {
+        let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.structs.len(), 1);
+        let hir = hir::lower(&parsed).expect("lower");
+        assert_eq!(hir.structs.len(), 1);
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("struct BuildInfo {"));
+        assert!(rendered.contains("name: String,"));
+        assert!(rendered.contains("count: i64,"));
+        assert!(rendered.contains(
+            "let info: BuildInfo = BuildInfo { name: String::from(\"stage1\"), count: 42 };"
+        ));
+        assert!(rendered.contains("return (info).count;"));
+    }
+
+    #[test]
     fn build_project_emits_native_binary() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("native");
@@ -75,6 +93,26 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
             "hello from stage1\n42\ntrue\n"
+        );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_structs() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("structs");
+        create_project(&project, Some("structs-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct BuildInfo {\nlabel: string\ncount: int\n}\n\nlet info: BuildInfo = BuildInfo { label: \"hello from stage1\", count: 42 }\nprint info.count\nprint info.label\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\nhello from stage1\n"
         );
     }
 
@@ -350,9 +388,9 @@ mod tests {
         fs::write(project.join("src/greetings.ax"), "print \"nope\"\n").expect("write greetings");
         let error = check_project(&project).expect_err("module top-level statements should fail");
         assert!(
-            error
-                .message
-                .contains("may only contain imports and function declarations")
+            error.message.contains(
+                "may only contain imports, struct declarations, and function declarations"
+            )
         );
         assert_eq!(error.kind, "import");
     }
@@ -380,5 +418,64 @@ mod tests {
         let error = check_project(&project).expect_err("circular imports should fail");
         assert!(error.message.contains("circular import"));
         assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_from_imported_public_structs() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-modules");
+        create_project(&project, Some("struct-modules-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"model.ax\"\n\nlet info: BuildInfo = BuildInfo { label: \"hello from modules\", count: 42 }\nprint info.count\nprint info.label\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/model.ax"),
+            "pub struct BuildInfo {\nlabel: string\ncount: int\n}\n",
+        )
+        .expect("write model");
+        let built = build_project(&project).expect("build imported structs");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\nhello from modules\n"
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_missing_struct_field() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-field");
+        create_project(&project, Some("missing-field-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct BuildInfo {\nlabel: string\ncount: int\n}\n\nlet info: BuildInfo = BuildInfo { label: \"x\" }\nprint info.count\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("missing field should fail");
+        assert!(error.message.contains("is missing field"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_field_access_on_non_struct() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("bad-field-access");
+        create_project(&project, Some("bad-field-access-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint answer.count\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("field access should fail");
+        assert!(
+            error
+                .message
+                .contains("field access expects a struct value")
+        );
+        assert_eq!(error.kind, "type");
     }
 }

@@ -101,6 +101,9 @@ struct ModuleSymbols {
     functions: HashMap<String, String>,
     public_functions: HashMap<String, String>,
     private_functions: HashSet<String>,
+    structs: HashMap<String, String>,
+    public_structs: HashMap<String, String>,
+    private_structs: HashSet<String>,
 }
 
 fn analyze_project(project_root: &Path) -> Result<AnalyzedProject, Diagnostic> {
@@ -187,7 +190,7 @@ fn load_module_recursive(
         let stmt = &program.stmts[0];
         return Err(Diagnostic::new(
             "import",
-            "imported stage1 modules may only contain imports and function declarations",
+            "imported stage1 modules may only contain imports, struct declarations, and function declarations",
         )
         .with_path(module_path.display().to_string())
         .with_span(stmt_line(stmt), stmt_column(stmt)));
@@ -222,13 +225,16 @@ fn flatten_modules(
     }
 
     let mut flattened_functions = Vec::new();
+    let mut flattened_structs = Vec::new();
     let mut flattened_stmts = Vec::new();
     for module in modules {
         let Some(module_symbols) = symbols.get(&module.path) else {
             continue;
         };
-        let mut visible = module_symbols.functions.clone();
+        let mut visible_functions = module_symbols.functions.clone();
+        let mut visible_structs = module_symbols.structs.clone();
         let mut private_imported = HashSet::new();
+        let mut private_imported_types = HashSet::new();
         for import in &module.program.imports {
             let import_path = resolve_import_path(source_root, &module.path, import)?;
             let imported_symbols = symbols.get(&import_path).ok_or_else(|| {
@@ -241,7 +247,7 @@ fn flatten_modules(
                 private_imported.insert(name.clone());
             }
             for (export_name, internal_name) in &imported_symbols.public_functions {
-                if let Some(existing) = visible.get(export_name)
+                if let Some(existing) = visible_functions.get(export_name)
                     && existing != internal_name
                 {
                     return Err(Diagnostic::new(
@@ -251,16 +257,43 @@ fn flatten_modules(
                     .with_path(module.path.display().to_string())
                     .with_span(import.line, import.column));
                 }
-                visible.insert(export_name.clone(), internal_name.clone());
+                visible_functions.insert(export_name.clone(), internal_name.clone());
+            }
+            for name in &imported_symbols.private_structs {
+                private_imported_types.insert(name.clone());
+            }
+            for (export_name, internal_name) in &imported_symbols.public_structs {
+                if let Some(existing) = visible_structs.get(export_name)
+                    && existing != internal_name
+                {
+                    return Err(Diagnostic::new(
+                        "import",
+                        format!("imported struct {export_name:?} collides with an existing name"),
+                    )
+                    .with_path(module.path.display().to_string())
+                    .with_span(import.line, import.column));
+                }
+                visible_structs.insert(export_name.clone(), internal_name.clone());
             }
         }
 
+        for struct_decl in &module.program.structs {
+            flattened_structs.push(rewrite_struct(
+                struct_decl,
+                module_symbols,
+                &visible_structs,
+                &private_imported_types,
+                &module.path,
+            )?);
+        }
         for function in &module.program.functions {
             flattened_functions.push(rewrite_function(
                 function,
                 module_symbols,
-                &visible,
+                &visible_functions,
+                &visible_structs,
                 &private_imported,
+                &private_imported_types,
                 &module.path,
             )?);
         }
@@ -268,8 +301,10 @@ fn flatten_modules(
             for stmt in &module.program.stmts {
                 flattened_stmts.push(rewrite_stmt(
                     stmt,
-                    &visible,
+                    &visible_functions,
+                    &visible_structs,
                     &private_imported,
+                    &private_imported_types,
                     &module.path,
                 )?);
             }
@@ -278,6 +313,7 @@ fn flatten_modules(
 
     Ok(syntax::Program {
         imports: Vec::new(),
+        structs: flattened_structs,
         functions: flattened_functions,
         stmts: flattened_stmts,
     })
@@ -291,6 +327,28 @@ fn build_module_symbols(
     let mut functions = HashMap::new();
     let mut public_functions = HashMap::new();
     let mut private_functions = HashSet::new();
+    let mut structs = HashMap::new();
+    let mut public_structs = HashMap::new();
+    let mut private_structs = HashSet::new();
+    for struct_decl in &module.program.structs {
+        let internal_name = format!("{module_id}_{}", struct_decl.name);
+        if structs
+            .insert(struct_decl.name.clone(), internal_name.clone())
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate struct {:?}", struct_decl.name),
+            )
+            .with_path(module.path.display().to_string())
+            .with_span(struct_decl.line, struct_decl.column));
+        }
+        if struct_decl.is_public {
+            public_structs.insert(struct_decl.name.clone(), internal_name);
+        } else {
+            private_structs.insert(struct_decl.name.clone());
+        }
+    }
     for function in &module.program.functions {
         let internal_name = format!("{module_id}_{}", function.name);
         if functions
@@ -314,14 +372,54 @@ fn build_module_symbols(
         functions,
         public_functions,
         private_functions,
+        structs,
+        public_structs,
+        private_structs,
     })
+}
+
+fn rewrite_struct(
+    struct_decl: &syntax::StructDecl,
+    module_symbols: &ModuleSymbols,
+    visible_structs: &HashMap<String, String>,
+    private_imported_types: &HashSet<String>,
+    module_path: &Path,
+) -> Result<syntax::StructDecl, Diagnostic> {
+    let mut rewritten = struct_decl.clone();
+    rewritten.name = module_symbols
+        .structs
+        .get(&struct_decl.name)
+        .cloned()
+        .unwrap_or_else(|| format!("{}_{}", module_symbols.module_id, struct_decl.name));
+    rewritten.fields = struct_decl
+        .fields
+        .iter()
+        .map(|field| {
+            Ok(syntax::StructField {
+                name: field.name.clone(),
+                ty: rewrite_type_name(
+                    &field.ty,
+                    visible_structs,
+                    private_imported_types,
+                    module_path,
+                    field.line,
+                    field.column,
+                )?,
+                line: field.line,
+                column: field.column,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    Ok(rewritten)
 }
 
 fn rewrite_function(
     function: &syntax::Function,
     module_symbols: &ModuleSymbols,
-    visible: &HashMap<String, String>,
+    visible_functions: &HashMap<String, String>,
+    visible_structs: &HashMap<String, String>,
     private_imported: &HashSet<String>,
+    private_imported_types: &HashSet<String>,
     module_path: &Path,
 ) -> Result<syntax::Function, Diagnostic> {
     let mut rewritten = function.clone();
@@ -333,15 +431,53 @@ fn rewrite_function(
     rewritten.body = function
         .body
         .iter()
-        .map(|stmt| rewrite_stmt(stmt, visible, private_imported, module_path))
+        .map(|stmt| {
+            rewrite_stmt(
+                stmt,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
+    rewritten.params = function
+        .params
+        .iter()
+        .map(|param| {
+            Ok(syntax::Param {
+                name: param.name.clone(),
+                ty: rewrite_type_name(
+                    &param.ty,
+                    visible_structs,
+                    private_imported_types,
+                    module_path,
+                    param.line,
+                    param.column,
+                )?,
+                line: param.line,
+                column: param.column,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    rewritten.return_ty = rewrite_type_name(
+        &function.return_ty,
+        visible_structs,
+        private_imported_types,
+        module_path,
+        function.line,
+        function.column,
+    )?;
     Ok(rewritten)
 }
 
 fn rewrite_stmt(
     stmt: &syntax::Stmt,
-    visible: &HashMap<String, String>,
+    visible_functions: &HashMap<String, String>,
+    visible_structs: &HashMap<String, String>,
     private_imported: &HashSet<String>,
+    private_imported_types: &HashSet<String>,
     module_path: &Path,
 ) -> Result<syntax::Stmt, Diagnostic> {
     Ok(match stmt {
@@ -353,13 +489,34 @@ fn rewrite_stmt(
             column,
         } => syntax::Stmt::Let {
             name: name.clone(),
-            ty: ty.clone(),
-            expr: rewrite_expr(expr, visible, private_imported, module_path)?,
+            ty: rewrite_type_name(
+                ty,
+                visible_structs,
+                private_imported_types,
+                module_path,
+                *line,
+                *column,
+            )?,
+            expr: rewrite_expr(
+                expr,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?,
             line: *line,
             column: *column,
         },
         syntax::Stmt::Print { expr, line, column } => syntax::Stmt::Print {
-            expr: rewrite_expr(expr, visible, private_imported, module_path)?,
+            expr: rewrite_expr(
+                expr,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?,
             line: *line,
             column: *column,
         },
@@ -370,17 +527,42 @@ fn rewrite_stmt(
             line,
             column,
         } => syntax::Stmt::If {
-            cond: rewrite_expr(cond, visible, private_imported, module_path)?,
+            cond: rewrite_expr(
+                cond,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?,
             then_block: then_block
                 .iter()
-                .map(|stmt| rewrite_stmt(stmt, visible, private_imported, module_path))
+                .map(|stmt| {
+                    rewrite_stmt(
+                        stmt,
+                        visible_functions,
+                        visible_structs,
+                        private_imported,
+                        private_imported_types,
+                        module_path,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?,
             else_block: else_block
                 .as_ref()
                 .map(|block| {
                     block
                         .iter()
-                        .map(|stmt| rewrite_stmt(stmt, visible, private_imported, module_path))
+                        .map(|stmt| {
+                            rewrite_stmt(
+                                stmt,
+                                visible_functions,
+                                visible_structs,
+                                private_imported,
+                                private_imported_types,
+                                module_path,
+                            )
+                        })
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .transpose()?,
@@ -393,16 +575,39 @@ fn rewrite_stmt(
             line,
             column,
         } => syntax::Stmt::While {
-            cond: rewrite_expr(cond, visible, private_imported, module_path)?,
+            cond: rewrite_expr(
+                cond,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?,
             body: body
                 .iter()
-                .map(|stmt| rewrite_stmt(stmt, visible, private_imported, module_path))
+                .map(|stmt| {
+                    rewrite_stmt(
+                        stmt,
+                        visible_functions,
+                        visible_structs,
+                        private_imported,
+                        private_imported_types,
+                        module_path,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?,
             line: *line,
             column: *column,
         },
         syntax::Stmt::Return { expr, line, column } => syntax::Stmt::Return {
-            expr: rewrite_expr(expr, visible, private_imported, module_path)?,
+            expr: rewrite_expr(
+                expr,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?,
             line: *line,
             column: *column,
         },
@@ -411,8 +616,10 @@ fn rewrite_stmt(
 
 fn rewrite_expr(
     expr: &syntax::Expr,
-    visible: &HashMap<String, String>,
+    visible_functions: &HashMap<String, String>,
+    visible_structs: &HashMap<String, String>,
     private_imported: &HashSet<String>,
+    private_imported_types: &HashSet<String>,
     module_path: &Path,
 ) -> Result<syntax::Expr, Diagnostic> {
     Ok(match expr {
@@ -423,7 +630,7 @@ fn rewrite_expr(
             line,
             column,
         } => {
-            if !visible.contains_key(name) && private_imported.contains(name) {
+            if !visible_functions.contains_key(name) && private_imported.contains(name) {
                 return Err(Diagnostic::new(
                     "import",
                     format!("function {name:?} is not exported by an imported module"),
@@ -432,10 +639,22 @@ fn rewrite_expr(
                 .with_span(*line, *column));
             }
             syntax::Expr::Call {
-                name: visible.get(name).cloned().unwrap_or_else(|| name.clone()),
+                name: visible_functions
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone()),
                 args: args
                     .iter()
-                    .map(|arg| rewrite_expr(arg, visible, private_imported, module_path))
+                    .map(|arg| {
+                        rewrite_expr(
+                            arg,
+                            visible_functions,
+                            visible_structs,
+                            private_imported,
+                            private_imported_types,
+                            module_path,
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?,
                 line: *line,
                 column: *column,
@@ -447,8 +666,22 @@ fn rewrite_expr(
             line,
             column,
         } => syntax::Expr::BinaryAdd {
-            lhs: Box::new(rewrite_expr(lhs, visible, private_imported, module_path)?),
-            rhs: Box::new(rewrite_expr(rhs, visible, private_imported, module_path)?),
+            lhs: Box::new(rewrite_expr(
+                lhs,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            rhs: Box::new(rewrite_expr(
+                rhs,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
             line: *line,
             column: *column,
         },
@@ -460,12 +693,116 @@ fn rewrite_expr(
             column,
         } => syntax::Expr::BinaryCompare {
             op: *op,
-            lhs: Box::new(rewrite_expr(lhs, visible, private_imported, module_path)?),
-            rhs: Box::new(rewrite_expr(rhs, visible, private_imported, module_path)?),
+            lhs: Box::new(rewrite_expr(
+                lhs,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            rhs: Box::new(rewrite_expr(
+                rhs,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::StructLiteral {
+            name,
+            fields,
+            line,
+            column,
+        } => {
+            if !visible_structs.contains_key(name) && private_imported_types.contains(name) {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("struct {name:?} is not exported by an imported module"),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(*line, *column));
+            }
+            syntax::Expr::StructLiteral {
+                name: visible_structs
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone()),
+                fields: fields
+                    .iter()
+                    .map(|field| {
+                        Ok(syntax::StructFieldValue {
+                            name: field.name.clone(),
+                            expr: rewrite_expr(
+                                &field.expr,
+                                visible_functions,
+                                visible_structs,
+                                private_imported,
+                                private_imported_types,
+                                module_path,
+                            )?,
+                            line: field.line,
+                            column: field.column,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+                line: *line,
+                column: *column,
+            }
+        }
+        syntax::Expr::FieldAccess {
+            base,
+            field,
+            line,
+            column,
+        } => syntax::Expr::FieldAccess {
+            base: Box::new(rewrite_expr(
+                base,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            field: field.clone(),
             line: *line,
             column: *column,
         },
     })
+}
+
+fn rewrite_type_name(
+    ty: &syntax::TypeName,
+    visible_structs: &HashMap<String, String>,
+    private_imported_types: &HashSet<String>,
+    module_path: &Path,
+    line: usize,
+    column: usize,
+) -> Result<syntax::TypeName, Diagnostic> {
+    match ty {
+        syntax::TypeName::Int => Ok(syntax::TypeName::Int),
+        syntax::TypeName::Bool => Ok(syntax::TypeName::Bool),
+        syntax::TypeName::String => Ok(syntax::TypeName::String),
+        syntax::TypeName::Named(name) => {
+            if !visible_structs.contains_key(name) && private_imported_types.contains(name) {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("struct {name:?} is not exported by an imported module"),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(line, column));
+            }
+            Ok(syntax::TypeName::Named(
+                visible_structs
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone()),
+            ))
+        }
+    }
 }
 
 fn resolve_import_path(

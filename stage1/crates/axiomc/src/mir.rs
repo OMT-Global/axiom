@@ -3,8 +3,21 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
+    pub structs: Vec<StructDef>,
     pub functions: Vec<Function>,
     pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -64,6 +77,16 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    StructLiteral {
+        name: String,
+        fields: Vec<StructFieldValue>,
+        ty: Type,
+    },
+    FieldAccess {
+        base: Box<Expr>,
+        field: String,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -88,10 +111,18 @@ pub enum Type {
     Int,
     Bool,
     String,
+    Struct(String),
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructFieldValue {
+    pub name: String,
+    pub expr: Expr,
 }
 
 pub fn lower(program: &hir::Program) -> Program {
     Program {
+        structs: program.structs.iter().map(lower_struct).collect(),
         functions: program.functions.iter().map(lower_function).collect(),
         stmts: program.stmts.iter().map(lower_stmt).collect(),
     }
@@ -131,6 +162,20 @@ fn lower_function(function: &hir::Function) -> Function {
         params: function.params.iter().map(lower_param).collect(),
         return_ty: lower_type(&function.return_ty),
         body: function.body.iter().map(lower_stmt).collect(),
+    }
+}
+
+fn lower_struct(struct_def: &hir::StructDef) -> StructDef {
+    StructDef {
+        name: struct_def.name.clone(),
+        fields: struct_def.fields.iter().map(lower_struct_field).collect(),
+    }
+}
+
+fn lower_struct_field(field: &hir::StructField) -> StructField {
+    StructField {
+        name: field.name.clone(),
+        ty: lower_type(&field.ty),
     }
 }
 
@@ -195,6 +240,22 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             rhs: Box::new(lower_expr(rhs)),
             ty: lower_type(ty),
         },
+        hir::Expr::StructLiteral { name, fields, ty } => Expr::StructLiteral {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| StructFieldValue {
+                    name: field.name.clone(),
+                    expr: lower_expr(&field.expr),
+                })
+                .collect(),
+            ty: lower_type(ty),
+        },
+        hir::Expr::FieldAccess { base, field, ty } => Expr::FieldAccess {
+            base: Box::new(lower_expr(base)),
+            field: field.clone(),
+            ty: lower_type(ty),
+        },
     }
 }
 
@@ -203,6 +264,7 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::Int => Type::Int,
         hir::Type::Bool => Type::Bool,
         hir::Type::String => Type::String,
+        hir::Type::Struct(name) => Type::Struct(name.clone()),
     }
 }
 

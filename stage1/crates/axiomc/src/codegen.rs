@@ -1,10 +1,16 @@
 use crate::diagnostics::Diagnostic;
-use crate::mir::{Expr, Function, LiteralValue, Param, Program, Stmt, Type};
+use crate::mir::{
+    Expr, Function, LiteralValue, Param, Program, Stmt, StructDef, StructField, Type,
+};
 use std::path::Path;
 use std::process::Command;
 
 pub fn render_rust(program: &Program) -> String {
     let mut out = String::new();
+    for struct_def in &program.structs {
+        render_struct(struct_def, &mut out);
+        out.push('\n');
+    }
     for function in &program.functions {
         render_function(function, &mut out);
         out.push('\n');
@@ -15,6 +21,21 @@ pub fn render_rust(program: &Program) -> String {
     }
     out.push_str("}\n");
     out
+}
+
+fn render_struct(struct_def: &StructDef, out: &mut String) {
+    out.push_str("#[allow(non_camel_case_types)]\n");
+    out.push_str("#[derive(Debug)]\n");
+    out.push_str(&format!("struct {} {{\n", struct_def.name));
+    for field in &struct_def.fields {
+        render_struct_field(field, out, 1);
+    }
+    out.push_str("}\n");
+}
+
+fn render_struct_field(field: &StructField, out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    out.push_str(&format!("{pad}{}: {},\n", field.name, rust_type(&field.ty)));
 }
 
 fn render_function(function: &Function, out: &mut String) {
@@ -100,18 +121,29 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(rhs)
             ),
             Type::Bool => unreachable!("type checker rejects bool addition"),
+            Type::Struct(_) => unreachable!("type checker rejects struct addition"),
         },
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
         }
+        Expr::StructLiteral { name, fields, .. } => {
+            let rendered_fields = fields
+                .iter()
+                .map(|field| format!("{}: {}", field.name, render_expr(&field.expr)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name} {{ {rendered_fields} }}")
+        }
+        Expr::FieldAccess { base, field, .. } => format!("({}).{}", render_expr(base), field),
     }
 }
 
-fn rust_type(ty: &Type) -> &'static str {
+fn rust_type(ty: &Type) -> String {
     match ty {
-        Type::Int => "i64",
-        Type::Bool => "bool",
-        Type::String => "String",
+        Type::Int => String::from("i64"),
+        Type::Bool => String::from("bool"),
+        Type::String => String::from("String"),
+        Type::Struct(name) => name.clone(),
     }
 }
 

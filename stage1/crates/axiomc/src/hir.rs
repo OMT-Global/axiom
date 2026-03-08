@@ -5,8 +5,21 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
+    pub structs: Vec<StructDef>,
     pub functions: Vec<Function>,
     pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -69,6 +82,16 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    StructLiteral {
+        name: String,
+        fields: Vec<StructFieldValue>,
+        ty: Type,
+    },
+    FieldAccess {
+        base: Box<Expr>,
+        field: String,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -76,6 +99,7 @@ pub enum Type {
     Int,
     Bool,
     String,
+    Struct(String),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -95,6 +119,12 @@ pub enum CompareOp {
     Ge,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructFieldValue {
+    pub name: String,
+    pub expr: Expr,
+}
+
 #[derive(Debug, Clone)]
 struct Binding {
     ty: Type,
@@ -108,23 +138,29 @@ struct FunctionSig {
 }
 
 struct LowerContext<'a> {
+    structs: &'a HashMap<String, StructDef>,
     functions: &'a HashMap<String, FunctionSig>,
     current_return: Option<Type>,
 }
 
 pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
-    let functions = collect_function_signatures(&program.functions)?;
+    let structs = collect_struct_definitions(&program.structs)?;
+    let functions = collect_function_signatures(&program.functions, &structs)?;
+    let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
+    lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_functions = Vec::new();
     for function in &program.functions {
-        lowered_functions.push(lower_function(function, &functions)?);
+        lowered_functions.push(lower_function(function, &structs, &functions)?);
     }
     let ctx = LowerContext {
+        structs: &structs,
         functions: &functions,
         current_return: None,
     };
     let mut env = HashMap::new();
     let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
     Ok(Program {
+        structs: lowered_structs,
         functions: lowered_functions,
         stmts,
     })
@@ -136,15 +172,75 @@ impl Type {
     }
 }
 
+fn collect_struct_definitions(
+    structs: &[syntax::StructDecl],
+) -> Result<HashMap<String, StructDef>, Diagnostic> {
+    let mut names = HashMap::new();
+    for struct_decl in structs {
+        if names
+            .insert(struct_decl.name.clone(), struct_decl.clone())
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate struct {:?}", struct_decl.name),
+            )
+            .with_span(struct_decl.line, struct_decl.column));
+        }
+    }
+
+    let mut lowered = HashMap::new();
+    for struct_decl in structs {
+        let mut fields = Vec::new();
+        let mut seen = HashMap::new();
+        for field in &struct_decl.fields {
+            if seen.insert(field.name.clone(), ()).is_some() {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "duplicate field {:?} in struct {:?}",
+                        field.name, struct_decl.name
+                    ),
+                )
+                .with_span(field.line, field.column));
+            }
+            let ty = lower_type(&field.ty, &names, field.line, field.column)?;
+            if matches!(&ty, Type::Struct(name) if name == &struct_decl.name) {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "recursive field {:?} in struct {:?} is not supported yet",
+                        field.name, struct_decl.name
+                    ),
+                )
+                .with_span(field.line, field.column));
+            }
+            fields.push(StructField {
+                name: field.name.clone(),
+                ty,
+            });
+        }
+        lowered.insert(
+            struct_decl.name.clone(),
+            StructDef {
+                name: struct_decl.name.clone(),
+                fields,
+            },
+        );
+    }
+    Ok(lowered)
+}
+
 fn collect_function_signatures(
     functions: &[syntax::Function],
+    structs: &HashMap<String, StructDef>,
 ) -> Result<HashMap<String, FunctionSig>, Diagnostic> {
     let mut signatures = HashMap::new();
     for function in functions {
-        let return_ty = lower_type(&function.return_ty);
+        let return_ty = lower_type(&function.return_ty, structs, function.line, function.column)?;
         let mut params = Vec::new();
         for param in &function.params {
-            params.push(lower_type(&param.ty));
+            params.push(lower_type(&param.ty, structs, param.line, param.column)?);
         }
         if signatures
             .insert(function.name.clone(), FunctionSig { params, return_ty })
@@ -161,10 +257,12 @@ fn collect_function_signatures(
 
 fn lower_function(
     function: &syntax::Function,
+    structs: &HashMap<String, StructDef>,
     functions: &HashMap<String, FunctionSig>,
 ) -> Result<Function, Diagnostic> {
-    let return_ty = lower_type(&function.return_ty);
+    let return_ty = lower_type(&function.return_ty, structs, function.line, function.column)?;
     let ctx = LowerContext {
+        structs,
         functions,
         current_return: Some(return_ty.clone()),
     };
@@ -187,7 +285,7 @@ fn lower_function(
                     .with_span(param.line, param.column),
             );
         }
-        let ty = lower_type(&param.ty);
+        let ty = lower_type(&param.ty, structs, param.line, param.column)?;
         env.insert(
             param.name.clone(),
             Binding {
@@ -268,7 +366,7 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            let expected = lower_type(ty);
+            let expected = lower_type(ty, ctx.structs, *line, *column)?;
             let lowered_expr = lower_expr(expr, env, ctx)?;
             let actual = lowered_expr.ty().clone();
             if actual != expected {
@@ -294,7 +392,17 @@ fn lower_stmt(
                 expr: lowered_expr,
             })
         }
-        syntax::Stmt::Print { expr, .. } => Ok(Stmt::Print(lower_expr(expr, env, ctx)?)),
+        syntax::Stmt::Print { expr, line, column } => {
+            let lowered = lower_expr(expr, env, ctx)?;
+            if !matches!(lowered.ty(), Type::Int | Type::Bool | Type::String) {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("print expects int, bool, or string, got {}", lowered.ty()),
+                )
+                .with_span(*line, *column));
+            }
+            Ok(Stmt::Print(lowered))
+        }
         syntax::Stmt::If {
             cond,
             then_block,
@@ -583,6 +691,124 @@ fn lower_expr(
                 ty: Type::Bool,
             })
         }
+        syntax::Expr::StructLiteral {
+            name,
+            fields,
+            line,
+            column,
+        } => {
+            let struct_def = ctx.structs.get(name).ok_or_else(|| {
+                Diagnostic::new("type", format!("undefined struct {name:?}"))
+                    .with_span(*line, *column)
+            })?;
+            let mut field_defs = HashMap::new();
+            for field in &struct_def.fields {
+                field_defs.insert(field.name.clone(), field.ty.clone());
+            }
+            let mut lowered_fields = HashMap::new();
+            for field in fields {
+                let expected = field_defs.get(&field.name).ok_or_else(|| {
+                    Diagnostic::new(
+                        "type",
+                        format!("struct {name:?} has no field {:?}", field.name),
+                    )
+                    .with_span(field.line, field.column)
+                })?;
+                if lowered_fields.contains_key(&field.name) {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "duplicate field {:?} in struct literal {name:?}",
+                            field.name
+                        ),
+                    )
+                    .with_span(field.line, field.column));
+                }
+                let lowered = lower_expr(&field.expr, env, ctx)?;
+                if lowered.ty() != expected {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "struct {name:?} field {:?} expects {expected}, got {}",
+                            field.name,
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(field.line, field.column));
+                }
+                if !expected.is_copy() {
+                    move_owner_value(&field.expr, env)?;
+                }
+                lowered_fields.insert(
+                    field.name.clone(),
+                    StructFieldValue {
+                        name: field.name.clone(),
+                        expr: lowered,
+                    },
+                );
+            }
+            let mut ordered_fields = Vec::new();
+            for field in &struct_def.fields {
+                let lowered = lowered_fields.remove(&field.name).ok_or_else(|| {
+                    Diagnostic::new(
+                        "type",
+                        format!("struct literal {name:?} is missing field {:?}", field.name),
+                    )
+                    .with_span(*line, *column)
+                })?;
+                ordered_fields.push(lowered);
+            }
+            Ok(Expr::StructLiteral {
+                name: name.clone(),
+                fields: ordered_fields,
+                ty: Type::Struct(name.clone()),
+            })
+        }
+        syntax::Expr::FieldAccess {
+            base,
+            field,
+            line,
+            column,
+        } => {
+            let lowered_base = lower_expr(base, env, ctx)?;
+            let Type::Struct(struct_name) = lowered_base.ty() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "field access expects a struct value, got {}",
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            };
+            let struct_def = ctx.structs.get(struct_name).ok_or_else(|| {
+                Diagnostic::new(
+                    "type",
+                    format!("internal error: missing struct definition {struct_name:?}"),
+                )
+                .with_span(*line, *column)
+            })?;
+            let field_ty = struct_def
+                .fields
+                .iter()
+                .find(|entry| entry.name == *field)
+                .map(|entry| entry.ty.clone())
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        "type",
+                        format!("struct {struct_name:?} has no field {field:?}"),
+                    )
+                    .with_span(*line, *column)
+                })?;
+            if !field_ty.is_copy() {
+                move_owner_value(base, env)?;
+            }
+            Ok(Expr::FieldAccess {
+                base: Box::new(lowered_base),
+                field: field.clone(),
+                ty: field_ty,
+            })
+        }
     }
 }
 
@@ -603,6 +829,17 @@ fn move_value(expr: &syntax::Expr, env: &mut HashMap<String, Binding>) -> Result
     Ok(())
 }
 
+fn move_owner_value(
+    expr: &syntax::Expr,
+    env: &mut HashMap<String, Binding>,
+) -> Result<(), Diagnostic> {
+    match expr {
+        syntax::Expr::VarRef { .. } => move_value(expr, env),
+        syntax::Expr::FieldAccess { base, .. } => move_owner_value(base, env),
+        _ => Ok(()),
+    }
+}
+
 fn lower_literal(literal: &syntax::Literal) -> Expr {
     match literal {
         syntax::Literal::Int(value) => Expr::Literal {
@@ -620,11 +857,23 @@ fn lower_literal(literal: &syntax::Literal) -> Expr {
     }
 }
 
-fn lower_type(ty: &syntax::TypeName) -> Type {
+fn lower_type<T>(
+    ty: &syntax::TypeName,
+    structs: &HashMap<String, T>,
+    line: usize,
+    column: usize,
+) -> Result<Type, Diagnostic> {
     match ty {
-        syntax::TypeName::Int => Type::Int,
-        syntax::TypeName::Bool => Type::Bool,
-        syntax::TypeName::String => Type::String,
+        syntax::TypeName::Int => Ok(Type::Int),
+        syntax::TypeName::Bool => Ok(Type::Bool),
+        syntax::TypeName::String => Ok(Type::String),
+        syntax::TypeName::Named(name) => {
+            if !structs.contains_key(name) {
+                return Err(Diagnostic::new("type", format!("unknown type {name:?}"))
+                    .with_span(line, column));
+            }
+            Ok(Type::Struct(name.clone()))
+        }
     }
 }
 
@@ -647,6 +896,8 @@ impl Expr {
             Expr::Call { ty, .. } => ty,
             Expr::BinaryAdd { ty, .. } => ty,
             Expr::BinaryCompare { ty, .. } => ty,
+            Expr::StructLiteral { ty, .. } => ty,
+            Expr::FieldAccess { ty, .. } => ty,
         }
     }
 }
@@ -698,7 +949,9 @@ impl syntax::Expr {
             syntax::Expr::VarRef { line, .. }
             | syntax::Expr::Call { line, .. }
             | syntax::Expr::BinaryAdd { line, .. }
-            | syntax::Expr::BinaryCompare { line, .. } => *line,
+            | syntax::Expr::BinaryCompare { line, .. }
+            | syntax::Expr::StructLiteral { line, .. }
+            | syntax::Expr::FieldAccess { line, .. } => *line,
         }
     }
 
@@ -708,7 +961,9 @@ impl syntax::Expr {
             syntax::Expr::VarRef { column, .. }
             | syntax::Expr::Call { column, .. }
             | syntax::Expr::BinaryAdd { column, .. }
-            | syntax::Expr::BinaryCompare { column, .. } => *column,
+            | syntax::Expr::BinaryCompare { column, .. }
+            | syntax::Expr::StructLiteral { column, .. }
+            | syntax::Expr::FieldAccess { column, .. } => *column,
         }
     }
 }
@@ -732,6 +987,7 @@ impl std::fmt::Display for Type {
             Type::Int => write!(f, "int"),
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
+            Type::Struct(name) => write!(f, "{name}"),
         }
     }
 }

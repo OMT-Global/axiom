@@ -5,6 +5,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
     pub imports: Vec<Import>,
+    pub structs: Vec<StructDecl>,
     pub functions: Vec<Function>,
     pub stmts: Vec<Stmt>,
 }
@@ -23,6 +24,23 @@ pub struct Function {
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
     pub is_public: bool,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructDecl {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub is_public: bool,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub ty: TypeName,
     pub line: usize,
     pub column: usize,
 }
@@ -74,6 +92,7 @@ pub enum TypeName {
     Int,
     Bool,
     String,
+    Named(String),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -103,6 +122,26 @@ pub enum Expr {
         line: usize,
         column: usize,
     },
+    StructLiteral {
+        name: String,
+        fields: Vec<StructFieldValue>,
+        line: usize,
+        column: usize,
+    },
+    FieldAccess {
+        base: Box<Expr>,
+        field: String,
+        line: usize,
+        column: usize,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StructFieldValue {
+    pub name: String,
+    pub expr: Expr,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -126,6 +165,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     let lines: Vec<&str> = source.lines().collect();
     let mut index = 0;
     let mut imports = Vec::new();
+    let mut structs = Vec::new();
     let mut functions = Vec::new();
     let mut stmts = Vec::new();
     while index < lines.len() {
@@ -157,10 +197,15 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
+        if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
+            structs.push(parse_struct(&lines, &mut index, path)?);
+            continue;
+        }
         stmts.push(parse_stmt(&lines, &mut index, path, false)?);
     }
     Ok(Program {
         imports,
+        structs,
         functions,
         stmts,
     })
@@ -223,6 +268,14 @@ fn parse_stmt_list(
             .with_path(path.display().to_string())
             .with_span(line_no, 1));
         }
+        if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap only supports top-level struct declarations",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1));
+        }
         stmts.push(parse_stmt(lines, index, path, true)?);
     }
     Err(Diagnostic::new("parse", "missing closing brace for block")
@@ -270,7 +323,7 @@ fn parse_stmt(
     let message = if in_block {
         "stage1 bootstrap currently supports let, print, if/else, while, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level import, fn, let, print, if/else, and while statements"
+        "stage1 bootstrap currently supports top-level import, struct, fn, let, print, if/else, and while statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())
@@ -332,6 +385,77 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         line: line_no,
         column: 1,
     })
+}
+
+fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<StructDecl, Diagnostic> {
+    let line_no = *index + 1;
+    let trimmed = lines[*index].trim();
+    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub struct ") {
+        (true, rest)
+    } else {
+        let rest = trimmed.strip_prefix("struct ").ok_or_else(|| {
+            Diagnostic::new("parse", "invalid struct declaration")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        (false, rest)
+    };
+    let name = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
+        Diagnostic::new(
+            "parse",
+            "struct declaration must use `struct Name {` syntax",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, 1)
+    })?;
+    validate_ident(name, path, line_no, if is_public { 12 } else { 8 })?;
+    *index += 1;
+    let fields = parse_struct_fields(lines, index, path)?;
+    Ok(StructDecl {
+        name: name.to_string(),
+        fields,
+        is_public,
+        line: line_no,
+        column: 1,
+    })
+}
+
+fn parse_struct_fields(
+    lines: &[&str],
+    index: &mut usize,
+    path: &Path,
+) -> Result<Vec<StructField>, Diagnostic> {
+    let mut fields = Vec::new();
+    while *index < lines.len() {
+        let line_no = *index + 1;
+        let trimmed = lines[*index].trim();
+        if trimmed.is_empty() {
+            *index += 1;
+            continue;
+        }
+        if trimmed == "}" {
+            *index += 1;
+            return Ok(fields);
+        }
+        let colon = find_top_level_char(trimmed, ':').ok_or_else(|| {
+            Diagnostic::new("parse", "struct field is missing ':'")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        let name = trimmed[..colon].trim();
+        validate_ident(name, path, line_no, 1)?;
+        let ty = parse_type_name(trimmed[colon + 1..].trim(), path, line_no, colon + 2)?;
+        fields.push(StructField {
+            name: name.to_string(),
+            ty,
+            line: line_no,
+            column: 1,
+        });
+        *index += 1;
+    }
+    Err(Diagnostic::new("parse", "missing closing brace for struct")
+        .with_path(path.display().to_string())
+        .with_span(lines.len().max(1), 1))
 }
 
 fn parse_params(raw: &str, path: &Path, line_no: usize) -> Result<Vec<Param>, Diagnostic> {
@@ -459,9 +583,10 @@ fn parse_type_name(
         "int" => Ok(TypeName::Int),
         "bool" => Ok(TypeName::Bool),
         "string" => Ok(TypeName::String),
-        _ => Err(Diagnostic::new("parse", format!("unknown type {raw:?}"))
-            .with_path(path.display().to_string())
-            .with_span(line_no, column)),
+        _ => {
+            validate_ident(raw, path, line_no, column)?;
+            Ok(TypeName::Named(raw.to_string()))
+        }
     }
 }
 
@@ -513,8 +638,45 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             .with_path(path.display().to_string())
             .with_span(line_no, column));
     }
+    if let Some(dot) = find_last_top_level_char(raw, '.') {
+        let base_raw = raw[..dot].trim();
+        let field = raw[dot + 1..].trim();
+        if base_raw.is_empty() || field.is_empty() {
+            return Err(Diagnostic::new("parse", "field access is incomplete")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+        }
+        validate_ident(field, path, line_no, column + dot + 1)?;
+        return Ok(Expr::FieldAccess {
+            base: Box::new(parse_term(base_raw, path, line_no, column)?),
+            field: field.to_string(),
+            line: line_no,
+            column,
+        });
+    }
     if is_wrapped_in_parens(raw) {
         return parse_expr(&raw[1..raw.len() - 1], path, line_no, column + 1);
+    }
+    if raw.ends_with('}')
+        && let Some(open_brace) = find_top_level_char(raw, '{')
+        && matches!(find_matching_brace(raw, open_brace), Some(close) if close == raw.len() - 1)
+    {
+        let name = raw[..open_brace].trim();
+        if !name.is_empty() {
+            validate_ident(name, path, line_no, column)?;
+            let fields = parse_struct_literal_fields(
+                &raw[open_brace + 1..raw.len() - 1],
+                path,
+                line_no,
+                column,
+            )?;
+            return Ok(Expr::StructLiteral {
+                name: name.to_string(),
+                fields,
+                line: line_no,
+                column,
+            });
+        }
     }
     if raw.starts_with('"') {
         let parsed = serde_json::from_str::<String>(raw).map_err(|_| {
@@ -554,6 +716,46 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         line: line_no,
         column,
     })
+}
+
+fn parse_struct_literal_fields(
+    raw: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<Vec<StructFieldValue>, Diagnostic> {
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut fields = Vec::new();
+    for field_text in split_top_level(raw, ',') {
+        let field_text = field_text.trim();
+        if field_text.is_empty() {
+            return Err(Diagnostic::new("parse", "struct literal field is empty")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+        }
+        let colon = find_top_level_char(field_text, ':').ok_or_else(|| {
+            Diagnostic::new("parse", "struct literal field is missing ':'")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column)
+        })?;
+        let name = field_text[..colon].trim();
+        validate_ident(name, path, line_no, column)?;
+        let expr = parse_expr(
+            field_text[colon + 1..].trim(),
+            path,
+            line_no,
+            column + colon + 1,
+        )?;
+        fields.push(StructFieldValue {
+            name: name.to_string(),
+            expr,
+            line: line_no,
+            column,
+        });
+    }
+    Ok(fields)
 }
 
 fn parse_call_args(
@@ -607,6 +809,7 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
     let mut in_string = false;
     let mut escaped = false;
     let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
     let mut start = 0;
     for (index, ch) in raw.char_indices() {
         if escaped {
@@ -627,7 +830,9 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
         match ch {
             '(' => paren_depth += 1,
             ')' => paren_depth = paren_depth.saturating_sub(1),
-            _ if ch == delimiter && paren_depth == 0 => {
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            _ if ch == delimiter && paren_depth == 0 && brace_depth == 0 => {
                 parts.push(&raw[start..index]);
                 start = index + ch.len_utf8();
             }
@@ -642,6 +847,7 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
     let mut in_string = false;
     let mut escaped = false;
     let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
     for (index, ch) in raw.char_indices() {
         if escaped {
             escaped = false;
@@ -660,18 +866,30 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
         }
         match ch {
             '(' => {
-                if target == '(' && paren_depth == 0 {
+                if target == '(' && paren_depth == 0 && brace_depth == 0 {
                     return Some(index);
                 }
                 paren_depth += 1;
             }
             ')' => {
-                if target == ')' && paren_depth == 1 {
+                if target == ')' && paren_depth == 1 && brace_depth == 0 {
                     return Some(index);
                 }
                 paren_depth = paren_depth.saturating_sub(1);
             }
-            _ if ch == target && paren_depth == 0 => return Some(index),
+            '{' => {
+                if target == '{' && paren_depth == 0 && brace_depth == 0 {
+                    return Some(index);
+                }
+                brace_depth += 1;
+            }
+            '}' => {
+                if target == '}' && paren_depth == 0 && brace_depth == 1 {
+                    return Some(index);
+                }
+                brace_depth = brace_depth.saturating_sub(1);
+            }
+            _ if ch == target && paren_depth == 0 && brace_depth == 0 => return Some(index),
             _ => {}
         }
     }
@@ -715,6 +933,80 @@ fn find_matching_paren(raw: &str, open_index: usize) -> Option<usize> {
     None
 }
 
+fn find_matching_brace(raw: &str, open_index: usize) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut brace_depth = 0usize;
+    let mut paren_depth = 0usize;
+    for (index, ch) in raw
+        .char_indices()
+        .skip_while(|(index, _)| *index < open_index)
+    {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' if paren_depth == 0 => brace_depth += 1,
+            '}' if paren_depth == 0 => {
+                brace_depth = brace_depth.saturating_sub(1);
+                if brace_depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn find_last_top_level_char(raw: &str, target: char) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut found = None;
+    for (index, ch) in raw.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            _ if ch == target && paren_depth == 0 && brace_depth == 0 => found = Some(index),
+            _ => {}
+        }
+    }
+    found
+}
+
 fn is_wrapped_in_parens(raw: &str) -> bool {
     raw.starts_with('(')
         && raw.ends_with(')')
@@ -725,6 +1017,7 @@ fn find_compare_operator(raw: &str) -> Option<(CompareOp, usize)> {
     let mut in_string = false;
     let mut escaped = false;
     let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
     let chars: Vec<(usize, char)> = raw.char_indices().collect();
     let mut cursor = 0;
     while cursor < chars.len() {
@@ -759,9 +1052,19 @@ fn find_compare_operator(raw: &str) -> Option<(CompareOp, usize)> {
                 cursor += 1;
                 continue;
             }
+            '{' => {
+                brace_depth += 1;
+                cursor += 1;
+                continue;
+            }
+            '}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                cursor += 1;
+                continue;
+            }
             _ => {}
         }
-        if paren_depth == 0 {
+        if paren_depth == 0 && brace_depth == 0 {
             if let Some((_, next)) = chars.get(cursor + 1) {
                 match (ch, *next) {
                     ('=', '=') => return Some((CompareOp::Eq, index)),
