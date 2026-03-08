@@ -19,11 +19,14 @@ from .ast import (
     Expr,
     IntLit,
     StringLit,
+    BoolLit,
     VarRef,
     CallExpr,
     UnaryNeg,
     Binary,
     BinOp,
+    Param,
+    TypeRef,
     expr_span,
 )
 from .errors import Span, AxiomParseError
@@ -161,7 +164,7 @@ class Parser:
             )
         self._eat(TokenKind.LPAREN)
 
-        params: List[str] = []
+        params: List[Param] = []
         if self._peek().kind != TokenKind.RPAREN:
             while True:
                 ident = self._eat(TokenKind.IDENT)
@@ -179,15 +182,32 @@ class Parser:
                         source=self.source,
                         path=self.source_path,
                     )
-                params.append(str(ident.value))
+                type_ref = None
+                param_end = ident.span.end
+                if self._peek().kind == TokenKind.COLON:
+                    self._bump()
+                    type_ref = self._parse_type_ref()
+                    param_end = type_ref.span.end
+                params.append(
+                    Param(
+                        name=str(ident.value),
+                        type_ref=type_ref,
+                        span=Span(ident.span.start, param_end),
+                    )
+                )
                 if self._peek().kind == TokenKind.COMMA:
                     self._bump()
                     continue
                 break
         self._eat(TokenKind.RPAREN)
+        return_type = None
+        if self._peek().kind == TokenKind.COLON:
+            self._bump()
+            return_type = self._parse_type_ref()
 
         # allow duplicate parameter names only if source author wrote them; catch for deterministic errors.
-        if len(set(params)) != len(params):
+        param_names = [param.name for param in params]
+        if len(set(param_names)) != len(param_names):
             raise AxiomParseError(
                 "duplicate function parameter name",
                 name.span,
@@ -200,7 +220,13 @@ class Parser:
             body = self._parse_block()
         finally:
             self.function_depth -= 1
-        return FunctionDefStmt(name=str(name.value), params=params, body=body, span=Span(start, body.span.end))
+        return FunctionDefStmt(
+            name=str(name.value),
+            params=params,
+            return_type=return_type,
+            body=body,
+            span=Span(start, body.span.end),
+        )
 
     def _parse_block(self) -> BlockStmt:
         lbrace = self._eat(TokenKind.LBRACE)
@@ -248,10 +274,19 @@ class Parser:
                 source=self.source,
                 path=self.source_path,
             )
+        type_ref = None
+        if self._peek().kind == TokenKind.COLON:
+            self._bump()
+            type_ref = self._parse_type_ref()
         self._eat(TokenKind.EQ)
         expr = self._parse_expr()
         end = self._parse_terminator(default_end=expr_span(expr).end)
-        return LetStmt(name=str(ident.value), expr=expr, span=Span(start, end))
+        return LetStmt(
+            name=str(ident.value),
+            type_ref=type_ref,
+            expr=expr,
+            span=Span(start, end),
+        )
 
     def _parse_import(self) -> ImportStmt:
         start = self._eat(TokenKind.IMPORT).span.start
@@ -360,6 +395,26 @@ class Parser:
     def _parse_expr(self) -> Expr:
         return self._parse_equality()
 
+    def _parse_type_ref(self) -> TypeRef:
+        token = self._peek()
+        if token.kind != TokenKind.IDENT:
+            raise AxiomParseError(
+                "expected type name",
+                token.span,
+                source=self.source,
+                path=self.source_path,
+            )
+        self._bump()
+        raw_name = str(token.value)
+        if raw_name not in {"int", "string", "bool"}:
+            raise AxiomParseError(
+                f"unknown type {raw_name!r}",
+                token.span,
+                source=self.source,
+                path=self.source_path,
+            )
+        return TypeRef(name=raw_name, span=token.span)
+
     def _parse_equality(self) -> Expr:
         node = self._parse_comparison()
         while True:
@@ -432,6 +487,9 @@ class Parser:
         if t.kind == TokenKind.STRING:
             tok = self._bump()
             return StringLit(str(tok.value), tok.span)
+        if t.kind in (TokenKind.TRUE, TokenKind.FALSE):
+            tok = self._bump()
+            return BoolLit(bool(tok.value), tok.span)
         if t.kind == TokenKind.IDENT:
             tok = self._bump()
             callee_parts = [str(tok.value)]
@@ -512,6 +570,8 @@ def _widen_span(expr: Expr, span: Span) -> Expr:
         return IntLit(expr.value, span)
     if isinstance(expr, StringLit):
         return StringLit(expr.value, span)
+    if isinstance(expr, BoolLit):
+        return BoolLit(expr.value, span)
     if isinstance(expr, VarRef):
         return VarRef(expr.name, span)
     if isinstance(expr, CallExpr):

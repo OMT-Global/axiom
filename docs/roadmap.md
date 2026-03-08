@@ -36,7 +36,12 @@
 - Mixed `int | string` runtime values, string literals, and bytecode `v0.8`
 - Typed host capability metadata and string-aware host I/O
 
-## Phase 8 (next)
-- Explicit types and broader value kinds beyond `int | string`
+## Phase 8 ✅
+- Explicit types on `let`, function params, and function returns
+- Real `bool`, bool-only control flow, and full type checking before codegen
+- Mixed `int | string | bool` runtime values and bytecode `v0.9`
+
+## Phase 9 (next)
 - Collections and first-class function values
 - Package and module ergonomics for larger multi-file programs
+- Richer diagnostics and tooling around the typed core

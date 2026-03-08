@@ -1,18 +1,19 @@
-# Axiom kernel (v0.8)
+# Axiom kernel (v0.9)
 
 ## Values
-- integers and strings (Python `int` and `str` in the seed implementation)
-- conditions use int truthiness only: `0` is false, non-zero is true
-- comparisons produce `0` or `1`
+- integers, strings, and booleans (Python `int`, `str`, and `bool` in the seed implementation)
+- conditions are bool-only
+- comparisons produce booleans
+- `print` renders booleans as `true` / `false`
 
 ## Statements
-- `let <ident> = <expr>` binds in the current lexical scope
+- `let <ident>: <type> = <expr>` binds in the current lexical scope
 - `<ident> = <expr>` assigns to nearest existing lexical binding
 - `print <expr>` prints the formatted value plus a newline
 - `{ ... }` introduces a nested lexical scope
 - `if <expr> { ... } else { ... }`
 - `while <expr> { ... }`
-- `fn <name>(<params>) { ... }`
+- `fn <name>(<typed params>): <return_type> { ... }`
 - `return <expr>`
 - nested functions capture outer bindings by reference (lexical closures)
 - `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
@@ -34,6 +35,7 @@
 ## Expressions
 - integer literals: `123`, `-5`
 - string literals: `"hello"`, `"hello\naxiom"`
+- boolean literals: `true`, `false`
 - variables: `x`
 - binary ops: `+ - * / == != < <= > >=`
 - parentheses: `( ... )`
@@ -47,7 +49,8 @@
 - all variables must be defined before use
 - integer division truncates toward zero
 - functions use explicit call frames with locals + return address + captured upvalues
-- every function returns a value (`int` or `string`; implicit `0` if no explicit return is reached)
+- every function returns a value of its declared type
+  - implicit fallthrough returns the zero value of the declared type: `0`, `""`, or `false`
 - `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
 - `host.read` returns a string; `host.int.parse` converts a string to an int
 - non-side-effecting host calls can be used in deterministic tool pipelines without flags

@@ -1,0 +1,7 @@
+{
+  "name": "typed-demo",
+  "version": "0.1.0",
+  "main": "src/main.ax",
+  "out_dir": "dist",
+  "output": "typed-demo.axb"
+}

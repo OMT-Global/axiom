@@ -12,9 +12,11 @@ from axiom.ast import (
     FunctionDefStmt,
     IntLit,
     LetStmt,
+    Param,
     Program,
     ReturnStmt,
     Span,
+    TypeRef,
     VarRef,
 )
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
@@ -41,9 +43,9 @@ class ErrorTests(unittest.TestCase):
 
     def test_interpreter_lexical_scope_shadow(self) -> None:
         program = parse_program("""
-let x = 1
+let x: int = 1
 {
-  let x = 2
+  let x: int = 2
 }
 print x
 """)
@@ -56,7 +58,7 @@ print x
             compile_to_bytecode("return 1\n")
 
     def test_parse_error_includes_path_and_location(self) -> None:
-        src = "let x = 1\nreturn 1\n"
+        src = "let x: int = 1\nreturn 1\n"
         with self.assertRaises(AxiomParseError) as cm:
             parse_program(src, path=Path("bad-program.ax"))
         msg = str(cm.exception)
@@ -72,19 +74,19 @@ print x
     def test_parse_reserved_host_function_name(self) -> None:
         with self.assertRaises(AxiomParseError):
             compile_to_bytecode("""
-fn host() {
+fn host(): int {
   return 1
 }
 """)
 
     def test_parse_reserved_host_identifier(self) -> None:
         with self.assertRaises(AxiomParseError):
-            compile_to_bytecode("let host = 1\n")
+            compile_to_bytecode("let host: int = 1\n")
         with self.assertRaises(AxiomParseError):
             compile_to_bytecode("host = 1\n")
         with self.assertRaises(AxiomParseError):
             compile_to_bytecode("""
-fn f(host) {
+fn f(host: int): int {
   return host
 }
 """)
@@ -92,8 +94,8 @@ fn f(host) {
     def test_nested_function_definition_support(self) -> None:
         program = parse_program(
             """
-fn outer() {
-  fn inner() {
+fn outer(): int {
+  fn inner(): int {
     return 1
   }
   return inner() + 1
@@ -108,8 +110,8 @@ print outer()
 
         bc = compile_to_bytecode(
             """
-fn outer() {
-  fn inner() {
+fn outer(): int {
+  fn inner(): int {
     return 1
   }
   return inner() + 1
@@ -125,7 +127,7 @@ print outer()
     def test_compile_arity_mismatch(self) -> None:
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("""
-fn f(a, b) {
+fn f(a: int, b: int): int {
   return a + b
 }
 print f(1)
@@ -134,8 +136,8 @@ print f(1)
     def test_compile_closure_undefined_capture(self) -> None:
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("""
-fn outer() {
-  fn inner() {
+fn outer(): int {
+  fn inner(): int {
     return missing + 1
   }
   return inner()
@@ -145,9 +147,9 @@ fn outer() {
     def test_runtime_closure_capture_reads_writes(self) -> None:
         program = parse_program(
             """
-fn counter() {
-  let value = 0
-  fn inc() {
+fn counter(): int {
+  let value: int = 0
+  fn inc(): int {
     value = value + 1
     return value
   }
@@ -164,9 +166,9 @@ print counter()
         self.assertEqual(out.getvalue(), "2\n")
         bc = compile_to_bytecode(
             """
-fn counter() {
-  let value = 0
-  fn inc() {
+fn counter(): int {
+  let value: int = 0
+  fn inc(): int {
     value = value + 1
     return value
   }
@@ -220,7 +222,7 @@ print counter()
     def test_compile_rejects_string_condition_when_statically_known(self) -> None:
         with self.assertRaises(AxiomCompileError) as cm:
             compile_to_bytecode('if "ready" { print 1 }\n')
-        self.assertIn("condition expects int value, got string", str(cm.exception))
+        self.assertIn("if condition expects bool, got string", str(cm.exception))
 
     def test_compile_rejects_host_parse_int_argument_type_mismatch(self) -> None:
         with self.assertRaises(AxiomCompileError) as cm:
@@ -282,7 +284,7 @@ print counter()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("math_module.ax").write_text(
-                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+                "fn add(a: int, b: int): int { return a + b }\n", encoding="utf-8"
             )
             root.joinpath("main.ax").write_text(
                 'import "math_module" as math\nprint math.add(11, 9)\n',
@@ -297,7 +299,7 @@ print counter()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("math_module.ax").write_text(
-                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+                "fn add(a: int, b: int): int { return a + b }\n", encoding="utf-8"
             )
             root.joinpath("main.ax").write_text(
                 'import "math_module" as tools.math\nprint tools.math.add(4, 5)\n',
@@ -328,10 +330,10 @@ print counter()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("math_module.ax").write_text(
-                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+                "fn add(a: int, b: int): int { return a + b }\n", encoding="utf-8"
             )
             root.joinpath("other_module.ax").write_text(
-                "fn sub(a, b) { return a - b }\n", encoding="utf-8"
+                "fn sub(a: int, b: int): int { return a - b }\n", encoding="utf-8"
             )
             root.joinpath("main.ax").write_text(
                 'import "math_module" as shared\nimport "other_module" as shared\n',
@@ -344,7 +346,7 @@ print counter()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("math_module.ax").write_text(
-                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+                "fn add(a: int, b: int): int { return a + b }\n", encoding="utf-8"
             )
             root.joinpath("main.ax").write_text(
                 'import "math_module" as one\nimport "math_module" as two\n',
@@ -359,7 +361,7 @@ print counter()
             modules = root / "math"
             modules.mkdir()
             modules.joinpath("math_utils.ax").write_text(
-                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+                "fn add(a: int, b: int): int { return a + b }\n", encoding="utf-8"
             )
             root.joinpath("main.ax").write_text(
                 'import "math/math_utils"\nprint math.math_utils.add(4, 5)\n', encoding="utf-8"
@@ -374,14 +376,14 @@ print counter()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             root.joinpath("shared_module.ax").write_text(
-                "fn add(a, b) { return a + b }\n", encoding="utf-8"
+                "fn add(a: int, b: int): int { return a + b }\n", encoding="utf-8"
             )
             root.joinpath("inner_module.ax").write_text(
-                'import "shared_module" as shared\nfn square(a) { return shared.add(a, a) }\n',
+                'import "shared_module" as shared\nfn square(a: int): int { return shared.add(a, a) }\n',
                 encoding="utf-8",
             )
             root.joinpath("outer_module.ax").write_text(
-                'import "shared_module" as shared\nfn add(a, b) { return a + b }\n',
+                'import "shared_module" as shared\nfn add(a: int, b: int): int { return a + b }\n',
                 encoding="utf-8",
             )
             root.joinpath("main.ax").write_text(
@@ -437,7 +439,7 @@ print counter()
             root = Path(td)
             root.joinpath("bad.ax").write_text("return 1\n", encoding="utf-8")
             root.joinpath("middle.ax").write_text(
-                'import "bad"\nfn ok() { return 1 }\n',
+                'import "bad"\nfn ok(): int { return 1 }\n',
                 encoding="utf-8",
             )
             root.joinpath("main.ax").write_text('import "middle"\n', encoding="utf-8")
@@ -509,6 +511,16 @@ print counter()
         Vm(locals_count=bc.locals_count).run(bc, out)
         self.assertEqual(out.getvalue(), "hello\naxiom\n")
 
+    def test_bool_literals_roundtrip_through_bytecode(self) -> None:
+        bc = compile_to_bytecode("print true\n")
+        bool_ops = [i for i in bc.instructions if i.op == Op.CONST_BOOL]
+        self.assertEqual(len(bool_ops), 1)
+        self.assertEqual(int(bool_ops[0].arg), 1)
+
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, out)
+        self.assertEqual(out.getvalue(), "true\n")
+
     def test_bytecode_decode_keeps_v7_compatibility(self) -> None:
         legacy = Bytecode(
             strings=[],
@@ -527,6 +539,25 @@ print counter()
         out = io.StringIO()
         Vm(locals_count=decoded.locals_count).run(decoded, out)
         self.assertEqual(out.getvalue(), "41\n")
+
+    def test_bytecode_decode_keeps_v8_compatibility(self) -> None:
+        legacy = Bytecode(
+            strings=["hi"],
+            instructions=[
+                Instr(Op.CONST_STRING, 0),
+                Instr(Op.PRINT),
+                Instr(Op.HALT),
+            ],
+            locals_count=0,
+            functions=[],
+            version_minor=8,
+        )
+        decoded = Bytecode.decode(legacy.encode())
+        self.assertEqual(decoded.version_minor, 8)
+
+        out = io.StringIO()
+        Vm(locals_count=decoded.locals_count).run(decoded, out)
+        self.assertEqual(out.getvalue(), "hi\n")
 
     def test_runtime_host_print_requires_explicit_allow(self) -> None:
         program = parse_program("host.print(1)\n")
@@ -562,7 +593,14 @@ print counter()
 
     def test_runtime_reserved_host_identifier_let(self) -> None:
         program = Program(
-            [LetStmt(name="host", expr=IntLit(1, Span(0, 1)), span=Span(0, 1))]
+            [
+                LetStmt(
+                    name="host",
+                    type_ref=TypeRef(name="int", span=Span(0, 1)),
+                    expr=IntLit(1, Span(0, 1)),
+                    span=Span(0, 1),
+                )
+            ]
         )
         with self.assertRaises(AxiomRuntimeError):
             Interpreter().run(program, io.StringIO())
@@ -572,7 +610,14 @@ print counter()
             [
                 FunctionDefStmt(
                     name="f",
-                    params=["host"],
+                    params=[
+                        Param(
+                            name="host",
+                            type_ref=TypeRef(name="int", span=Span(0, 4)),
+                            span=Span(0, 4),
+                        )
+                    ],
+                    return_type=TypeRef(name="int", span=Span(0, 4)),
                     body=BlockStmt(
                         stmts=[
                             ReturnStmt(expr=VarRef(name="host", span=Span(0, 4)), span=Span(0, 4))
@@ -589,7 +634,12 @@ print counter()
     def test_runtime_reserved_host_identifier_assign(self) -> None:
         program = Program(
             [
-                LetStmt(name="x", expr=IntLit(1, Span(0, 1)), span=Span(0, 1)),
+                LetStmt(
+                    name="x",
+                    type_ref=TypeRef(name="int", span=Span(0, 1)),
+                    expr=IntLit(1, Span(0, 1)),
+                    span=Span(0, 1),
+                ),
                 AssignStmt(name="host", expr=IntLit(2, Span(2, 3)), span=Span(2, 4)),
             ]
         )
@@ -602,6 +652,7 @@ print counter()
                 FunctionDefStmt(
                     name="host",
                     params=[],
+                    return_type=TypeRef(name="int", span=Span(0, 1)),
                     body=BlockStmt(
                         stmts=[ReturnStmt(expr=IntLit(0, Span(0, 1)), span=Span(0, 1))],
                         span=Span(0, 3),
@@ -640,12 +691,13 @@ print counter()
         self.assertEqual(out.getvalue(), "41\n")
         fake_input.assert_called_once_with("num> ")
 
-    def test_runtime_string_condition_requires_int(self) -> None:
+    def test_runtime_string_condition_requires_bool(self) -> None:
         src = """
-fn choose(cond) {
+fn choose(cond: string): int {
   if cond {
     print 1
   }
+  return 0
 }
 
 choose("yes")
@@ -654,9 +706,9 @@ choose("yes")
         with self.assertRaises(AxiomRuntimeError):
             Interpreter().run(program, io.StringIO())
 
-        bc = compile_to_bytecode(src)
-        with self.assertRaises(AxiomRuntimeError):
-            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode(src)
+        self.assertIn("if condition expects bool, got string", str(cm.exception))
 
     def test_host_contract_signature_tracks_capability_state(self) -> None:
         base = host_contract_metadata()

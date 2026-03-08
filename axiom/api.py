@@ -8,6 +8,7 @@ from .parser import Parser
 from .ast import (
     Binary,
     BlockStmt,
+    BoolLit,
     CallExpr,
     Expr,
     FunctionDefStmt,
@@ -26,6 +27,7 @@ from .ast import (
     ExprStmt,
     Stmt,
 )
+from .checker import CheckedProgram, check_program
 from .compiler import Compiler
 from .bytecode import Bytecode
 from .errors import AxiomCompileError, AxiomError, Span
@@ -56,10 +58,15 @@ def compile_to_bytecode(
     allowed_host_calls: Optional[Set[str]] = None,
 ) -> Bytecode:
     program = parse_program(src, path=None)
+    checked = check_program(
+        program,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    )
     return Compiler(
         allow_host_side_effects=allow_host_side_effects,
         allowed_host_calls=allowed_host_calls,
-    ).compile(program)
+    ).compile(checked)
 
 
 def compile_file(
@@ -69,11 +76,30 @@ def compile_file(
     allowed_host_calls: Optional[Set[str]] = None,
     module_search_paths: Optional[Sequence[Path]] = None,
 ) -> Bytecode:
+    program = parse_file(path, module_search_paths=module_search_paths)
+    checked = check_program(
+        program,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
+    )
     return Compiler(
         allow_host_side_effects=allow_host_side_effects,
         allowed_host_calls=allowed_host_calls,
-    ).compile(
-        parse_file(path, module_search_paths=module_search_paths)
+    ).compile(checked)
+
+
+def check_file(
+    path: Path,
+    *,
+    allow_host_side_effects: bool = False,
+    allowed_host_calls: Optional[Set[str]] = None,
+    module_search_paths: Optional[Sequence[Path]] = None,
+) -> CheckedProgram:
+    program = parse_file(path, module_search_paths=module_search_paths)
+    return check_program(
+        program,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=allowed_host_calls,
     )
 
 
@@ -238,6 +264,8 @@ def _namespace_module_program(program: Program, module_alias: str) -> Program:
             return expr
         if isinstance(expr, StringLit):
             return expr
+        if isinstance(expr, BoolLit):
+            return expr
         if isinstance(expr, VarRef):
             return expr
         if isinstance(expr, UnaryNeg):
@@ -263,11 +291,17 @@ def _namespace_module_program(program: Program, module_alias: str) -> Program:
             return FunctionDefStmt(
                 name=fn_names[stmt.name],
                 params=stmt.params,
+                return_type=stmt.return_type,
                 body=_rewrite_stmt(stmt.body),
                 span=stmt.span,
             )
         if isinstance(stmt, LetStmt):
-            return LetStmt(name=stmt.name, expr=_rewrite_expr(stmt.expr), span=stmt.span)
+            return LetStmt(
+                name=stmt.name,
+                type_ref=stmt.type_ref,
+                expr=_rewrite_expr(stmt.expr),
+                span=stmt.span,
+            )
         if isinstance(stmt, AssignStmt):
             return AssignStmt(name=stmt.name, expr=_rewrite_expr(stmt.expr), span=stmt.span)
         if isinstance(stmt, ReturnStmt):

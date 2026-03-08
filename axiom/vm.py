@@ -18,7 +18,7 @@ from .values import (
     div_values,
     mul_values,
     render_value,
-    require_condition_int,
+    require_condition_bool,
     sub_values,
 )
 
@@ -77,6 +77,10 @@ class Vm:
 
             if i.op == Op.CONST_I64:
                 self.stack.append(int(i.arg))
+            elif i.op == Op.CONST_BOOL:
+                if i.arg is None:
+                    raise AxiomRuntimeError("bool constant missing arg")
+                self.stack.append(bool(i.arg))
             elif i.op == Op.CONST_STRING:
                 if i.arg is None:
                     raise AxiomRuntimeError("string constant missing arg")
@@ -220,7 +224,7 @@ class Vm:
                     raise AxiomRuntimeError("stack underflow on JMP_IF_FALSE")
                 cond = self.stack.pop()
                 try:
-                    if require_condition_int(cond) == 0:
+                    if not require_condition_bool(cond):
                         self.ip = int(i.arg)
                 except ValueError as e:
                     raise AxiomRuntimeError(str(e)) from e

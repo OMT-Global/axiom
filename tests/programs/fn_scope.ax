@@ -1,12 +1,12 @@
-fn scope_probe() {
-  let x = 1
+fn scope_probe(): int {
+  let x: int = 1
   {
-    let x = 2
+    let x: int = 2
     print x
   }
   return x
 }
 
-let x = 7
+let x: int = 7
 print scope_probe()
 print x

@@ -95,6 +95,10 @@ class Lexer:
             return Token(TokenKind.ELSE, Span(start, end))
         if text == "while":
             return Token(TokenKind.WHILE, Span(start, end))
+        if text == "true":
+            return Token(TokenKind.TRUE, Span(start, end), True)
+        if text == "false":
+            return Token(TokenKind.FALSE, Span(start, end), False)
         return Token(TokenKind.IDENT, Span(start, end), text)
 
     def _lex_string(self, start: int) -> Token:
@@ -186,6 +190,8 @@ class Lexer:
             return Token(TokenKind.DOT, Span(start, start + 1))
         if ch == ",":
             return Token(TokenKind.COMMA, Span(start, start + 1))
+        if ch == ":":
+            return Token(TokenKind.COLON, Span(start, start + 1))
         if ch == '"':
             return self._lex_string(start)
         if ch == "(":

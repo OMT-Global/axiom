@@ -8,11 +8,12 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 8
+VERSION_MINOR = 9
 
 
 class Op:
     CONST_I64 = 0x01
+    CONST_BOOL = 0x1A
     CONST_STRING = 0x19
     LOAD = 0x02
     STORE = 0x03
@@ -106,6 +107,12 @@ class Bytecode:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_I64 missing arg")
                 out += struct.pack("<q", int(ins.arg))
+            elif ins.op == Op.CONST_BOOL:
+                if ins.arg is None:
+                    raise AxiomCompileError("CONST_BOOL missing arg")
+                if self.version_minor < 9:
+                    raise AxiomCompileError("CONST_BOOL requires bytecode version 0.9+")
+                out += struct.pack("<B", 1 if int(ins.arg) else 0)
             elif ins.op == Op.CONST_STRING:
                 if ins.arg is None:
                     raise AxiomCompileError("CONST_STRING missing arg")
@@ -195,6 +202,11 @@ class Bytecode:
             (op,) = struct.unpack("<B", take(1))
             if op == Op.CONST_I64:
                 (v,) = struct.unpack("<q", take(8))
+                ins.append(Instr(op, int(v)))
+            elif op == Op.CONST_BOOL:
+                if minor < 9:
+                    raise ValueError("CONST_BOOL requires bytecode version 0.9+")
+                (v,) = struct.unpack("<B", take(1))
                 ins.append(Instr(op, int(v)))
             elif op == Op.CONST_STRING:
                 if minor < 8:

@@ -193,10 +193,29 @@ class CliParityTests(unittest.TestCase):
             self.assertIn("CONST_STRING", disasm_proc.stdout)
             self.assertIn("'hello, axiom'", disasm_proc.stdout)
 
+    def test_bool_program_cli_roundtrip_and_disasm(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "bool.ax"
+            bc = Path(td) / "bool.axb"
+            src.write_text("let ready: bool = true\nprint ready\n", encoding="utf-8")
+
+            interp_proc = self._run_cli(["interp", str(src)], cwd=ROOT)
+            self.assertEqual(interp_proc.stdout, "true\n")
+
+            self._run_cli(["compile", str(src), "-o", str(bc)], cwd=ROOT)
+            vm_proc = self._run_cli(["vm", str(bc)], cwd=ROOT)
+            self.assertEqual(vm_proc.stdout, "true\n")
+
+            run_proc = self._run_cli(["run", str(src)], cwd=ROOT)
+            self.assertEqual(run_proc.stdout, "true\n")
+
+            disasm_proc = self._run_cli(["disasm", str(bc)], cwd=ROOT)
+            self.assertIn("CONST_BOOL true", disasm_proc.stdout)
+
     def test_imported_modules_execute(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             mod = Path(td) / "math_module.ax"
-            mod.write_text("fn add(a, b) {\n  return a + b\n}\n", encoding="utf-8")
+            mod.write_text("fn add(a: int, b: int): int {\n  return a + b\n}\n", encoding="utf-8")
 
             main = Path(td) / "main.ax"
             main.write_text('import "math_module"\nprint math_module.add(6, 7)\n', encoding="utf-8")
@@ -209,7 +228,7 @@ class CliParityTests(unittest.TestCase):
     def test_imported_modules_execute_with_alias(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             mod = Path(td) / "math_module.ax"
-            mod.write_text("fn add(a, b) {\n  return a + b\n}\n", encoding="utf-8")
+            mod.write_text("fn add(a: int, b: int): int {\n  return a + b\n}\n", encoding="utf-8")
 
             main = Path(td) / "main.ax"
             main.write_text(
@@ -297,10 +316,10 @@ class CliParityTests(unittest.TestCase):
                     "src/app/main.ax",
                     "--out-dir",
                     "build",
-                "--output",
-                "bundle.axb",
-            ],
-            cwd=ROOT,
+                    "--output",
+                    "bundle.axb",
+                ],
+                cwd=ROOT,
             )
             manifest = json.loads((project / "axiom.pkg").read_text(encoding="utf-8"))
             self.assertEqual(manifest["name"], "demo")

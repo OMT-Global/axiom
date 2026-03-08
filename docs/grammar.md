@@ -1,4 +1,4 @@
-# Axiom grammar (v0.8)
+# Axiom grammar (v0.9)
 
 Whitespace is generally ignored except newlines, which can terminate statements.
 
@@ -20,10 +20,11 @@ import_stmt    := "import" STRING terminator ;                      # default mo
                | "import" STRING "as" qualified_ident terminator ;  # explicit alias
 qualified_ident := IDENT ("." IDENT)* ;
                # imported modules are function-only and may contain imports plus fn declarations.
-fn_stmt        := "fn" IDENT "(" params? ")" block ;  # IDENT and params may not be "host"
-params         := IDENT ("," IDENT)* ;
+fn_stmt        := "fn" IDENT "(" params? ")" ":" type_name block ;  # IDENT and params may not be "host"
+params         := param ("," param)* ;
+param          := IDENT ":" type_name ;
 return_stmt    := "return" expr terminator ;
-let_stmt       := "let" IDENT "=" expr terminator ;
+let_stmt       := "let" IDENT ":" type_name "=" expr terminator ;
 assign_stmt    := IDENT "=" expr terminator ;
 print_stmt     := "print" expr terminator ;
 if_stmt        := "if" expr block ("else" block)? ;
@@ -35,6 +36,7 @@ call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace: h
 args           := expr ("," expr)* ;
 
 terminator     := ";" | NEWLINE | EOF ;
+type_name      := "int" | "string" | "bool" ;
 
 expr           := equality ;
 equality       := comparison (("==" | "!=") comparison)* ;
@@ -42,7 +44,7 @@ comparison     := term (("<" | "<=" | ">" | ">=") term)* ;
 term           := factor (("+" | "-") factor)* ;
 factor         := unary (("*" | "/") unary)* ;
 unary          := "-" unary | primary ;
-primary        := INT | STRING | IDENT | call_expr | "(" expr ")" ;
+primary        := INT | STRING | "true" | "false" | IDENT | call_expr | "(" expr ")" ;
 STRING         := double-quoted UTF-8 string ;
 ```
 

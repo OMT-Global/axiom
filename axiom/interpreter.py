@@ -18,6 +18,7 @@ from .ast import (
     Expr,
     IntLit,
     StringLit,
+    BoolLit,
     VarRef,
     CallExpr,
     UnaryNeg,
@@ -39,7 +40,7 @@ from .values import (
     mul_values,
     negate_value,
     render_value,
-    require_condition_int,
+    require_condition_bool,
     sub_values,
 )
 
@@ -91,10 +92,10 @@ class Interpreter:
                 continue
             if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
                 raise AxiomRuntimeError(f"reserved function name {stmt.name!r}")
-            if any(param in self.RESERVED_IDENTIFIER_NAMES for param in stmt.params):
+            if any(param.name in self.RESERVED_IDENTIFIER_NAMES for param in stmt.params):
                 for param in stmt.params:
-                    if param in self.RESERVED_IDENTIFIER_NAMES:
-                        raise AxiomRuntimeError(f"reserved identifier {param!r}")
+                    if param.name in self.RESERVED_IDENTIFIER_NAMES:
+                        raise AxiomRuntimeError(f"reserved identifier {param.name!r}")
             if stmt.name in local_scope:
                 raise AxiomRuntimeError(f"duplicate function {stmt.name!r}")
 
@@ -165,10 +166,10 @@ class Interpreter:
         if isinstance(stmt, IfStmt):
             cond = self._eval(stmt.cond, out)
             try:
-                cond_value = require_condition_int(cond, context="if condition")
+                cond_value = require_condition_bool(cond, context="if condition")
             except ValueError as e:
                 raise AxiomRuntimeError(str(e), stmt.cond.span) from e
-            if cond_value != 0:
+            if cond_value:
                 self._exec_stmt(stmt.then_block, out)
             elif stmt.else_block is not None:
                 self._exec_stmt(stmt.else_block, out)
@@ -176,12 +177,12 @@ class Interpreter:
         if isinstance(stmt, WhileStmt):
             while True:
                 try:
-                    cond_value = require_condition_int(
+                    cond_value = require_condition_bool(
                         self._eval(stmt.cond, out), context="while condition"
                     )
                 except ValueError as e:
                     raise AxiomRuntimeError(str(e), stmt.cond.span) from e
-                if cond_value == 0:
+                if not cond_value:
                     break
                 self._exec_stmt(stmt.body, out)
             return
@@ -217,10 +218,10 @@ class Interpreter:
         self.call_stack.append((self.scopes, self.function_depth, self.function_scope_stack))
 
         param_scope: Dict[str, Value] = {}
-        for index, name in enumerate(fn.params):
-            if name in self.RESERVED_IDENTIFIER_NAMES:
-                raise AxiomRuntimeError(f"reserved identifier {name!r}")
-            param_scope[name] = args[index]
+        for index, param in enumerate(fn.params):
+            if param.name in self.RESERVED_IDENTIFIER_NAMES:
+                raise AxiomRuntimeError(f"reserved identifier {param.name!r}")
+            param_scope[param.name] = args[index]
 
         self.scopes.append(param_scope)
         self.function_scope_stack = self.function_scopes.get(
@@ -230,11 +231,20 @@ class Interpreter:
 
         try:
             self._exec_stmt(fn.body, out)
-            return 0
+            return self._default_return_value(fn)
         except _FunctionReturn as exc:
             return exc.value
         finally:
             self.scopes, self.function_depth, self.function_scope_stack = self.call_stack.pop()
+
+    def _default_return_value(self, fn: FunctionDefStmt) -> Value:
+        if fn.return_type is None or fn.return_type.name == "int":
+            return 0
+        if fn.return_type.name == "string":
+            return ""
+        if fn.return_type.name == "bool":
+            return False
+        raise AxiomRuntimeError(f"unsupported return type {fn.return_type.name!r}")
 
     def _call_host(self, fn_name: str, args: List[Value], out: TextIO) -> Value:
         host_name = fn_name[len("host.") :]
@@ -258,6 +268,8 @@ class Interpreter:
         if isinstance(expr, IntLit):
             return expr.value
         if isinstance(expr, StringLit):
+            return expr.value
+        if isinstance(expr, BoolLit):
             return expr.value
         if isinstance(expr, VarRef):
             return self._lookup(expr.name, expr.span)

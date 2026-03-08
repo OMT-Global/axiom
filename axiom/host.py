@@ -113,9 +113,9 @@ def register_host_builtin(
             f"host builtin {name!r} declared arity {arity} but got {len(normalized_arg_kinds)} arg kinds"
         )
     for kind in normalized_arg_kinds:
-        if kind not in {"int", "string", "value"}:
+        if kind not in {"int", "string", "bool", "value"}:
             raise ValueError(f"host builtin {name!r} has invalid arg kind {kind!r}")
-    if return_kind not in {"int", "string", "value"}:
+    if return_kind not in {"int", "string", "bool", "value"}:
         raise ValueError(f"host builtin {name!r} has invalid return kind {return_kind!r}")
     _HOST_BUILTINS_LIST.append(
         HostBuiltin(

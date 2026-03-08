@@ -1,7 +1,7 @@
-fn sum_to_n() {
-  let total = 0
+fn sum_to_n(): int {
+  let total: int = 0
 
-  fn walk(n) {
+  fn walk(n: int): int {
     if n <= 0 {
       return total
     }

@@ -1,6 +1,6 @@
-fn capture_counter() {
-  let value = 0
-  fn inc() {
+fn capture_counter(): int {
+  let value: int = 0
+  fn inc(): int {
     value = value + 1
     return value
   }

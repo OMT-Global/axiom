@@ -68,7 +68,7 @@ Options:
 `pkg build` reads `axiom.pkg`, compiles `main`, and writes `.axb` into `out_dir`.
 `--output` overrides the manifest output path for that invocation only.
 
-`pkg check` validates `axiom.pkg` and compiles the manifest `main` entrypoint.
+`pkg check` validates `axiom.pkg` and fully type-checks the manifest `main` entrypoint.
 Host side-effecting host calls (for example `host.print`) obey the global
 `--allow-host-side-effects` flag.
 `host.read` returns a string value; numeric input should flow through
@@ -79,3 +79,5 @@ Host side-effecting host calls (for example `host.print`) obey the global
 `pkg manifest` prints normalized manifest JSON.
 
 `pkg clean` removes the configured `out_dir` directory entirely.
+
+For a typed package example, see `examples/typed_package`.

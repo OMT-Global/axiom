@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 from .errors import Span
 
@@ -12,13 +12,30 @@ class Program:
     stmts: List["Stmt"]
 
 
+TypeName = Literal["int", "string", "bool"]
+
+
+@dataclass(frozen=True)
+class TypeRef:
+    name: TypeName
+    span: Span
+
+
+@dataclass(frozen=True)
+class Param:
+    name: str
+    span: Span
+    type_ref: Optional[TypeRef] = None
+
+
 # Statements
 @dataclass(frozen=True)
 class FunctionDefStmt:
     name: str
-    params: List[str]
+    params: List[Param]
     body: "BlockStmt"
     span: Span
+    return_type: Optional[TypeRef] = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +49,7 @@ class LetStmt:
     name: str
     expr: "Expr"
     span: Span
+    type_ref: Optional[TypeRef] = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +127,12 @@ class StringLit:
 
 
 @dataclass(frozen=True)
+class BoolLit:
+    value: bool
+    span: Span
+
+
+@dataclass(frozen=True)
 class VarRef:
     name: str
     span: Span
@@ -148,7 +172,7 @@ class Binary:
     span: Span
 
 
-Expr = Union[IntLit, StringLit, VarRef, UnaryNeg, Binary, CallExpr]
+Expr = Union[IntLit, StringLit, BoolLit, VarRef, UnaryNeg, Binary, CallExpr]
 
 
 def expr_span(e: Expr) -> Span:

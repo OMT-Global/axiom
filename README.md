@@ -11,6 +11,7 @@ host contracts:
 - **Phase 5**: package manifest, build helpers, and CLI package commands
 - **Phase 6**: stable host contract metadata and package-level host contract checks
 - **Phase 7**: mixed `int | string` values, bytecode `v0.8`, and typed host capability metadata
+- **Phase 8**: explicit scalar types, real `bool`, full type checking, and bytecode `v0.9`
 
 This repo is intentionally small and test-driven. Everything is **standard-library only** (no deps).
 
@@ -53,7 +54,7 @@ See `docs/package.md` for manifest format and build behavior.
 
 Supported:
 
-- `let name = <expr>`
+- `let name: <type> = <expr>`
 - `name = <expr>` assignment (nearest lexical binding)
 - `print <expr>`
 - block scopes:
@@ -61,11 +62,17 @@ Supported:
 - control flow:
   - `if <expr> { ... } else { ... }`
   - `while <expr> { ... }`
+- explicit scalar types on `let` bindings, function params, and function returns:
+  - `int`
+  - `string`
+  - `bool`
+- boolean literals: `true`, `false`
 - integer literals
 - string literals
 - variables
 - identifiers named `host` are reserved (`let host`, function parameters, and function names)
 - function calls: `name(arg, ...)`
+- function declarations: `fn name(arg: type, ...): type { ... }`
 - `import "path"` (or `import "path" as alias`) for file-level module loading (resolved relative to importing file)
   - Import paths must be relative and may not use parent traversal (`..`).
 - host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.int.parse(text)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)
@@ -73,12 +80,13 @@ Supported:
 - host bridge calls are registry-backed, and new `host.*` functions can be added with
   `axiom.host.register_host_builtin(name, arity, side_effecting, handler, arg_kinds=..., return_kind=...)`.
 - `+ - * /` with parentheses
-- comparisons: `== != < <= > >=` (results are `0` or `1`)
+- comparisons: `== != < <= > >=` (results are `bool`)
 - unary `-`
 
-Runtime semantics are `int | string`. Conditions remain int-only: `0` is false and
-non-zero is true. `+` supports `int+int` and `string+string`; ordered comparisons
-and arithmetic other than `+` remain int-only.
+Runtime semantics are `int | string | bool`. Conditions are bool-only.
+`+` supports `int+int` and `string+string`; `-`, `*`, `/`, unary `-`, and ordered
+comparisons remain int-only. `==` and `!=` require matching scalar types and
+return `bool`. `print` renders booleans as `true` / `false`.
 
 Statements can end with `;` or a newline.
 
@@ -96,9 +104,11 @@ See `docs/grammar.md`.
 
 ## Next steps
 
-- Add explicit types and broader value kinds beyond `int | string`
 - Extend diagnostics beyond single-span snippets (for example import traces and richer runtime context)
+- Add collections and richer compound values beyond the scalar typed core
+- Add first-class function values and broader module/package ergonomics
 - Continue host-native package tooling hardening
-- Improve collections and module/package ergonomics for larger multi-file programs
+
+For a typed package example, see `examples/typed_package`.
 
 See `docs/roadmap.md`.

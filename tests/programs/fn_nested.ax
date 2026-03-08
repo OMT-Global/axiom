@@ -1,13 +1,13 @@
-fn inner() {
+fn inner(): int {
   return 2
 }
 
-fn outer() {
-  fn inner() {
+fn outer(): int {
+  fn inner(): int {
     return 1
   }
 
-  fn fact(n) {
+  fn fact(n: int): int {
     if n <= 1 {
       return 1
     }

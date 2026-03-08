@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import json
 
-from .api import parse_file, compile_file
+from .api import check_file, compile_file
 from .bytecode import Bytecode, Op
 from .interpreter import Interpreter
 from .vm import Vm
@@ -30,8 +30,15 @@ def _module_search_paths(values: list[str] | None) -> list[Path] | None:
 def cmd_interp(
     path: Path, *, allow_host_side_effects: bool, module_paths: list[Path] | None = None
 ) -> int:
-    program = parse_file(path, module_search_paths=module_paths)
-    Interpreter(allow_host_side_effects=allow_host_side_effects).run(program, sys.stdout)
+    checked = check_file(
+        path,
+        allow_host_side_effects=allow_host_side_effects,
+        module_search_paths=module_paths,
+    )
+    Interpreter(allow_host_side_effects=allow_host_side_effects).run(
+        checked.program,
+        sys.stdout,
+    )
     return 0
 
 
@@ -81,6 +88,8 @@ def cmd_disasm(path: Path) -> int:
         name = names.get(ins.op, f"OP_{ins.op}")
         if ins.arg is None:
             print(f"{idx:04d} {name}")
+        elif ins.op == Op.CONST_BOOL:
+            print(f"{idx:04d} {name} {'true' if int(ins.arg) else 'false'}")
         elif ins.op == Op.CONST_STRING:
             try:
                 value = bc.strings[int(ins.arg)]
@@ -95,7 +104,7 @@ def cmd_disasm(path: Path) -> int:
 def cmd_check(
     path: Path, *, allow_host_side_effects: bool, module_paths: list[Path] | None = None
 ) -> int:
-    _ = compile_file(
+    _ = check_file(
         path,
         allow_host_side_effects=allow_host_side_effects,
         module_search_paths=module_paths,
@@ -244,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser(
         "check",
-        help="Parse + semantic checks (compilation plus obvious static type mismatches)",
+        help="Parse + type-check source without writing bytecode artifacts",
     )
     sp.add_argument("file", type=Path)
     sp.add_argument("--allow-host-side-effects", action="store_true")

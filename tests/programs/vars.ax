@@ -1,4 +1,4 @@
-let a = 10
-let b = a * 3 + 2
+let a: int = 10
+let b: int = a * 3 + 2
 print b
 print -b

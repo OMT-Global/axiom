@@ -1,0 +1,10 @@
+import "support/banner" as banner
+
+let user: string = "axiom"
+let excited: bool = true
+
+if excited {
+  print banner.render(user)
+} else {
+  print user
+}

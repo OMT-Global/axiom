@@ -1,4 +1,4 @@
-# Axiom bytecode format (AXBC v0.8)
+# Axiom bytecode format (AXBC v0.9)
 
 This project uses a tiny custom binary format (no deps) to keep the bootstrap surface small.
 
@@ -8,7 +8,7 @@ All integers are little-endian.
 
 - 4 bytes: magic `AXBC`
 - u16: version_major (currently 0)
-- u16: version_minor (currently 8)
+- u16: version_minor (currently 9)
 - u32: locals_count
 - u32: function_count (K)
 - K times:
@@ -57,9 +57,12 @@ All integers are little-endian.
 - 0x17 STORE_UPVALUE   (u32 upvalue index)
 - 0x18 CLOSE_UPVALUE
 - 0x19 CONST_STRING    (u32 string table index)
+- 0x1A CONST_BOOL      (u8 0/1)
 
 In `v0.8+`, string constants are emitted as `CONST_STRING` and resolved through
 the bytecode string table.
+
+In `v0.9+`, boolean constants are emitted as `CONST_BOOL`.
 
 In `v0.7+`, function metadata may include upvalue descriptors for lexical
 captures. During call setup, captured upvalues are bound against the current frame.
