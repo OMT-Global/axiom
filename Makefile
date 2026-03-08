@@ -28,6 +28,9 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/modules --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/modules --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/modules
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 
 stage1-run:

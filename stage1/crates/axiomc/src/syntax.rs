@@ -4,8 +4,16 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
+    pub imports: Vec<Import>,
     pub functions: Vec<Function>,
     pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Import {
+    pub path: String,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -14,6 +22,7 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
+    pub is_public: bool,
     pub line: usize,
     pub column: usize,
 }
@@ -116,6 +125,7 @@ pub enum CompareOp {
 pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     let lines: Vec<&str> = source.lines().collect();
     let mut index = 0;
+    let mut imports = Vec::new();
     let mut functions = Vec::new();
     let mut stmts = Vec::new();
     while index < lines.len() {
@@ -138,13 +148,38 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             }
             _ => {}
         }
-        if trimmed.starts_with("fn ") {
+        if let Some(import) = parse_import(trimmed, path, line_no)? {
+            imports.push(import);
+            index += 1;
+            continue;
+        }
+        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
         stmts.push(parse_stmt(&lines, &mut index, path, false)?);
     }
-    Ok(Program { functions, stmts })
+    Ok(Program {
+        imports,
+        functions,
+        stmts,
+    })
+}
+
+fn parse_import(trimmed: &str, path: &Path, line_no: usize) -> Result<Option<Import>, Diagnostic> {
+    let Some(rest) = trimmed.strip_prefix("import ") else {
+        return Ok(None);
+    };
+    let import_path = serde_json::from_str::<String>(rest).map_err(|_| {
+        Diagnostic::new("parse", "import must use a quoted relative path")
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1)
+    })?;
+    Ok(Some(Import {
+        path: import_path,
+        line: line_no,
+        column: 1,
+    }))
 }
 
 fn parse_stmt_list(
@@ -172,7 +207,15 @@ fn parse_stmt_list(
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1));
         }
-        if trimmed.starts_with("fn ") {
+        if trimmed.starts_with("import ") {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap only supports imports at the top level",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1));
+        }
+        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
             return Err(Diagnostic::new(
                 "parse",
                 "stage1 bootstrap only supports top-level function declarations",
@@ -227,7 +270,7 @@ fn parse_stmt(
     let message = if in_block {
         "stage1 bootstrap currently supports let, print, if/else, while, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level fn, let, print, if/else, and while statements"
+        "stage1 bootstrap currently supports top-level import, fn, let, print, if/else, and while statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())
@@ -237,11 +280,16 @@ fn parse_stmt(
 fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Function, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let header = trimmed.strip_prefix("fn ").ok_or_else(|| {
-        Diagnostic::new("parse", "invalid function declaration")
-            .with_path(path.display().to_string())
-            .with_span(line_no, 1)
-    })?;
+    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub fn ") {
+        (true, rest)
+    } else {
+        let rest = trimmed.strip_prefix("fn ").ok_or_else(|| {
+            Diagnostic::new("parse", "invalid function declaration")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        (false, rest)
+    };
     let open_paren = find_top_level_char(header, '(').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration is missing '('")
             .with_path(path.display().to_string())
@@ -253,7 +301,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_span(line_no, 1)
     })?;
     let name = header[..open_paren].trim();
-    validate_ident(name, path, line_no, 4)?;
+    validate_ident(name, path, line_no, if is_public { 8 } else { 4 })?;
     let params = parse_params(&header[open_paren + 1..close_paren], path, line_no)?;
     let after_paren = header[close_paren + 1..].trim();
     let after_colon = after_paren.strip_prefix(':').ok_or_else(|| {
@@ -280,6 +328,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         params,
         return_ty,
         body,
+        is_public,
         line: line_no,
         column: 1,
     })

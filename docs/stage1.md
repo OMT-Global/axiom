@@ -12,7 +12,7 @@ This repo now has two tracks:
 The Rust compiler is intentionally tiny in this first slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
-- Supported source subset is top-level `fn`, `let`, `print`, `if` / `else`, `while`, `return`, variables, function calls, `+` on `int`/`string`, and scalar comparisons.
+- Supported source subset is top-level `import`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, `return`, variables, function calls, `+` on `int`/`string`, and scalar comparisons.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
 - A bootstrap ownership rule is active: binding a `string` from another variable moves it, and branch-local moves conservatively propagate after `if`.
@@ -36,7 +36,7 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Language surface gaps
 
-- No modules or explicit exports in stage1 yet.
+- Modules are now limited to package-local path imports plus `pub fn` exports only.
 - No tuples, structs, enums, arrays, slices, maps, `Option<T>`, or `Result<T, E>`.
 - No `match`, no pattern matching, no generic functions or generic types.
 - No methods, trait-style interfaces, closures, or async/await.
@@ -52,8 +52,8 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Package and build graph gaps
 
 - `axiom.toml` and `axiom.lock` exist, but dependencies and workspaces are still rejected.
-- There is no package registry flow, no version resolution, no offline lockfile validation, and no `pub`-based module boundary model.
-- Relative file imports from the planned 1.0 module system are not implemented in stage1.
+- The current import model is still intentionally small: relative path imports only, direct `pub fn` exports only, no aliases, no re-exports, and no namespace-qualified calls.
+- There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape.
 
 ### Runtime and standard library gaps
 
@@ -73,20 +73,20 @@ still far from the stated 1.0 target for service and agent workloads.
 The work should stay incremental. Each slice must keep stage0 stable and leave stage1 in a
 working state with concrete tests.
 
-### Slice 2 remainder: modules and multi-file package baseline
+### Slice 2 completed: multi-file callable baseline
 
-Goal: finish the callable baseline by making it usable across more than one source file.
+Done in the current bootstrap:
 
-- Add module parsing with explicit exports and package-local imports.
-- Extend project analysis beyond a single entry file into a small package graph.
-- Keep the current function/call checker model while teaching the HIR/MIR pipeline about imported function signatures.
-- Add compile-fail tests for unresolved imports, duplicate exports, and cross-file call/type failures.
+- Package-local relative imports are supported.
+- Imported modules can expose functions through `pub fn`.
+- Project analysis now walks a small recursive module graph and rewrites cross-file calls before type checking.
+- Compile-fail coverage now includes missing imports, private import calls, imported top-level statements, and circular imports.
 
-Exit criteria:
+Current proof points:
 
-- `stage1/examples/hello` remains green as the single-file callable baseline.
-- `axiomc check/build/run` work on at least one multi-file package.
-- Rust tests cover both the current function/call/loop subset and new cross-file module failures.
+- `stage1/examples/hello` remains the single-file callable baseline.
+- `stage1/examples/modules` is the checked-in multi-file package example.
+- `make stage1-test stage1-smoke` now covers both examples.
 
 ### Slice 3: structured data and branching semantics
 

@@ -271,4 +271,114 @@ mod tests {
         assert!(error.message.contains("does not return along all paths"));
         assert_eq!(error.kind, "control");
     }
+
+    #[test]
+    fn build_project_emits_native_binary_from_imported_modules() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("modules");
+        create_project(&project, Some("modules-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"greetings.ax\"\nimport \"math.ax\"\n\nfn is_ready(value: int): bool {\nreturn value == 42\n}\n\nlet answer: int = lucky(40)\nlet ready: bool = is_ready(answer)\nif ready {\nprint banner(\"from modules\")\n} else {\nprint \"bad\"\n}\nprint answer\nprint ready\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/greetings.ax"),
+            "pub fn banner(name: string): string {\nreturn prefix() + name\n}\n\nfn prefix(): string {\nreturn \"hello \"\n}\n",
+        )
+        .expect("write greetings");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn lucky(base: int): int {\nreturn bump(base)\n}\n\nfn bump(base: int): int {\nreturn base + 2\n}\n",
+        )
+        .expect("write math");
+        let built = build_project(&project).expect("build imported modules");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "hello from modules\n42\ntrue\n"
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_missing_import() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-import");
+        create_project(&project, Some("missing-import-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"nope.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("missing import should fail");
+        assert!(error.message.contains("missing import"));
+        assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn check_project_rejects_private_import_call() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("private-import");
+        create_project(&project, Some("private-import-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"greetings.ax\"\nprint prefix()\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/greetings.ax"),
+            "pub fn banner(name: string): string {\nreturn prefix() + name\n}\n\nfn prefix(): string {\nreturn \"hello \"\n}\n",
+        )
+        .expect("write greetings");
+        let error = check_project(&project).expect_err("private import should fail");
+        assert!(error.message.contains("is not exported"));
+        assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn check_project_rejects_imported_top_level_statements() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("bad-module");
+        create_project(&project, Some("bad-module-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"greetings.ax\"\nprint banner(\"x\")\n",
+        )
+        .expect("write main");
+        fs::write(project.join("src/greetings.ax"), "print \"nope\"\n").expect("write greetings");
+        let error = check_project(&project).expect_err("module top-level statements should fail");
+        assert!(
+            error
+                .message
+                .contains("may only contain imports and function declarations")
+        );
+        assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn check_project_rejects_circular_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("cycle");
+        create_project(&project, Some("cycle-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"a.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/a.ax"),
+            "import \"b.ax\"\npub fn call_a(): int {\nreturn call_b()\n}\n",
+        )
+        .expect("write a");
+        fs::write(
+            project.join("src/b.ax"),
+            "import \"a.ax\"\npub fn call_b(): int {\nreturn call_a()\n}\n",
+        )
+        .expect("write b");
+        let error = check_project(&project).expect_err("circular imports should fail");
+        assert!(error.message.contains("circular import"));
+        assert_eq!(error.kind, "import");
+    }
 }

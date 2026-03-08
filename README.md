@@ -75,6 +75,9 @@ python -m axiom pkg run examples/codex_duo_system
 
 # Run the stage1 native hello-world
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
+
+# Run the stage1 multi-file module example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/modules
 ```
 
 ## 🧰 Useful Commands
