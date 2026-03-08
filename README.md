@@ -1,114 +1,135 @@
-# Axiom (VM-first bootstrap runtime and tooling, no LLVM)
+# Axiom 🧠⚙️
 
-This repo now covers the VM-first bootstrap path through package tooling and
-host contracts:
+**Axiom** is a small experimental programming language with:
 
-- **Phase 0**: reference interpreter, portable bytecode compiler, stack VM, and conformance tests
-- **Phase 1**: blocks/scopes, control flow, and span-aware diagnostics
-- **Phase 2**: functions, call frames, lexical closures, and file-based modules
-- **Phase 3**: deterministic `host.*` bridge calls with interpreter/VM parity
-- **Phase 4**: registry-backed host capabilities and reserved host namespace rules
-- **Phase 5**: package manifest, build helpers, and CLI package commands
-- **Phase 6**: stable host contract metadata and package-level host contract checks
-- **Phase 7**: mixed `int | string` values, bytecode `v0.8`, and typed host capability metadata
-- **Phase 8**: explicit scalar types, real `bool`, full type checking, and bytecode `v0.9`
+- 📝 a hand-written lexer and parser
+- ✅ a real type checker
+- 🧪 a tree-walking interpreter
+- 📦 a portable bytecode format
+- ⚡ a stack VM
+- 🔌 a constrained `host.*` bridge for tool/runtime integration
 
-This repo is intentionally small and test-driven. Everything is **standard-library only** (no deps).
+The project is intentionally small, readable, and standard-library only. The goal is a workable compiler that stays easy to inspect end to end.
 
-## Quickstart
+## ✨ Current Status
 
-```bash
-# Run via interpreter (stage0)
-python -m axiom interp examples/arith.ax
+Axiom currently supports:
 
-# Compile to bytecode (stage1)
-python -m axiom compile examples/arith.ax -o /tmp/arith.axb
+- typed `let` bindings
+- typed function parameters and return values
+- scalar types: `int`, `string`, `bool`
+- `if` / `while`
+- nested functions and lexical closures
+- file-based imports
+- package manifests and build/run/check commands
+- bytecode compilation and VM execution
+- registry-backed host capabilities
 
-# Run bytecode on the VM (stage1)
-python -m axiom vm /tmp/arith.axb
+Current bytecode version: **AXBC v0.9**
 
-# Run package main from manifest
-python -m axiom pkg run .
+## 👀 Example
 
-# Inspect host bridge capabilities for tooling
-python -m axiom host list
-# Emit compact machine-readable output for scripts
-python -m axiom host list --compact
-# Inspect the full host contract (schema + runtime version + capabilities) for tooling
-python -m axiom host describe
-# Inspect only deterministic host calls for agentic tooling
-python -m axiom host list --safe-only
+```axiom
+fn greet(name: string): string {
+  return "hello, " + name
+}
 
-# Run conformance tests (interpreter vs VM + expected output)
-python -m unittest discover -v
+let ready: bool = true
 
-# Create package scaffold and build output artifact
-python -m axiom pkg init .
-python -m axiom pkg build .
-python -m axiom pkg check .
+if ready {
+  print greet("axiom")
+}
 ```
 
-See `docs/package.md` for manifest format and build behavior.
+## 🚀 Quickstart
 
-## Axiom v0 language subset
+```bash
+# Clone
+git clone https://github.com/OMT-Global/axiom.git
+cd axiom
 
-Supported:
+# Create the local virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-- `let name: <type> = <expr>`
-- `name = <expr>` assignment (nearest lexical binding)
-- `print <expr>`
-- block scopes:
-  - `{ ... }` introduces nested lexical scope
-- control flow:
-  - `if <expr> { ... } else { ... }`
-  - `while <expr> { ... }`
-- explicit scalar types on `let` bindings, function params, and function returns:
-  - `int`
-  - `string`
-  - `bool`
-- boolean literals: `true`, `false`
-- integer literals
-- string literals
-- variables
-- identifiers named `host` are reserved (`let host`, function parameters, and function names)
-- function calls: `name(arg, ...)`
-- function declarations: `fn name(arg: type, ...): type { ... }`
-- `import "path"` (or `import "path" as alias`) for file-level module loading (resolved relative to importing file)
-  - Import paths must be relative and may not use parent traversal (`..`).
-- host bridge calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.int.parse(text)`, `host.abs(value)`, `host.math.abs(value)` (gated side effects apply to `print`/`read` only)
-- deterministic host calls are available without runtime flags; side-effecting host calls require the explicit `--allow-host-side-effects` option
-- host bridge calls are registry-backed, and new `host.*` functions can be added with
-  `axiom.host.register_host_builtin(name, arity, side_effecting, handler, arg_kinds=..., return_kind=...)`.
-- `+ - * /` with parentheses
-- comparisons: `== != < <= > >=` (results are `bool`)
-- unary `-`
+# Run a program through the interpreter
+python -m axiom interp examples/arith.ax
 
-Runtime semantics are `int | string | bool`. Conditions are bool-only.
-`+` supports `int+int` and `string+string`; `-`, `*`, `/`, unary `-`, and ordered
-comparisons remain int-only. `==` and `!=` require matching scalar types and
-return `bool`. `print` renders booleans as `true` / `false`.
+# Compile to bytecode
+python -m axiom compile examples/arith.ax -o /tmp/arith.axb
 
-Statements can end with `;` or a newline.
+# Run bytecode on the VM
+python -m axiom vm /tmp/arith.axb
 
-See `docs/grammar.md`.
+# Run the package example
+python -m axiom pkg run examples/typed_package
+```
 
-## Project layout
+## 🧰 Useful Commands
 
-- `axiom/lexer.py` / `axiom/parser.py`: parse Axiom into an AST
-- `axiom/interpreter.py`: execute AST directly (stage0)
-- `axiom/compiler.py`: compile AST -> bytecode (stage1)
-- `axiom/bytecode.py`: bytecode format + encoder/decoder
-- `axiom/vm.py`: bytecode VM (stage1)
-- `tests/programs/*.ax`: conformance programs
-- `tests/programs/*.out`: expected stdout for each program
+```bash
+# Full test suite
+python -m unittest discover -v
 
-## Next steps
+# Typecheck / compile a source file
+python -m axiom check examples/arith.ax
 
-- Extend diagnostics beyond single-span snippets (for example import traces and richer runtime context)
-- Add collections and richer compound values beyond the scalar typed core
-- Add first-class function values and broader module/package ergonomics
-- Continue host-native package tooling hardening
+# Build and run a package
+python -m axiom pkg build examples/typed_package
+python -m axiom pkg run examples/typed_package
 
-For a typed package example, see `examples/typed_package`.
+# Inspect host capabilities
+python -m axiom host list
+python -m axiom host describe
+```
 
-See `docs/roadmap.md`.
+## 🗣 Language Snapshot
+
+Supported syntax today:
+
+- `let name: type = expr`
+- `name = expr`
+- `print expr`
+- `fn name(arg: type, ...): type { ... }`
+- `if expr { ... } else { ... }`
+- `while expr { ... }`
+- `import "path"` and `import "path" as alias`
+- calls like `name(arg)` and `module.name(arg)`
+- host calls like `host.version()` and `host.int.parse("41")`
+
+Runtime rules:
+
+- `+` supports `int + int` and `string + string`
+- `-`, `*`, `/`, unary `-`, and ordered comparisons are `int`-only
+- `==` and `!=` require matching scalar types and return `bool`
+- conditions are `bool`-only
+- booleans print as `true` / `false`
+
+See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and [docs/bytecode.md](docs/bytecode.md) for the precise spec.
+
+## 📁 Repo Map
+
+- `axiom/lexer.py`, `axiom/parser.py`: source -> AST
+- `axiom/checker.py`: AST -> typed validation
+- `axiom/compiler.py`: AST -> bytecode
+- `axiom/interpreter.py`: AST execution
+- `axiom/bytecode.py`: bytecode encoder/decoder
+- `axiom/vm.py`: bytecode execution
+- `tests/programs/*.ax`: language fixtures
+- `examples/typed_package/`: small typed package example
+
+## 🛣 Roadmap
+
+The next major step is **Phase 9A**:
+
+- 📚 arrays and collections
+- 🧩 better package/module ergonomics
+- 🔍 richer diagnostics on the typed core
+
+High-level roadmap: [docs/roadmap.md](docs/roadmap.md)
+
+## 🤝 Notes
+
+- The repo uses a project-local `.venv`.
+- The host bridge is intentionally constrained and side effects are gated.
+- This codebase is optimized for clarity over abstraction density.
