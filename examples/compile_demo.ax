@@ -1,0 +1,16 @@
+fn double(value: int): int {
+  return value + value
+}
+
+let answer: int = double(21)
+let ready: bool = true
+
+if ready {
+  print "    /\\"
+  print "   /  \\"
+  print "  / /\\ \\"
+  print " / ____ \\"
+  print "/_/    \\_\\"
+  print "  AXIOM"
+  print answer
+}

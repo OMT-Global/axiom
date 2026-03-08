@@ -11,9 +11,14 @@ This repo is intentionally small and test-driven.
 ## Running tests
 ```bash
 python -m unittest discover -v
+python -m ruff check .
+make smoke
+make stage1-test
+make stage1-smoke
 ```
 
 ## Bootstrap discipline
-Treat the interpreter and VM as **two implementations** of the same semantics:
-- Interpreter (stage0) is the reference.
-- VM (stage1) must match the interpreter on conformance tests.
+Treat the repo as a staged bootstrap:
+- Python `axiom/` is stage0 and remains the reference parser/checker/interpreter/VM.
+- Rust `stage1/` is the native compiler bootstrap and may support only a subset while it grows.
+- Overlapping language behavior should continue to be proven against stage0 before features are promoted.

@@ -1,7 +1,16 @@
-.PHONY: test interp compile vm
+.PHONY: test lint smoke interp compile vm stage1-test stage1-smoke stage1-run
 
 test:
 	python -m unittest discover -v
+
+lint:
+	python -m ruff check .
+
+smoke:
+	python -m axiom check examples/arith.ax
+	python -m axiom check tests/programs/bool_values.ax
+	python -m axiom pkg check examples/typed_package
+	python -m axiom pkg run examples/typed_package
 
 interp:
 	python -m axiom interp examples/arith.ax
@@ -11,3 +20,15 @@ compile:
 
 vm:
 	python -m axiom vm /tmp/arith.axb
+
+stage1-test:
+	cargo test --manifest-path stage1/Cargo.toml
+
+stage1-smoke:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+
+stage1-run:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello

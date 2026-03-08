@@ -4,11 +4,13 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
-from typing import List, Optional
+from typing import List, Optional, Set, TextIO
 
 from .api import compile_file
+from .bytecode import Bytecode
 from .host import host_contract_metadata
 from .errors import AxiomCompileError
+from .vm import Vm
 
 
 MANIFEST_FILENAME = "axiom.pkg"
@@ -27,6 +29,14 @@ class PackageManifest:
     output: Optional[str] = None
     allowed_host_calls: Optional[List[str]] = None
     host_contract_signature: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PreparedPackage:
+    project_root: Path
+    manifest: PackageManifest
+    entry: Path
+    allowed_host_calls: Optional[Set[str]]
 
 
 def manifest_path(project_root: Path) -> Path:
@@ -179,6 +189,25 @@ def manifest_to_dict(manifest: PackageManifest) -> dict[str, object]:
     return payload
 
 
+def prepare_package(
+    project_root: Path, *, validate_host_contract: bool = True
+) -> PreparedPackage:
+    project_root = project_root.resolve()
+    manifest = load_manifest(project_root)
+    if validate_host_contract:
+        _validate_project_host_contract(manifest, manifest_path(project_root))
+    return PreparedPackage(
+        project_root=project_root,
+        manifest=manifest,
+        entry=project_root / manifest.main,
+        allowed_host_calls=(
+            set(manifest.allowed_host_calls)
+            if manifest.allowed_host_calls is not None
+            else None
+        ),
+    )
+
+
 def write_default_manifest(project_root: Path, manifest: PackageManifest) -> PackageManifest:
     path = manifest_path(project_root)
     payload = manifest_to_dict(manifest)
@@ -262,25 +291,21 @@ def build_package(
     allow_host_side_effects: bool = False,
     output: Optional[str] = None,
 ) -> Path:
-    project_root = project_root.resolve()
-    manifest = load_manifest(project_root)
-    _validate_project_host_contract(manifest, manifest_path(project_root))
-    entry = project_root / manifest.main
-    allowed_host_calls = (
-        set(manifest.allowed_host_calls)
-        if manifest.allowed_host_calls is not None
-        else None
-    )
-    bytecode = compile_file(
-        entry,
+    prepared, bytecode = compile_package(
+        project_root,
         allow_host_side_effects=allow_host_side_effects,
-        allowed_host_calls=allowed_host_calls,
     )
-    out_dir = project_root / manifest.out_dir
+    out_dir = prepared.project_root / prepared.manifest.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    selected_output = output if output is not None else manifest.output or manifest.name
-    validated_output = _validate_output(selected_output, manifest_path(project_root))
+    selected_output = (
+        output
+        if output is not None
+        else prepared.manifest.output or prepared.manifest.name
+    )
+    validated_output = _validate_output(
+        selected_output, manifest_path(prepared.project_root)
+    )
 
     if validated_output.endswith(".axb"):
         output_name = validated_output
@@ -293,10 +318,52 @@ def build_package(
     return out_path
 
 
+def check_package(
+    project_root: Path,
+    *,
+    allow_host_side_effects: bool = False,
+) -> PreparedPackage:
+    prepared, _ = compile_package(
+        project_root,
+        allow_host_side_effects=allow_host_side_effects,
+    )
+    return prepared
+
+
+def compile_package(
+    project_root: Path,
+    *,
+    allow_host_side_effects: bool = False,
+) -> tuple[PreparedPackage, Bytecode]:
+    prepared = prepare_package(project_root)
+    bytecode = compile_file(
+        prepared.entry,
+        allow_host_side_effects=allow_host_side_effects,
+        allowed_host_calls=prepared.allowed_host_calls,
+    )
+    return prepared, bytecode
+
+
+def run_package(
+    project_root: Path,
+    *,
+    allow_host_side_effects: bool = False,
+    out: TextIO,
+) -> PreparedPackage:
+    prepared, bytecode = compile_package(
+        project_root,
+        allow_host_side_effects=allow_host_side_effects,
+    )
+    Vm(
+        locals_count=bytecode.locals_count,
+        allow_host_side_effects=allow_host_side_effects,
+    ).run(bytecode, out)
+    return prepared
+
+
 def clean_package(project_root: Path) -> bool:
-    project_root = project_root.resolve()
-    manifest = load_manifest(project_root)
-    out_dir = project_root / manifest.out_dir
+    prepared = prepare_package(project_root, validate_host_contract=False)
+    out_dir = prepared.project_root / prepared.manifest.out_dir
     if not out_dir.exists():
         return False
     if out_dir.is_file():

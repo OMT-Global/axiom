@@ -8,6 +8,7 @@
 - 📦 a portable bytecode format
 - ⚡ a stack VM
 - 🔌 a constrained `host.*` bridge for tool/runtime integration
+- 🦀 a new Rust `stage1` native bootstrap under `stage1/`
 
 The project is intentionally small, readable, and standard-library only. The goal is a workable compiler that stays easy to inspect end to end.
 
@@ -26,6 +27,11 @@ Axiom currently supports:
 - registry-backed host capabilities
 
 Current bytecode version: **AXBC v0.9**
+
+The repo now has two tracks:
+
+- `stage0`: the current Python implementation in `axiom/`
+- `stage1`: a Rust bootstrap compiler in `stage1/` with a tiny native subset
 
 ## 👀 Example
 
@@ -63,6 +69,12 @@ python -m axiom vm /tmp/arith.axb
 
 # Run the package example
 python -m axiom pkg run examples/typed_package
+
+# Run the two-session collaboration demo
+python -m axiom pkg run examples/codex_duo_system
+
+# Run the stage1 native hello-world
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 ```
 
 ## 🧰 Useful Commands
@@ -71,12 +83,26 @@ python -m axiom pkg run examples/typed_package
 # Full test suite
 python -m unittest discover -v
 
+# Lint
+python -m ruff check .
+
 # Typecheck / compile a source file
 python -m axiom check examples/arith.ax
+python -m axiom check examples/arith.ax --json
+python -m axiom compile examples/compile_demo.ax -o /tmp/compile_demo.axb --json
+python -m axiom vm /tmp/compile_demo.axb
 
 # Build and run a package
 python -m axiom pkg build examples/typed_package
 python -m axiom pkg run examples/typed_package
+python -m axiom pkg build examples/codex_duo_system
+python -m axiom pkg run examples/codex_duo_system
+
+# Project shortcuts
+make test
+make smoke
+make stage1-test
+make stage1-smoke
 
 # Inspect host capabilities
 python -m axiom host list
@@ -107,20 +133,26 @@ Runtime rules:
 
 See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and [docs/bytecode.md](docs/bytecode.md) for the precise spec.
 
+For the Rust bootstrap split, the current native subset, and the stage1 gap/execution plan, see [docs/stage1.md](docs/stage1.md).
+
 ## 📁 Repo Map
 
-- `axiom/lexer.py`, `axiom/parser.py`: source -> AST
+- `axiom/lexer.py`, `axiom/parser.py`, `axiom/loader.py`: source parsing plus file/import loading
 - `axiom/checker.py`: AST -> typed validation
+- `axiom/semantic_plan.py`: shared nested-function planning and name resolution
 - `axiom/compiler.py`: AST -> bytecode
 - `axiom/interpreter.py`: AST execution
 - `axiom/bytecode.py`: bytecode encoder/decoder
 - `axiom/vm.py`: bytecode execution
+- `axiom/cli.py`, `axiom/packaging.py`: CLI orchestration and package workflows
+- `stage1/`: Rust bootstrap compiler with `axiom.toml`/`axiom.lock` and native hello-world builds
 - `tests/programs/*.ax`: language fixtures
 - `examples/typed_package/`: small typed package example
+- `examples/codex_duo_system/`: package demo where two imported modules assemble one system
 
 ## 🛣 Roadmap
 
-The next major step is **Phase 9A**:
+The current stage0 roadmap is still **Phase 9A**:
 
 - 📚 arrays and collections
 - 🧩 better package/module ergonomics

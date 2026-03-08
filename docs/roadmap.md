@@ -1,5 +1,8 @@
 # Roadmap (high-level)
 
+This file tracks the Python `stage0` language/runtime line. The Rust `stage1`
+bootstrap compiler now lives in `stage1/` and is described in `docs/stage1.md`.
+
 ## Phase 0 ✅
 - Small kernel spec + conformance tests
 - Interpreter + bytecode compiler + VM
