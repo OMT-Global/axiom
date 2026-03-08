@@ -92,6 +92,15 @@ pub enum Expr {
         field: String,
         ty: Type,
     },
+    ArrayLiteral {
+        elements: Vec<Expr>,
+        ty: Type,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -100,6 +109,7 @@ pub enum Type {
     Bool,
     String,
     Struct(String),
+    Array(Box<Type>),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -809,6 +819,82 @@ fn lower_expr(
                 ty: field_ty,
             })
         }
+        syntax::Expr::ArrayLiteral {
+            elements,
+            line,
+            column,
+        } => {
+            if elements.is_empty() {
+                return Err(Diagnostic::new(
+                    "type",
+                    "empty array literals are not yet supported in stage1",
+                )
+                .with_span(*line, *column));
+            }
+            let mut lowered_elements = Vec::new();
+            let mut element_ty = None;
+            for element in elements {
+                let lowered = lower_expr(element, env, ctx)?;
+                if let Some(expected) = element_ty.as_ref() {
+                    if lowered.ty() != expected {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "array literal expects matching element types, got {expected} and {}",
+                                lowered.ty()
+                            ),
+                        )
+                        .with_span(element.line(), element.column()));
+                    }
+                } else {
+                    element_ty = Some(lowered.ty().clone());
+                }
+                if !lowered.ty().is_copy() {
+                    move_owner_value(element, env)?;
+                }
+                lowered_elements.push(lowered);
+            }
+            let element_ty = element_ty.expect("non-empty array literal must have an element type");
+            Ok(Expr::ArrayLiteral {
+                elements: lowered_elements,
+                ty: Type::Array(Box::new(element_ty)),
+            })
+        }
+        syntax::Expr::Index {
+            base,
+            index,
+            line,
+            column,
+        } => {
+            let lowered_base = lower_expr(base, env, ctx)?;
+            let lowered_index = lower_expr(index, env, ctx)?;
+            if lowered_index.ty() != &Type::Int {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("array index expects int, got {}", lowered_index.ty()),
+                )
+                .with_span(*line, *column));
+            }
+            let Type::Array(element_ty) = lowered_base.ty() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "array index expects an array value, got {}",
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            };
+            let element_ty = (*element_ty.clone()).clone();
+            if !element_ty.is_copy() {
+                move_owner_value(base, env)?;
+            }
+            Ok(Expr::Index {
+                base: Box::new(lowered_base),
+                index: Box::new(lowered_index),
+                ty: element_ty,
+            })
+        }
     }
 }
 
@@ -836,6 +922,7 @@ fn move_owner_value(
     match expr {
         syntax::Expr::VarRef { .. } => move_value(expr, env),
         syntax::Expr::FieldAccess { base, .. } => move_owner_value(base, env),
+        syntax::Expr::Index { base, .. } => move_owner_value(base, env),
         _ => Ok(()),
     }
 }
@@ -874,6 +961,9 @@ fn lower_type<T>(
             }
             Ok(Type::Struct(name.clone()))
         }
+        syntax::TypeName::Array(inner) => Ok(Type::Array(Box::new(lower_type(
+            inner, structs, line, column,
+        )?))),
     }
 }
 
@@ -898,6 +988,8 @@ impl Expr {
             Expr::BinaryCompare { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
             Expr::FieldAccess { ty, .. } => ty,
+            Expr::ArrayLiteral { ty, .. } => ty,
+            Expr::Index { ty, .. } => ty,
         }
     }
 }
@@ -951,7 +1043,9 @@ impl syntax::Expr {
             | syntax::Expr::BinaryAdd { line, .. }
             | syntax::Expr::BinaryCompare { line, .. }
             | syntax::Expr::StructLiteral { line, .. }
-            | syntax::Expr::FieldAccess { line, .. } => *line,
+            | syntax::Expr::FieldAccess { line, .. }
+            | syntax::Expr::ArrayLiteral { line, .. }
+            | syntax::Expr::Index { line, .. } => *line,
         }
     }
 
@@ -963,7 +1057,9 @@ impl syntax::Expr {
             | syntax::Expr::BinaryAdd { column, .. }
             | syntax::Expr::BinaryCompare { column, .. }
             | syntax::Expr::StructLiteral { column, .. }
-            | syntax::Expr::FieldAccess { column, .. } => *column,
+            | syntax::Expr::FieldAccess { column, .. }
+            | syntax::Expr::ArrayLiteral { column, .. }
+            | syntax::Expr::Index { column, .. } => *column,
         }
     }
 }
@@ -988,6 +1084,7 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
             Type::Struct(name) => write!(f, "{name}"),
+            Type::Array(inner) => write!(f, "[{inner}]"),
         }
     }
 }

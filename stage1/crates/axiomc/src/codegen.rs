@@ -7,6 +7,20 @@ use std::process::Command;
 
 pub fn render_rust(program: &Program) -> String {
     let mut out = String::new();
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_array_get<T: Copy>(values: &[T], index: i64) -> T {\n");
+    out.push_str(
+        "    let index = usize::try_from(index).expect(\"array index must be non-negative\");\n",
+    );
+    out.push_str("    values[index]\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_array_take<T>(values: Vec<T>, index: i64) -> T {\n");
+    out.push_str(
+        "    let index = usize::try_from(index).expect(\"array index must be non-negative\");\n",
+    );
+    out.push_str("    values.into_iter().nth(index).expect(\"array index out of bounds\")\n");
+    out.push_str("}\n\n");
     for struct_def in &program.structs {
         render_struct(struct_def, &mut out);
         out.push('\n');
@@ -122,6 +136,7 @@ fn render_expr(expr: &Expr) -> String {
             ),
             Type::Bool => unreachable!("type checker rejects bool addition"),
             Type::Struct(_) => unreachable!("type checker rejects struct addition"),
+            Type::Array(_) => unreachable!("type checker rejects array addition"),
         },
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
@@ -135,6 +150,29 @@ fn render_expr(expr: &Expr) -> String {
             format!("{name} {{ {rendered_fields} }}")
         }
         Expr::FieldAccess { base, field, .. } => format!("({}).{}", render_expr(base), field),
+        Expr::ArrayLiteral { elements, .. } => {
+            let rendered = elements
+                .iter()
+                .map(render_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("vec![{rendered}]")
+        }
+        Expr::Index { base, index, ty } => {
+            if ty.is_copy() {
+                format!(
+                    "axiom_array_get(&{}, {})",
+                    render_expr(base),
+                    render_expr(index)
+                )
+            } else {
+                format!(
+                    "axiom_array_take({}, {})",
+                    render_expr(base),
+                    render_expr(index)
+                )
+            }
+        }
     }
 }
 
@@ -144,6 +182,7 @@ fn rust_type(ty: &Type) -> String {
         Type::Bool => String::from("bool"),
         Type::String => String::from("String"),
         Type::Struct(name) => name.clone(),
+        Type::Array(inner) => format!("Vec<{}>", rust_type(inner)),
     }
 }
 

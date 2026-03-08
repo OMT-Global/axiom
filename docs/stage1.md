@@ -12,10 +12,10 @@ This repo now has two tracks:
 The Rust compiler is intentionally tiny in this first slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
-- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, `return`, variables, function calls, named struct types, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
+- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, `return`, variables, function calls, named struct types, array types, array literals, array indexing, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
-- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access conservatively moves the owning variable, and branch-local moves conservatively propagate after `if`.
+- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access and non-`Copy` array indexing conservatively move the owning variable, and branch-local moves conservatively propagate after `if`.
 
 This is not the final backend architecture. It is the smallest executable version of the
 stage0/stage1 split that can build a native hello-world and carry the 1.0 package model.
@@ -37,7 +37,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Language surface gaps
 
 - Modules are now limited to package-local path imports plus direct `pub struct` and `pub fn` exports only.
-- Structs exist now, but there are still no tuples, enums, arrays, slices, maps, `Option<T>`, or `Result<T, E>`.
+- Structs and arrays exist now, but there are still no tuples, enums, slices, maps, `Option<T>`, or `Result<T, E>`.
 - No `match`, no pattern matching, no generic functions or generic types.
 - No methods, trait-style interfaces, closures, or async/await.
 - Rebinding and shadowing are intentionally rejected today to keep the bootstrap scope small.
@@ -80,21 +80,22 @@ Done in the current bootstrap:
 - Package-local relative imports are supported.
 - Imported modules can expose structs and functions through `pub struct` and `pub fn`.
 - Project analysis now walks a small recursive module graph and rewrites cross-file calls before type checking.
-- Compile-fail coverage now includes missing imports, private import calls, imported top-level statements, circular imports, and basic struct misuse.
+- Compile-fail coverage now includes missing imports, private import calls, imported top-level statements, circular imports, basic struct misuse, and basic array misuse.
 
 Current proof points:
 
 - `stage1/examples/hello` remains the single-file callable baseline.
 - `stage1/examples/modules` is the checked-in multi-file package example.
+- `stage1/examples/arrays` is the checked-in array/bootstrap collection example.
 - `stage1/examples/structs` is the checked-in structured-data bootstrap example.
-- `make stage1-test stage1-smoke` now covers all three examples.
+- `make stage1-test stage1-smoke` now covers all four examples.
 
 ### Slice 3: structured data and branching semantics
 
 Goal: add the minimum useful data model for service code.
 
-- Struct declarations, literals, named struct types, and field access are now in the bootstrap.
-- Add tuples, enums, arrays, and maps next.
+- Struct declarations, literals, named struct types, field access, array types, array literals, and array indexing are now in the bootstrap.
+- Add tuples, enums, and maps next.
 - Add `match` with exhaustiveness checking.
 - Add `Option<T>` and `Result<T, E>` as real language-level types.
 - Extend comparisons and control-flow typing across structured data where appropriate.

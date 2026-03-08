@@ -79,6 +79,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hel
 # Run the stage1 multi-file module example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/modules
 
+# Run the stage1 array example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arrays
+
 # Run the stage1 struct example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/structs
 ```

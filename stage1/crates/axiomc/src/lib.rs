@@ -76,6 +76,19 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_arrays_and_indexing() {
+        let source = "fn answer(values: [int]): int {\nreturn values[1]\n}\n\nlet values: [int] = [40, 42]\nprint answer(values)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn answer(values: Vec<i64>) -> i64 {"));
+        assert!(rendered.contains("return axiom_array_get(&values, 1);"));
+        assert!(rendered.contains("let values: Vec<i64> = vec![40, 42];"));
+        assert!(rendered.contains("println!(\"{}\", answer(values));"));
+    }
+
+    #[test]
     fn build_project_emits_native_binary() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("native");
@@ -114,6 +127,23 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             "42\nhello from stage1\n"
         );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_arrays() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("arrays");
+        create_project(&project, Some("arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn answer(values: [int]): int {\nreturn values[1]\n}\n\nlet values: [int] = [40, 42]\nprint answer(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
     }
 
     #[test]
@@ -477,5 +507,70 @@ mod tests {
                 .contains("field access expects a struct value")
         );
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mixed_array_literal_types() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("bad-array-literal");
+        create_project(&project, Some("bad-array-literal-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, true]\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("array literal should require matching types");
+        assert!(
+            error
+                .message
+                .contains("array literal expects matching element types")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_array_index_on_non_array() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("bad-array-index");
+        create_project(&project, Some("bad-array-index-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint answer[0]\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("array index should require array");
+        assert!(error.message.contains("array index expects an array value"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_non_int_array_index() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("bad-array-index-type");
+        create_project(&project, Some("bad-array-index-type-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2]\nprint values[true]\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("array index should require int");
+        assert!(error.message.contains("array index expects int"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_use_after_non_copy_array_index() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("array-move");
+        create_project(&project, Some("array-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let labels: [string] = [\"a\", \"b\"]\nprint labels[0]\nprint labels[1]\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("non-copy array index should consume owner");
+        assert!(error.message.contains("use of moved value"));
+        assert_eq!(error.kind, "ownership");
     }
 }

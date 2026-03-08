@@ -93,6 +93,7 @@ pub enum TypeName {
     Bool,
     String,
     Named(String),
+    Array(Box<TypeName>),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -131,6 +132,17 @@ pub enum Expr {
     FieldAccess {
         base: Box<Expr>,
         field: String,
+        line: usize,
+        column: usize,
+    },
+    ArrayLiteral {
+        elements: Vec<Expr>,
+        line: usize,
+        column: usize,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
         line: usize,
         column: usize,
     },
@@ -579,6 +591,25 @@ fn parse_type_name(
     line_no: usize,
     column: usize,
 ) -> Result<TypeName, Diagnostic> {
+    if raw.starts_with('[')
+        && raw.ends_with(']')
+        && matches!(find_matching_square(raw, 0), Some(close) if close == raw.len() - 1)
+    {
+        let inner = raw[1..raw.len() - 1].trim();
+        if inner.is_empty() {
+            return Err(
+                Diagnostic::new("parse", "array type is missing an element type")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column),
+            );
+        }
+        return Ok(TypeName::Array(Box::new(parse_type_name(
+            inner,
+            path,
+            line_no,
+            column + 1,
+        )?)));
+    }
     match raw {
         "int" => Ok(TypeName::Int),
         "bool" => Ok(TypeName::Bool),
@@ -654,8 +685,44 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             column,
         });
     }
+    if raw.ends_with(']')
+        && let Some(open_bracket) = find_last_top_level_char(raw, '[')
+        && matches!(find_matching_square(raw, open_bracket), Some(close) if close == raw.len() - 1)
+    {
+        let base_raw = raw[..open_bracket].trim();
+        let index_raw = raw[open_bracket + 1..raw.len() - 1].trim();
+        if base_raw.is_empty() {
+            // This is an array literal, handled below.
+        } else if index_raw.is_empty() {
+            return Err(Diagnostic::new("parse", "array index is incomplete")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+        } else {
+            return Ok(Expr::Index {
+                base: Box::new(parse_term(base_raw, path, line_no, column)?),
+                index: Box::new(parse_expr(
+                    index_raw,
+                    path,
+                    line_no,
+                    column + open_bracket + 1,
+                )?),
+                line: line_no,
+                column,
+            });
+        }
+    }
     if is_wrapped_in_parens(raw) {
         return parse_expr(&raw[1..raw.len() - 1], path, line_no, column + 1);
+    }
+    if raw.starts_with('[')
+        && raw.ends_with(']')
+        && matches!(find_matching_square(raw, 0), Some(close) if close == raw.len() - 1)
+    {
+        return Ok(Expr::ArrayLiteral {
+            elements: parse_array_literal_elements(&raw[1..raw.len() - 1], path, line_no, column)?,
+            line: line_no,
+            column,
+        });
     }
     if raw.ends_with('}')
         && let Some(open_brace) = find_top_level_char(raw, '{')
@@ -716,6 +783,28 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         line: line_no,
         column,
     })
+}
+
+fn parse_array_literal_elements(
+    raw: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<Vec<Expr>, Diagnostic> {
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut elements = Vec::new();
+    for element_text in split_top_level(raw, ',') {
+        let element_text = element_text.trim();
+        if element_text.is_empty() {
+            return Err(Diagnostic::new("parse", "array literal element is empty")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+        }
+        elements.push(parse_expr(element_text, path, line_no, column)?);
+    }
+    Ok(elements)
 }
 
 fn parse_struct_literal_fields(
@@ -810,6 +899,7 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
     let mut escaped = false;
     let mut paren_depth = 0usize;
     let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
     let mut start = 0;
     for (index, ch) in raw.char_indices() {
         if escaped {
@@ -832,7 +922,9 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
             ')' => paren_depth = paren_depth.saturating_sub(1),
             '{' => brace_depth += 1,
             '}' => brace_depth = brace_depth.saturating_sub(1),
-            _ if ch == delimiter && paren_depth == 0 && brace_depth == 0 => {
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            _ if ch == delimiter && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
                 parts.push(&raw[start..index]);
                 start = index + ch.len_utf8();
             }
@@ -848,6 +940,7 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
     let mut escaped = false;
     let mut paren_depth = 0usize;
     let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
     for (index, ch) in raw.char_indices() {
         if escaped {
             escaped = false;
@@ -866,30 +959,44 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
         }
         match ch {
             '(' => {
-                if target == '(' && paren_depth == 0 && brace_depth == 0 {
+                if target == '(' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
                     return Some(index);
                 }
                 paren_depth += 1;
             }
             ')' => {
-                if target == ')' && paren_depth == 1 && brace_depth == 0 {
+                if target == ')' && paren_depth == 1 && brace_depth == 0 && bracket_depth == 0 {
                     return Some(index);
                 }
                 paren_depth = paren_depth.saturating_sub(1);
             }
             '{' => {
-                if target == '{' && paren_depth == 0 && brace_depth == 0 {
+                if target == '{' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
                     return Some(index);
                 }
                 brace_depth += 1;
             }
             '}' => {
-                if target == '}' && paren_depth == 0 && brace_depth == 1 {
+                if target == '}' && paren_depth == 0 && brace_depth == 1 && bracket_depth == 0 {
                     return Some(index);
                 }
                 brace_depth = brace_depth.saturating_sub(1);
             }
-            _ if ch == target && paren_depth == 0 && brace_depth == 0 => return Some(index),
+            '[' => {
+                if target == '[' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
+                    return Some(index);
+                }
+                bracket_depth += 1;
+            }
+            ']' => {
+                if target == ']' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 1 {
+                    return Some(index);
+                }
+                bracket_depth = bracket_depth.saturating_sub(1);
+            }
+            _ if ch == target && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                return Some(index);
+            }
             _ => {}
         }
     }
@@ -973,11 +1080,55 @@ fn find_matching_brace(raw: &str, open_index: usize) -> Option<usize> {
     None
 }
 
+fn find_matching_square(raw: &str, open_index: usize) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for (index, ch) in raw
+        .char_indices()
+        .skip_while(|(index, _)| *index < open_index)
+    {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' if paren_depth == 0 && brace_depth == 0 => bracket_depth += 1,
+            ']' if paren_depth == 0 && brace_depth == 0 => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                if bracket_depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn find_last_top_level_char(raw: &str, target: char) -> Option<usize> {
     let mut in_string = false;
     let mut escaped = false;
     let mut paren_depth = 0usize;
     let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
     let mut found = None;
     for (index, ch) in raw.char_indices() {
         if escaped {
@@ -1000,7 +1151,16 @@ fn find_last_top_level_char(raw: &str, target: char) -> Option<usize> {
             ')' => paren_depth = paren_depth.saturating_sub(1),
             '{' => brace_depth += 1,
             '}' => brace_depth = brace_depth.saturating_sub(1),
-            _ if ch == target && paren_depth == 0 && brace_depth == 0 => found = Some(index),
+            '[' => {
+                if target == '[' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
+                    found = Some(index);
+                }
+                bracket_depth += 1;
+            }
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            _ if ch == target && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                found = Some(index)
+            }
             _ => {}
         }
     }
@@ -1018,6 +1178,7 @@ fn find_compare_operator(raw: &str) -> Option<(CompareOp, usize)> {
     let mut escaped = false;
     let mut paren_depth = 0usize;
     let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
     let chars: Vec<(usize, char)> = raw.char_indices().collect();
     let mut cursor = 0;
     while cursor < chars.len() {
@@ -1062,9 +1223,19 @@ fn find_compare_operator(raw: &str) -> Option<(CompareOp, usize)> {
                 cursor += 1;
                 continue;
             }
+            '[' => {
+                bracket_depth += 1;
+                cursor += 1;
+                continue;
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                cursor += 1;
+                continue;
+            }
             _ => {}
         }
-        if paren_depth == 0 && brace_depth == 0 {
+        if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
             if let Some((_, next)) = chars.get(cursor + 1) {
                 match (ch, *next) {
                     ('=', '=') => return Some((CompareOp::Eq, index)),

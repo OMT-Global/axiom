@@ -87,6 +87,15 @@ pub enum Expr {
         field: String,
         ty: Type,
     },
+    ArrayLiteral {
+        elements: Vec<Expr>,
+        ty: Type,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -112,6 +121,13 @@ pub enum Type {
     Bool,
     String,
     Struct(String),
+    Array(Box<Type>),
+}
+
+impl Type {
+    pub fn is_copy(&self) -> bool {
+        matches!(self, Type::Int | Type::Bool)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -256,6 +272,15 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             field: field.clone(),
             ty: lower_type(ty),
         },
+        hir::Expr::ArrayLiteral { elements, ty } => Expr::ArrayLiteral {
+            elements: elements.iter().map(lower_expr).collect(),
+            ty: lower_type(ty),
+        },
+        hir::Expr::Index { base, index, ty } => Expr::Index {
+            base: Box::new(lower_expr(base)),
+            index: Box::new(lower_expr(index)),
+            ty: lower_type(ty),
+        },
     }
 }
 
@@ -265,6 +290,7 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::Bool => Type::Bool,
         hir::Type::String => Type::String,
         hir::Type::Struct(name) => Type::Struct(name.clone()),
+        hir::Type::Array(inner) => Type::Array(Box::new(lower_type(inner))),
     }
 }
 

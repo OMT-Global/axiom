@@ -771,6 +771,52 @@ fn rewrite_expr(
             line: *line,
             column: *column,
         },
+        syntax::Expr::ArrayLiteral {
+            elements,
+            line,
+            column,
+        } => syntax::Expr::ArrayLiteral {
+            elements: elements
+                .iter()
+                .map(|element| {
+                    rewrite_expr(
+                        element,
+                        visible_functions,
+                        visible_structs,
+                        private_imported,
+                        private_imported_types,
+                        module_path,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Index {
+            base,
+            index,
+            line,
+            column,
+        } => syntax::Expr::Index {
+            base: Box::new(rewrite_expr(
+                base,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            index: Box::new(rewrite_expr(
+                index,
+                visible_functions,
+                visible_structs,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
     })
 }
 
@@ -802,6 +848,14 @@ fn rewrite_type_name(
                     .unwrap_or_else(|| name.clone()),
             ))
         }
+        syntax::TypeName::Array(inner) => Ok(syntax::TypeName::Array(Box::new(rewrite_type_name(
+            inner,
+            visible_structs,
+            private_imported_types,
+            module_path,
+            line,
+            column,
+        )?))),
     }
 }
 
