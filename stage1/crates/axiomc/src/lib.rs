@@ -90,27 +90,23 @@ mod tests {
 
     #[test]
     fn parser_lowers_array_slices() {
-        let source = "let values: [int] = [3, 7, 9, 11]\nlet middle: [int] = values[1:3]\nlet prefix: [int] = values[:2]\nlet tail: [int] = values[2:]\nlet everything: [int] = values[:]\nprint middle[0]\nprint prefix[1]\nprint tail[0]\nprint everything[3]\n";
+        let source = "fn tail_len(values: &[string]): int {\nlet tail: &[string] = values[1:]\nreturn len(tail)\n}\n\nlet values: [int] = [3, 7, 9, 11]\nlet middle: &[int] = values[1:3]\nlet prefix: &[int] = values[:2]\nlet tail: &[int] = values[2:]\nprint middle[0]\nprint prefix[1]\nprint tail[0]\nprint len(values[:])\nlet labels: [string] = [\"build\", \"test\", \"ship\"]\nprint tail_len(labels[:])\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         let hir = hir::lower(&parsed).expect("lower");
         let mir = mir::lower(&hir);
         let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn tail_len(values: &[String]) -> i64 {"));
+        assert!(
+            rendered.contains("let middle: &[i64] = axiom_slice_view(&values, Some(1), Some(3));")
+        );
+        assert!(
+            rendered.contains("let prefix: &[i64] = axiom_slice_view(&values, None, Some(2));")
+        );
+        assert!(rendered.contains("let tail: &[i64] = axiom_slice_view(&values, Some(2), None);"));
+        assert!(rendered.contains("return (tail).len() as i64;"));
         assert!(
             rendered.contains(
-                "let middle: Vec<i64> = axiom_array_slice_copy(&values, Some(1), Some(3));"
-            )
-        );
-        assert!(
-            rendered
-                .contains("let prefix: Vec<i64> = axiom_array_slice_copy(&values, None, Some(2));")
-        );
-        assert!(
-            rendered
-                .contains("let tail: Vec<i64> = axiom_array_slice_copy(&values, Some(2), None);")
-        );
-        assert!(
-            rendered.contains(
-                "let everything: Vec<i64> = axiom_array_slice_copy(&values, None, None);"
+                "println!(\"{}\", (axiom_slice_view(&values, None, None)).len() as i64);"
             )
         );
     }
@@ -338,14 +334,14 @@ mod tests {
         create_project(&project, Some("slices-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
-            "let values: [int] = [3, 7, 9, 11]\nlet middle: [int] = values[1:3]\nlet prefix: [int] = values[:2]\nlet tail: [int] = values[2:]\nlet everything: [int] = values[:]\nprint middle[0]\nprint prefix[1]\nprint tail[0]\nprint everything[3]\n",
+            "fn tail_len(values: &[string]): int {\nlet tail: &[string] = values[1:]\nreturn len(tail)\n}\n\nlet values: [int] = [3, 7, 9, 11]\nlet middle: &[int] = values[1:3]\nlet prefix: &[int] = values[:2]\nlet tail: &[int] = values[2:]\nprint middle[0]\nprint prefix[1]\nprint tail[0]\nprint len(values[:])\nlet labels: [string] = [\"build\", \"test\", \"ship\"]\nprint tail_len(labels[:])\n",
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
         let output = Command::new(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n7\n9\n11\n");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n7\n9\n4\n2\n");
     }
 
     #[test]
@@ -1016,7 +1012,7 @@ mod tests {
         assert!(
             error
                 .message
-                .contains("slice expects an array value, got int")
+                .contains("slice expects an array or slice value, got int")
         );
         assert_eq!(error.kind, "type");
     }
@@ -1041,18 +1037,41 @@ mod tests {
     }
 
     #[test]
-    fn check_project_rejects_use_after_non_copy_array_slice() {
+    fn check_project_rejects_non_copy_slice_index() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("slice-move");
         create_project(&project, Some("slice-move-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
-            "let values: [string] = [\"a\", \"b\", \"c\"]\nlet tail: [string] = values[1:]\nprint tail[0]\nprint values[0]\n",
+            "let values: [string] = [\"a\", \"b\", \"c\"]\nlet tail: &[string] = values[1:]\nprint tail[0]\n",
         )
         .expect("write source");
-        let error = check_project(&project).expect_err("non-copy slice should move owner");
-        assert!(error.message.contains("use of moved value"));
-        assert_eq!(error.kind, "ownership");
+        let error = check_project(&project).expect_err("non-copy slice indexing should fail");
+        assert!(
+            error
+                .message
+                .contains("borrowed slice indexing requires a Copy element type")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_slice_return_type() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("slice-return");
+        create_project(&project, Some("slice-return-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn tail(values: &[int]): &[int] {\nreturn values[1:]\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("slice returns should fail in stage1");
+        assert!(
+            error
+                .message
+                .contains("function return types cannot contain borrowed slices")
+        );
+        assert_eq!(error.kind, "type");
     }
 
     #[test]

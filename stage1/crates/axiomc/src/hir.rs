@@ -169,6 +169,7 @@ pub enum Type {
     String,
     Struct(String),
     Enum(String),
+    Slice(Box<Type>),
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
@@ -261,7 +262,7 @@ pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
 impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool => true,
+            Type::Int | Type::Bool | Type::Slice(_) => true,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
             Type::Tuple(elements) => elements.iter().all(Type::is_copy),
@@ -277,6 +278,7 @@ impl Type {
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
             Type::Struct(_)
             | Type::Enum(_)
+            | Type::Slice(_)
             | Type::Option(_)
             | Type::Result(_, _)
             | Type::Map(_, _)
@@ -333,6 +335,13 @@ fn collect_struct_definitions(
                         "recursive field {:?} in struct {:?} is not supported yet",
                         field.name, struct_decl.name
                     ),
+                )
+                .with_span(field.line, field.column));
+            }
+            if contains_borrowed_slice_type(&ty) {
+                return Err(Diagnostic::new(
+                    "type",
+                    "struct fields cannot store borrowed slice types in stage1",
                 )
                 .with_span(field.line, field.column));
             }
@@ -446,6 +455,13 @@ fn collect_enum_definitions(
                 .iter()
                 .map(|ty| lower_type(ty, structs, enum_names, variant.line, variant.column))
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
+            if payload_tys.iter().any(contains_borrowed_slice_type) {
+                return Err(Diagnostic::new(
+                    "type",
+                    "enum payloads cannot store borrowed slice types in stage1",
+                )
+                .with_span(variant.line, variant.column));
+            }
             if !variant.payload_names.is_empty() && variant.payload_names.len() != payload_tys.len()
             {
                 return Err(Diagnostic::new(
@@ -517,6 +533,13 @@ fn collect_function_signatures(
             function.line,
             function.column,
         )?;
+        if contains_borrowed_slice_type(&return_ty) {
+            return Err(Diagnostic::new(
+                "type",
+                "function return types cannot contain borrowed slices in stage1",
+            )
+            .with_span(function.line, function.column));
+        }
         let mut params = Vec::new();
         for param in &function.params {
             params.push(lower_type(
@@ -1163,6 +1186,28 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
+            if name == "len" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("len expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr(&args[0], env, ctx)?;
+                if !matches!(lowered.ty(), Type::Array(_) | Type::Slice(_)) {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("len expects an array or slice value, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Int,
+                });
+            }
             if let Some(signature) = ctx.functions.get(name) {
                 if args.len() != signature.params.len() {
                     return Err(Diagnostic::new(
@@ -1702,13 +1747,26 @@ fn lower_expr_with_expected(
             column,
         } => {
             let lowered_base = lower_expr(base, env, ctx)?;
-            let Type::Array(element_ty) = lowered_base.ty() else {
+            let element_ty = match lowered_base.ty() {
+                Type::Array(element_ty) | Type::Slice(element_ty) => (*element_ty.clone()).clone(),
+                _ => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "slice expects an array or slice value, got {}",
+                            lowered_base.ty()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+            };
+            if !is_borrowable_slice_base(&lowered_base) {
                 return Err(Diagnostic::new(
                     "type",
-                    format!("slice expects an array value, got {}", lowered_base.ty()),
+                    "borrowed slices currently require a named array, field, tuple field, or slice value",
                 )
                 .with_span(*line, *column));
-            };
+            }
             let lowered_start = if let Some(start) = start {
                 let lowered = lower_expr(start, env, ctx)?;
                 if lowered.ty() != &Type::Int {
@@ -1735,15 +1793,11 @@ fn lower_expr_with_expected(
             } else {
                 None
             };
-            let element_ty = (*element_ty.clone()).clone();
-            if !element_ty.is_copy() {
-                move_lowered_owner_value(&lowered_base, env)?;
-            }
             Ok(Expr::Slice {
                 base: Box::new(lowered_base),
                 start: lowered_start,
                 end: lowered_end,
-                ty: Type::Array(Box::new(element_ty)),
+                ty: Type::Slice(Box::new(element_ty)),
             })
         }
         syntax::Expr::Index {
@@ -1766,6 +1820,26 @@ fn lower_expr_with_expected(
                     let element_ty = (*element_ty.clone()).clone();
                     if !element_ty.is_copy() {
                         move_lowered_owner_value(&lowered_base, env)?;
+                    }
+                    element_ty
+                }
+                Type::Slice(element_ty) => {
+                    if lowered_index.ty() != &Type::Int {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("slice index expects int, got {}", lowered_index.ty()),
+                        )
+                        .with_span(*line, *column));
+                    }
+                    let element_ty = (*element_ty.clone()).clone();
+                    if !element_ty.is_copy() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "borrowed slice indexing requires a Copy element type, got {element_ty}"
+                            ),
+                        )
+                        .with_span(*line, *column));
                     }
                     element_ty
                 }
@@ -1972,9 +2046,34 @@ fn move_lowered_owner_value(
         Expr::VarRef { .. } => move_lowered_value(expr, env),
         Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
         Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
-        Expr::Slice { base, .. } => move_lowered_owner_value(base, env),
         Expr::Index { base, .. } => move_lowered_owner_value(base, env),
         _ => Ok(()),
+    }
+}
+
+fn is_borrowable_slice_base(expr: &Expr) -> bool {
+    match expr {
+        Expr::VarRef { .. } => true,
+        Expr::FieldAccess { base, .. } => is_borrowable_slice_base(base),
+        Expr::TupleIndex { base, .. } => is_borrowable_slice_base(base),
+        Expr::Slice { .. } => true,
+        _ => false,
+    }
+}
+
+fn contains_borrowed_slice_type(ty: &Type) -> bool {
+    match ty {
+        Type::Slice(_) => true,
+        Type::Option(inner) => contains_borrowed_slice_type(inner),
+        Type::Result(ok, err) => {
+            contains_borrowed_slice_type(ok) || contains_borrowed_slice_type(err)
+        }
+        Type::Tuple(elements) => elements.iter().any(contains_borrowed_slice_type),
+        Type::Map(key, value) => {
+            contains_borrowed_slice_type(key) || contains_borrowed_slice_type(value)
+        }
+        Type::Array(inner) => contains_borrowed_slice_type(inner),
+        Type::Int | Type::Bool | Type::String | Type::Struct(_) | Type::Enum(_) => false,
     }
 }
 
@@ -2015,6 +2114,9 @@ fn lower_type<T, U>(
             }
             Err(Diagnostic::new("type", format!("unknown type {name:?}")).with_span(line, column))
         }
+        syntax::TypeName::Slice(inner) => Ok(Type::Slice(Box::new(lower_type(
+            inner, structs, enums, line, column,
+        )?))),
         syntax::TypeName::Option(inner) => Ok(Type::Option(Box::new(lower_type(
             inner, structs, enums, line, column,
         )?))),
@@ -2182,6 +2284,7 @@ impl std::fmt::Display for Type {
             Type::String => write!(f, "string"),
             Type::Struct(name) => write!(f, "{name}"),
             Type::Enum(name) => write!(f, "{name}"),
+            Type::Slice(inner) => write!(f, "&[{inner}]"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
             Type::Result(ok, err) => write!(f, "Result<{ok}, {err}>"),
             Type::Tuple(elements) => write!(

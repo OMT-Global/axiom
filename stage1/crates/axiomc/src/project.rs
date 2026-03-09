@@ -1159,6 +1159,14 @@ fn rewrite_type_name(
                 column,
             )?)))
         }
+        syntax::TypeName::Slice(inner) => Ok(syntax::TypeName::Slice(Box::new(rewrite_type_name(
+            inner,
+            visible_types,
+            private_imported_types,
+            module_path,
+            line,
+            column,
+        )?))),
         syntax::TypeName::Result(ok, err) => Ok(syntax::TypeName::Result(
             Box::new(rewrite_type_name(
                 ok,

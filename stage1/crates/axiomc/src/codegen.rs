@@ -41,19 +41,9 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    (start, end)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str(
-        "fn axiom_array_slice_copy<T: Copy>(values: &[T], start: Option<i64>, end: Option<i64>) -> Vec<T> {\n",
-    );
+    out.push_str("fn axiom_slice_view<'a, T>(values: &'a [T], start: Option<i64>, end: Option<i64>) -> &'a [T] {\n");
     out.push_str("    let (start, end) = axiom_array_slice_bounds(values.len(), start, end);\n");
-    out.push_str("    values[start..end].to_vec()\n");
-    out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str(
-        "fn axiom_array_slice_take<T>(values: Vec<T>, start: Option<i64>, end: Option<i64>) -> Vec<T> {\n",
-    );
-    out.push_str("    let len = values.len();\n");
-    out.push_str("    let (start, end) = axiom_array_slice_bounds(len, start, end);\n");
-    out.push_str("    values.into_iter().skip(start).take(end - start).collect()\n");
+    out.push_str("    &values[start..end]\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str(
@@ -239,6 +229,9 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Literal(LiteralValue::Bool(value)) => value.to_string(),
         Expr::Literal(LiteralValue::String(value)) => format!("String::from({value:?})"),
         Expr::VarRef { name, .. } => name.clone(),
+        Expr::Call { name, args, .. } if name == "len" => {
+            format!("({}).len() as i64", render_expr(&args[0]))
+        }
         Expr::Call { name, args, .. } => {
             let rendered_args = args.iter().map(render_expr).collect::<Vec<_>>().join(", ");
             format!("{name}({rendered_args})")
@@ -253,6 +246,7 @@ fn render_expr(expr: &Expr) -> String {
             Type::Bool => unreachable!("type checker rejects bool addition"),
             Type::Struct(_) => unreachable!("type checker rejects struct addition"),
             Type::Enum(_) => unreachable!("type checker rejects enum addition"),
+            Type::Slice(_) => unreachable!("type checker rejects slice addition"),
             Type::Option(_) => unreachable!("type checker rejects option addition"),
             Type::Result(_, _) => unreachable!("type checker rejects result addition"),
             Type::Tuple(_) => unreachable!("type checker rejects tuple addition"),
@@ -340,22 +334,21 @@ fn render_expr(expr: &Expr) -> String {
                 .map(|expr| format!("Some({})", render_expr(expr)))
                 .unwrap_or_else(|| String::from("None"));
             match base.ty() {
-                Type::Array(inner) => {
-                    if inner.is_copy() {
-                        format!(
-                            "axiom_array_slice_copy(&{}, {}, {})",
-                            render_expr(base),
-                            start,
-                            end
-                        )
-                    } else {
-                        format!(
-                            "axiom_array_slice_take({}, {}, {})",
-                            render_expr(base),
-                            start,
-                            end
-                        )
-                    }
+                Type::Array(_) => {
+                    format!(
+                        "axiom_slice_view(&{}, {}, {})",
+                        render_expr(base),
+                        start,
+                        end
+                    )
+                }
+                Type::Slice(_) => {
+                    format!(
+                        "axiom_slice_view({}, {}, {})",
+                        render_expr(base),
+                        start,
+                        end
+                    )
                 }
                 _ => unreachable!("type checker rejects slicing non-array values"),
             }
@@ -375,6 +368,13 @@ fn render_expr(expr: &Expr) -> String {
                         render_expr(index)
                     )
                 }
+            }
+            Type::Slice(_) => {
+                format!(
+                    "axiom_array_get({}, {})",
+                    render_expr(base),
+                    render_expr(index)
+                )
             }
             Type::Map(_, _) => {
                 if ty.is_copy() {
@@ -403,6 +403,7 @@ fn rust_type(ty: &Type) -> String {
         Type::String => String::from("String"),
         Type::Struct(name) => name.clone(),
         Type::Enum(name) => name.clone(),
+        Type::Slice(inner) => format!("&[{}]", rust_type(inner)),
         Type::Option(inner) => format!("Option<{}>", rust_type(inner)),
         Type::Result(ok, err) => format!("Result<{}, {}>", rust_type(ok), rust_type(err)),
         Type::Tuple(elements) => format!(

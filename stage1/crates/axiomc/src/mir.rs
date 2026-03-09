@@ -181,6 +181,7 @@ pub enum Type {
     String,
     Struct(String),
     Enum(String),
+    Slice(Box<Type>),
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
@@ -191,7 +192,7 @@ pub enum Type {
 impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool => true,
+            Type::Int | Type::Bool | Type::Slice(_) => true,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
             Type::Tuple(elements) => elements.iter().all(Type::is_copy),
@@ -464,6 +465,7 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::String => Type::String,
         hir::Type::Struct(name) => Type::Struct(name.clone()),
         hir::Type::Enum(name) => Type::Enum(name.clone()),
+        hir::Type::Slice(inner) => Type::Slice(Box::new(lower_type(inner))),
         hir::Type::Option(inner) => Type::Option(Box::new(lower_type(inner))),
         hir::Type::Result(ok, err) => {
             Type::Result(Box::new(lower_type(ok)), Box::new(lower_type(err)))

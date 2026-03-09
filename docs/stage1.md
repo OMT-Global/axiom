@@ -12,7 +12,7 @@ This repo now has two tracks:
 The Rust compiler is intentionally small in this bootstrap slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
-- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, array slice expressions, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
+- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic `len(...)`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
 - A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, and branch-local moves conservatively propagate after `if` and `match`.
@@ -37,7 +37,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Language surface gaps
 
 - Modules are now limited to package-local path imports plus direct `pub struct`, `pub enum`, and `pub fn` exports only.
-- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, array slice expressions, field access, tuple indexing, map indexing, array indexing, and exhaustive statement-level `match` now exist, but there are still no first-class borrowed slice types or generic collection abstractions.
+- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, borrowed slice types, borrowed array slice expressions, field access, tuple indexing, map indexing, array indexing, and exhaustive statement-level `match` now exist, but there are still no user-defined generic collection abstractions or a general borrow system.
 - No generic functions or generic types.
 - No methods, trait-style interfaces, closures, or async/await.
 - Rebinding and shadowing are intentionally rejected today to keep the bootstrap scope small.
@@ -87,7 +87,7 @@ Current proof points:
 - `stage1/examples/hello` remains the single-file callable baseline.
 - `stage1/examples/modules` is the checked-in multi-file package example.
 - `stage1/examples/arrays` is the checked-in array/bootstrap collection example.
-- `stage1/examples/slices` is the checked-in array-slicing bootstrap example.
+- `stage1/examples/slices` is the checked-in borrowed-slice plus polymorphic `len(...)` bootstrap example.
 - `stage1/examples/tuples` is the checked-in tuple/bootstrap aggregate example.
 - `stage1/examples/maps` is the checked-in map/bootstrap collection example.
 - `stage1/examples/structs` is the checked-in structured-data bootstrap example.
@@ -99,7 +99,7 @@ Current proof points:
 
 Goal: add the minimum useful data model for service code.
 
-- Struct declarations, literals, named struct types, field access, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, array slice expressions, both tuple-style and named-payload enum variants with exhaustive statement-level `match`, and `Option<T>` / `Result<T, E>` are now in the bootstrap.
+- Struct declarations, literals, named struct types, field access, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed slice types, borrowed array slice expressions, both tuple-style and named-payload enum variants with exhaustive statement-level `match`, the built-in polymorphic `len(...)`, and `Option<T>` / `Result<T, E>` are now in the bootstrap.
 - Extend comparisons and control-flow typing across structured data where appropriate.
 
 Exit criteria:
