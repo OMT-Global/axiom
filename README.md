@@ -82,8 +82,20 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/mod
 # Run the stage1 array example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arrays
 
+# Run the stage1 tuple example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/tuples
+
+# Run the stage1 map example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/maps
+
 # Run the stage1 struct example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/structs
+
+# Run the stage1 payload-enum + match example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/enums
+
+# Run the stage1 Option/Result example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/outcomes
 ```
 
 ## 🧰 Useful Commands
@@ -154,7 +166,7 @@ For the Rust bootstrap split, the current native subset, and the stage1 gap/exec
 - `axiom/bytecode.py`: bytecode encoder/decoder
 - `axiom/vm.py`: bytecode execution
 - `axiom/cli.py`, `axiom/packaging.py`: CLI orchestration and package workflows
-- `stage1/`: Rust bootstrap compiler with `axiom.toml`/`axiom.lock` and native hello-world builds
+- `stage1/`: Rust bootstrap compiler with `axiom.toml`/`axiom.lock` and native bootstrap examples
 - `tests/programs/*.ax`: language fixtures
 - `examples/typed_package/`: small typed package example
 - `examples/codex_duo_system/`: package demo where two imported modules assemble one system

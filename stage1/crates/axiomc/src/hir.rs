@@ -6,6 +6,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
     pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
     pub functions: Vec<Function>,
     pub stmts: Vec<Stmt>,
 }
@@ -20,6 +21,19 @@ pub struct StructDef {
 pub struct StructField {
     pub name: String,
     pub ty: Type,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct EnumDef {
+    pub name: String,
+    pub variants: Vec<EnumVariantDef>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct EnumVariantDef {
+    pub name: String,
+    pub payload_tys: Vec<Type>,
+    pub payload_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -53,7 +67,26 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    Match {
+        expr: Expr,
+        arms: Vec<MatchArm>,
+    },
     Return(Expr),
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MatchArm {
+    pub enum_name: String,
+    pub variant: String,
+    pub bindings: Vec<String>,
+    pub is_named: bool,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MapEntry {
+    pub key: Expr,
+    pub value: Expr,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -92,6 +125,26 @@ pub enum Expr {
         field: String,
         ty: Type,
     },
+    TupleLiteral {
+        elements: Vec<Expr>,
+        ty: Type,
+    },
+    TupleIndex {
+        base: Box<Expr>,
+        index: usize,
+        ty: Type,
+    },
+    MapLiteral {
+        entries: Vec<MapEntry>,
+        ty: Type,
+    },
+    EnumVariant {
+        enum_name: String,
+        variant: String,
+        field_names: Vec<String>,
+        payloads: Vec<Expr>,
+        ty: Type,
+    },
     ArrayLiteral {
         elements: Vec<Expr>,
         ty: Type,
@@ -109,6 +162,11 @@ pub enum Type {
     Bool,
     String,
     Struct(String),
+    Enum(String),
+    Option(Box<Type>),
+    Result(Box<Type>, Box<Type>),
+    Tuple(Vec<Type>),
+    Map(Box<Type>, Box<Type>),
     Array(Box<Type>),
 }
 
@@ -149,21 +207,38 @@ struct FunctionSig {
 
 struct LowerContext<'a> {
     structs: &'a HashMap<String, StructDef>,
+    enums: &'a HashMap<String, EnumDef>,
+    variants: &'a HashMap<String, VariantInfo>,
     functions: &'a HashMap<String, FunctionSig>,
     current_return: Option<Type>,
 }
 
+#[derive(Debug, Clone)]
+struct VariantInfo {
+    enum_name: String,
+    payload_tys: Vec<Type>,
+    payload_names: Vec<String>,
+}
+
 pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
-    let structs = collect_struct_definitions(&program.structs)?;
-    let functions = collect_function_signatures(&program.functions, &structs)?;
+    let (struct_names, enum_names) = collect_type_names(&program.structs, &program.enums)?;
+    let (enums, variants) = collect_enum_definitions(&program.enums, &struct_names, &enum_names)?;
+    let structs = collect_struct_definitions(&program.structs, &enum_names)?;
+    let functions = collect_function_signatures(&program.functions, &structs, &enums)?;
     let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    let mut lowered_enums = enums.values().cloned().collect::<Vec<_>>();
+    lowered_enums.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_functions = Vec::new();
     for function in &program.functions {
-        lowered_functions.push(lower_function(function, &structs, &functions)?);
+        lowered_functions.push(lower_function(
+            function, &structs, &enums, &variants, &functions,
+        )?);
     }
     let ctx = LowerContext {
         structs: &structs,
+        enums: &enums,
+        variants: &variants,
         functions: &functions,
         current_return: None,
     };
@@ -171,6 +246,7 @@ pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
     let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
     Ok(Program {
         structs: lowered_structs,
+        enums: lowered_enums,
         functions: lowered_functions,
         stmts,
     })
@@ -178,15 +254,44 @@ pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
 
 impl Type {
     pub fn is_copy(&self) -> bool {
-        matches!(self, Type::Int | Type::Bool)
+        match self {
+            Type::Int | Type::Bool => true,
+            Type::Option(inner) => inner.is_copy(),
+            Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
+            Type::Tuple(elements) => elements.iter().all(Type::is_copy),
+            Type::String | Type::Struct(_) | Type::Enum(_) | Type::Map(_, _) | Type::Array(_) => {
+                false
+            }
+        }
+    }
+
+    fn supports_map_key(&self) -> bool {
+        match self {
+            Type::Int | Type::Bool | Type::String => true,
+            Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
+            Type::Struct(_)
+            | Type::Enum(_)
+            | Type::Option(_)
+            | Type::Result(_, _)
+            | Type::Map(_, _)
+            | Type::Array(_) => false,
+        }
     }
 }
 
 fn collect_struct_definitions(
     structs: &[syntax::StructDecl],
+    enums: &HashMap<String, ()>,
 ) -> Result<HashMap<String, StructDef>, Diagnostic> {
     let mut names = HashMap::new();
     for struct_decl in structs {
+        if enums.contains_key(&struct_decl.name) {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate type name {:?}", struct_decl.name),
+            )
+            .with_span(struct_decl.line, struct_decl.column));
+        }
         if names
             .insert(struct_decl.name.clone(), struct_decl.clone())
             .is_some()
@@ -214,7 +319,7 @@ fn collect_struct_definitions(
                 )
                 .with_span(field.line, field.column));
             }
-            let ty = lower_type(&field.ty, &names, field.line, field.column)?;
+            let ty = lower_type(&field.ty, &names, enums, field.line, field.column)?;
             if matches!(&ty, Type::Struct(name) if name == &struct_decl.name) {
                 return Err(Diagnostic::new(
                     "type",
@@ -241,16 +346,180 @@ fn collect_struct_definitions(
     Ok(lowered)
 }
 
+fn collect_type_names(
+    structs: &[syntax::StructDecl],
+    enums: &[syntax::EnumDecl],
+) -> Result<(HashMap<String, syntax::StructDecl>, HashMap<String, ()>), Diagnostic> {
+    let mut struct_names = HashMap::new();
+    for struct_decl in structs {
+        if struct_names
+            .insert(struct_decl.name.clone(), struct_decl.clone())
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate struct {:?}", struct_decl.name),
+            )
+            .with_span(struct_decl.line, struct_decl.column));
+        }
+    }
+    let mut enum_names = HashMap::new();
+    for enum_decl in enums {
+        if struct_names.contains_key(&enum_decl.name) {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate type name {:?}", enum_decl.name),
+            )
+            .with_span(enum_decl.line, enum_decl.column));
+        }
+        if enum_names.insert(enum_decl.name.clone(), ()).is_some() {
+            return Err(
+                Diagnostic::new("type", format!("duplicate enum {:?}", enum_decl.name))
+                    .with_span(enum_decl.line, enum_decl.column),
+            );
+        }
+    }
+    Ok((struct_names, enum_names))
+}
+
+fn collect_enum_definitions(
+    enums: &[syntax::EnumDecl],
+    structs: &HashMap<String, syntax::StructDecl>,
+    enum_names: &HashMap<String, ()>,
+) -> Result<(HashMap<String, EnumDef>, HashMap<String, VariantInfo>), Diagnostic> {
+    let mut lowered = HashMap::new();
+    let mut variants = HashMap::new();
+    for enum_decl in enums {
+        if enum_decl.variants.is_empty() {
+            return Err(Diagnostic::new(
+                "type",
+                format!(
+                    "enum {:?} must declare at least one variant",
+                    enum_decl.name
+                ),
+            )
+            .with_span(enum_decl.line, enum_decl.column));
+        }
+        let mut seen = HashMap::new();
+        let mut lowered_variants = Vec::new();
+        for variant in &enum_decl.variants {
+            if seen.insert(variant.name.clone(), ()).is_some() {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "duplicate variant {:?} in enum {:?}",
+                        variant.name, enum_decl.name
+                    ),
+                )
+                .with_span(variant.line, variant.column));
+            }
+            if let Some(existing_enum) = variants.insert(
+                variant.name.clone(),
+                VariantInfo {
+                    enum_name: enum_decl.name.clone(),
+                    payload_tys: variant
+                        .payload_tys
+                        .iter()
+                        .map(|ty| lower_type(ty, structs, enum_names, variant.line, variant.column))
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                    payload_names: variant.payload_names.clone(),
+                },
+            ) && existing_enum.enum_name != enum_decl.name
+            {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "duplicate variant name {:?} across enums {:?} and {:?} is not yet supported",
+                        variant.name, existing_enum.enum_name, enum_decl.name
+                    ),
+                )
+                .with_span(variant.line, variant.column));
+            }
+            let payload_tys = variant
+                .payload_tys
+                .iter()
+                .map(|ty| lower_type(ty, structs, enum_names, variant.line, variant.column))
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            if !variant.payload_names.is_empty() && variant.payload_names.len() != payload_tys.len()
+            {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "internal error: enum variant {:?} has mismatched named payload metadata",
+                        variant.name
+                    ),
+                )
+                .with_span(variant.line, variant.column));
+            }
+            let mut seen_payload_names = HashMap::new();
+            for payload_name in &variant.payload_names {
+                if seen_payload_names
+                    .insert(payload_name.clone(), ())
+                    .is_some()
+                {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "duplicate payload field {:?} in enum variant {:?}",
+                            payload_name, variant.name
+                        ),
+                    )
+                    .with_span(variant.line, variant.column));
+                }
+            }
+            if payload_tys
+                .iter()
+                .any(|ty| matches!(ty, Type::Enum(name) if name == &enum_decl.name))
+            {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "recursive payload variant {:?} in enum {:?} is not supported yet",
+                        variant.name, enum_decl.name
+                    ),
+                )
+                .with_span(variant.line, variant.column));
+            }
+            lowered_variants.push(EnumVariantDef {
+                name: variant.name.clone(),
+                payload_tys,
+                payload_names: variant.payload_names.clone(),
+            });
+        }
+        lowered.insert(
+            enum_decl.name.clone(),
+            EnumDef {
+                name: enum_decl.name.clone(),
+                variants: lowered_variants,
+            },
+        );
+    }
+    Ok((lowered, variants))
+}
+
 fn collect_function_signatures(
     functions: &[syntax::Function],
     structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
 ) -> Result<HashMap<String, FunctionSig>, Diagnostic> {
     let mut signatures = HashMap::new();
     for function in functions {
-        let return_ty = lower_type(&function.return_ty, structs, function.line, function.column)?;
+        let return_ty = lower_type(
+            &function.return_ty,
+            structs,
+            enums,
+            function.line,
+            function.column,
+        )?;
         let mut params = Vec::new();
         for param in &function.params {
-            params.push(lower_type(&param.ty, structs, param.line, param.column)?);
+            params.push(lower_type(
+                &param.ty,
+                structs,
+                enums,
+                param.line,
+                param.column,
+            )?);
         }
         if signatures
             .insert(function.name.clone(), FunctionSig { params, return_ty })
@@ -268,11 +537,21 @@ fn collect_function_signatures(
 fn lower_function(
     function: &syntax::Function,
     structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    variants: &HashMap<String, VariantInfo>,
     functions: &HashMap<String, FunctionSig>,
 ) -> Result<Function, Diagnostic> {
-    let return_ty = lower_type(&function.return_ty, structs, function.line, function.column)?;
+    let return_ty = lower_type(
+        &function.return_ty,
+        structs,
+        enums,
+        function.line,
+        function.column,
+    )?;
     let ctx = LowerContext {
         structs,
+        enums,
+        variants,
         functions,
         current_return: Some(return_ty.clone()),
     };
@@ -295,7 +574,7 @@ fn lower_function(
                     .with_span(param.line, param.column),
             );
         }
-        let ty = lower_type(&param.ty, structs, param.line, param.column)?;
+        let ty = lower_type(&param.ty, structs, enums, param.line, param.column)?;
         env.insert(
             param.name.clone(),
             Binding {
@@ -376,8 +655,8 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            let expected = lower_type(ty, ctx.structs, *line, *column)?;
-            let lowered_expr = lower_expr(expr, env, ctx)?;
+            let expected = lower_type(ty, ctx.structs, ctx.enums, *line, *column)?;
+            let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
             if actual != expected {
                 return Err(Diagnostic::new(
@@ -386,8 +665,8 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            if matches!(expr, syntax::Expr::VarRef { .. }) && !actual.is_copy() {
-                move_value(expr, env)?;
+            if !actual.is_copy() {
+                move_lowered_value(&lowered_expr, env)?;
             }
             env.insert(
                 name.clone(),
@@ -476,6 +755,185 @@ fn lower_stmt(
                 body,
             })
         }
+        syntax::Stmt::Match {
+            expr,
+            arms,
+            line,
+            column,
+        } => {
+            let lowered_expr = lower_expr(expr, env, ctx)?;
+            if matches!(lowered_expr, Expr::VarRef { .. }) && !lowered_expr.ty().is_copy() {
+                move_lowered_owner_value(&lowered_expr, env)?;
+            }
+            let (enum_name, variant_defs) =
+                match_variants(lowered_expr.ty(), ctx).ok_or_else(|| {
+                    Diagnostic::new(
+                        "type",
+                        format!(
+                            "match expects an enum-like value, got {}",
+                            lowered_expr.ty()
+                        ),
+                    )
+                    .with_span(*line, *column)
+                })?;
+            let before = env.clone();
+            let mut seen = HashMap::new();
+            let mut lowered_arms = Vec::new();
+            let mut arm_states = Vec::new();
+            for arm in arms {
+                let variant_def = variant_defs
+                    .iter()
+                    .find(|variant| variant.name == arm.variant)
+                    .ok_or_else(|| {
+                        Diagnostic::new(
+                            "type",
+                            format!("enum {enum_name:?} has no variant {:?}", arm.variant),
+                        )
+                        .with_span(arm.line, arm.column)
+                    })?;
+                if seen.insert(arm.variant.clone(), ()).is_some() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("duplicate match arm {:?}", arm.variant),
+                    )
+                    .with_span(arm.line, arm.column));
+                }
+                let mut arm_env = before.clone();
+                let binding_tys = if arm.is_named {
+                    if variant_def.payload_names.is_empty() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "match arm {:?} uses named bindings, but variant {:?} is positional",
+                                arm.variant, arm.variant
+                            ),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    if arm.bindings.len() != variant_def.payload_names.len() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "match arm {:?} expects {} named bindings, got {}",
+                                arm.variant,
+                                variant_def.payload_names.len(),
+                                arm.bindings.len()
+                            ),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    let mut seen_named = HashMap::new();
+                    let mut payload_tys = Vec::new();
+                    for binding in &arm.bindings {
+                        let Some(position) = variant_def
+                            .payload_names
+                            .iter()
+                            .position(|name| name == binding)
+                        else {
+                            return Err(Diagnostic::new(
+                                "type",
+                                format!(
+                                    "match arm {:?} has no named payload {:?}",
+                                    arm.variant, binding
+                                ),
+                            )
+                            .with_span(arm.line, arm.column));
+                        };
+                        if seen_named.insert(binding.clone(), ()).is_some() {
+                            return Err(Diagnostic::new(
+                                "type",
+                                format!(
+                                    "match arm {:?} repeats named payload {:?}",
+                                    arm.variant, binding
+                                ),
+                            )
+                            .with_span(arm.line, arm.column));
+                        }
+                        payload_tys.push(variant_def.payload_tys[position].clone());
+                    }
+                    payload_tys
+                } else {
+                    if !variant_def.payload_names.is_empty() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "match arm {:?} must use named bindings for variant {:?}",
+                                arm.variant, arm.variant
+                            ),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    if arm.bindings.len() != variant_def.payload_tys.len() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "match arm {:?} expects {} bindings, got {}",
+                                arm.variant,
+                                variant_def.payload_tys.len(),
+                                arm.bindings.len()
+                            ),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    variant_def.payload_tys.clone()
+                };
+                for (binding, payload_ty) in arm.bindings.iter().zip(binding_tys.iter()) {
+                    if ctx.functions.contains_key(binding) {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("match binding {binding:?} conflicts with a function name"),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    if arm_env.contains_key(binding) {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "match binding {binding:?} reuses an existing name in the current scope"
+                            ),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    arm_env.insert(
+                        binding.clone(),
+                        Binding {
+                            ty: payload_ty.clone(),
+                            moved: false,
+                        },
+                    );
+                }
+                let (body, after, returns) = lower_block(&arm.body, &mut arm_env, ctx)?;
+                lowered_arms.push(MatchArm {
+                    enum_name: enum_name.clone(),
+                    variant: arm.variant.clone(),
+                    bindings: arm.bindings.clone(),
+                    is_named: arm.is_named,
+                    body,
+                });
+                arm_states.push((after, returns));
+            }
+            let missing = variant_defs
+                .iter()
+                .filter(|variant| !seen.contains_key(&variant.name))
+                .map(|variant| variant.name.clone())
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "match on {:?} is not exhaustive; missing {}",
+                        enum_name,
+                        missing.join(", ")
+                    ),
+                )
+                .with_span(*line, *column));
+            }
+            merge_match_state(env, &before, &arm_states);
+            Ok(Stmt::Match {
+                expr: lowered_expr,
+                arms: lowered_arms,
+            })
+        }
         syntax::Stmt::Return { expr, line, column } => {
             let Some(expected) = ctx.current_return.as_ref() else {
                 return Err(
@@ -483,7 +941,7 @@ fn lower_stmt(
                         .with_span(*line, *column),
                 );
             };
-            let lowered_expr = lower_expr(expr, env, ctx)?;
+            let lowered_expr = lower_expr_with_expected(expr, Some(expected), env, ctx)?;
             if lowered_expr.ty() != expected {
                 return Err(Diagnostic::new(
                     "type",
@@ -557,28 +1015,141 @@ fn merge_loop_state(
     }
 }
 
+fn merge_match_state(
+    env: &mut HashMap<String, Binding>,
+    before: &HashMap<String, Binding>,
+    arm_states: &[(HashMap<String, Binding>, bool)],
+) {
+    env.clear();
+    for (name, binding) in before {
+        let moved = arm_states.iter().any(|(after, returns)| {
+            if *returns {
+                binding.moved
+            } else {
+                after
+                    .get(name)
+                    .map(|entry| entry.moved)
+                    .unwrap_or(binding.moved)
+            }
+        });
+        env.insert(
+            name.clone(),
+            Binding {
+                ty: binding.ty.clone(),
+                moved,
+            },
+        );
+    }
+}
+
+fn match_variants(ty: &Type, ctx: &LowerContext<'_>) -> Option<(String, Vec<EnumVariantDef>)> {
+    match ty {
+        Type::Enum(enum_name) => ctx
+            .enums
+            .get(enum_name)
+            .map(|enum_def| (enum_name.clone(), enum_def.variants.clone())),
+        Type::Option(inner) => Some((
+            String::from("Option"),
+            vec![
+                EnumVariantDef {
+                    name: String::from("Some"),
+                    payload_tys: vec![(*inner.clone()).clone()],
+                    payload_names: Vec::new(),
+                },
+                EnumVariantDef {
+                    name: String::from("None"),
+                    payload_tys: Vec::new(),
+                    payload_names: Vec::new(),
+                },
+            ],
+        )),
+        Type::Result(ok, err) => Some((
+            String::from("Result"),
+            vec![
+                EnumVariantDef {
+                    name: String::from("Ok"),
+                    payload_tys: vec![(*ok.clone()).clone()],
+                    payload_names: Vec::new(),
+                },
+                EnumVariantDef {
+                    name: String::from("Err"),
+                    payload_tys: vec![(*err.clone()).clone()],
+                    payload_names: Vec::new(),
+                },
+            ],
+        )),
+        _ => None,
+    }
+}
+
 fn lower_expr(
     expr: &syntax::Expr,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Expr, Diagnostic> {
+    lower_expr_with_expected(expr, None, env, ctx)
+}
+
+fn lower_expr_with_expected(
+    expr: &syntax::Expr,
+    expected: Option<&Type>,
     env: &mut HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Result<Expr, Diagnostic> {
     match expr {
         syntax::Expr::Literal(literal) => Ok(lower_literal(literal)),
         syntax::Expr::VarRef { name, line, column } => {
-            let binding = env.get(name).ok_or_else(|| {
-                Diagnostic::new("type", format!("undefined variable {name:?}"))
-                    .with_span(*line, *column)
-            })?;
-            if binding.moved {
+            if let Some(binding) = env.get(name) {
+                if binding.moved {
+                    return Err(Diagnostic::new(
+                        "ownership",
+                        format!("use of moved value {name:?}"),
+                    )
+                    .with_span(*line, *column));
+                }
+                return Ok(Expr::VarRef {
+                    name: name.clone(),
+                    ty: binding.ty.clone(),
+                });
+            }
+            if name == "None" {
+                if let Some(Type::Option(inner)) = expected {
+                    return Ok(Expr::EnumVariant {
+                        enum_name: String::from("Option"),
+                        variant: String::from("None"),
+                        field_names: Vec::new(),
+                        payloads: Vec::new(),
+                        ty: Type::Option(inner.clone()),
+                    });
+                }
                 return Err(
-                    Diagnostic::new("ownership", format!("use of moved value {name:?}"))
+                    Diagnostic::new("type", "None requires an expected Option<T> context")
                         .with_span(*line, *column),
                 );
             }
-            Ok(Expr::VarRef {
-                name: name.clone(),
-                ty: binding.ty.clone(),
-            })
+            if let Some(variant) = ctx.variants.get(name) {
+                if !variant.payload_tys.is_empty() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "enum variant {name:?} requires {} arguments",
+                            variant.payload_tys.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                return Ok(Expr::EnumVariant {
+                    enum_name: variant.enum_name.clone(),
+                    variant: name.clone(),
+                    field_names: Vec::new(),
+                    payloads: Vec::new(),
+                    ty: Type::Enum(variant.enum_name.clone()),
+                });
+            }
+            Err(
+                Diagnostic::new("type", format!("undefined variable {name:?}"))
+                    .with_span(*line, *column),
+            )
         }
         syntax::Expr::Call {
             name,
@@ -586,44 +1157,159 @@ fn lower_expr(
             line,
             column,
         } => {
-            let signature = ctx.functions.get(name).ok_or_else(|| {
-                Diagnostic::new("type", format!("undefined function {name:?}"))
-                    .with_span(*line, *column)
-            })?;
-            if args.len() != signature.params.len() {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!(
-                        "function {name:?} expects {} arguments, got {}",
-                        signature.params.len(),
-                        args.len()
-                    ),
-                )
-                .with_span(*line, *column));
-            }
-            let mut lowered_args = Vec::new();
-            for (arg, expected) in args.iter().zip(signature.params.iter()) {
-                let lowered = lower_expr(arg, env, ctx)?;
-                if lowered.ty() != expected {
+            if let Some(signature) = ctx.functions.get(name) {
+                if args.len() != signature.params.len() {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
-                            "function {name:?} expects argument type {expected}, got {}",
+                            "function {name:?} expects {} arguments, got {}",
+                            signature.params.len(),
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let mut lowered_args = Vec::new();
+                for (arg, expected) in args.iter().zip(signature.params.iter()) {
+                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                    if lowered.ty() != expected {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "function {name:?} expects argument type {expected}, got {}",
+                                lowered.ty()
+                            ),
+                        )
+                        .with_span(arg.line(), arg.column()));
+                    }
+                    if !expected.is_copy() {
+                        move_lowered_value(&lowered, env)?;
+                    }
+                    lowered_args.push(lowered);
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
+                    ty: signature.return_ty.clone(),
+                });
+            }
+            if name == "Some" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("Option::Some expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let inner_expected = match expected {
+                    Some(Type::Option(inner)) => Some(inner.as_ref()),
+                    _ => None,
+                };
+                let lowered = lower_expr_with_expected(&args[0], inner_expected, env, ctx)?;
+                let inner_ty = lowered.ty().clone();
+                if let Some(expected_inner) = inner_expected
+                    && &inner_ty != expected_inner
+                {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "Option::Some expects payload type {expected_inner}, got {inner_ty}"
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                if !inner_ty.is_copy() {
+                    move_lowered_value(&lowered, env)?;
+                }
+                return Ok(Expr::EnumVariant {
+                    enum_name: String::from("Option"),
+                    variant: String::from("Some"),
+                    field_names: Vec::new(),
+                    payloads: vec![lowered],
+                    ty: Type::Option(Box::new(inner_ty)),
+                });
+            }
+            if name == "Ok" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("Result::Ok expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let Some(Type::Result(ok_ty, err_ty)) = expected else {
+                    return Err(Diagnostic::new(
+                        "type",
+                        "Ok requires an expected Result<T, E> context",
+                    )
+                    .with_span(*line, *column));
+                };
+                let lowered = lower_expr_with_expected(&args[0], Some(ok_ty.as_ref()), env, ctx)?;
+                if lowered.ty() != ok_ty.as_ref() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "Result::Ok expects payload type {ok_ty}, got {}",
                             lowered.ty()
                         ),
                     )
-                    .with_span(arg.line(), arg.column()));
+                    .with_span(args[0].line(), args[0].column()));
                 }
-                if matches!(arg, syntax::Expr::VarRef { .. }) && !expected.is_copy() {
-                    move_value(arg, env)?;
+                if !ok_ty.is_copy() {
+                    move_lowered_value(&lowered, env)?;
                 }
-                lowered_args.push(lowered);
+                return Ok(Expr::EnumVariant {
+                    enum_name: String::from("Result"),
+                    variant: String::from("Ok"),
+                    field_names: Vec::new(),
+                    payloads: vec![lowered],
+                    ty: Type::Result(ok_ty.clone(), err_ty.clone()),
+                });
             }
-            Ok(Expr::Call {
-                name: name.clone(),
-                args: lowered_args,
-                ty: signature.return_ty.clone(),
-            })
+            if name == "Err" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("Result::Err expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let Some(Type::Result(ok_ty, err_ty)) = expected else {
+                    return Err(Diagnostic::new(
+                        "type",
+                        "Err requires an expected Result<T, E> context",
+                    )
+                    .with_span(*line, *column));
+                };
+                let lowered = lower_expr_with_expected(&args[0], Some(err_ty.as_ref()), env, ctx)?;
+                if lowered.ty() != err_ty.as_ref() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "Result::Err expects payload type {err_ty}, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                if !err_ty.is_copy() {
+                    move_lowered_value(&lowered, env)?;
+                }
+                return Ok(Expr::EnumVariant {
+                    enum_name: String::from("Result"),
+                    variant: String::from("Err"),
+                    field_names: Vec::new(),
+                    payloads: vec![lowered],
+                    ty: Type::Result(ok_ty.clone(), err_ty.clone()),
+                });
+            }
+            if let Some(variant) = ctx.variants.get(name) {
+                return lower_variant_constructor(name, args, *line, *column, variant, env, ctx);
+            }
+            Err(
+                Diagnostic::new("type", format!("undefined function {name:?}"))
+                    .with_span(*line, *column),
+            )
         }
         syntax::Expr::BinaryAdd {
             lhs,
@@ -707,6 +1393,13 @@ fn lower_expr(
             line,
             column,
         } => {
+            if let Some(variant) = ctx.variants.get(name)
+                && !variant.payload_names.is_empty()
+            {
+                return lower_named_variant_constructor(
+                    name, fields, *line, *column, variant, env, ctx,
+                );
+            }
             let struct_def = ctx.structs.get(name).ok_or_else(|| {
                 Diagnostic::new("type", format!("undefined struct {name:?}"))
                     .with_span(*line, *column)
@@ -734,7 +1427,7 @@ fn lower_expr(
                     )
                     .with_span(field.line, field.column));
                 }
-                let lowered = lower_expr(&field.expr, env, ctx)?;
+                let lowered = lower_expr_with_expected(&field.expr, Some(expected), env, ctx)?;
                 if lowered.ty() != expected {
                     return Err(Diagnostic::new(
                         "type",
@@ -747,7 +1440,7 @@ fn lower_expr(
                     .with_span(field.line, field.column));
                 }
                 if !expected.is_copy() {
-                    move_owner_value(&field.expr, env)?;
+                    move_lowered_owner_value(&lowered, env)?;
                 }
                 lowered_fields.insert(
                     field.name.clone(),
@@ -772,6 +1465,33 @@ fn lower_expr(
                 name: name.clone(),
                 fields: ordered_fields,
                 ty: Type::Struct(name.clone()),
+            })
+        }
+        syntax::Expr::TupleLiteral {
+            elements,
+            line,
+            column,
+        } => {
+            let mut lowered_elements = Vec::new();
+            let mut element_tys = Vec::new();
+            for element in elements {
+                let lowered = lower_expr(element, env, ctx)?;
+                if !lowered.ty().is_copy() {
+                    move_lowered_owner_value(&lowered, env)?;
+                }
+                element_tys.push(lowered.ty().clone());
+                lowered_elements.push(lowered);
+            }
+            if lowered_elements.len() < 2 {
+                return Err(Diagnostic::new(
+                    "type",
+                    "tuple literals require at least two elements",
+                )
+                .with_span(*line, *column));
+            }
+            Ok(Expr::TupleLiteral {
+                elements: lowered_elements,
+                ty: Type::Tuple(element_tys),
             })
         }
         syntax::Expr::FieldAccess {
@@ -811,12 +1531,120 @@ fn lower_expr(
                     .with_span(*line, *column)
                 })?;
             if !field_ty.is_copy() {
-                move_owner_value(base, env)?;
+                move_lowered_owner_value(&lowered_base, env)?;
             }
             Ok(Expr::FieldAccess {
                 base: Box::new(lowered_base),
                 field: field.clone(),
                 ty: field_ty,
+            })
+        }
+        syntax::Expr::TupleIndex {
+            base,
+            index,
+            line,
+            column,
+        } => {
+            let lowered_base = lower_expr(base, env, ctx)?;
+            let Type::Tuple(element_tys) = lowered_base.ty() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "tuple index expects a tuple value, got {}",
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            };
+            let element_ty = element_tys.get(*index).cloned().ok_or_else(|| {
+                Diagnostic::new(
+                    "type",
+                    format!(
+                        "tuple index {} is out of bounds for {}",
+                        index,
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column)
+            })?;
+            if !element_ty.is_copy() {
+                move_lowered_owner_value(&lowered_base, env)?;
+            }
+            Ok(Expr::TupleIndex {
+                base: Box::new(lowered_base),
+                index: *index,
+                ty: element_ty,
+            })
+        }
+        syntax::Expr::MapLiteral {
+            entries,
+            line,
+            column,
+        } => {
+            if entries.is_empty() {
+                return Err(Diagnostic::new(
+                    "type",
+                    "empty map literals are not yet supported in stage1",
+                )
+                .with_span(*line, *column));
+            }
+            let mut lowered_entries = Vec::new();
+            let mut key_ty = None;
+            let mut value_ty = None;
+            for entry in entries {
+                let lowered_key = lower_expr(&entry.key, env, ctx)?;
+                let lowered_value = lower_expr(&entry.value, env, ctx)?;
+                if let Some(expected) = key_ty.as_ref() {
+                    if lowered_key.ty() != expected {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "map literal expects matching key types, got {expected} and {}",
+                                lowered_key.ty()
+                            ),
+                        )
+                        .with_span(entry.line, entry.column));
+                    }
+                } else {
+                    key_ty = Some(lowered_key.ty().clone());
+                }
+                if let Some(expected) = value_ty.as_ref() {
+                    if lowered_value.ty() != expected {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "map literal expects matching value types, got {expected} and {}",
+                                lowered_value.ty()
+                            ),
+                        )
+                        .with_span(entry.line, entry.column));
+                    }
+                } else {
+                    value_ty = Some(lowered_value.ty().clone());
+                }
+                if !lowered_key.ty().supports_map_key() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("map literal key type {} is not supported", lowered_key.ty()),
+                    )
+                    .with_span(entry.line, entry.column));
+                }
+                if !lowered_key.ty().is_copy() {
+                    move_lowered_owner_value(&lowered_key, env)?;
+                }
+                if !lowered_value.ty().is_copy() {
+                    move_lowered_owner_value(&lowered_value, env)?;
+                }
+                lowered_entries.push(MapEntry {
+                    key: lowered_key,
+                    value: lowered_value,
+                });
+            }
+            let key_ty = key_ty.expect("non-empty map literal must have a key type");
+            let value_ty = value_ty.expect("non-empty map literal must have a value type");
+            Ok(Expr::MapLiteral {
+                entries: lowered_entries,
+                ty: Type::Map(Box::new(key_ty), Box::new(value_ty)),
             })
         }
         syntax::Expr::ArrayLiteral {
@@ -850,7 +1678,7 @@ fn lower_expr(
                     element_ty = Some(lowered.ty().clone());
                 }
                 if !lowered.ty().is_copy() {
-                    move_owner_value(element, env)?;
+                    move_lowered_owner_value(&lowered, env)?;
                 }
                 lowered_elements.push(lowered);
             }
@@ -868,61 +1696,225 @@ fn lower_expr(
         } => {
             let lowered_base = lower_expr(base, env, ctx)?;
             let lowered_index = lower_expr(index, env, ctx)?;
-            if lowered_index.ty() != &Type::Int {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!("array index expects int, got {}", lowered_index.ty()),
-                )
-                .with_span(*line, *column));
-            }
-            let Type::Array(element_ty) = lowered_base.ty() else {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!(
-                        "array index expects an array value, got {}",
-                        lowered_base.ty()
-                    ),
-                )
-                .with_span(*line, *column));
+            let result_ty = match lowered_base.ty() {
+                Type::Array(element_ty) => {
+                    if lowered_index.ty() != &Type::Int {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("array index expects int, got {}", lowered_index.ty()),
+                        )
+                        .with_span(*line, *column));
+                    }
+                    let element_ty = (*element_ty.clone()).clone();
+                    if !element_ty.is_copy() {
+                        move_lowered_owner_value(&lowered_base, env)?;
+                    }
+                    element_ty
+                }
+                Type::Map(key_ty, value_ty) => {
+                    if lowered_index.ty() != key_ty.as_ref() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "map index expects key type {}, got {}",
+                                key_ty,
+                                lowered_index.ty()
+                            ),
+                        )
+                        .with_span(*line, *column));
+                    }
+                    let value_ty = (*value_ty.clone()).clone();
+                    if !value_ty.is_copy() {
+                        move_lowered_owner_value(&lowered_base, env)?;
+                    }
+                    value_ty
+                }
+                _ => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "index expects an array or map value, got {}",
+                            lowered_base.ty()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
             };
-            let element_ty = (*element_ty.clone()).clone();
-            if !element_ty.is_copy() {
-                move_owner_value(base, env)?;
-            }
             Ok(Expr::Index {
                 base: Box::new(lowered_base),
                 index: Box::new(lowered_index),
-                ty: element_ty,
+                ty: result_ty,
             })
         }
     }
 }
 
-fn move_value(expr: &syntax::Expr, env: &mut HashMap<String, Binding>) -> Result<(), Diagnostic> {
-    let syntax::Expr::VarRef { name, line, column } = expr else {
+fn lower_variant_constructor(
+    name: &str,
+    args: &[syntax::Expr],
+    line: usize,
+    column: usize,
+    variant: &VariantInfo,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Expr, Diagnostic> {
+    if !variant.payload_names.is_empty() {
+        return Err(Diagnostic::new(
+            "type",
+            format!("enum variant {name:?} requires named payload fields"),
+        )
+        .with_span(line, column));
+    }
+    if variant.payload_tys.is_empty() {
+        return Err(Diagnostic::new(
+            "type",
+            format!("enum variant {name:?} does not take arguments"),
+        )
+        .with_span(line, column));
+    }
+    if args.len() != variant.payload_tys.len() {
+        return Err(Diagnostic::new(
+            "type",
+            format!(
+                "enum variant {name:?} expects {} arguments, got {}",
+                variant.payload_tys.len(),
+                args.len()
+            ),
+        )
+        .with_span(line, column));
+    }
+    let mut lowered_payloads = Vec::new();
+    for (arg, expected) in args.iter().zip(variant.payload_tys.iter()) {
+        let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+        if lowered.ty() != expected {
+            return Err(Diagnostic::new(
+                "type",
+                format!(
+                    "enum variant {name:?} expects payload type {expected}, got {}",
+                    lowered.ty()
+                ),
+            )
+            .with_span(arg.line(), arg.column()));
+        }
+        if !expected.is_copy() {
+            move_lowered_value(&lowered, env)?;
+        }
+        lowered_payloads.push(lowered);
+    }
+    Ok(Expr::EnumVariant {
+        enum_name: variant.enum_name.clone(),
+        variant: name.to_string(),
+        field_names: Vec::new(),
+        payloads: lowered_payloads,
+        ty: Type::Enum(variant.enum_name.clone()),
+    })
+}
+
+fn lower_named_variant_constructor(
+    name: &str,
+    fields: &[syntax::StructFieldValue],
+    line: usize,
+    column: usize,
+    variant: &VariantInfo,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Expr, Diagnostic> {
+    let mut lowered_fields = HashMap::new();
+    for field in fields {
+        let Some(position) = variant
+            .payload_names
+            .iter()
+            .position(|payload_name| payload_name == &field.name)
+        else {
+            return Err(Diagnostic::new(
+                "type",
+                format!(
+                    "enum variant {name:?} has no named payload {:?}",
+                    field.name
+                ),
+            )
+            .with_span(field.line, field.column));
+        };
+        if lowered_fields.contains_key(&field.name) {
+            return Err(Diagnostic::new(
+                "type",
+                format!(
+                    "duplicate named payload {:?} in enum variant literal {name:?}",
+                    field.name
+                ),
+            )
+            .with_span(field.line, field.column));
+        }
+        let expected = &variant.payload_tys[position];
+        let lowered = lower_expr_with_expected(&field.expr, Some(expected), env, ctx)?;
+        if lowered.ty() != expected {
+            return Err(Diagnostic::new(
+                "type",
+                format!(
+                    "enum variant {name:?} payload {:?} expects {expected}, got {}",
+                    field.name,
+                    lowered.ty()
+                ),
+            )
+            .with_span(field.line, field.column));
+        }
+        if !expected.is_copy() {
+            move_lowered_owner_value(&lowered, env)?;
+        }
+        lowered_fields.insert(field.name.clone(), lowered);
+    }
+    let mut ordered_payloads = Vec::new();
+    for payload_name in &variant.payload_names {
+        let lowered = lowered_fields.remove(payload_name).ok_or_else(|| {
+            Diagnostic::new(
+                "type",
+                format!(
+                    "enum variant literal {name:?} is missing named payload {:?}",
+                    payload_name
+                ),
+            )
+            .with_span(line, column)
+        })?;
+        ordered_payloads.push(lowered);
+    }
+    Ok(Expr::EnumVariant {
+        enum_name: variant.enum_name.clone(),
+        variant: name.to_string(),
+        field_names: variant.payload_names.clone(),
+        payloads: ordered_payloads,
+        ty: Type::Enum(variant.enum_name.clone()),
+    })
+}
+
+fn move_lowered_value(expr: &Expr, env: &mut HashMap<String, Binding>) -> Result<(), Diagnostic> {
+    let Expr::VarRef { name, .. } = expr else {
         return Ok(());
     };
     let binding = env.get_mut(name).ok_or_else(|| {
-        Diagnostic::new("type", format!("undefined variable {name:?}")).with_span(*line, *column)
+        Diagnostic::new(
+            "type",
+            format!("internal error: missing binding for moved value {name:?}"),
+        )
     })?;
     if binding.moved {
-        return Err(
-            Diagnostic::new("ownership", format!("use of moved value {name:?}"))
-                .with_span(*line, *column),
-        );
+        return Err(Diagnostic::new(
+            "ownership",
+            format!("use of moved value {name:?}"),
+        ));
     }
     binding.moved = true;
     Ok(())
 }
 
-fn move_owner_value(
-    expr: &syntax::Expr,
+fn move_lowered_owner_value(
+    expr: &Expr,
     env: &mut HashMap<String, Binding>,
 ) -> Result<(), Diagnostic> {
     match expr {
-        syntax::Expr::VarRef { .. } => move_value(expr, env),
-        syntax::Expr::FieldAccess { base, .. } => move_owner_value(base, env),
-        syntax::Expr::Index { base, .. } => move_owner_value(base, env),
+        Expr::VarRef { .. } => move_lowered_value(expr, env),
+        Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
+        Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
+        Expr::Index { base, .. } => move_lowered_owner_value(base, env),
         _ => Ok(()),
     }
 }
@@ -944,9 +1936,10 @@ fn lower_literal(literal: &syntax::Literal) -> Expr {
     }
 }
 
-fn lower_type<T>(
+fn lower_type<T, U>(
     ty: &syntax::TypeName,
     structs: &HashMap<String, T>,
+    enums: &HashMap<String, U>,
     line: usize,
     column: usize,
 ) -> Result<Type, Diagnostic> {
@@ -955,14 +1948,43 @@ fn lower_type<T>(
         syntax::TypeName::Bool => Ok(Type::Bool),
         syntax::TypeName::String => Ok(Type::String),
         syntax::TypeName::Named(name) => {
-            if !structs.contains_key(name) {
-                return Err(Diagnostic::new("type", format!("unknown type {name:?}"))
-                    .with_span(line, column));
+            if structs.contains_key(name) {
+                return Ok(Type::Struct(name.clone()));
             }
-            Ok(Type::Struct(name.clone()))
+            if enums.contains_key(name) {
+                return Ok(Type::Enum(name.clone()));
+            }
+            Err(Diagnostic::new("type", format!("unknown type {name:?}")).with_span(line, column))
+        }
+        syntax::TypeName::Option(inner) => Ok(Type::Option(Box::new(lower_type(
+            inner, structs, enums, line, column,
+        )?))),
+        syntax::TypeName::Result(ok, err) => Ok(Type::Result(
+            Box::new(lower_type(ok, structs, enums, line, column)?),
+            Box::new(lower_type(err, structs, enums, line, column)?),
+        )),
+        syntax::TypeName::Tuple(elements) => Ok(Type::Tuple(
+            elements
+                .iter()
+                .map(|element| lower_type(element, structs, enums, line, column))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        syntax::TypeName::Map(key, value) => {
+            let key = lower_type(key, structs, enums, line, column)?;
+            if !key.supports_map_key() {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("map key type {key} is not supported"),
+                )
+                .with_span(line, column));
+            }
+            Ok(Type::Map(
+                Box::new(key),
+                Box::new(lower_type(value, structs, enums, line, column)?),
+            ))
         }
         syntax::TypeName::Array(inner) => Ok(Type::Array(Box::new(lower_type(
-            inner, structs, line, column,
+            inner, structs, enums, line, column,
         )?))),
     }
 }
@@ -988,6 +2010,10 @@ impl Expr {
             Expr::BinaryCompare { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
             Expr::FieldAccess { ty, .. } => ty,
+            Expr::TupleLiteral { ty, .. } => ty,
+            Expr::TupleIndex { ty, .. } => ty,
+            Expr::MapLiteral { ty, .. } => ty,
+            Expr::EnumVariant { ty, .. } => ty,
             Expr::ArrayLiteral { ty, .. } => ty,
             Expr::Index { ty, .. } => ty,
         }
@@ -1003,6 +2029,7 @@ impl Stmt {
                 else_block: Some(else_block),
                 ..
             } => block_always_returns(then_block) && block_always_returns(else_block),
+            Stmt::Match { arms, .. } => arms.iter().all(|arm| block_always_returns(&arm.body)),
             _ => false,
         }
     }
@@ -1019,6 +2046,7 @@ impl syntax::Stmt {
             | syntax::Stmt::Print { line, .. }
             | syntax::Stmt::If { line, .. }
             | syntax::Stmt::While { line, .. }
+            | syntax::Stmt::Match { line, .. }
             | syntax::Stmt::Return { line, .. } => *line,
         }
     }
@@ -1029,6 +2057,7 @@ impl syntax::Stmt {
             | syntax::Stmt::Print { column, .. }
             | syntax::Stmt::If { column, .. }
             | syntax::Stmt::While { column, .. }
+            | syntax::Stmt::Match { column, .. }
             | syntax::Stmt::Return { column, .. } => *column,
         }
     }
@@ -1044,6 +2073,9 @@ impl syntax::Expr {
             | syntax::Expr::BinaryCompare { line, .. }
             | syntax::Expr::StructLiteral { line, .. }
             | syntax::Expr::FieldAccess { line, .. }
+            | syntax::Expr::TupleLiteral { line, .. }
+            | syntax::Expr::TupleIndex { line, .. }
+            | syntax::Expr::MapLiteral { line, .. }
             | syntax::Expr::ArrayLiteral { line, .. }
             | syntax::Expr::Index { line, .. } => *line,
         }
@@ -1058,6 +2090,9 @@ impl syntax::Expr {
             | syntax::Expr::BinaryCompare { column, .. }
             | syntax::Expr::StructLiteral { column, .. }
             | syntax::Expr::FieldAccess { column, .. }
+            | syntax::Expr::TupleLiteral { column, .. }
+            | syntax::Expr::TupleIndex { column, .. }
+            | syntax::Expr::MapLiteral { column, .. }
             | syntax::Expr::ArrayLiteral { column, .. }
             | syntax::Expr::Index { column, .. } => *column,
         }
@@ -1084,6 +2119,19 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
             Type::Struct(name) => write!(f, "{name}"),
+            Type::Enum(name) => write!(f, "{name}"),
+            Type::Option(inner) => write!(f, "Option<{inner}>"),
+            Type::Result(ok, err) => write!(f, "Result<{ok}, {err}>"),
+            Type::Tuple(elements) => write!(
+                f,
+                "({})",
+                elements
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Type::Map(key, value) => write!(f, "{{{key}: {value}}}"),
             Type::Array(inner) => write!(f, "[{inner}]"),
         }
     }

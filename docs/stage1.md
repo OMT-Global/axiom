@@ -9,13 +9,13 @@ This repo now has two tracks:
 
 ## Current bootstrap scope
 
-The Rust compiler is intentionally tiny in this first slice:
+The Rust compiler is intentionally small in this bootstrap slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
-- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, `return`, variables, function calls, named struct types, array types, array literals, array indexing, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
+- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
-- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access and non-`Copy` array indexing conservatively move the owning variable, and branch-local moves conservatively propagate after `if`.
+- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, and branch-local moves conservatively propagate after `if` and `match`.
 
 This is not the final backend architecture. It is the smallest executable version of the
 stage0/stage1 split that can build a native hello-world and carry the 1.0 package model.
@@ -36,9 +36,9 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Language surface gaps
 
-- Modules are now limited to package-local path imports plus direct `pub struct` and `pub fn` exports only.
-- Structs and arrays exist now, but there are still no tuples, enums, slices, maps, `Option<T>`, or `Result<T, E>`.
-- No `match`, no pattern matching, no generic functions or generic types.
+- Modules are now limited to package-local path imports plus direct `pub struct`, `pub enum`, and `pub fn` exports only.
+- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, field access, tuple indexing, map indexing, array indexing, and exhaustive statement-level `match` now exist, but there are still no slices or generic collection abstractions.
+- No generic functions or generic types.
 - No methods, trait-style interfaces, closures, or async/await.
 - Rebinding and shadowing are intentionally rejected today to keep the bootstrap scope small.
 
@@ -46,13 +46,13 @@ still far from the stated 1.0 target for service and agent workloads.
 
 - Ownership is still bootstrap-grade even though it now covers all non-`Copy` stage1 values and conservatively handles non-`Copy` field access.
 - There are no borrows, mutable borrows, lifetime checks, or first-class partial-move analysis for aggregates and function calls.
-- No exhaustiveness checking, no typed error propagation, and no control-flow-sensitive ownership diagnostics beyond simple branches.
+- Exhaustiveness checking now exists for statement-level enum `match`, but there is still no typed error propagation and no control-flow-sensitive ownership diagnostics beyond simple branches.
 - No compile-fail corpus yet for the future ownership rules that a Rust-like language actually needs.
 
 ### Package and build graph gaps
 
 - `axiom.toml` and `axiom.lock` exist, but dependencies and workspaces are still rejected.
-- The current import model is still intentionally small: relative path imports only, direct `pub struct` / `pub fn` exports only, no aliases, no re-exports, and no namespace-qualified calls.
+- The current import model is still intentionally small: relative path imports only, direct `pub struct` / `pub enum` / `pub fn` exports only, no aliases, no re-exports, and no namespace-qualified calls.
 - There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape.
 
 ### Runtime and standard library gaps
@@ -87,22 +87,23 @@ Current proof points:
 - `stage1/examples/hello` remains the single-file callable baseline.
 - `stage1/examples/modules` is the checked-in multi-file package example.
 - `stage1/examples/arrays` is the checked-in array/bootstrap collection example.
+- `stage1/examples/tuples` is the checked-in tuple/bootstrap aggregate example.
+- `stage1/examples/maps` is the checked-in map/bootstrap collection example.
 - `stage1/examples/structs` is the checked-in structured-data bootstrap example.
-- `make stage1-test stage1-smoke` now covers all four examples.
+- `stage1/examples/enums` is the checked-in tuple-payload plus named-payload enum-and-match bootstrap example.
+- `stage1/examples/outcomes` is the checked-in `Option<T>` / `Result<T, E>` bootstrap example with imported types.
+- `make stage1-test stage1-smoke` now covers all eight examples.
 
 ### Slice 3: structured data and branching semantics
 
 Goal: add the minimum useful data model for service code.
 
-- Struct declarations, literals, named struct types, field access, array types, array literals, and array indexing are now in the bootstrap.
-- Add tuples, enums, and maps next.
-- Add `match` with exhaustiveness checking.
-- Add `Option<T>` and `Result<T, E>` as real language-level types.
+- Struct declarations, literals, named struct types, field access, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, both tuple-style and named-payload enum variants with exhaustive statement-level `match`, and `Option<T>` / `Result<T, E>` are now in the bootstrap.
 - Extend comparisons and control-flow typing across structured data where appropriate.
 
 Exit criteria:
 
-- Stage1 can express request/response-style data without encoding everything as strings.
+- Stage1 can express request/response-style data and explicit success/failure flows without encoding everything as strings.
 - Compile-fail tests cover bad field access, invalid constructors, and non-exhaustive matches.
 - The example set includes one small service-style program using structs or enums.
 

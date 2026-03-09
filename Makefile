@@ -34,9 +34,21 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/arrays --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/arrays --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arrays
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/tuples --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/tuples --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/tuples
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/maps --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/maps --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/maps
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/structs --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/structs --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/structs
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/enums --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/enums --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/enums
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/outcomes --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/outcomes --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/outcomes
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 
 stage1-run:
