@@ -358,6 +358,23 @@ mod tests {
     }
 
     #[test]
+    fn build_project_emits_native_binary_after_branch_local_slice_borrow_ends() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("borrow-scope");
+        create_project(&project, Some("borrow-scope-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nif true {\nlet view: &[string] = values[:]\nprint len(view)\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\n");
+    }
+
+    #[test]
     fn build_project_emits_native_binary_with_tuples() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tuples");
@@ -1120,6 +1137,25 @@ mod tests {
                 .contains("first requires a Copy element type when called on a borrowed slice")
         );
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owned_array_while_slice_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("live-borrow-move");
+        create_project(&project, Some("live-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet view: &[string] = values[:]\nprint len(view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("moving a borrowed owner should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
     }
 
     #[test]

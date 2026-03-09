@@ -15,7 +15,7 @@ The Rust compiler is intentionally small in this bootstrap slice:
 - Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, direct borrowed-slice returns backed by borrowed-slice parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
-- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, and branch-local moves conservatively propagate after `if` and `match`.
+- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, branch-local moves conservatively propagate after `if` and `match`, and live borrowed slices now block moving their owned collection roots until the borrow scope ends.
 
 This is not the final backend architecture. It is the smallest executable version of the
 stage0/stage1 split that can build a native hello-world and carry the 1.0 package model.
@@ -44,10 +44,10 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Type and ownership gaps
 
-- Ownership is still bootstrap-grade even though it now covers all non-`Copy` stage1 values and conservatively handles non-`Copy` field access.
-- Borrowed slices can now flow through direct `&[T]` return values when they are derived from borrowed-slice parameters, but there are still no general borrows, mutable borrows, lifetime checks, or first-class partial-move analysis for aggregates and function calls.
+- Ownership is still bootstrap-grade even though it now covers all non-`Copy` stage1 values, conservatively handles non-`Copy` field access, and enforces immutable live-borrow checks for owned values behind borrowed slices.
+- Borrowed slices can now flow through direct `&[T]` return values when they are derived from borrowed-slice parameters, and live borrowed slices now block later owner moves until their scope ends, but there are still no general borrows, mutable borrows, lifetime checks, or first-class partial-move analysis for aggregates and function calls.
 - Exhaustiveness checking now exists for statement-level enum `match`, but there is still no typed error propagation and no control-flow-sensitive ownership diagnostics beyond simple branches.
-- No compile-fail corpus yet for the future ownership rules that a Rust-like language actually needs.
+- Compile-fail coverage now exists for several bootstrap ownership failures, but there is still no dedicated corpus yet for the broader future borrow rules that a Rust-like language actually needs.
 
 ### Package and build graph gaps
 

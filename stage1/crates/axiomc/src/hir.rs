@@ -1,7 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::syntax;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
@@ -205,6 +205,8 @@ struct Binding {
     ty: Type,
     moved: bool,
     borrow_origin: Option<BorrowOrigin>,
+    borrowed_owner: Option<String>,
+    active_borrow_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -620,6 +622,8 @@ fn lower_function(
                 ty: ty.clone(),
                 moved: false,
                 borrow_origin: binding_borrow_origin(&ty, Some(&param.name)),
+                borrowed_owner: None,
+                active_borrow_count: 0,
             },
         );
         params.push(Param {
@@ -651,6 +655,7 @@ fn lower_block(
     env: &mut HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Result<(Vec<Stmt>, HashMap<String, Binding>, bool), Diagnostic> {
+    let scope_names = env.keys().cloned().collect::<HashSet<_>>();
     let mut lowered = Vec::new();
     let mut guaranteed_return = false;
     for stmt in block {
@@ -665,7 +670,9 @@ fn lower_block(
         guaranteed_return = lowered_stmt.always_returns();
         lowered.push(lowered_stmt);
     }
-    Ok((lowered, env.clone(), guaranteed_return))
+    let mut after = env.clone();
+    release_scope_borrows(&mut after, &scope_names);
+    Ok((lowered, after, guaranteed_return))
 }
 
 fn lower_stmt(
@@ -705,6 +712,11 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
+            let borrowed_owner =
+                binding_borrowed_owner_from_expr(&expected, &lowered_expr, env, ctx);
+            if let Some(owner_name) = borrowed_owner.as_ref() {
+                increment_active_borrow(owner_name, env)?;
+            }
             if !actual.is_copy() {
                 move_lowered_value(&lowered_expr, env)?;
             }
@@ -719,6 +731,8 @@ fn lower_stmt(
                         env,
                         ctx,
                     ),
+                    borrowed_owner,
+                    active_borrow_count: 0,
                 },
             );
             Ok(Stmt::Let {
@@ -946,6 +960,8 @@ fn lower_stmt(
                             ty: payload_ty.clone(),
                             moved: false,
                             borrow_origin: binding_borrow_origin(payload_ty, None),
+                            borrowed_owner: None,
+                            active_borrow_count: 0,
                         },
                     );
                 }
@@ -1044,6 +1060,15 @@ fn merge_branch_state(
                 ty: binding.ty.clone(),
                 moved: then_moved || else_moved,
                 borrow_origin: binding.borrow_origin.clone(),
+                borrowed_owner: binding.borrowed_owner.clone(),
+                active_borrow_count: merge_borrow_count(
+                    binding.active_borrow_count,
+                    then_returns,
+                    then_after.get(name).map(|entry| entry.active_borrow_count),
+                    else_returns,
+                    else_after
+                        .and_then(|branch| branch.get(name).map(|entry| entry.active_borrow_count)),
+                ),
             },
         );
     }
@@ -1071,6 +1096,15 @@ fn merge_loop_state(
                 ty: binding.ty.clone(),
                 moved: binding.moved || body_moved,
                 borrow_origin: binding.borrow_origin.clone(),
+                borrowed_owner: binding.borrowed_owner.clone(),
+                active_borrow_count: if body_returns {
+                    binding.active_borrow_count
+                } else {
+                    body_after
+                        .get(name)
+                        .map(|entry| entry.active_borrow_count)
+                        .unwrap_or(binding.active_borrow_count)
+                },
             },
         );
     }
@@ -1099,6 +1133,18 @@ fn merge_match_state(
                 ty: binding.ty.clone(),
                 moved,
                 borrow_origin: binding.borrow_origin.clone(),
+                borrowed_owner: binding.borrowed_owner.clone(),
+                active_borrow_count: arm_states
+                    .iter()
+                    .filter_map(|(after, returns)| {
+                        if *returns {
+                            Some(binding.active_borrow_count)
+                        } else {
+                            after.get(name).map(|entry| entry.active_borrow_count)
+                        }
+                    })
+                    .max()
+                    .unwrap_or(binding.active_borrow_count),
             },
         );
     }
@@ -2103,6 +2149,12 @@ fn move_lowered_value(expr: &Expr, env: &mut HashMap<String, Binding>) -> Result
             format!("internal error: missing binding for moved value {name:?}"),
         )
     })?;
+    if binding.active_borrow_count > 0 {
+        return Err(Diagnostic::new(
+            "ownership",
+            format!("cannot move value {name:?} while borrowed slices are still live"),
+        ));
+    }
     if binding.moved {
         return Err(Diagnostic::new(
             "ownership",
@@ -2158,6 +2210,18 @@ fn binding_borrow_origin_from_expr(
     Some(direct_borrow_origin(expr, env, ctx).unwrap_or(BorrowOrigin::Local))
 }
 
+fn binding_borrowed_owner_from_expr(
+    ty: &Type,
+    expr: &Expr,
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Option<String> {
+    if !matches!(ty, Type::Slice(_)) {
+        return None;
+    }
+    direct_borrowed_owner(expr, env, ctx)
+}
+
 fn direct_borrow_origin(
     expr: &Expr,
     env: &HashMap<String, Binding>,
@@ -2181,6 +2245,41 @@ fn direct_borrow_origin(
             .and_then(|signature| signature.slice_return_param)
             .and_then(|index| direct_borrow_origin(&args[index], env, ctx)),
         _ => Some(BorrowOrigin::Local),
+    }
+}
+
+fn direct_borrowed_owner(
+    expr: &Expr,
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Option<String> {
+    if !matches!(expr.ty(), Type::Slice(_)) {
+        return None;
+    }
+    match expr {
+        Expr::VarRef { name, .. } => env
+            .get(name)
+            .and_then(|binding| binding.borrowed_owner.clone()),
+        Expr::Slice { base, .. } => match base.ty() {
+            Type::Slice(_) => direct_borrowed_owner(base, env, ctx),
+            Type::Array(_) => owned_borrow_root(base),
+            _ => None,
+        },
+        Expr::Call { name, args, .. } => ctx
+            .functions
+            .get(name)
+            .and_then(|signature| signature.slice_return_param)
+            .and_then(|index| direct_borrowed_owner(&args[index], env, ctx)),
+        _ => None,
+    }
+}
+
+fn owned_borrow_root(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::VarRef { name, ty } if !matches!(ty, Type::Slice(_)) => Some(name.clone()),
+        Expr::FieldAccess { base, .. } => owned_borrow_root(base),
+        Expr::TupleIndex { base, .. } => owned_borrow_root(base),
+        _ => None,
     }
 }
 
@@ -2229,6 +2328,66 @@ fn classify_slice_return(
         .with_span(line, column));
     }
     Ok(matches.first().copied())
+}
+
+fn increment_active_borrow(
+    owner_name: &str,
+    env: &mut HashMap<String, Binding>,
+) -> Result<(), Diagnostic> {
+    let binding = env.get_mut(owner_name).ok_or_else(|| {
+        Diagnostic::new(
+            "type",
+            format!("internal error: missing borrow owner {owner_name:?}"),
+        )
+    })?;
+    binding.active_borrow_count += 1;
+    Ok(())
+}
+
+fn decrement_active_borrow(owner_name: &str, env: &mut HashMap<String, Binding>) {
+    let Some(binding) = env.get_mut(owner_name) else {
+        return;
+    };
+    binding.active_borrow_count = binding.active_borrow_count.saturating_sub(1);
+}
+
+fn release_scope_borrows(env: &mut HashMap<String, Binding>, scope_names: &HashSet<String>) {
+    let released = env
+        .keys()
+        .filter(|name| !scope_names.contains(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in &released {
+        if let Some(owner_name) = env
+            .get(name)
+            .and_then(|binding| binding.borrowed_owner.clone())
+        {
+            decrement_active_borrow(&owner_name, env);
+        }
+    }
+    for name in released {
+        env.remove(&name);
+    }
+}
+
+fn merge_borrow_count(
+    before: usize,
+    then_returns: bool,
+    then_after: Option<usize>,
+    else_returns: bool,
+    else_after: Option<usize>,
+) -> usize {
+    let then_count = if then_returns {
+        before
+    } else {
+        then_after.unwrap_or(before)
+    };
+    let else_count = if else_returns {
+        before
+    } else {
+        else_after.unwrap_or(before)
+    };
+    then_count.max(else_count)
 }
 
 fn lower_literal(literal: &syntax::Literal) -> Expr {
