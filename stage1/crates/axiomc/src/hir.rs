@@ -149,6 +149,12 @@ pub enum Expr {
         elements: Vec<Expr>,
         ty: Type,
     },
+    Slice {
+        base: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        ty: Type,
+    },
     Index {
         base: Box<Expr>,
         index: Box<Expr>,
@@ -1688,6 +1694,58 @@ fn lower_expr_with_expected(
                 ty: Type::Array(Box::new(element_ty)),
             })
         }
+        syntax::Expr::Slice {
+            base,
+            start,
+            end,
+            line,
+            column,
+        } => {
+            let lowered_base = lower_expr(base, env, ctx)?;
+            let Type::Array(element_ty) = lowered_base.ty() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("slice expects an array value, got {}", lowered_base.ty()),
+                )
+                .with_span(*line, *column));
+            };
+            let lowered_start = if let Some(start) = start {
+                let lowered = lower_expr(start, env, ctx)?;
+                if lowered.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("array slice start expects int, got {}", lowered.ty()),
+                    )
+                    .with_span(start.line(), start.column()));
+                }
+                Some(Box::new(lowered))
+            } else {
+                None
+            };
+            let lowered_end = if let Some(end) = end {
+                let lowered = lower_expr(end, env, ctx)?;
+                if lowered.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("array slice end expects int, got {}", lowered.ty()),
+                    )
+                    .with_span(end.line(), end.column()));
+                }
+                Some(Box::new(lowered))
+            } else {
+                None
+            };
+            let element_ty = (*element_ty.clone()).clone();
+            if !element_ty.is_copy() {
+                move_lowered_owner_value(&lowered_base, env)?;
+            }
+            Ok(Expr::Slice {
+                base: Box::new(lowered_base),
+                start: lowered_start,
+                end: lowered_end,
+                ty: Type::Array(Box::new(element_ty)),
+            })
+        }
         syntax::Expr::Index {
             base,
             index,
@@ -1914,6 +1972,7 @@ fn move_lowered_owner_value(
         Expr::VarRef { .. } => move_lowered_value(expr, env),
         Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
         Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
+        Expr::Slice { base, .. } => move_lowered_owner_value(base, env),
         Expr::Index { base, .. } => move_lowered_owner_value(base, env),
         _ => Ok(()),
     }
@@ -2015,6 +2074,7 @@ impl Expr {
             Expr::MapLiteral { ty, .. } => ty,
             Expr::EnumVariant { ty, .. } => ty,
             Expr::ArrayLiteral { ty, .. } => ty,
+            Expr::Slice { ty, .. } => ty,
             Expr::Index { ty, .. } => ty,
         }
     }
@@ -2077,6 +2137,7 @@ impl syntax::Expr {
             | syntax::Expr::TupleIndex { line, .. }
             | syntax::Expr::MapLiteral { line, .. }
             | syntax::Expr::ArrayLiteral { line, .. }
+            | syntax::Expr::Slice { line, .. }
             | syntax::Expr::Index { line, .. } => *line,
         }
     }
@@ -2094,6 +2155,7 @@ impl syntax::Expr {
             | syntax::Expr::TupleIndex { column, .. }
             | syntax::Expr::MapLiteral { column, .. }
             | syntax::Expr::ArrayLiteral { column, .. }
+            | syntax::Expr::Slice { column, .. }
             | syntax::Expr::Index { column, .. } => *column,
         }
     }

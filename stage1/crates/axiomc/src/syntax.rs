@@ -195,6 +195,13 @@ pub enum Expr {
         line: usize,
         column: usize,
     },
+    Slice {
+        base: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        line: usize,
+        column: usize,
+    },
     Index {
         base: Box<Expr>,
         index: Box<Expr>,
@@ -1114,6 +1121,34 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         let index_raw = raw[open_bracket + 1..raw.len() - 1].trim();
         if base_raw.is_empty() {
             // This is an array literal, handled below.
+        } else if let Some(colon) = find_top_level_char(index_raw, ':') {
+            let start_raw = index_raw[..colon].trim();
+            let end_raw = index_raw[colon + 1..].trim();
+            return Ok(Expr::Slice {
+                base: Box::new(parse_term(base_raw, path, line_no, column)?),
+                start: if start_raw.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(parse_expr(
+                        start_raw,
+                        path,
+                        line_no,
+                        column + open_bracket + 1,
+                    )?))
+                },
+                end: if end_raw.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(parse_expr(
+                        end_raw,
+                        path,
+                        line_no,
+                        column + open_bracket + colon + 2,
+                    )?))
+                },
+                line: line_no,
+                column,
+            });
         } else if index_raw.is_empty() {
             return Err(Diagnostic::new("parse", "array index is incomplete")
                 .with_path(path.display().to_string())

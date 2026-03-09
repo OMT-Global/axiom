@@ -1042,6 +1042,55 @@ fn rewrite_expr(
             line: *line,
             column: *column,
         },
+        syntax::Expr::Slice {
+            base,
+            start,
+            end,
+            line,
+            column,
+        } => syntax::Expr::Slice {
+            base: Box::new(rewrite_expr(
+                base,
+                visible_functions,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_types,
+                module_path,
+            )?),
+            start: start
+                .as_ref()
+                .map(|expr| {
+                    rewrite_expr(
+                        expr,
+                        visible_functions,
+                        visible_structs,
+                        visible_types,
+                        private_imported,
+                        private_imported_types,
+                        module_path,
+                    )
+                    .map(Box::new)
+                })
+                .transpose()?,
+            end: end
+                .as_ref()
+                .map(|expr| {
+                    rewrite_expr(
+                        expr,
+                        visible_functions,
+                        visible_structs,
+                        visible_types,
+                        private_imported,
+                        private_imported_types,
+                        module_path,
+                    )
+                    .map(Box::new)
+                })
+                .transpose()?,
+            line: *line,
+            column: *column,
+        },
         syntax::Expr::Index {
             base,
             index,

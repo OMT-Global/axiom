@@ -144,6 +144,12 @@ pub enum Expr {
         elements: Vec<Expr>,
         ty: Type,
     },
+    Slice {
+        base: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        ty: Type,
+    },
     Index {
         base: Box<Expr>,
         index: Box<Expr>,
@@ -238,6 +244,7 @@ impl Expr {
             Expr::MapLiteral { ty, .. } => ty.clone(),
             Expr::EnumVariant { ty, .. } => ty.clone(),
             Expr::ArrayLiteral { ty, .. } => ty.clone(),
+            Expr::Slice { ty, .. } => ty.clone(),
             Expr::Index { ty, .. } => ty.clone(),
         }
     }
@@ -429,6 +436,17 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
         },
         hir::Expr::ArrayLiteral { elements, ty } => Expr::ArrayLiteral {
             elements: elements.iter().map(lower_expr).collect(),
+            ty: lower_type(ty),
+        },
+        hir::Expr::Slice {
+            base,
+            start,
+            end,
+            ty,
+        } => Expr::Slice {
+            base: Box::new(lower_expr(base)),
+            start: start.as_ref().map(|expr| Box::new(lower_expr(expr))),
+            end: end.as_ref().map(|expr| Box::new(lower_expr(expr))),
             ty: lower_type(ty),
         },
         hir::Expr::Index { base, index, ty } => Expr::Index {

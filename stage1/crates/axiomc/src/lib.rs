@@ -89,6 +89,33 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_array_slices() {
+        let source = "let values: [int] = [3, 7, 9, 11]\nlet middle: [int] = values[1:3]\nlet prefix: [int] = values[:2]\nlet tail: [int] = values[2:]\nlet everything: [int] = values[:]\nprint middle[0]\nprint prefix[1]\nprint tail[0]\nprint everything[3]\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(
+            rendered.contains(
+                "let middle: Vec<i64> = axiom_array_slice_copy(&values, Some(1), Some(3));"
+            )
+        );
+        assert!(
+            rendered
+                .contains("let prefix: Vec<i64> = axiom_array_slice_copy(&values, None, Some(2));")
+        );
+        assert!(
+            rendered
+                .contains("let tail: Vec<i64> = axiom_array_slice_copy(&values, Some(2), None);")
+        );
+        assert!(
+            rendered.contains(
+                "let everything: Vec<i64> = axiom_array_slice_copy(&values, None, None);"
+            )
+        );
+    }
+
+    #[test]
     fn parser_lowers_tuples_and_tuple_indexing() {
         let source = "fn label(pair: (int, string)): string {\nreturn pair.1\n}\n\nlet pair: (int, string) = (7, \"stage1 tuples\")\nprint pair.0\nprint label(pair)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -302,6 +329,23 @@ mod tests {
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_array_slices() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("slices");
+        create_project(&project, Some("slices-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [3, 7, 9, 11]\nlet middle: [int] = values[1:3]\nlet prefix: [int] = values[:2]\nlet tail: [int] = values[2:]\nlet everything: [int] = values[:]\nprint middle[0]\nprint prefix[1]\nprint tail[0]\nprint everything[3]\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n7\n9\n11\n");
     }
 
     #[test]
@@ -956,6 +1000,59 @@ mod tests {
         let error = check_project(&project).expect_err("array index should require int");
         assert!(error.message.contains("array index expects int"));
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_array_slice_on_non_array() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("slice-non-array");
+        create_project(&project, Some("slice-non-array-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let value: int = 42\nprint value[1:2]\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("slicing non-array should fail");
+        assert!(
+            error
+                .message
+                .contains("slice expects an array value, got int")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_non_int_array_slice_bound() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("slice-bound-type");
+        create_project(&project, Some("slice-bound-type-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nprint values[true:2][0]\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("slice bound should require int");
+        assert!(
+            error
+                .message
+                .contains("array slice start expects int, got bool")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_use_after_non_copy_array_slice() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("slice-move");
+        create_project(&project, Some("slice-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"a\", \"b\", \"c\"]\nlet tail: [string] = values[1:]\nprint tail[0]\nprint values[0]\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("non-copy slice should move owner");
+        assert!(error.message.contains("use of moved value"));
+        assert_eq!(error.kind, "ownership");
     }
 
     #[test]

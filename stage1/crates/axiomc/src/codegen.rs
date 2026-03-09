@@ -26,6 +26,37 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str(
+        "fn axiom_array_slice_bounds(len: usize, start: Option<i64>, end: Option<i64>) -> (usize, usize) {\n",
+    );
+    out.push_str("    let start = start.unwrap_or(0);\n");
+    out.push_str("    let end = end.unwrap_or(len as i64);\n");
+    out.push_str(
+        "    let start = usize::try_from(start).expect(\"array slice start must be non-negative\");\n",
+    );
+    out.push_str(
+        "    let end = usize::try_from(end).expect(\"array slice end must be non-negative\");\n",
+    );
+    out.push_str("    assert!(start <= end, \"array slice start must be <= end\");\n");
+    out.push_str("    assert!(end <= len, \"array slice end out of bounds\");\n");
+    out.push_str("    (start, end)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
+        "fn axiom_array_slice_copy<T: Copy>(values: &[T], start: Option<i64>, end: Option<i64>) -> Vec<T> {\n",
+    );
+    out.push_str("    let (start, end) = axiom_array_slice_bounds(values.len(), start, end);\n");
+    out.push_str("    values[start..end].to_vec()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
+        "fn axiom_array_slice_take<T>(values: Vec<T>, start: Option<i64>, end: Option<i64>) -> Vec<T> {\n",
+    );
+    out.push_str("    let len = values.len();\n");
+    out.push_str("    let (start, end) = axiom_array_slice_bounds(len, start, end);\n");
+    out.push_str("    values.into_iter().skip(start).take(end - start).collect()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
         "fn axiom_map_get<K: Eq + std::hash::Hash, V: Copy>(values: &HashMap<K, V>, key: &K) -> V {\n",
     );
     out.push_str("    *values.get(key).expect(\"map key not found\")\n");
@@ -296,6 +327,38 @@ fn render_expr(expr: &Expr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("vec![{rendered}]")
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            let start = start
+                .as_ref()
+                .map(|expr| format!("Some({})", render_expr(expr)))
+                .unwrap_or_else(|| String::from("None"));
+            let end = end
+                .as_ref()
+                .map(|expr| format!("Some({})", render_expr(expr)))
+                .unwrap_or_else(|| String::from("None"));
+            match base.ty() {
+                Type::Array(inner) => {
+                    if inner.is_copy() {
+                        format!(
+                            "axiom_array_slice_copy(&{}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    } else {
+                        format!(
+                            "axiom_array_slice_take({}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    }
+                }
+                _ => unreachable!("type checker rejects slicing non-array values"),
+            }
         }
         Expr::Index { base, index, ty } => match base.ty() {
             Type::Array(_) => {

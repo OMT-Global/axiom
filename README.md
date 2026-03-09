@@ -82,6 +82,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/mod
 # Run the stage1 array example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arrays
 
+# Run the stage1 array-slice example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/slices
+
 # Run the stage1 tuple example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/tuples
 
