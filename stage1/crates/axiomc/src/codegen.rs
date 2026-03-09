@@ -46,6 +46,11 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    &values[start..end]\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_last_index(len: usize) -> i64 {\n");
+    out.push_str("    assert!(len > 0, \"collection must not be empty\");\n");
+    out.push_str("    (len - 1) as i64\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str(
         "fn axiom_map_get<K: Eq + std::hash::Hash, V: Copy>(values: &HashMap<K, V>, key: &K) -> V {\n",
     );
@@ -127,17 +132,20 @@ fn render_struct_field(field: &StructField, out: &mut String, indent: usize) {
 }
 
 fn render_function(function: &Function, out: &mut String) {
+    let uses_slice_lifetime = function_signature_uses_borrowed_slice(function);
     let params = function
         .params
         .iter()
-        .map(render_param)
+        .map(|param| render_param(param, uses_slice_lifetime))
         .collect::<Vec<_>>()
         .join(", ");
+    let lifetime = if uses_slice_lifetime { "<'a>" } else { "" };
     out.push_str(&format!(
-        "fn {}({}) -> {} {{\n",
+        "fn {}{}({}) -> {} {{\n",
         function.name,
+        lifetime,
         params,
-        rust_type(&function.return_ty)
+        rust_type_in_signature(&function.return_ty, uses_slice_lifetime)
     ));
     for stmt in &function.body {
         render_stmt(stmt, out, 1);
@@ -145,8 +153,12 @@ fn render_function(function: &Function, out: &mut String) {
     out.push_str("}\n");
 }
 
-fn render_param(param: &Param) -> String {
-    format!("{}: {}", param.name, rust_type(&param.ty))
+fn render_param(param: &Param, uses_slice_lifetime: bool) -> String {
+    format!(
+        "{}: {}",
+        param.name,
+        rust_type_in_signature(&param.ty, uses_slice_lifetime)
+    )
 }
 
 fn render_stmt(stmt: &Stmt, out: &mut String, indent: usize) {
@@ -231,6 +243,12 @@ fn render_expr(expr: &Expr) -> String {
         Expr::VarRef { name, .. } => name.clone(),
         Expr::Call { name, args, .. } if name == "len" => {
             format!("({}).len() as i64", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, ty } if name == "first" => {
+            render_collection_edge(&args[0], ty, false)
+        }
+        Expr::Call { name, args, ty } if name == "last" => {
+            render_collection_edge(&args[0], ty, true)
         }
         Expr::Call { name, args, .. } => {
             let rendered_args = args.iter().map(render_expr).collect::<Vec<_>>().join(", ");
@@ -397,25 +415,99 @@ fn render_expr(expr: &Expr) -> String {
 }
 
 fn rust_type(ty: &Type) -> String {
+    rust_type_inner(ty, None)
+}
+
+fn rust_type_in_signature(ty: &Type, uses_slice_lifetime: bool) -> String {
+    if uses_slice_lifetime {
+        rust_type_inner(ty, Some("'a"))
+    } else {
+        rust_type(ty)
+    }
+}
+
+fn rust_type_inner(ty: &Type, lifetime: Option<&str>) -> String {
     match ty {
         Type::Int => String::from("i64"),
         Type::Bool => String::from("bool"),
         Type::String => String::from("String"),
         Type::Struct(name) => name.clone(),
         Type::Enum(name) => name.clone(),
-        Type::Slice(inner) => format!("&[{}]", rust_type(inner)),
-        Type::Option(inner) => format!("Option<{}>", rust_type(inner)),
-        Type::Result(ok, err) => format!("Result<{}, {}>", rust_type(ok), rust_type(err)),
+        Type::Slice(inner) => {
+            let inner = rust_type_inner(inner, lifetime);
+            match lifetime {
+                Some(lifetime) => format!("&{lifetime} [{inner}]"),
+                None => format!("&[{inner}]"),
+            }
+        }
+        Type::Option(inner) => format!("Option<{}>", rust_type_inner(inner, lifetime)),
+        Type::Result(ok, err) => format!(
+            "Result<{}, {}>",
+            rust_type_inner(ok, lifetime),
+            rust_type_inner(err, lifetime)
+        ),
         Type::Tuple(elements) => format!(
             "({})",
             elements
                 .iter()
-                .map(rust_type)
+                .map(|element| rust_type_inner(element, lifetime))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Type::Map(key, value) => format!("HashMap<{}, {}>", rust_type(key), rust_type(value)),
-        Type::Array(inner) => format!("Vec<{}>", rust_type(inner)),
+        Type::Map(key, value) => format!(
+            "HashMap<{}, {}>",
+            rust_type_inner(key, lifetime),
+            rust_type_inner(value, lifetime)
+        ),
+        Type::Array(inner) => format!("Vec<{}>", rust_type_inner(inner, lifetime)),
+    }
+}
+
+fn function_signature_uses_borrowed_slice(function: &Function) -> bool {
+    type_contains_borrowed_slice(&function.return_ty)
+        || function
+            .params
+            .iter()
+            .any(|param| type_contains_borrowed_slice(&param.ty))
+}
+
+fn type_contains_borrowed_slice(ty: &Type) -> bool {
+    match ty {
+        Type::Slice(_) => true,
+        Type::Option(inner) => type_contains_borrowed_slice(inner),
+        Type::Result(ok, err) => {
+            type_contains_borrowed_slice(ok) || type_contains_borrowed_slice(err)
+        }
+        Type::Tuple(elements) => elements.iter().any(type_contains_borrowed_slice),
+        Type::Map(key, value) => {
+            type_contains_borrowed_slice(key) || type_contains_borrowed_slice(value)
+        }
+        Type::Array(inner) => type_contains_borrowed_slice(inner),
+        Type::Int | Type::Bool | Type::String | Type::Struct(_) | Type::Enum(_) => false,
+    }
+}
+
+fn render_collection_edge(collection: &Expr, result_ty: &Type, from_end: bool) -> String {
+    let rendered = render_expr(collection);
+    let index = if from_end {
+        String::from("axiom_last_index(values.len())")
+    } else {
+        String::from("0")
+    };
+    match collection.ty() {
+        Type::Array(_) => {
+            if result_ty.is_copy() {
+                format!("{{ let values = {rendered}; axiom_array_get(&values, {index}) }}")
+            } else {
+                format!(
+                    "{{ let values = {rendered}; let index = {index}; axiom_array_take(values, index) }}"
+                )
+            }
+        }
+        Type::Slice(_) => format!(
+            "{{ let values = {rendered}; let index = {index}; axiom_array_get(values, index) }}"
+        ),
+        _ => unreachable!("type checker rejects first/last on non-collection values"),
     }
 }
 

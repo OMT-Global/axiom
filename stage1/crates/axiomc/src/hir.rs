@@ -204,12 +204,20 @@ pub struct StructFieldValue {
 struct Binding {
     ty: Type,
     moved: bool,
+    borrow_origin: Option<BorrowOrigin>,
 }
 
 #[derive(Debug, Clone)]
 struct FunctionSig {
     params: Vec<Type>,
     return_ty: Type,
+    slice_return_param: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BorrowOrigin {
+    Param(String),
+    Local,
 }
 
 struct LowerContext<'a> {
@@ -533,13 +541,6 @@ fn collect_function_signatures(
             function.line,
             function.column,
         )?;
-        if contains_borrowed_slice_type(&return_ty) {
-            return Err(Diagnostic::new(
-                "type",
-                "function return types cannot contain borrowed slices in stage1",
-            )
-            .with_span(function.line, function.column));
-        }
         let mut params = Vec::new();
         for param in &function.params {
             params.push(lower_type(
@@ -550,8 +551,17 @@ fn collect_function_signatures(
                 param.column,
             )?);
         }
+        let slice_return_param =
+            classify_slice_return(&params, &return_ty, function.line, function.column)?;
         if signatures
-            .insert(function.name.clone(), FunctionSig { params, return_ty })
+            .insert(
+                function.name.clone(),
+                FunctionSig {
+                    params,
+                    return_ty,
+                    slice_return_param,
+                },
+            )
             .is_some()
         {
             return Err(
@@ -609,6 +619,7 @@ fn lower_function(
             Binding {
                 ty: ty.clone(),
                 moved: false,
+                borrow_origin: binding_borrow_origin(&ty, Some(&param.name)),
             },
         );
         params.push(Param {
@@ -702,6 +713,12 @@ fn lower_stmt(
                 Binding {
                     ty: expected.clone(),
                     moved: false,
+                    borrow_origin: binding_borrow_origin_from_expr(
+                        &expected,
+                        &lowered_expr,
+                        env,
+                        ctx,
+                    ),
                 },
             );
             Ok(Stmt::Let {
@@ -928,6 +945,7 @@ fn lower_stmt(
                         Binding {
                             ty: payload_ty.clone(),
                             moved: false,
+                            borrow_origin: binding_borrow_origin(payload_ty, None),
                         },
                     );
                 }
@@ -978,6 +996,18 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
+            if matches!(expected, Type::Slice(_))
+                && !matches!(
+                    direct_borrow_origin(&lowered_expr, env, ctx),
+                    Some(BorrowOrigin::Param(_))
+                )
+            {
+                return Err(Diagnostic::new(
+                    "ownership",
+                    "returning borrowed slices requires a slice derived from a borrowed slice parameter in stage1",
+                )
+                .with_span(*line, *column));
+            }
             Ok(Stmt::Return(lowered_expr))
         }
     }
@@ -1013,6 +1043,7 @@ fn merge_branch_state(
             Binding {
                 ty: binding.ty.clone(),
                 moved: then_moved || else_moved,
+                borrow_origin: binding.borrow_origin.clone(),
             },
         );
     }
@@ -1039,6 +1070,7 @@ fn merge_loop_state(
             Binding {
                 ty: binding.ty.clone(),
                 moved: binding.moved || body_moved,
+                borrow_origin: binding.borrow_origin.clone(),
             },
         );
     }
@@ -1066,6 +1098,7 @@ fn merge_match_state(
             Binding {
                 ty: binding.ty.clone(),
                 moved,
+                borrow_origin: binding.borrow_origin.clone(),
             },
         );
     }
@@ -1206,6 +1239,48 @@ fn lower_expr_with_expected(
                     name: name.clone(),
                     args: vec![lowered],
                     ty: Type::Int,
+                });
+            }
+            if name == "first" || name == "last" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr(&args[0], env, ctx)?;
+                let element_ty = match lowered.ty() {
+                    Type::Array(element_ty) | Type::Slice(element_ty) => {
+                        (*element_ty.clone()).clone()
+                    }
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "{name} expects an array or slice value, got {}",
+                                lowered.ty()
+                            ),
+                        )
+                        .with_span(args[0].line(), args[0].column()));
+                    }
+                };
+                if matches!(lowered.ty(), Type::Slice(_)) && !element_ty.is_copy() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} requires a Copy element type when called on a borrowed slice, got {element_ty}"
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                if matches!(lowered.ty(), Type::Array(_)) && !element_ty.is_copy() {
+                    move_lowered_owner_value(&lowered, env)?;
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: element_ty,
                 });
             }
             if let Some(signature) = ctx.functions.get(name) {
@@ -2061,6 +2136,54 @@ fn is_borrowable_slice_base(expr: &Expr) -> bool {
     }
 }
 
+fn binding_borrow_origin(ty: &Type, param_name: Option<&str>) -> Option<BorrowOrigin> {
+    if !contains_borrowed_slice_type(ty) {
+        return None;
+    }
+    Some(match param_name {
+        Some(name) => BorrowOrigin::Param(name.to_string()),
+        None => BorrowOrigin::Local,
+    })
+}
+
+fn binding_borrow_origin_from_expr(
+    ty: &Type,
+    expr: &Expr,
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Option<BorrowOrigin> {
+    if !contains_borrowed_slice_type(ty) {
+        return None;
+    }
+    Some(direct_borrow_origin(expr, env, ctx).unwrap_or(BorrowOrigin::Local))
+}
+
+fn direct_borrow_origin(
+    expr: &Expr,
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Option<BorrowOrigin> {
+    if !matches!(expr.ty(), Type::Slice(_)) {
+        return None;
+    }
+    match expr {
+        Expr::VarRef { name, .. } => env
+            .get(name)
+            .and_then(|binding| binding.borrow_origin.clone()),
+        Expr::Slice { base, .. } => match base.ty() {
+            Type::Slice(_) => direct_borrow_origin(base, env, ctx),
+            Type::Array(_) => Some(BorrowOrigin::Local),
+            _ => Some(BorrowOrigin::Local),
+        },
+        Expr::Call { name, args, .. } => ctx
+            .functions
+            .get(name)
+            .and_then(|signature| signature.slice_return_param)
+            .and_then(|index| direct_borrow_origin(&args[index], env, ctx)),
+        _ => Some(BorrowOrigin::Local),
+    }
+}
+
 fn contains_borrowed_slice_type(ty: &Type) -> bool {
     match ty {
         Type::Slice(_) => true,
@@ -2075,6 +2198,37 @@ fn contains_borrowed_slice_type(ty: &Type) -> bool {
         Type::Array(inner) => contains_borrowed_slice_type(inner),
         Type::Int | Type::Bool | Type::String | Type::Struct(_) | Type::Enum(_) => false,
     }
+}
+
+fn classify_slice_return(
+    params: &[Type],
+    return_ty: &Type,
+    line: usize,
+    column: usize,
+) -> Result<Option<usize>, Diagnostic> {
+    if !contains_borrowed_slice_type(return_ty) {
+        return Ok(None);
+    }
+    if !matches!(return_ty, Type::Slice(_)) {
+        return Err(Diagnostic::new(
+            "type",
+            "function return types may only use direct borrowed slice types in stage1",
+        )
+        .with_span(line, column));
+    }
+    let matches = params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, ty)| (ty == return_ty).then_some(index))
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(Diagnostic::new(
+            "type",
+            "borrowed slice return functions must take exactly one borrowed slice parameter with the same type in stage1",
+        )
+        .with_span(line, column));
+    }
+    Ok(matches.first().copied())
 }
 
 fn lower_literal(literal: &syntax::Literal) -> Expr {
