@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from .ast import (
     AssignStmt,
@@ -21,7 +21,6 @@ from .ast import (
     PrintStmt,
     ReturnStmt,
     StringLit,
-    TypeName,
     UnaryNeg,
     VarRef,
     WhileStmt,
@@ -29,6 +28,11 @@ from .ast import (
 from .bytecode import Bytecode, FunctionMeta, Instr, ModuleMeta, Op, Upvalue
 from .checker import CheckedProgram, FunctionSignature
 from .errors import AxiomCompileError
+from .semantic_plan import (
+    RESERVED_IDENTIFIER_NAMES,
+    SemanticPlan,
+    build_semantic_plan,
+)
 
 
 @dataclass(frozen=True)
@@ -55,14 +59,17 @@ class Compiler:
     compiled_functions: Set[str] = field(default_factory=set)
     allow_host_side_effects: bool = False
     allowed_host_calls: Optional[Set[str]] = None
+    semantic_plan: Optional[SemanticPlan] = None
     _parent_bindings: Dict[str, BindingRef] = field(default_factory=dict)
     _current_upvalue_map: Dict[str, int] = field(default_factory=dict)
     _current_upvalues: List[Upvalue] = field(default_factory=list)
-    RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
-    RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
 
     def compile(self, checked: CheckedProgram) -> Bytecode:
         program = checked.program
+        self.semantic_plan = build_semantic_plan(
+            program,
+            error_factory=lambda message, span: AxiomCompileError(message, span),
+        )
         self.scope_stack = [{}]
         self.next_slot = 0
         self.strings = []
@@ -81,8 +88,13 @@ class Compiler:
         self._current_upvalue_map = {}
         self._current_upvalues = []
 
-        global_scope = self._collect_functions(program.stmts, [], [])
-        self.function_scope_stack = [global_scope]
+        self.function_defs = dict(self.semantic_plan.function_defs)
+        self.function_decl_order = list(self.semantic_plan.function_decl_order)
+        self.function_scopes = dict(self.semantic_plan.function_scopes)
+        self.function_ids = {
+            name: index for index, name in enumerate(self.function_decl_order)
+        }
+        self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
 
         out: List[Instr] = []
         for stmt in program.stmts:
@@ -125,47 +137,6 @@ class Compiler:
             functions=ordered_functions,
             modules=module_metas,
         )
-
-    def _qualify(self, parts: List[str]) -> str:
-        return ".".join(parts)
-
-    def _collect_functions(
-        self, stmts: List[object], scope_chain: List[Dict[str, str]], scope_path: List[str]
-    ) -> Dict[str, str]:
-        local_scope: Dict[str, str] = {}
-
-        for stmt in stmts:
-            if not isinstance(stmt, FunctionDefStmt):
-                continue
-            if stmt.name in self.RESERVED_FUNCTION_NAMES:
-                raise AxiomCompileError(f"reserved function name {stmt.name!r}", stmt.span)
-            if stmt.name in local_scope:
-                raise AxiomCompileError(f"duplicate function {stmt.name!r}", stmt.span)
-
-            qual_name = self._qualify(scope_path + [stmt.name])
-            if qual_name in self.function_ids:
-                raise AxiomCompileError(f"duplicate function {qual_name!r}", stmt.span)
-
-            self.function_ids[qual_name] = len(self.function_decl_order)
-            self.function_defs[qual_name] = stmt
-            self.function_decl_order.append(qual_name)
-            local_scope[stmt.name] = qual_name
-
-        current_chain = scope_chain + [local_scope]
-        for stmt in stmts:
-            if not isinstance(stmt, FunctionDefStmt):
-                continue
-            qual_name = self._qualify(scope_path + [stmt.name])
-            body_scope_chain = current_chain + [{stmt.name: qual_name}]
-            body_locals = self._collect_functions(
-                stmt.body.stmts, body_scope_chain, scope_path + [stmt.name]
-            )
-            self.function_scopes[qual_name] = body_scope_chain + [
-                body_locals,
-                {stmt.name: qual_name},
-            ]
-
-        return local_scope
 
     def _compile_function(
         self,
@@ -272,7 +243,7 @@ class Compiler:
         return source.index, False
 
     def _slot_for_let(self, name: str, span) -> int:
-        if name in self.RESERVED_IDENTIFIER_NAMES:
+        if name in RESERVED_IDENTIFIER_NAMES:
             raise AxiomCompileError(f"reserved identifier {name!r}", span)
         current = self.scope_stack[-1]
         if name in current:
@@ -284,7 +255,7 @@ class Compiler:
         return slot
 
     def _slot_for_param(self, param: Param) -> None:
-        if param.name in self.RESERVED_IDENTIFIER_NAMES:
+        if param.name in RESERVED_IDENTIFIER_NAMES:
             raise AxiomCompileError(f"reserved identifier {param.name!r}", param.span)
         current = self.scope_stack[-1]
         if param.name in current:
@@ -429,10 +400,8 @@ class Compiler:
     def _resolve_function(self, fn_name: str, span) -> str:
         if fn_name.startswith("host."):
             return fn_name
-        if "." not in fn_name:
-            for scope in reversed(self.function_scope_stack):
-                if fn_name in scope:
-                    return scope[fn_name]
-        if fn_name in self.function_ids:
-            return fn_name
+        if self.semantic_plan is not None:
+            resolved = self.semantic_plan.resolve_function(fn_name, self.function_scope_stack)
+            if resolved is not None:
+                return resolved
         raise AxiomCompileError(f"undefined function {fn_name!r}", span)

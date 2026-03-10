@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List, TextIO, Tuple
+from typing import Dict, List, Optional, TextIO, Tuple
 
 from .ast import (
     Program,
@@ -27,6 +27,11 @@ from .ast import (
 )
 from .errors import AxiomRuntimeError
 from .host import HOST_BUILTINS, call_host_builtin
+from .semantic_plan import (
+    RESERVED_IDENTIFIER_NAMES,
+    SemanticPlan,
+    build_semantic_plan,
+)
 from .values import (
     Value,
     add_values,
@@ -52,8 +57,6 @@ class _FunctionReturn(Exception):
 
 @dataclass
 class Interpreter:
-    RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
-
     scopes: List[Dict[str, Value]] = field(default_factory=lambda: [{}])
     global_scope: Dict[str, Value] = field(default_factory=dict)
     functions: Dict[str, FunctionDefStmt] = field(default_factory=dict)
@@ -64,76 +67,36 @@ class Interpreter:
         default_factory=list
     )
     allow_host_side_effects: bool = False
+    semantic_plan: Optional[SemanticPlan] = None
 
     def run(self, program: Program, out: TextIO) -> None:
+        self.semantic_plan = build_semantic_plan(
+            program,
+            error_factory=lambda message, span: AxiomRuntimeError(message, span),
+        )
         self.global_scope = {}
         self.scopes = [self.global_scope]
         self.call_stack = []
         self.function_depth = 0
-        self.functions = {}
-        self.function_scopes = {}
-        self.function_scope_stack = [{}]
-
-        global_scope = self._collect_functions(program.stmts, [], [])
-        self.function_scope_stack = [global_scope]
+        self.functions = dict(self.semantic_plan.function_defs)
+        self.function_scopes = dict(self.semantic_plan.function_scopes)
+        self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
 
         for stmt in program.stmts:
             if isinstance(stmt, FunctionDefStmt):
                 continue
             self._exec_stmt(stmt, out)
 
-    def _collect_functions(
-        self, stmts: List, scope_chain: List[Dict[str, str]], scope_path: List[str]
-    ) -> Dict[str, str]:
-        local_scope: Dict[str, str] = {}
-
-        for stmt in stmts:
-            if not isinstance(stmt, FunctionDefStmt):
-                continue
-            if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
-                raise AxiomRuntimeError(f"reserved function name {stmt.name!r}")
-            if any(param.name in self.RESERVED_IDENTIFIER_NAMES for param in stmt.params):
-                for param in stmt.params:
-                    if param.name in self.RESERVED_IDENTIFIER_NAMES:
-                        raise AxiomRuntimeError(f"reserved identifier {param.name!r}")
-            if stmt.name in local_scope:
-                raise AxiomRuntimeError(f"duplicate function {stmt.name!r}")
-
-            qual_name = ".".join(scope_path + [stmt.name])
-            if qual_name in self.functions:
-                raise AxiomRuntimeError(f"duplicate function {qual_name!r}")
-
-            self.functions[qual_name] = stmt
-            local_scope[stmt.name] = qual_name
-
-        current_chain = scope_chain + [local_scope]
-
-        for stmt in stmts:
-            if not isinstance(stmt, FunctionDefStmt):
-                continue
-            qual_name = ".".join(scope_path + [stmt.name])
-            body_scope_chain = current_chain + [{stmt.name: qual_name}]
-            body_locals = self._collect_functions(
-                stmt.body.stmts, body_scope_chain, scope_path + [stmt.name]
-            )
-            self.function_scopes[qual_name] = body_scope_chain + [
-                body_locals,
-                {stmt.name: qual_name},
-            ]
-
-        return local_scope
-
     def _resolve_function(self, name: str) -> str:
-        if "." in name and name in self.functions:
-            return name
-        for scope in reversed(self.function_scope_stack):
-            if name in scope:
-                return scope[name]
+        if self.semantic_plan is not None:
+            resolved = self.semantic_plan.resolve_function(name, self.function_scope_stack)
+            if resolved is not None:
+                return resolved
         raise AxiomRuntimeError(f"undefined function {name!r}")
 
     def _exec_stmt(self, stmt, out: TextIO) -> None:
         if isinstance(stmt, LetStmt):
-            if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
+            if stmt.name in RESERVED_IDENTIFIER_NAMES:
                 raise AxiomRuntimeError(f"reserved identifier {stmt.name!r}")
             self.scopes[-1][stmt.name] = self._eval(stmt.expr, out)
             return
@@ -195,7 +158,7 @@ class Interpreter:
         raise AxiomRuntimeError(f"undefined variable {name!r}", span)
 
     def _assign(self, name: str, value: Value, span) -> None:
-        if name in self.RESERVED_IDENTIFIER_NAMES:
+        if name in RESERVED_IDENTIFIER_NAMES:
             raise AxiomRuntimeError(f"reserved identifier {name!r}")
         for scope in reversed(self.scopes):
             if name in scope:
@@ -219,8 +182,6 @@ class Interpreter:
 
         param_scope: Dict[str, Value] = {}
         for index, param in enumerate(fn.params):
-            if param.name in self.RESERVED_IDENTIFIER_NAMES:
-                raise AxiomRuntimeError(f"reserved identifier {param.name!r}")
             param_scope[param.name] = args[index]
 
         self.scopes.append(param_scope)

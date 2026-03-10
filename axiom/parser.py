@@ -531,10 +531,10 @@ class Parser:
             inner = self._parse_factor()
             return UnaryNeg(expr=inner, span=Span(minus.span.start, expr_span(inner).end))
         if t.kind == TokenKind.LPAREN:
-            l = self._bump()
+            lparen_token = self._bump()
             expr = self._parse_expr()
-            r = self._eat(TokenKind.RPAREN)
-            return _widen_span(expr, Span(l.span.start, r.span.end))
+            rparen_token = self._eat(TokenKind.RPAREN)
+            return _widen_span(expr, Span(lparen_token.span.start, rparen_token.span.end))
         raise AxiomParseError(
             "expected expression",
             t.span,

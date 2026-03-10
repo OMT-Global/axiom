@@ -1,0 +1,283 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Iterable, List, Optional, Sequence, Set
+
+from .ast import (
+    AssignStmt,
+    Binary,
+    BlockStmt,
+    BoolLit,
+    CallExpr,
+    Expr,
+    ExprStmt,
+    FunctionDefStmt,
+    IfStmt,
+    ImportStmt,
+    IntLit,
+    LetStmt,
+    PrintStmt,
+    Program,
+    ReturnStmt,
+    Stmt,
+    StringLit,
+    UnaryNeg,
+    VarRef,
+    WhileStmt,
+)
+from .errors import AxiomCompileError, AxiomError, Span
+from .lexer import Lexer
+from .parser import Parser
+
+
+def parse_program(src: str, path: Path | str | None = None) -> Program:
+    toks = Lexer(src, path=str(path) if path is not None else None).tokenize()
+    return Parser(
+        toks,
+        source=src,
+        source_path=str(path) if path is not None else None,
+    ).parse_program()
+
+
+def normalize_module_search_paths(
+    paths: Optional[Iterable[Path]] = None,
+) -> Optional[Sequence[Path]]:
+    if paths is None:
+        return None
+    normalized: List[Path] = []
+    for item in paths:
+        normalized.append(item)
+    return normalized
+
+
+@dataclass
+class ModuleLoader:
+    module_search_paths: Optional[Sequence[Path]] = None
+    seen: Set[Path] = field(default_factory=set)
+    loading: Set[Path] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self.module_search_paths = normalize_module_search_paths(self.module_search_paths)
+
+    def load_file(self, path: Path) -> Program:
+        return self._load_program_file(Path(path).resolve())
+
+    def _load_program_file(
+        self,
+        path: Path,
+        *,
+        import_source: Optional[str] = None,
+        import_span: Optional[Span] = None,
+        importer_path: Optional[Path] = None,
+    ) -> Program:
+        if path in self.seen:
+            return Program(stmts=[])
+
+        if path in self.loading:
+            if import_span is not None and import_source is not None and importer_path is not None:
+                raise AxiomCompileError(
+                    f"circular import of {path}",
+                    import_span,
+                    source=import_source,
+                    path=str(importer_path),
+                )
+            raise AxiomCompileError(f"circular import of {path}")
+
+        if not path.exists():
+            if import_span is not None and import_source is not None and importer_path is not None:
+                raise AxiomCompileError(
+                    f"cannot resolve import file {path}",
+                    import_span,
+                    source=import_source,
+                    path=str(importer_path),
+                )
+            raise AxiomCompileError(f"cannot resolve import file {path}")
+
+        self.loading.add(path)
+        try:
+            src = path.read_text(encoding="utf-8")
+            program = parse_program(src, path=path)
+
+            stmts = []
+            for stmt in program.stmts:
+                if isinstance(stmt, ImportStmt):
+                    try:
+                        import_path = self.resolve_import_path(stmt.path, path)
+                    except AxiomCompileError as e:
+                        raise AxiomCompileError(
+                            e.message,
+                            stmt.span,
+                            source=src,
+                            path=str(path),
+                        ) from e
+                    if not import_path.exists():
+                        raise AxiomCompileError(
+                            f"cannot resolve import file {import_path}",
+                            stmt.span,
+                            source=src,
+                            path=str(path),
+                        )
+                    imported_source = import_path.read_text(encoding="utf-8")
+                    imported = self._load_program_file(
+                        import_path,
+                        import_source=src,
+                        import_span=stmt.span,
+                        importer_path=path,
+                    )
+                    try:
+                        validate_module_file(imported, import_path, source=imported_source)
+                    except AxiomError as e:
+                        attach_import_note(
+                            e,
+                            import_source=src,
+                            import_span=stmt.span,
+                            importer_path=path,
+                        )
+                        raise
+                    stmts.extend(namespace_module_program(imported, stmt.alias).stmts)
+                else:
+                    stmts.append(stmt)
+        except AxiomError as e:
+            attach_import_note(
+                e,
+                import_source=import_source,
+                import_span=import_span,
+                importer_path=importer_path,
+            )
+            raise
+        finally:
+            self.loading.discard(path)
+
+        self.seen.add(path)
+        return Program(stmts=stmts)
+
+    def resolve_import_path(self, raw: str, base_path: Path) -> Path:
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            raise AxiomCompileError(f"absolute import paths are not allowed: {raw!r}")
+        if any(part == ".." for part in candidate.parts):
+            raise AxiomCompileError(f"parent traversal in import path is not allowed: {raw!r}")
+        if candidate.suffix == "":
+            candidate = candidate.with_suffix(".ax")
+        if candidate.suffix not in (".ax", ".AX"):
+            # Preserve prior behavior for module names that may include dots.
+            candidate = Path(str(candidate) + ".ax")
+
+        search_paths = [base_path.parent]
+        search_paths.extend(self.module_search_paths or [])
+
+        for root in search_paths:
+            candidate_path = root / candidate
+            if candidate_path.exists():
+                return candidate_path
+        raise AxiomCompileError(f"cannot resolve import file {candidate}")
+
+
+def load_program_file(
+    path: Path, module_search_paths: Optional[Sequence[Path]] = None
+) -> Program:
+    return ModuleLoader(module_search_paths=module_search_paths).load_file(path)
+
+
+def attach_import_note(
+    error: AxiomError,
+    *,
+    import_source: Optional[str],
+    import_span: Optional[Span],
+    importer_path: Optional[Path],
+) -> None:
+    if import_source is None or import_span is None or importer_path is None:
+        return
+    error.add_note(
+        "imported from here",
+        span=import_span,
+        source=import_source,
+        path=str(importer_path),
+    )
+
+
+def namespace_module_program(program: Program, module_alias: str) -> Program:
+    fn_names = {
+        stmt.name: f"{module_alias}.{stmt.name}"
+        for stmt in program.stmts
+        if isinstance(stmt, FunctionDefStmt)
+    }
+
+    def rewrite_expr(expr: Expr) -> Expr:
+        if isinstance(expr, (IntLit, StringLit, BoolLit, VarRef)):
+            return expr
+        if isinstance(expr, UnaryNeg):
+            return UnaryNeg(expr=rewrite_expr(expr.expr), span=expr.span)
+        if isinstance(expr, Binary):
+            return Binary(
+                op=expr.op,
+                lhs=rewrite_expr(expr.lhs),
+                rhs=rewrite_expr(expr.rhs),
+                span=expr.span,
+            )
+        if isinstance(expr, CallExpr):
+            callee = fn_names.get(expr.callee, expr.callee)
+            return CallExpr(
+                callee=callee,
+                args=[rewrite_expr(arg) for arg in expr.args],
+                span=expr.span,
+            )
+        raise AssertionError("unknown expr")
+
+    def rewrite_stmt(stmt: Stmt) -> Stmt:
+        if isinstance(stmt, FunctionDefStmt):
+            return FunctionDefStmt(
+                name=fn_names[stmt.name],
+                params=stmt.params,
+                return_type=stmt.return_type,
+                body=rewrite_stmt(stmt.body),
+                span=stmt.span,
+            )
+        if isinstance(stmt, LetStmt):
+            return LetStmt(
+                name=stmt.name,
+                type_ref=stmt.type_ref,
+                expr=rewrite_expr(stmt.expr),
+                span=stmt.span,
+            )
+        if isinstance(stmt, AssignStmt):
+            return AssignStmt(name=stmt.name, expr=rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, ReturnStmt):
+            return ReturnStmt(expr=rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, PrintStmt):
+            return PrintStmt(expr=rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, ExprStmt):
+            return ExprStmt(expr=rewrite_expr(stmt.expr), span=stmt.span)
+        if isinstance(stmt, BlockStmt):
+            return BlockStmt(stmts=[rewrite_stmt(item) for item in stmt.stmts], span=stmt.span)
+        if isinstance(stmt, IfStmt):
+            return IfStmt(
+                cond=rewrite_expr(stmt.cond),
+                then_block=rewrite_stmt(stmt.then_block),
+                else_block=rewrite_stmt(stmt.else_block) if stmt.else_block else None,
+                span=stmt.span,
+            )
+        if isinstance(stmt, WhileStmt):
+            return WhileStmt(
+                cond=rewrite_expr(stmt.cond),
+                body=rewrite_stmt(stmt.body),
+                span=stmt.span,
+            )
+        return stmt
+
+    return Program(stmts=[rewrite_stmt(stmt) for stmt in program.stmts])
+
+
+def validate_module_file(
+    program: Program, import_path: Path, source: Optional[str] = None
+) -> None:
+    for stmt in program.stmts:
+        if isinstance(stmt, (FunctionDefStmt, ImportStmt)):
+            continue
+        raise AxiomCompileError(
+            f"imported module {import_path} may only contain imports and function declarations",
+            stmt.span,
+            path=str(import_path),
+            source=source,
+        )

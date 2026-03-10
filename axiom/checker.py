@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from .ast import (
     AssignStmt,
@@ -29,6 +29,11 @@ from .ast import (
 )
 from .errors import AxiomCompileError
 from .host import HOST_BUILTINS
+from .semantic_plan import (
+    RESERVED_IDENTIFIER_NAMES,
+    SemanticPlan,
+    build_semantic_plan,
+)
 from .values import ValueKind
 
 
@@ -50,6 +55,7 @@ class CheckedProgram:
 class Checker:
     allow_host_side_effects: bool = False
     allowed_host_calls: Optional[set[str]] = None
+    semantic_plan: Optional[SemanticPlan] = None
     function_defs: Dict[str, FunctionDefStmt] = field(default_factory=dict)
     function_decl_order: List[str] = field(default_factory=list)
     function_scopes: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
@@ -60,10 +66,12 @@ class Checker:
     expr_types: Dict[int, TypeName] = field(default_factory=dict)
     _parent_types: Dict[str, TypeName] = field(default_factory=dict)
     _current_return_type: Optional[TypeName] = None
-    RESERVED_FUNCTION_NAMES: ClassVar[set[str]] = {"host"}
-    RESERVED_IDENTIFIER_NAMES: ClassVar[set[str]] = {"host"}
 
     def check(self, program: Program) -> CheckedProgram:
+        self.semantic_plan = build_semantic_plan(
+            program,
+            error_factory=lambda message, span: AxiomCompileError(message, span),
+        )
         self.function_defs = {}
         self.function_decl_order = []
         self.function_scopes = {}
@@ -75,8 +83,20 @@ class Checker:
         self._parent_types = {}
         self._current_return_type = None
 
-        global_scope = self._collect_functions(program.stmts, [], [])
-        self.function_scope_stack = [global_scope]
+        self.function_defs = dict(self.semantic_plan.function_defs)
+        self.function_decl_order = list(self.semantic_plan.function_decl_order)
+        self.function_scopes = dict(self.semantic_plan.function_scopes)
+        self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
+        for fn_name in self.function_decl_order:
+            fn = self.function_defs[fn_name]
+            self.function_signatures[fn_name] = FunctionSignature(
+                name=fn_name,
+                param_types=[
+                    self._require_param_type(fn_name=fn_name, param=param)
+                    for param in fn.params
+                ],
+                return_type=self._require_return_type(fn_name=fn_name, fn=fn),
+            )
 
         for stmt in program.stmts:
             self._check_stmt(stmt)
@@ -86,54 +106,6 @@ class Checker:
             expr_types=dict(self.expr_types),
             function_signatures=dict(self.function_signatures),
         )
-
-    def _collect_functions(
-        self, stmts: List[object], scope_chain: List[Dict[str, str]], scope_path: List[str]
-    ) -> Dict[str, str]:
-        local_scope: Dict[str, str] = {}
-
-        for stmt in stmts:
-            if not isinstance(stmt, FunctionDefStmt):
-                continue
-            if stmt.name in self.RESERVED_FUNCTION_NAMES:
-                raise AxiomCompileError(f"reserved function name {stmt.name!r}", stmt.span)
-            if stmt.name in local_scope:
-                raise AxiomCompileError(f"duplicate function {stmt.name!r}", stmt.span)
-
-            qual_name = self._qualify(scope_path + [stmt.name])
-            if qual_name in self.function_defs:
-                raise AxiomCompileError(f"duplicate function {qual_name!r}", stmt.span)
-
-            self.function_defs[qual_name] = stmt
-            self.function_decl_order.append(qual_name)
-            self.function_signatures[qual_name] = FunctionSignature(
-                name=qual_name,
-                param_types=[
-                    self._require_param_type(fn_name=qual_name, param=param)
-                    for param in stmt.params
-                ],
-                return_type=self._require_return_type(fn_name=qual_name, fn=stmt),
-            )
-            local_scope[stmt.name] = qual_name
-
-        current_chain = scope_chain + [local_scope]
-        for stmt in stmts:
-            if not isinstance(stmt, FunctionDefStmt):
-                continue
-            qual_name = self._qualify(scope_path + [stmt.name])
-            body_scope_chain = current_chain + [{stmt.name: qual_name}]
-            body_locals = self._collect_functions(
-                stmt.body.stmts, body_scope_chain, scope_path + [stmt.name]
-            )
-            self.function_scopes[qual_name] = body_scope_chain + [
-                body_locals,
-                {stmt.name: qual_name},
-            ]
-
-        return local_scope
-
-    def _qualify(self, parts: List[str]) -> str:
-        return ".".join(parts)
 
     def _check_function(
         self,
@@ -223,7 +195,7 @@ class Checker:
         return False
 
     def _bind_param(self, param: Param) -> None:
-        if param.name in self.RESERVED_IDENTIFIER_NAMES:
+        if param.name in RESERVED_IDENTIFIER_NAMES:
             raise AxiomCompileError(f"reserved identifier {param.name!r}", param.span)
         current = self.scope_stack[-1]
         if param.name in current:
@@ -246,17 +218,15 @@ class Checker:
     def _resolve_function(self, fn_name: str, span) -> str:
         if fn_name.startswith("host."):
             return fn_name
-        if "." not in fn_name:
-            for scope in reversed(self.function_scope_stack):
-                if fn_name in scope:
-                    return scope[fn_name]
-        if fn_name in self.function_defs:
-            return fn_name
+        if self.semantic_plan is not None:
+            resolved = self.semantic_plan.resolve_function(fn_name, self.function_scope_stack)
+            if resolved is not None:
+                return resolved
         raise AxiomCompileError(f"undefined function {fn_name!r}", span)
 
     def _check_stmt(self, stmt: object) -> None:
         if isinstance(stmt, LetStmt):
-            if stmt.name in self.RESERVED_IDENTIFIER_NAMES:
+            if stmt.name in RESERVED_IDENTIFIER_NAMES:
                 raise AxiomCompileError(f"reserved identifier {stmt.name!r}", stmt.span)
             expr_type = self._check_expr(stmt.expr)
             expected_type = self._require_let_type(stmt)

@@ -1,0 +1,20 @@
+import "sessions/architect" as architect
+import "sessions/builder" as builder
+
+let system: string = architect.system_name()
+let edge: string = architect.edge_name()
+let worker: string = builder.worker_name()
+let audit: string = builder.audit_name()
+let ready: bool = true
+
+if ready {
+  print "+--------------------------------+"
+  print "| codex session a -> architect   |"
+  print "| codex session b -> builder     |"
+  print "+--------------------------------+"
+  print architect.plan_line()
+  print builder.build_line(edge)
+  print "system: " + system
+  print edge + " -> " + worker + " -> " + audit
+  print builder.ship_line(system)
+}

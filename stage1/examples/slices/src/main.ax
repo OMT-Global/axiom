@@ -1,0 +1,20 @@
+fn tail(values: &[int]): &[int] {
+return values[1:]
+}
+
+fn string_tail_len(values: &[string]): int {
+let rest: &[string] = values[1:]
+return len(rest)
+}
+
+let values: [int] = [3, 7, 9, 11]
+let window: &[int] = tail(values[:])
+
+print first(window)
+print last(window)
+print len(window)
+let labels: [string] = ["build", "test", "ship"]
+print string_tail_len(labels[:])
+
+let words: [string] = ["alpha", "beta"]
+print first(words)

@@ -3,3 +3,5 @@ __pycache__/
 *.pyo
 *.axb
 .DS_Store
+stage1/target/
+stage1/examples/**/dist/

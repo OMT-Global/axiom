@@ -111,6 +111,55 @@ class AxiomError(Exception):
             )
         return "\n".join(blocks)
 
+    def _location_dict(
+        self,
+        *,
+        span: Optional[Span],
+        source: Optional[str],
+        path: Optional[str],
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "path": path,
+            "span": (
+                {
+                    "start": span.start,
+                    "end": span.end,
+                }
+                if span is not None
+                else None
+            ),
+        }
+        if span is not None and source is not None:
+            line, column = _line_col(source, span.start)
+            _, line_text = _line_text(source, span.start)
+            payload["line"] = line
+            payload["column"] = column
+            payload["line_text"] = line_text
+        return payload
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.__class__.__name__,
+            "message": self.message,
+            "rendered": str(self),
+            "location": self._location_dict(
+                span=self.span,
+                source=self.source,
+                path=self.path,
+            ),
+            "notes": [
+                {
+                    "message": note.message,
+                    "location": self._location_dict(
+                        span=note.span,
+                        source=note.source,
+                        path=note.path,
+                    ),
+                }
+                for note in self.notes
+            ],
+        }
+
 
 class AxiomParseError(AxiomError):
     pass
