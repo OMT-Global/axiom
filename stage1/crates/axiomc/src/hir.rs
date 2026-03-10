@@ -205,7 +205,7 @@ struct Binding {
     ty: Type,
     moved: bool,
     borrow_origin: Option<BorrowOrigin>,
-    borrowed_owner: Option<String>,
+    borrowed_owners: HashSet<String>,
     active_borrow_count: usize,
 }
 
@@ -213,7 +213,7 @@ struct Binding {
 struct FunctionSig {
     params: Vec<Type>,
     return_ty: Type,
-    slice_return_param: Option<usize>,
+    borrow_return_params: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +228,7 @@ struct LowerContext<'a> {
     variants: &'a HashMap<String, VariantInfo>,
     functions: &'a HashMap<String, FunctionSig>,
     current_return: Option<Type>,
+    current_borrow_return_params: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -258,6 +259,7 @@ pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
         variants: &variants,
         functions: &functions,
         current_return: None,
+        current_borrow_return_params: HashSet::new(),
     };
     let mut env = HashMap::new();
     let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
@@ -553,15 +555,15 @@ fn collect_function_signatures(
                 param.column,
             )?);
         }
-        let slice_return_param =
-            classify_slice_return(&params, &return_ty, function.line, function.column)?;
+        let borrow_return_params =
+            classify_borrow_return(&params, &return_ty, function.line, function.column)?;
         if signatures
             .insert(
                 function.name.clone(),
                 FunctionSig {
                     params,
                     return_ty,
-                    slice_return_param,
+                    borrow_return_params,
                 },
             )
             .is_some()
@@ -589,12 +591,20 @@ fn lower_function(
         function.line,
         function.column,
     )?;
+    let signature = functions
+        .get(&function.name)
+        .expect("function signatures collected before lowering");
     let ctx = LowerContext {
         structs,
         enums,
         variants,
         functions,
         current_return: Some(return_ty.clone()),
+        current_borrow_return_params: signature
+            .borrow_return_params
+            .iter()
+            .map(|index| function.params[*index].name.clone())
+            .collect(),
     };
     let mut env: HashMap<String, Binding> = HashMap::new();
     let mut params = Vec::new();
@@ -622,7 +632,7 @@ fn lower_function(
                 ty: ty.clone(),
                 moved: false,
                 borrow_origin: binding_borrow_origin(&ty, Some(&param.name)),
-                borrowed_owner: None,
+                borrowed_owners: HashSet::new(),
                 active_borrow_count: 0,
             },
         );
@@ -712,11 +722,9 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            let borrowed_owner =
-                binding_borrowed_owner_from_expr(&expected, &lowered_expr, env, ctx);
-            if let Some(owner_name) = borrowed_owner.as_ref() {
-                increment_active_borrow(owner_name, env)?;
-            }
+            let borrowed_owners =
+                binding_borrowed_owners_from_expr(&expected, &lowered_expr, env, ctx);
+            increment_active_borrows(&borrowed_owners, env)?;
             if !actual.is_copy() {
                 move_lowered_value(&lowered_expr, env)?;
             }
@@ -731,7 +739,7 @@ fn lower_stmt(
                         env,
                         ctx,
                     ),
-                    borrowed_owner,
+                    borrowed_owners,
                     active_borrow_count: 0,
                 },
             );
@@ -766,6 +774,33 @@ fn lower_stmt(
                     format!("if condition expects bool, got {}", lowered_cond.ty()),
                 )
                 .with_span(*line, *column));
+            }
+            if let Some(known_cond) = static_bool_value(&lowered_cond) {
+                if known_cond {
+                    let mut then_env = env.clone();
+                    let (then_block, then_after, _) = lower_block(then_block, &mut then_env, ctx)?;
+                    *env = then_after;
+                    return Ok(Stmt::If {
+                        cond: lowered_cond,
+                        then_block,
+                        else_block: else_block.as_ref().map(|_| Vec::new()),
+                    });
+                }
+                if let Some(else_block) = else_block {
+                    let mut else_env = env.clone();
+                    let (block, after, _) = lower_block(else_block, &mut else_env, ctx)?;
+                    *env = after;
+                    return Ok(Stmt::If {
+                        cond: lowered_cond,
+                        then_block: Vec::new(),
+                        else_block: Some(block),
+                    });
+                }
+                return Ok(Stmt::If {
+                    cond: lowered_cond,
+                    then_block: Vec::new(),
+                    else_block: None,
+                });
             }
             let before = env.clone();
             let mut then_env = before.clone();
@@ -806,6 +841,12 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
+            if static_bool_value(&lowered_cond) == Some(false) {
+                return Ok(Stmt::While {
+                    cond: lowered_cond,
+                    body: Vec::new(),
+                });
+            }
             let before = env.clone();
             let mut body_env = before.clone();
             let (body, body_after, body_returns) = lower_block(body, &mut body_env, ctx)?;
@@ -822,6 +863,8 @@ fn lower_stmt(
             column,
         } => {
             let lowered_expr = lower_expr(expr, env, ctx)?;
+            let match_borrowed_owners = expr_borrowed_owners(&lowered_expr, env, ctx);
+            increment_active_borrows(&match_borrowed_owners, env)?;
             if matches!(lowered_expr, Expr::VarRef { .. }) && !lowered_expr.ty().is_copy() {
                 move_lowered_owner_value(&lowered_expr, env)?;
             }
@@ -937,7 +980,9 @@ fn lower_stmt(
                     }
                     variant_def.payload_tys.clone()
                 };
-                for (binding, payload_ty) in arm.bindings.iter().zip(binding_tys.iter()) {
+                for (binding_index, (binding, payload_ty)) in
+                    arm.bindings.iter().zip(binding_tys.iter()).enumerate()
+                {
                     if ctx.functions.contains_key(binding) {
                         return Err(Diagnostic::new(
                             "type",
@@ -959,8 +1004,24 @@ fn lower_stmt(
                         Binding {
                             ty: payload_ty.clone(),
                             moved: false,
-                            borrow_origin: binding_borrow_origin(payload_ty, None),
-                            borrowed_owner: None,
+                            borrow_origin: match_binding_borrow_origin(
+                                &lowered_expr,
+                                &arm.variant,
+                                binding,
+                                binding_index,
+                                payload_ty,
+                                &before,
+                                ctx,
+                            ),
+                            borrowed_owners: match_binding_borrowed_owners(
+                                &lowered_expr,
+                                &arm.variant,
+                                binding,
+                                binding_index,
+                                payload_ty,
+                                &before,
+                                ctx,
+                            ),
                             active_borrow_count: 0,
                         },
                     );
@@ -992,6 +1053,7 @@ fn lower_stmt(
                 .with_span(*line, *column));
             }
             merge_match_state(env, &before, &arm_states);
+            release_active_borrow_owners(&match_borrowed_owners, env);
             Ok(Stmt::Match {
                 expr: lowered_expr,
                 arms: lowered_arms,
@@ -1012,17 +1074,23 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            if matches!(expected, Type::Slice(_))
-                && !matches!(
-                    direct_borrow_origin(&lowered_expr, env, ctx),
-                    Some(BorrowOrigin::Param(_))
-                )
+            if contains_borrowed_slice_type(expected)
+                && !ctx.current_borrow_return_params.is_empty()
             {
-                return Err(Diagnostic::new(
-                    "ownership",
-                    "returning borrowed slices requires a slice derived from a borrowed slice parameter in stage1",
-                )
-                .with_span(*line, *column));
+                match expr_borrow_origin(&lowered_expr, env, ctx) {
+                    None => {}
+                    Some(BorrowOrigin::Param(origin))
+                        if ctx.current_borrow_return_params.contains(&origin) => {}
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "ownership",
+                            format!(
+                                "returning borrowed values requires data derived from one of the borrowed parameters in stage1"
+                            ),
+                        )
+                        .with_span(*line, *column));
+                    }
+                }
             }
             Ok(Stmt::Return(lowered_expr))
         }
@@ -1060,7 +1128,7 @@ fn merge_branch_state(
                 ty: binding.ty.clone(),
                 moved: then_moved || else_moved,
                 borrow_origin: binding.borrow_origin.clone(),
-                borrowed_owner: binding.borrowed_owner.clone(),
+                borrowed_owners: binding.borrowed_owners.clone(),
                 active_borrow_count: merge_borrow_count(
                     binding.active_borrow_count,
                     then_returns,
@@ -1096,7 +1164,7 @@ fn merge_loop_state(
                 ty: binding.ty.clone(),
                 moved: binding.moved || body_moved,
                 borrow_origin: binding.borrow_origin.clone(),
-                borrowed_owner: binding.borrowed_owner.clone(),
+                borrowed_owners: binding.borrowed_owners.clone(),
                 active_borrow_count: if body_returns {
                     binding.active_borrow_count
                 } else {
@@ -1133,7 +1201,7 @@ fn merge_match_state(
                 ty: binding.ty.clone(),
                 moved,
                 borrow_origin: binding.borrow_origin.clone(),
-                borrowed_owner: binding.borrowed_owner.clone(),
+                borrowed_owners: binding.borrowed_owners.clone(),
                 active_borrow_count: arm_states
                     .iter()
                     .filter_map(|(after, returns)| {
@@ -1342,6 +1410,7 @@ fn lower_expr_with_expected(
                     .with_span(*line, *column));
                 }
                 let mut lowered_args = Vec::new();
+                let mut temporary_borrows = Vec::new();
                 for (arg, expected) in args.iter().zip(signature.params.iter()) {
                     let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
                     if lowered.ty() != expected {
@@ -1354,11 +1423,13 @@ fn lower_expr_with_expected(
                         )
                         .with_span(arg.line(), arg.column()));
                     }
+                    record_temporary_borrows(&lowered, env, ctx, &mut temporary_borrows)?;
                     if !expected.is_copy() {
                         move_lowered_value(&lowered, env)?;
                     }
                     lowered_args.push(lowered);
                 }
+                release_temporary_borrows(&temporary_borrows, env);
                 return Ok(Expr::Call {
                     name: name.clone(),
                     args: lowered_args,
@@ -1646,14 +1717,17 @@ fn lower_expr_with_expected(
         } => {
             let mut lowered_elements = Vec::new();
             let mut element_tys = Vec::new();
+            let mut temporary_borrows = Vec::new();
             for element in elements {
                 let lowered = lower_expr(element, env, ctx)?;
+                record_temporary_borrows(&lowered, env, ctx, &mut temporary_borrows)?;
                 if !lowered.ty().is_copy() {
                     move_lowered_owner_value(&lowered, env)?;
                 }
                 element_tys.push(lowered.ty().clone());
                 lowered_elements.push(lowered);
             }
+            release_temporary_borrows(&temporary_borrows, env);
             if lowered_elements.len() < 2 {
                 return Err(Diagnostic::new(
                     "type",
@@ -1763,6 +1837,7 @@ fn lower_expr_with_expected(
             let mut lowered_entries = Vec::new();
             let mut key_ty = None;
             let mut value_ty = None;
+            let mut temporary_borrows = Vec::new();
             for entry in entries {
                 let lowered_key = lower_expr(&entry.key, env, ctx)?;
                 let lowered_value = lower_expr(&entry.value, env, ctx)?;
@@ -1801,6 +1876,8 @@ fn lower_expr_with_expected(
                     )
                     .with_span(entry.line, entry.column));
                 }
+                record_temporary_borrows(&lowered_key, env, ctx, &mut temporary_borrows)?;
+                record_temporary_borrows(&lowered_value, env, ctx, &mut temporary_borrows)?;
                 if !lowered_key.ty().is_copy() {
                     move_lowered_owner_value(&lowered_key, env)?;
                 }
@@ -1812,6 +1889,7 @@ fn lower_expr_with_expected(
                     value: lowered_value,
                 });
             }
+            release_temporary_borrows(&temporary_borrows, env);
             let key_ty = key_ty.expect("non-empty map literal must have a key type");
             let value_ty = value_ty.expect("non-empty map literal must have a value type");
             Ok(Expr::MapLiteral {
@@ -1833,6 +1911,7 @@ fn lower_expr_with_expected(
             }
             let mut lowered_elements = Vec::new();
             let mut element_ty = None;
+            let mut temporary_borrows = Vec::new();
             for element in elements {
                 let lowered = lower_expr(element, env, ctx)?;
                 if let Some(expected) = element_ty.as_ref() {
@@ -1849,11 +1928,13 @@ fn lower_expr_with_expected(
                 } else {
                     element_ty = Some(lowered.ty().clone());
                 }
+                record_temporary_borrows(&lowered, env, ctx, &mut temporary_borrows)?;
                 if !lowered.ty().is_copy() {
                     move_lowered_owner_value(&lowered, env)?;
                 }
                 lowered_elements.push(lowered);
             }
+            release_temporary_borrows(&temporary_borrows, env);
             let element_ty = element_ty.expect("non-empty array literal must have an element type");
             Ok(Expr::ArrayLiteral {
                 elements: lowered_elements,
@@ -2207,27 +2288,27 @@ fn binding_borrow_origin_from_expr(
     if !contains_borrowed_slice_type(ty) {
         return None;
     }
-    Some(direct_borrow_origin(expr, env, ctx).unwrap_or(BorrowOrigin::Local))
+    expr_borrow_origin(expr, env, ctx)
 }
 
-fn binding_borrowed_owner_from_expr(
+fn binding_borrowed_owners_from_expr(
     ty: &Type,
     expr: &Expr,
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-) -> Option<String> {
-    if !matches!(ty, Type::Slice(_)) {
-        return None;
+) -> HashSet<String> {
+    if !contains_borrowed_slice_type(ty) {
+        return HashSet::new();
     }
-    direct_borrowed_owner(expr, env, ctx)
+    expr_borrowed_owners(expr, env, ctx)
 }
 
-fn direct_borrow_origin(
+fn expr_borrow_origin(
     expr: &Expr,
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !matches!(expr.ty(), Type::Slice(_)) {
+    if !contains_borrowed_slice_type(expr.ty()) {
         return None;
     }
     match expr {
@@ -2235,43 +2316,205 @@ fn direct_borrow_origin(
             .get(name)
             .and_then(|binding| binding.borrow_origin.clone()),
         Expr::Slice { base, .. } => match base.ty() {
-            Type::Slice(_) => direct_borrow_origin(base, env, ctx),
+            Type::Slice(_) => expr_borrow_origin(base, env, ctx),
             Type::Array(_) => Some(BorrowOrigin::Local),
             _ => Some(BorrowOrigin::Local),
         },
         Expr::Call { name, args, .. } => ctx
             .functions
             .get(name)
-            .and_then(|signature| signature.slice_return_param)
-            .and_then(|index| direct_borrow_origin(&args[index], env, ctx)),
-        _ => Some(BorrowOrigin::Local),
+            .map(|signature| {
+                merge_borrow_origins(
+                    signature
+                        .borrow_return_params
+                        .iter()
+                        .map(|index| expr_borrow_origin(&args[*index], env, ctx)),
+                )
+            })
+            .flatten(),
+        Expr::TupleLiteral { elements, .. } => merge_borrow_origins(
+            elements
+                .iter()
+                .map(|element| expr_borrow_origin(element, env, ctx)),
+        ),
+        Expr::TupleIndex { base, .. } => expr_borrow_origin(base, env, ctx),
+        Expr::MapLiteral { entries, .. } => {
+            merge_borrow_origins(entries.iter().flat_map(|entry| {
+                [
+                    expr_borrow_origin(&entry.key, env, ctx),
+                    expr_borrow_origin(&entry.value, env, ctx),
+                ]
+            }))
+        }
+        Expr::EnumVariant { payloads, .. } => merge_borrow_origins(
+            payloads
+                .iter()
+                .map(|payload| expr_borrow_origin(payload, env, ctx)),
+        ),
+        Expr::FieldAccess { base, .. } => expr_borrow_origin(base, env, ctx),
+        Expr::ArrayLiteral { elements, .. } => merge_borrow_origins(
+            elements
+                .iter()
+                .map(|element| expr_borrow_origin(element, env, ctx)),
+        ),
+        Expr::StructLiteral { fields, .. } => merge_borrow_origins(
+            fields
+                .iter()
+                .map(|field| expr_borrow_origin(&field.expr, env, ctx)),
+        ),
+        Expr::Index { base, .. } => expr_borrow_origin(base, env, ctx),
+        Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => None,
     }
 }
 
-fn direct_borrowed_owner(
+fn merge_borrow_origins<I>(origins: I) -> Option<BorrowOrigin>
+where
+    I: IntoIterator<Item = Option<BorrowOrigin>>,
+{
+    let mut merged = None;
+    for origin in origins.into_iter().flatten() {
+        match &merged {
+            None => merged = Some(origin),
+            Some(existing) if existing == &origin => {}
+            Some(_) => return Some(BorrowOrigin::Local),
+        }
+    }
+    merged
+}
+
+fn match_binding_payload_expr<'a>(
+    matched_expr: &'a Expr,
+    variant_name: &str,
+    binding_name: &str,
+    binding_index: usize,
+) -> Option<&'a Expr> {
+    let Expr::EnumVariant {
+        variant,
+        field_names,
+        payloads,
+        ..
+    } = matched_expr
+    else {
+        return None;
+    };
+    if variant != variant_name {
+        return None;
+    }
+    if field_names.is_empty() {
+        return payloads.get(binding_index);
+    }
+    field_names
+        .iter()
+        .position(|field_name| field_name == binding_name)
+        .and_then(|index| payloads.get(index))
+}
+
+fn match_binding_borrow_origin(
+    matched_expr: &Expr,
+    variant_name: &str,
+    binding_name: &str,
+    binding_index: usize,
+    payload_ty: &Type,
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Option<BorrowOrigin> {
+    if !contains_borrowed_slice_type(payload_ty) {
+        return None;
+    }
+    if let Some(payload_expr) =
+        match_binding_payload_expr(matched_expr, variant_name, binding_name, binding_index)
+    {
+        return expr_borrow_origin(payload_expr, env, ctx);
+    }
+    expr_borrow_origin(matched_expr, env, ctx)
+}
+
+fn match_binding_borrowed_owners(
+    matched_expr: &Expr,
+    variant_name: &str,
+    binding_name: &str,
+    binding_index: usize,
+    payload_ty: &Type,
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> HashSet<String> {
+    if !contains_borrowed_slice_type(payload_ty) {
+        return HashSet::new();
+    }
+    if let Some(payload_expr) =
+        match_binding_payload_expr(matched_expr, variant_name, binding_name, binding_index)
+    {
+        return expr_borrowed_owners(payload_expr, env, ctx);
+    }
+    expr_borrowed_owners(matched_expr, env, ctx)
+}
+
+fn expr_borrowed_owners(
     expr: &Expr,
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-) -> Option<String> {
-    if !matches!(expr.ty(), Type::Slice(_)) {
-        return None;
+) -> HashSet<String> {
+    if !contains_borrowed_slice_type(expr.ty()) {
+        return HashSet::new();
     }
     match expr {
         Expr::VarRef { name, .. } => env
             .get(name)
-            .and_then(|binding| binding.borrowed_owner.clone()),
+            .map(|binding| binding.borrowed_owners.clone())
+            .unwrap_or_default(),
         Expr::Slice { base, .. } => match base.ty() {
-            Type::Slice(_) => direct_borrowed_owner(base, env, ctx),
-            Type::Array(_) => owned_borrow_root(base),
-            _ => None,
+            Type::Slice(_) => expr_borrowed_owners(base, env, ctx),
+            Type::Array(_) => owned_borrow_root(base).into_iter().collect(),
+            _ => HashSet::new(),
         },
         Expr::Call { name, args, .. } => ctx
             .functions
             .get(name)
-            .and_then(|signature| signature.slice_return_param)
-            .and_then(|index| direct_borrowed_owner(&args[index], env, ctx)),
-        _ => None,
+            .map(|signature| {
+                let mut owners = HashSet::new();
+                for index in &signature.borrow_return_params {
+                    owners.extend(expr_borrowed_owners(&args[*index], env, ctx));
+                }
+                owners
+            })
+            .unwrap_or_default(),
+        Expr::TupleLiteral { elements, .. } => collect_expr_borrowed_owners(elements, env, ctx),
+        Expr::TupleIndex { base, .. } => expr_borrowed_owners(base, env, ctx),
+        Expr::MapLiteral { entries, .. } => {
+            let mut owners = HashSet::new();
+            for entry in entries {
+                owners.extend(expr_borrowed_owners(&entry.key, env, ctx));
+                owners.extend(expr_borrowed_owners(&entry.value, env, ctx));
+            }
+            owners
+        }
+        Expr::ArrayLiteral { elements, .. } => collect_expr_borrowed_owners(elements, env, ctx),
+        Expr::EnumVariant { payloads, .. } => collect_expr_borrowed_owners(payloads, env, ctx),
+        Expr::FieldAccess { base, .. } => expr_borrowed_owners(base, env, ctx),
+        Expr::Index { base, .. } => expr_borrowed_owners(base, env, ctx),
+        Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => {
+            HashSet::new()
+        }
+        Expr::StructLiteral { fields, .. } => {
+            let mut owners = HashSet::new();
+            for field in fields {
+                owners.extend(expr_borrowed_owners(&field.expr, env, ctx));
+            }
+            owners
+        }
     }
+}
+
+fn collect_expr_borrowed_owners(
+    exprs: &[Expr],
+    env: &HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> HashSet<String> {
+    let mut owners = HashSet::new();
+    for expr in exprs {
+        owners.extend(expr_borrowed_owners(expr, env, ctx));
+    }
+    owners
 }
 
 fn owned_borrow_root(expr: &Expr) -> Option<String> {
@@ -2299,49 +2542,71 @@ fn contains_borrowed_slice_type(ty: &Type) -> bool {
     }
 }
 
-fn classify_slice_return(
+fn classify_borrow_return(
     params: &[Type],
     return_ty: &Type,
     line: usize,
     column: usize,
-) -> Result<Option<usize>, Diagnostic> {
+) -> Result<Vec<usize>, Diagnostic> {
     if !contains_borrowed_slice_type(return_ty) {
-        return Ok(None);
-    }
-    if !matches!(return_ty, Type::Slice(_)) {
-        return Err(Diagnostic::new(
-            "type",
-            "function return types may only use direct borrowed slice types in stage1",
-        )
-        .with_span(line, column));
+        return Ok(Vec::new());
     }
     let matches = params
         .iter()
         .enumerate()
-        .filter_map(|(index, ty)| (ty == return_ty).then_some(index))
+        .filter_map(|(index, ty)| contains_borrowed_slice_type(ty).then_some(index))
         .collect::<Vec<_>>();
-    if matches.len() != 1 {
+    if matches.is_empty() {
         return Err(Diagnostic::new(
             "type",
-            "borrowed slice return functions must take exactly one borrowed slice parameter with the same type in stage1",
+            "borrowed return functions must take at least one borrowed parameter in stage1",
         )
         .with_span(line, column));
     }
-    Ok(matches.first().copied())
+    Ok(matches)
 }
 
-fn increment_active_borrow(
-    owner_name: &str,
+fn increment_active_borrows(
+    owner_names: &HashSet<String>,
     env: &mut HashMap<String, Binding>,
 ) -> Result<(), Diagnostic> {
-    let binding = env.get_mut(owner_name).ok_or_else(|| {
-        Diagnostic::new(
-            "type",
-            format!("internal error: missing borrow owner {owner_name:?}"),
-        )
-    })?;
-    binding.active_borrow_count += 1;
+    for owner_name in owner_names {
+        let binding = env.get_mut(owner_name).ok_or_else(|| {
+            Diagnostic::new(
+                "type",
+                format!("internal error: missing borrow owner {owner_name:?}"),
+            )
+        })?;
+        binding.active_borrow_count += 1;
+    }
     Ok(())
+}
+
+fn record_temporary_borrows(
+    expr: &Expr,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+    temporary_borrows: &mut Vec<HashSet<String>>,
+) -> Result<(), Diagnostic> {
+    let owners = expr_borrowed_owners(expr, env, ctx);
+    increment_active_borrows(&owners, env)?;
+    temporary_borrows.push(owners);
+    Ok(())
+}
+
+fn release_temporary_borrows(
+    temporary_borrows: &[HashSet<String>],
+    env: &mut HashMap<String, Binding>,
+) {
+    for owner_names in temporary_borrows.iter().rev() {
+        release_active_borrow_owners(owner_names, env);
+    }
+}
+
+fn release_active_borrow_owners(owner_names: &HashSet<String>, env: &mut HashMap<String, Binding>) {
+    for owner_name in owner_names {
+        decrement_active_borrow(owner_name, env);
+    }
 }
 
 fn decrement_active_borrow(owner_name: &str, env: &mut HashMap<String, Binding>) {
@@ -2358,10 +2623,11 @@ fn release_scope_borrows(env: &mut HashMap<String, Binding>, scope_names: &HashS
         .cloned()
         .collect::<Vec<_>>();
     for name in &released {
-        if let Some(owner_name) = env
+        let owner_names = env
             .get(name)
-            .and_then(|binding| binding.borrowed_owner.clone())
-        {
+            .map(|binding| binding.borrowed_owners.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for owner_name in owner_names {
             decrement_active_borrow(&owner_name, env);
         }
     }
@@ -2474,6 +2740,48 @@ fn lower_compare_op(op: syntax::CompareOp) -> CompareOp {
     }
 }
 
+fn static_bool_value(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::Literal {
+            value: LiteralValue::Bool(value),
+            ..
+        } => Some(*value),
+        Expr::BinaryCompare { op, lhs, rhs, .. } => {
+            let lhs = literal_value(lhs)?;
+            let rhs = literal_value(rhs)?;
+            Some(match (lhs, rhs) {
+                (LiteralValue::Int(lhs), LiteralValue::Int(rhs)) => match op {
+                    CompareOp::Eq => lhs == rhs,
+                    CompareOp::Ne => lhs != rhs,
+                    CompareOp::Lt => lhs < rhs,
+                    CompareOp::Le => lhs <= rhs,
+                    CompareOp::Gt => lhs > rhs,
+                    CompareOp::Ge => lhs >= rhs,
+                },
+                (LiteralValue::Bool(lhs), LiteralValue::Bool(rhs)) => match op {
+                    CompareOp::Eq => lhs == rhs,
+                    CompareOp::Ne => lhs != rhs,
+                    _ => return None,
+                },
+                (LiteralValue::String(lhs), LiteralValue::String(rhs)) => match op {
+                    CompareOp::Eq => lhs == rhs,
+                    CompareOp::Ne => lhs != rhs,
+                    _ => return None,
+                },
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn literal_value(expr: &Expr) -> Option<&LiteralValue> {
+    match expr {
+        Expr::Literal { value, .. } => Some(value),
+        _ => None,
+    }
+}
+
 impl Expr {
     pub fn ty(&self) -> &Type {
         match self {
@@ -2500,10 +2808,22 @@ impl Stmt {
         match self {
             Stmt::Return(_) => true,
             Stmt::If {
+                cond,
                 then_block,
                 else_block: Some(else_block),
-                ..
-            } => block_always_returns(then_block) && block_always_returns(else_block),
+            } => match static_bool_value(cond) {
+                Some(true) => block_always_returns(then_block),
+                Some(false) => block_always_returns(else_block),
+                None => block_always_returns(then_block) && block_always_returns(else_block),
+            },
+            Stmt::If {
+                cond,
+                then_block,
+                else_block: None,
+            } => {
+                static_bool_value(cond).is_some_and(|value| value)
+                    && block_always_returns(then_block)
+            }
             Stmt::Match { arms, .. } => arms.iter().all(|arm| block_always_returns(&arm.body)),
             _ => false,
         }

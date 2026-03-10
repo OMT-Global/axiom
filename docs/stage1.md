@@ -12,10 +12,10 @@ This repo now has two tracks:
 The Rust compiler is intentionally small in this bootstrap slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
-- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, direct borrowed-slice returns backed by borrowed-slice parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
+- Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
-- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, branch-local moves conservatively propagate after `if` and `match`, and live borrowed slices now block moving their owned collection roots until the borrow scope ends.
+- A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, branch-local moves conservatively propagate after `if` and `match`, statically false `if` / `while` branches are now ignored instead of poisoning later ownership state, and live borrowed slices now block moving their owned collection roots until the borrow scope ends, including when those borrows are wrapped in local tuples or `Option` / `Result` values, passed through sibling expression evaluation, or introduced by temporary `match` expressions.
 
 This is not the final backend architecture. It is the smallest executable version of the
 stage0/stage1 split that can build a native hello-world and carry the 1.0 package model.
@@ -37,7 +37,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Language surface gaps
 
 - Modules are now limited to package-local path imports plus direct `pub struct`, `pub enum`, and `pub fn` exports only.
-- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, borrowed slice types, borrowed array slice expressions, direct borrowed-slice returns backed by borrowed-slice parameters, field access, tuple indexing, map indexing, array indexing, exhaustive statement-level `match`, and the built-in collection helpers `len(...)`, `first(...)`, and `last(...)` now exist, but there are still no user-defined generic abstractions or a general borrow system.
+- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, borrowed slice types, borrowed array slice expressions, borrowed-return aggregates backed by one or more borrowed parameters, field access, tuple indexing, map indexing, array indexing, exhaustive statement-level `match`, and the built-in collection helpers `len(...)`, `first(...)`, and `last(...)` now exist, but there are still no user-defined generic abstractions or a general borrow system.
 - No generic functions or generic types.
 - No methods, trait-style interfaces, closures, or async/await.
 - Rebinding and shadowing are intentionally rejected today to keep the bootstrap scope small.
@@ -45,7 +45,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Type and ownership gaps
 
 - Ownership is still bootstrap-grade even though it now covers all non-`Copy` stage1 values, conservatively handles non-`Copy` field access, and enforces immutable live-borrow checks for owned values behind borrowed slices.
-- Borrowed slices can now flow through direct `&[T]` return values when they are derived from borrowed-slice parameters, and live borrowed slices now block later owner moves until their scope ends, but there are still no general borrows, mutable borrows, lifetime checks, or first-class partial-move analysis for aggregates and function calls.
+- Borrowed slices can now flow through direct `&[T]` returns and aggregate return types like `Option<&[T]>` or tuples when they are derived from one or more borrowed parameters, `Option` / `Result` match bindings preserve enough borrow provenance to return those borrowed payloads again, conservative call summaries now keep borrowed-return provenance alive across multiple borrowed parameters, statically false control-flow is now skipped instead of contaminating move state, and live borrowed slices now block later owner moves until their scope ends even when those borrows are stored inside local aggregate wrappers or temporary `match` / call expressions, but there are still no general borrows, mutable borrows, lifetime checks, precise path-sensitive borrow narrowing beyond constant conditions, or first-class partial-move analysis for aggregates and function calls.
 - Exhaustiveness checking now exists for statement-level enum `match`, but there is still no typed error propagation and no control-flow-sensitive ownership diagnostics beyond simple branches.
 - Compile-fail coverage now exists for several bootstrap ownership failures, but there is still no dedicated corpus yet for the broader future borrow rules that a Rust-like language actually needs.
 
@@ -99,7 +99,7 @@ Current proof points:
 
 Goal: add the minimum useful data model for service code.
 
-- Struct declarations, literals, named struct types, field access, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed slice types, borrowed array slice expressions, direct borrowed-slice returns backed by borrowed-slice parameters, both tuple-style and named-payload enum variants with exhaustive statement-level `match`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, and `Option<T>` / `Result<T, E>` are now in the bootstrap.
+- Struct declarations, literals, named struct types, field access, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed slice types, borrowed array slice expressions, borrowed-return aggregates backed by one or more borrowed parameters, both tuple-style and named-payload enum variants with exhaustive statement-level `match`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, and `Option<T>` / `Result<T, E>` are now in the bootstrap.
 - Extend comparisons and control-flow typing across structured data where appropriate.
 
 Exit criteria:
@@ -116,6 +116,32 @@ Goal: replace the bootstrap move rule with a real Rust-like safety model.
 - Add immutable and mutable borrows, lexical lifetime tracking, and aliasing checks.
 - Teach the checker about moves through function calls, branches, loops, and aggregate fields.
 - Build a dedicated compile-fail corpus for move-after-use, double mutable borrow, mutable-plus-shared borrow, and borrow-outlives-owner errors.
+
+Execution order inside Slice 4:
+
+1. Promote borrowed slices from bootstrap special cases into first-class borrow values.
+   - Unify provenance tracking for borrowed locals, temporary expressions, `match` bindings, aggregate wrappers, and borrowed return values.
+   - Extend the same model to borrowed projections that appear inside structs, tuple elements, enum payloads, and nested collection shapes instead of only direct local bindings.
+2. Tighten control-flow and loop joins.
+   - Keep dead-branch pruning for statically false control-flow, then add conservative merge rules for unknown `if` / `while` paths so borrows survive exactly as long as they must across back-edges and join points.
+   - Lock this with compile-fail cases for branch-local borrows, loop-carried borrows, and post-loop owner moves.
+3. Add mutable borrows in a deliberately narrow order.
+   - Start with borrowed slices and borrowed locals before widening to aggregate projections.
+   - Reject double mutable borrow, mutable-plus-shared aliasing, and mutation through moved values before trying to optimize ergonomics.
+4. Add first-class partial-move and projection-sensitive ownership.
+   - Track field/tuple/enum payload moves separately where it is sound instead of conservatively consuming the entire aggregate in every case.
+   - Recheck calls, destructuring, and `match` lowering against that finer-grained ownership model.
+5. Finish the ownership surface with diagnostics and a real failure corpus.
+   - Emit stable machine-readable ownership diagnostics with spans, notes, and rule-specific error kinds.
+   - Keep dedicated compile-fail suites for move-after-use, conflicting borrows, borrow-outlives-owner, invalid returned borrows, and loop/control-flow regressions.
+
+Generic-abstraction track after Slice 4:
+
+- Do not add user-defined generics until the borrow model above is stable enough to represent borrowed data inside generic signatures without more bootstrap exceptions.
+- Start with monomorphized generic functions over existing stage1 types and built-ins (`Option<T>`, `Result<T, E>`, arrays, maps, borrowed slices).
+- Then add generic structs and enums, still using monomorphized native codegen before any trait/interface system exists.
+- Keep the initial generic surface intentionally small: explicit type arguments, no higher-kinded abstractions, and no trait bounds until method/interface work starts.
+- Add compile-fail coverage for mismatched instantiations, unconstrained type parameters, borrowed generic return misuse, and recursive generic layout hazards.
 
 Exit criteria:
 

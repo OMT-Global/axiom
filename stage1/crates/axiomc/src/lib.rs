@@ -45,7 +45,7 @@ mod tests {
         let hir = hir::lower(&parsed).expect("lower");
         let mir = mir::lower(&hir);
         assert_eq!(mir.functions.len(), 3);
-        assert_eq!(mir.statement_count(), 12);
+        assert_eq!(mir.statement_count(), 11);
         let rendered = render_rust(&mir);
         assert!(rendered.contains("fn banner(name: String) -> String {"));
         assert!(rendered.contains("return format!(\"{}{}\", String::from(\"hello \"), name);"));
@@ -358,6 +358,109 @@ mod tests {
     }
 
     #[test]
+    fn build_project_emits_native_binary_with_wrapped_borrow_returns() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("wrapped-borrow-returns");
+        create_project(&project, Some("wrapped-borrow-returns-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn maybe_tail(values: &[int], ready: bool): Option<&[int]> {\nif ready {\nreturn Some(values[1:])\n}\nreturn None\n}\n\nfn describe(values: &[int]): (Option<&[int]>, int) {\nreturn (Some(values[1:]), len(values))\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nmatch maybe_tail(numbers[:], true) {\nSome(window) {\nprint first(window)\n}\nNone {\nprint 0\n}\n}\nlet summary: (Option<&[int]>, int) = describe(numbers[:])\nmatch summary.0 {\nSome(window) {\nprint last(window)\n}\nNone {\nprint 0\n}\n}\nprint summary.1\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n11\n4\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_match_payload_borrow_returns() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("match-payload-borrow-returns");
+        create_project(&project, Some("match-payload-borrow-returns-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn choose(values: &[int]): Option<&[int]> {\nmatch Some(values[1:]) {\nSome(window) {\nreturn Some(window)\n}\nNone {\nreturn None\n}\n}\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nmatch choose(numbers[:]) {\nSome(window) {\nprint first(window)\n}\nNone {\nprint 0\n}\n}\nprint first(numbers)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n3\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_after_match_temporary_borrow_ends() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("match-temporary-borrow-release");
+        create_project(&project, Some("match-temporary-borrow-release-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nmatch Some(values[:]) {\nSome(window) {\nprint len(window)\n}\nNone {\nprint 0\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_after_if_false_dead_branch_is_ignored() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("if-false-dead-branch");
+        create_project(&project, Some("if-false-dead-branch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nif false {\nlet view: &[string] = values[:]\nprint len(view)\nprint first(values)\n} else {\nprint 0\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "0\nalpha\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_after_while_false_dead_body_is_ignored() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("while-false-dead-body");
+        create_project(&project, Some("while-false-dead-body-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nwhile false {\nlet view: &[string] = values[:]\nprint len(view)\nprint first(values)\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "alpha\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_multi_param_borrow_returns() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("multi-param-borrow-returns");
+        create_project(&project, Some("multi-param-borrow-returns-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn choose(left: &[int], right: &[int], pick_left: bool): Option<&[int]> {\nif pick_left {\nreturn Some(left[1:])\n}\nreturn Some(right[1:])\n}\n\nlet left: [int] = [3, 7, 9]\nlet right: [int] = [40, 42, 44]\nmatch choose(left[:], right[:], false) {\nSome(window) {\nprint first(window)\n}\nNone {\nprint 0\n}\n}\nprint first(left)\nprint first(right)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n3\n40\n");
+    }
+
+    #[test]
     fn build_project_emits_native_binary_after_branch_local_slice_borrow_ends() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("borrow-scope");
@@ -365,6 +468,23 @@ mod tests {
         fs::write(
             project.join("src/main.ax"),
             "let values: [string] = [\"alpha\", \"beta\"]\nif true {\nlet view: &[string] = values[:]\nprint len(view)\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_after_wrapped_borrow_scope_ends() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("wrapped-borrow-scope");
+        create_project(&project, Some("wrapped-borrow-scope-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nif true {\nlet wrapped: (&[string], int) = (values[:], 1)\nprint len(wrapped.0)\n}\nprint first(values)\n",
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
@@ -1097,9 +1217,11 @@ mod tests {
         .expect("write source");
         let error =
             check_project(&project).expect_err("slice returns should require a borrowed param");
-        assert!(error.message.contains(
-            "borrowed slice return functions must take exactly one borrowed slice parameter"
-        ));
+        assert!(
+            error
+                .message
+                .contains("borrowed return functions must take at least one borrowed parameter")
+        );
         assert_eq!(error.kind, "type");
     }
 
@@ -1115,8 +1237,112 @@ mod tests {
         .expect("write source");
         let error = check_project(&project).expect_err("local slice return should fail");
         assert!(error.message.contains(
-            "returning borrowed slices requires a slice derived from a borrowed slice parameter"
+            "returning borrowed values requires data derived from one of the borrowed parameters"
         ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_wrapped_borrow_return_from_local_value() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("wrapped-borrow-return-local");
+        create_project(&project, Some("wrapped-borrow-return-local-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn wrap(values: &[int]): Option<&[int]> {\nlet local: [int] = [7, 9, 11]\nreturn Some(local[1:])\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("local wrapped borrow return should fail");
+        assert!(error.message.contains(
+            "returning borrowed values requires data derived from one of the borrowed parameters"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_wrapped_borrow_return_without_borrowed_params() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("wrapped-borrow-return-no-param");
+        create_project(&project, Some("wrapped-borrow-return-no-param-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn choose(values: [int]): Option<&[int]> {\nreturn Some(values[1:])\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("borrowed returns should still require at least one borrowed param");
+        assert!(
+            error
+                .message
+                .contains("borrowed return functions must take at least one borrowed parameter")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_inside_match_while_temporary_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("match-temporary-borrow-move");
+        create_project(&project, Some("match-temporary-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nmatch Some(values[:]) {\nSome(window) {\nprint len(window)\nprint first(values)\n}\nNone {\nprint 0\n}\n}\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("temporary match borrow should block owner move inside the arm");
+        assert!(error.message.contains("cannot move"));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_in_later_call_arg_after_temporary_borrow_arg() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("call-arg-temporary-borrow-move");
+        create_project(&project, Some("call-arg-temporary-borrow-move-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn consume(view: Option<&[string]>, values: [string]): string {\nreturn first(values)\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nprint consume(Some(values[:]), values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("temporary borrow in an earlier call argument should block moving the owner later in the call");
+        assert!(error.message.contains("cannot move"));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_borrowing_owner_in_later_call_arg_after_move_arg() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("call-arg-move-then-borrow");
+        create_project(&project, Some("call-arg-move-then-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn consume(values: [string], view: Option<&[string]>): string {\nreturn first(values)\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nprint consume(values, Some(values[:]))\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err(
+            "moving the owner first should still reject borrowing it later in the call",
+        );
+        assert!(error.message.contains("use of moved value"));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_inside_while_while_local_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("while-live-borrow-move");
+        create_project(&project, Some("while-live-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nwhile true {\nlet view: &[string] = values[:]\nprint len(view)\nprint first(values)\n}\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("loop-local borrow should block owner move inside the loop body");
+        assert!(error.message.contains("cannot move"));
         assert_eq!(error.kind, "ownership");
     }
 
@@ -1150,6 +1376,46 @@ mod tests {
         )
         .expect("write source");
         let error = check_project(&project).expect_err("moving a borrowed owner should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_tuple_wrapped_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("tuple-wrapped-live-borrow");
+        create_project(&project, Some("tuple-wrapped-live-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: (&[string], int) = (values[:], 1)\nprint len(wrapped.0)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("tuple-wrapped borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_option_wrapped_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("option-wrapped-live-borrow");
+        create_project(&project, Some("option-wrapped-live-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: Option<&[string]> = Some(values[:])\nmatch wrapped {\nSome(view) {\nprint len(view)\n}\nNone {\nprint 0\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("option-wrapped borrow should block owner move");
         assert!(
             error
                 .message
