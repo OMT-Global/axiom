@@ -350,13 +350,6 @@ fn collect_struct_definitions(
                 )
                 .with_span(field.line, field.column));
             }
-            if contains_borrowed_slice_type(&ty) {
-                return Err(Diagnostic::new(
-                    "type",
-                    "struct fields cannot store borrowed slice types in stage1",
-                )
-                .with_span(field.line, field.column));
-            }
             fields.push(StructField {
                 name: field.name.clone(),
                 ty,
@@ -467,13 +460,6 @@ fn collect_enum_definitions(
                 .iter()
                 .map(|ty| lower_type(ty, structs, enum_names, variant.line, variant.column))
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
-            if payload_tys.iter().any(contains_borrowed_slice_type) {
-                return Err(Diagnostic::new(
-                    "type",
-                    "enum payloads cannot store borrowed slice types in stage1",
-                )
-                .with_span(variant.line, variant.column));
-            }
             if !variant.payload_names.is_empty() && variant.payload_names.len() != payload_tys.len()
             {
                 return Err(Diagnostic::new(
@@ -555,8 +541,14 @@ fn collect_function_signatures(
                 param.column,
             )?);
         }
-        let borrow_return_params =
-            classify_borrow_return(&params, &return_ty, function.line, function.column)?;
+        let borrow_return_params = classify_borrow_return(
+            &params,
+            &return_ty,
+            structs,
+            enums,
+            function.line,
+            function.column,
+        )?;
         if signatures
             .insert(
                 function.name.clone(),
@@ -631,7 +623,7 @@ fn lower_function(
             Binding {
                 ty: ty.clone(),
                 moved: false,
-                borrow_origin: binding_borrow_origin(&ty, Some(&param.name)),
+                borrow_origin: binding_borrow_origin(&ty, Some(&param.name), structs, enums),
                 borrowed_owners: HashSet::new(),
                 active_borrow_count: 0,
             },
@@ -1074,7 +1066,7 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            if contains_borrowed_slice_type(expected)
+            if contains_borrowed_slice_type(expected, ctx.structs, ctx.enums)
                 && !ctx.current_borrow_return_params.is_empty()
             {
                 match expr_borrow_origin(&lowered_expr, env, ctx) {
@@ -2269,8 +2261,13 @@ fn is_borrowable_slice_base(expr: &Expr) -> bool {
     }
 }
 
-fn binding_borrow_origin(ty: &Type, param_name: Option<&str>) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(ty) {
+fn binding_borrow_origin(
+    ty: &Type,
+    param_name: Option<&str>,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+) -> Option<BorrowOrigin> {
+    if !contains_borrowed_slice_type(ty, structs, enums) {
         return None;
     }
     Some(match param_name {
@@ -2285,7 +2282,7 @@ fn binding_borrow_origin_from_expr(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(ty) {
+    if !contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
         return None;
     }
     expr_borrow_origin(expr, env, ctx)
@@ -2297,7 +2294,7 @@ fn binding_borrowed_owners_from_expr(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> HashSet<String> {
-    if !contains_borrowed_slice_type(ty) {
+    if !contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
         return HashSet::new();
     }
     expr_borrowed_owners(expr, env, ctx)
@@ -2308,7 +2305,7 @@ fn expr_borrow_origin(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(expr.ty()) {
+    if !contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
         return None;
     }
     match expr {
@@ -2418,7 +2415,7 @@ fn match_binding_borrow_origin(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(payload_ty) {
+    if !contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
         return None;
     }
     if let Some(payload_expr) =
@@ -2438,7 +2435,7 @@ fn match_binding_borrowed_owners(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> HashSet<String> {
-    if !contains_borrowed_slice_type(payload_ty) {
+    if !contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
         return HashSet::new();
     }
     if let Some(payload_expr) =
@@ -2454,7 +2451,7 @@ fn expr_borrowed_owners(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> HashSet<String> {
-    if !contains_borrowed_slice_type(expr.ty()) {
+    if !contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
         return HashSet::new();
     }
     match expr {
@@ -2526,35 +2523,128 @@ fn owned_borrow_root(expr: &Expr) -> Option<String> {
     }
 }
 
-fn contains_borrowed_slice_type(ty: &Type) -> bool {
+fn contains_borrowed_slice_type(
+    ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+) -> bool {
+    contains_borrowed_slice_type_inner(ty, structs, enums, &mut HashSet::new(), &mut HashSet::new())
+}
+
+fn contains_borrowed_slice_type_inner(
+    ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    visiting_structs: &mut HashSet<String>,
+    visiting_enums: &mut HashSet<String>,
+) -> bool {
     match ty {
         Type::Slice(_) => true,
-        Type::Option(inner) => contains_borrowed_slice_type(inner),
+        Type::Option(inner) => contains_borrowed_slice_type_inner(
+            inner,
+            structs,
+            enums,
+            visiting_structs,
+            visiting_enums,
+        ),
         Type::Result(ok, err) => {
-            contains_borrowed_slice_type(ok) || contains_borrowed_slice_type(err)
+            contains_borrowed_slice_type_inner(ok, structs, enums, visiting_structs, visiting_enums)
+                || contains_borrowed_slice_type_inner(
+                    err,
+                    structs,
+                    enums,
+                    visiting_structs,
+                    visiting_enums,
+                )
         }
-        Type::Tuple(elements) => elements.iter().any(contains_borrowed_slice_type),
+        Type::Tuple(elements) => elements.iter().any(|element| {
+            contains_borrowed_slice_type_inner(
+                element,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }),
         Type::Map(key, value) => {
-            contains_borrowed_slice_type(key) || contains_borrowed_slice_type(value)
+            contains_borrowed_slice_type_inner(
+                key,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            ) || contains_borrowed_slice_type_inner(
+                value,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
         }
-        Type::Array(inner) => contains_borrowed_slice_type(inner),
-        Type::Int | Type::Bool | Type::String | Type::Struct(_) | Type::Enum(_) => false,
+        Type::Array(inner) => contains_borrowed_slice_type_inner(
+            inner,
+            structs,
+            enums,
+            visiting_structs,
+            visiting_enums,
+        ),
+        Type::Struct(name) => {
+            if !visiting_structs.insert(name.clone()) {
+                return false;
+            }
+            let contains = structs.get(name).is_some_and(|struct_def| {
+                struct_def.fields.iter().any(|field| {
+                    contains_borrowed_slice_type_inner(
+                        &field.ty,
+                        structs,
+                        enums,
+                        visiting_structs,
+                        visiting_enums,
+                    )
+                })
+            });
+            visiting_structs.remove(name);
+            contains
+        }
+        Type::Enum(name) => {
+            if !visiting_enums.insert(name.clone()) {
+                return false;
+            }
+            let contains = enums.get(name).is_some_and(|enum_def| {
+                enum_def.variants.iter().any(|variant| {
+                    variant.payload_tys.iter().any(|payload_ty| {
+                        contains_borrowed_slice_type_inner(
+                            payload_ty,
+                            structs,
+                            enums,
+                            visiting_structs,
+                            visiting_enums,
+                        )
+                    })
+                })
+            });
+            visiting_enums.remove(name);
+            contains
+        }
+        Type::Int | Type::Bool | Type::String => false,
     }
 }
 
 fn classify_borrow_return(
     params: &[Type],
     return_ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
     line: usize,
     column: usize,
 ) -> Result<Vec<usize>, Diagnostic> {
-    if !contains_borrowed_slice_type(return_ty) {
+    if !contains_borrowed_slice_type(return_ty, structs, enums) {
         return Ok(Vec::new());
     }
     let matches = params
         .iter()
         .enumerate()
-        .filter_map(|(index, ty)| contains_borrowed_slice_type(ty).then_some(index))
+        .filter_map(|(index, ty)| contains_borrowed_slice_type(ty, structs, enums).then_some(index))
         .collect::<Vec<_>>();
     if matches.is_empty() {
         return Err(Diagnostic::new(

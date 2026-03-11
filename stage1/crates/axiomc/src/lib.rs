@@ -122,6 +122,31 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_borrowed_structs_and_enums() {
+        let source = "struct Window {\nview: &[int]\n}\n\nenum Snapshot {\nWindow(Window)\nNamed { window: Window }\n}\n\nfn tail(values: &[int]): Window {\nreturn Window { view: values[1:] }\n}\n\nfn read(snapshot: Snapshot): int {\nmatch snapshot {\nWindow(window) {\nreturn first(window.view)\n}\nNamed { window } {\nreturn last(window.view)\n}\n}\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nlet window: Window = tail(numbers[:])\nprint first(window.view)\nprint read(Named { window: tail(numbers[:]) })\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("struct Window<'a> {"));
+        assert!(rendered.contains("view: &'a [i64],"));
+        assert!(rendered.contains("enum Snapshot<'a> {"));
+        assert!(rendered.contains("Window(Window<'a>),"));
+        assert!(rendered.contains("window: Window<'a>,"));
+        assert!(rendered.contains("fn tail<'a>(values: &'a [i64]) -> Window<'a> {"));
+        assert!(rendered.contains("fn read<'a>(snapshot: Snapshot<'a>) -> i64 {"));
+        assert!(
+            rendered
+                .contains("let window: Window<'_> = tail(axiom_slice_view(&numbers, None, None));")
+        );
+        assert!(
+            rendered.contains(
+                "println!(\"{}\", read(Snapshot::Named { window: tail(axiom_slice_view(&numbers, None, None)) }));"
+            )
+        );
+    }
+
+    #[test]
     fn parser_lowers_tuples_and_tuple_indexing() {
         let source = "fn label(pair: (int, string)): string {\nreturn pair.1\n}\n\nlet pair: (int, string) = (7, \"stage1 tuples\")\nprint pair.0\nprint label(pair)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -458,6 +483,23 @@ mod tests {
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n3\n40\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_borrowed_named_shapes() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("borrowed-named-shapes");
+        create_project(&project, Some("borrowed-named-shapes-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window {\nview: &[int]\n}\n\nenum Snapshot {\nWindow(Window)\nNamed { window: Window }\n}\n\nfn tail(values: &[int]): Window {\nreturn Window { view: values[1:] }\n}\n\nfn read(snapshot: Snapshot): int {\nmatch snapshot {\nWindow(window) {\nreturn first(window.view)\n}\nNamed { window } {\nreturn last(window.view)\n}\n}\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nlet window: Window = tail(numbers[:])\nprint first(window.view)\nprint read(Window(tail(numbers[:])))\nprint read(Named { window: tail(numbers[:]) })\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n7\n11\n");
     }
 
     #[test]
@@ -1416,6 +1458,46 @@ mod tests {
         .expect("write source");
         let error =
             check_project(&project).expect_err("option-wrapped borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_struct_wrapped_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-wrapped-live-borrow");
+        create_project(&project, Some("struct-wrapped-live-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window {\nview: &[string]\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet window: Window = Window { view: values[:] }\nprint len(window.view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("struct-wrapped borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_enum_wrapped_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("enum-wrapped-live-borrow");
+        create_project(&project, Some("enum-wrapped-live-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Snapshot {\nWindow(&[string])\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet snapshot: Snapshot = Window(values[:])\nmatch snapshot {\nWindow(view) {\nprint len(view)\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("enum-wrapped borrow should block owner move");
         assert!(
             error
                 .message

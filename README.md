@@ -85,6 +85,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arr
 # Run the stage1 borrowed-slice + collection-helper example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/slices
 
+# Run the stage1 borrowed-struct + borrowed-enum example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/borrowed_shapes
+
 # Run the stage1 tuple example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/tuples
 
