@@ -85,6 +85,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arr
 # Run the stage1 borrowed-slice + collection-helper example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/slices
 
+# Run the stage1 borrowed-struct + borrowed-enum example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/borrowed_shapes
+
 # Run the stage1 tuple example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/tuples
 
@@ -157,7 +160,9 @@ Runtime rules:
 
 See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and [docs/bytecode.md](docs/bytecode.md) for the precise spec.
 
-For the Rust bootstrap split, the current native subset, and the stage1 gap/execution plan, see [docs/stage1.md](docs/stage1.md).
+For the Rust bootstrap split and the current stage1 status summary, see [docs/stage1.md](docs/stage1.md).
+
+For the detailed agent-facing roadmap to the first workable stage1 compiler, see [docs/stage1-agent-grade-compiler.md](docs/stage1-agent-grade-compiler.md).
 
 ## 📁 Repo Map
 

@@ -37,6 +37,9 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/slices --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/slices --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/slices
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/borrowed_shapes --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/borrowed_shapes --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/borrowed_shapes
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/tuples --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/tuples --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/tuples

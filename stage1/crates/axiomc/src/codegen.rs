@@ -3,10 +3,12 @@ use crate::mir::{
     EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, Stmt, StructDef, StructField,
     Type,
 };
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
 pub fn render_rust(program: &Program) -> String {
+    let type_context = TypeContext::new(program);
     let mut out = String::new();
     out.push_str("#[allow(unused_imports)]\n");
     out.push_str("use std::collections::HashMap;\n\n");
@@ -63,41 +65,156 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    values.remove(key).expect(\"map key not found\")\n");
     out.push_str("}\n\n");
     for enum_def in &program.enums {
-        render_enum(enum_def, &mut out);
+        render_enum(enum_def, &type_context, &mut out);
         out.push('\n');
     }
     for struct_def in &program.structs {
-        render_struct(struct_def, &mut out);
+        render_struct(struct_def, &type_context, &mut out);
         out.push('\n');
     }
     for function in &program.functions {
-        render_function(function, &mut out);
+        render_function(function, &type_context, &mut out);
         out.push('\n');
     }
     out.push_str("fn main() {\n");
     for stmt in &program.stmts {
-        render_stmt(stmt, &mut out, 1);
+        render_stmt(stmt, &type_context, &mut out, 1);
     }
     out.push_str("}\n");
     out
 }
 
-fn render_struct(struct_def: &StructDef, out: &mut String) {
+struct TypeContext<'a> {
+    structs: HashMap<&'a str, &'a StructDef>,
+    enums: HashMap<&'a str, &'a EnumDef>,
+}
+
+impl<'a> TypeContext<'a> {
+    fn new(program: &'a Program) -> Self {
+        Self {
+            structs: program
+                .structs
+                .iter()
+                .map(|struct_def| (struct_def.name.as_str(), struct_def))
+                .collect(),
+            enums: program
+                .enums
+                .iter()
+                .map(|enum_def| (enum_def.name.as_str(), enum_def))
+                .collect(),
+        }
+    }
+
+    fn type_contains_borrowed_slice(&self, ty: &Type) -> bool {
+        self.type_contains_borrowed_slice_inner(ty, &mut HashSet::new(), &mut HashSet::new())
+    }
+
+    fn struct_uses_borrowed_slice(&self, name: &str) -> bool {
+        self.type_contains_borrowed_slice(&Type::Struct(name.to_string()))
+    }
+
+    fn enum_uses_borrowed_slice(&self, name: &str) -> bool {
+        self.type_contains_borrowed_slice(&Type::Enum(name.to_string()))
+    }
+
+    fn type_contains_borrowed_slice_inner(
+        &self,
+        ty: &Type,
+        visiting_structs: &mut HashSet<String>,
+        visiting_enums: &mut HashSet<String>,
+    ) -> bool {
+        match ty {
+            Type::Int | Type::Bool | Type::String => false,
+            Type::Slice(_) => true,
+            Type::Struct(name) => {
+                if !visiting_structs.insert(name.clone()) {
+                    return false;
+                }
+                let contains = self.structs.get(name.as_str()).is_some_and(|struct_def| {
+                    struct_def.fields.iter().any(|field| {
+                        self.type_contains_borrowed_slice_inner(
+                            &field.ty,
+                            visiting_structs,
+                            visiting_enums,
+                        )
+                    })
+                });
+                visiting_structs.remove(name);
+                contains
+            }
+            Type::Enum(name) => {
+                if !visiting_enums.insert(name.clone()) {
+                    return false;
+                }
+                let contains = self.enums.get(name.as_str()).is_some_and(|enum_def| {
+                    enum_def.variants.iter().any(|variant| {
+                        variant.payload_tys.iter().any(|payload_ty| {
+                            self.type_contains_borrowed_slice_inner(
+                                payload_ty,
+                                visiting_structs,
+                                visiting_enums,
+                            )
+                        })
+                    })
+                });
+                visiting_enums.remove(name);
+                contains
+            }
+            Type::Option(inner) => {
+                self.type_contains_borrowed_slice_inner(inner, visiting_structs, visiting_enums)
+            }
+            Type::Result(ok, err) => {
+                self.type_contains_borrowed_slice_inner(ok, visiting_structs, visiting_enums)
+                    || self.type_contains_borrowed_slice_inner(
+                        err,
+                        visiting_structs,
+                        visiting_enums,
+                    )
+            }
+            Type::Tuple(elements) => elements.iter().any(|element| {
+                self.type_contains_borrowed_slice_inner(element, visiting_structs, visiting_enums)
+            }),
+            Type::Map(key, value) => {
+                self.type_contains_borrowed_slice_inner(key, visiting_structs, visiting_enums)
+                    || self.type_contains_borrowed_slice_inner(
+                        value,
+                        visiting_structs,
+                        visiting_enums,
+                    )
+            }
+            Type::Array(inner) => {
+                self.type_contains_borrowed_slice_inner(inner, visiting_structs, visiting_enums)
+            }
+        }
+    }
+}
+
+fn render_struct(struct_def: &StructDef, type_context: &TypeContext<'_>, out: &mut String) {
+    let lifetime = if type_context.struct_uses_borrowed_slice(&struct_def.name) {
+        "<'a>"
+    } else {
+        ""
+    };
     out.push_str("#[allow(non_camel_case_types)]\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("#[derive(Debug, PartialEq)]\n");
-    out.push_str(&format!("struct {} {{\n", struct_def.name));
+    out.push_str(&format!("struct {}{} {{\n", struct_def.name, lifetime));
     for field in &struct_def.fields {
-        render_struct_field(field, out, 1);
+        render_struct_field(field, type_context, out, 1, !lifetime.is_empty());
     }
     out.push_str("}\n");
 }
 
-fn render_enum(enum_def: &EnumDef, out: &mut String) {
+fn render_enum(enum_def: &EnumDef, type_context: &TypeContext<'_>, out: &mut String) {
+    let lifetime = if type_context.enum_uses_borrowed_slice(&enum_def.name) {
+        "<'a>"
+    } else {
+        ""
+    };
     out.push_str("#[allow(non_camel_case_types)]\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("#[derive(Debug, PartialEq)]\n");
-    out.push_str(&format!("enum {} {{\n", enum_def.name));
+    out.push_str(&format!("enum {}{} {{\n", enum_def.name, lifetime));
     for variant in &enum_def.variants {
         if variant.payload_tys.is_empty() {
             out.push_str(&format!("    {},\n", variant.name));
@@ -109,7 +226,7 @@ fn render_enum(enum_def: &EnumDef, out: &mut String) {
                 out.push_str(&format!(
                     "        {}: {},\n",
                     payload_name,
-                    rust_type(payload_ty)
+                    rust_type_inner(payload_ty, Some("'a"), type_context)
                 ));
             }
             out.push_str("    },\n");
@@ -117,7 +234,7 @@ fn render_enum(enum_def: &EnumDef, out: &mut String) {
             let payload_tys = variant
                 .payload_tys
                 .iter()
-                .map(rust_type)
+                .map(|payload_ty| rust_type_inner(payload_ty, Some("'a"), type_context))
                 .collect::<Vec<_>>()
                 .join(", ");
             out.push_str(&format!("    {}({payload_tys}),\n", variant.name));
@@ -126,17 +243,28 @@ fn render_enum(enum_def: &EnumDef, out: &mut String) {
     out.push_str("}\n");
 }
 
-fn render_struct_field(field: &StructField, out: &mut String, indent: usize) {
+fn render_struct_field(
+    field: &StructField,
+    type_context: &TypeContext<'_>,
+    out: &mut String,
+    indent: usize,
+    uses_slice_lifetime: bool,
+) {
     let pad = "    ".repeat(indent);
-    out.push_str(&format!("{pad}{}: {},\n", field.name, rust_type(&field.ty)));
+    let lifetime = uses_slice_lifetime.then_some("'a");
+    out.push_str(&format!(
+        "{pad}{}: {},\n",
+        field.name,
+        rust_type_inner(&field.ty, lifetime, type_context)
+    ));
 }
 
-fn render_function(function: &Function, out: &mut String) {
-    let uses_slice_lifetime = function_signature_uses_borrowed_slice(function);
+fn render_function(function: &Function, type_context: &TypeContext<'_>, out: &mut String) {
+    let uses_slice_lifetime = function_signature_uses_borrowed_slice(function, type_context);
     let params = function
         .params
         .iter()
-        .map(|param| render_param(param, uses_slice_lifetime))
+        .map(|param| render_param(param, uses_slice_lifetime, type_context))
         .collect::<Vec<_>>()
         .join(", ");
     let lifetime = if uses_slice_lifetime { "<'a>" } else { "" };
@@ -145,28 +273,32 @@ fn render_function(function: &Function, out: &mut String) {
         function.name,
         lifetime,
         params,
-        rust_type_in_signature(&function.return_ty, uses_slice_lifetime)
+        rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
     for stmt in &function.body {
-        render_stmt(stmt, out, 1);
+        render_stmt(stmt, type_context, out, 1);
     }
     out.push_str("}\n");
 }
 
-fn render_param(param: &Param, uses_slice_lifetime: bool) -> String {
+fn render_param(
+    param: &Param,
+    uses_slice_lifetime: bool,
+    type_context: &TypeContext<'_>,
+) -> String {
     format!(
         "{}: {}",
         param.name,
-        rust_type_in_signature(&param.ty, uses_slice_lifetime)
+        rust_type_in_signature(&param.ty, uses_slice_lifetime, type_context)
     )
 }
 
-fn render_stmt(stmt: &Stmt, out: &mut String, indent: usize) {
+fn render_stmt(stmt: &Stmt, type_context: &TypeContext<'_>, out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);
     match stmt {
         Stmt::Let { name, ty, expr } => out.push_str(&format!(
             "{pad}let {name}: {} = {};\n",
-            rust_type(ty),
+            rust_type(ty, type_context),
             render_expr(expr)
         )),
         Stmt::Print(expr) => out.push_str(&format!(
@@ -180,12 +312,12 @@ fn render_stmt(stmt: &Stmt, out: &mut String, indent: usize) {
         } => {
             out.push_str(&format!("{pad}if {} {{\n", render_expr(cond)));
             for stmt in then_block {
-                render_stmt(stmt, out, indent + 1);
+                render_stmt(stmt, type_context, out, indent + 1);
             }
             if let Some(else_block) = else_block {
                 out.push_str(&format!("{pad}}} else {{\n"));
                 for stmt in else_block {
-                    render_stmt(stmt, out, indent + 1);
+                    render_stmt(stmt, type_context, out, indent + 1);
                 }
                 out.push_str(&format!("{pad}}}\n"));
             } else {
@@ -195,14 +327,14 @@ fn render_stmt(stmt: &Stmt, out: &mut String, indent: usize) {
         Stmt::While { cond, body } => {
             out.push_str(&format!("{pad}while {} {{\n", render_expr(cond)));
             for stmt in body {
-                render_stmt(stmt, out, indent + 1);
+                render_stmt(stmt, type_context, out, indent + 1);
             }
             out.push_str(&format!("{pad}}}\n"));
         }
         Stmt::Match { expr, arms } => {
             out.push_str(&format!("{pad}match {} {{\n", render_expr(expr)));
             for arm in arms {
-                render_match_arm(arm, out, indent + 1);
+                render_match_arm(arm, type_context, out, indent + 1);
             }
             out.push_str(&format!("{pad}}}\n"));
         }
@@ -210,7 +342,12 @@ fn render_stmt(stmt: &Stmt, out: &mut String, indent: usize) {
     }
 }
 
-fn render_match_arm(arm: &MatchArm, out: &mut String, indent: usize) {
+fn render_match_arm(
+    arm: &MatchArm,
+    type_context: &TypeContext<'_>,
+    out: &mut String,
+    indent: usize,
+) {
     let pad = "    ".repeat(indent);
     if arm.bindings.is_empty() {
         out.push_str(&format!("{pad}{}::{} => {{\n", arm.enum_name, arm.variant));
@@ -230,7 +367,7 @@ fn render_match_arm(arm: &MatchArm, out: &mut String, indent: usize) {
         ));
     }
     for stmt in &arm.body {
-        render_stmt(stmt, out, indent + 1);
+        render_stmt(stmt, type_context, out, indent + 1);
     }
     out.push_str(&format!("{pad}}},\n"));
 }
@@ -414,77 +551,82 @@ fn render_expr(expr: &Expr) -> String {
     }
 }
 
-fn rust_type(ty: &Type) -> String {
-    rust_type_inner(ty, None)
+fn rust_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
+    rust_type_inner(ty, None, type_context)
 }
 
-fn rust_type_in_signature(ty: &Type, uses_slice_lifetime: bool) -> String {
+fn rust_type_in_signature(
+    ty: &Type,
+    uses_slice_lifetime: bool,
+    type_context: &TypeContext<'_>,
+) -> String {
     if uses_slice_lifetime {
-        rust_type_inner(ty, Some("'a"))
+        rust_type_inner(ty, Some("'a"), type_context)
     } else {
-        rust_type(ty)
+        rust_type(ty, type_context)
     }
 }
 
-fn rust_type_inner(ty: &Type, lifetime: Option<&str>) -> String {
+fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext<'_>) -> String {
     match ty {
         Type::Int => String::from("i64"),
         Type::Bool => String::from("bool"),
         Type::String => String::from("String"),
-        Type::Struct(name) => name.clone(),
-        Type::Enum(name) => name.clone(),
+        Type::Struct(name) => {
+            if type_context.struct_uses_borrowed_slice(name) {
+                format!("{name}<{}>", lifetime.unwrap_or("'_"))
+            } else {
+                name.clone()
+            }
+        }
+        Type::Enum(name) => {
+            if type_context.enum_uses_borrowed_slice(name) {
+                format!("{name}<{}>", lifetime.unwrap_or("'_"))
+            } else {
+                name.clone()
+            }
+        }
         Type::Slice(inner) => {
-            let inner = rust_type_inner(inner, lifetime);
+            let inner = rust_type_inner(inner, lifetime, type_context);
             match lifetime {
                 Some(lifetime) => format!("&{lifetime} [{inner}]"),
                 None => format!("&[{inner}]"),
             }
         }
-        Type::Option(inner) => format!("Option<{}>", rust_type_inner(inner, lifetime)),
+        Type::Option(inner) => {
+            format!("Option<{}>", rust_type_inner(inner, lifetime, type_context))
+        }
         Type::Result(ok, err) => format!(
             "Result<{}, {}>",
-            rust_type_inner(ok, lifetime),
-            rust_type_inner(err, lifetime)
+            rust_type_inner(ok, lifetime, type_context),
+            rust_type_inner(err, lifetime, type_context)
         ),
         Type::Tuple(elements) => format!(
             "({})",
             elements
                 .iter()
-                .map(|element| rust_type_inner(element, lifetime))
+                .map(|element| rust_type_inner(element, lifetime, type_context))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
         Type::Map(key, value) => format!(
             "HashMap<{}, {}>",
-            rust_type_inner(key, lifetime),
-            rust_type_inner(value, lifetime)
+            rust_type_inner(key, lifetime, type_context),
+            rust_type_inner(value, lifetime, type_context)
         ),
-        Type::Array(inner) => format!("Vec<{}>", rust_type_inner(inner, lifetime)),
+        Type::Array(inner) => format!("Vec<{}>", rust_type_inner(inner, lifetime, type_context)),
     }
 }
 
-fn function_signature_uses_borrowed_slice(function: &Function) -> bool {
-    type_contains_borrowed_slice(&function.return_ty)
+fn function_signature_uses_borrowed_slice(
+    function: &Function,
+    type_context: &TypeContext<'_>,
+) -> bool {
+    type_context.type_contains_borrowed_slice(&function.return_ty)
         || function
             .params
             .iter()
-            .any(|param| type_contains_borrowed_slice(&param.ty))
-}
-
-fn type_contains_borrowed_slice(ty: &Type) -> bool {
-    match ty {
-        Type::Slice(_) => true,
-        Type::Option(inner) => type_contains_borrowed_slice(inner),
-        Type::Result(ok, err) => {
-            type_contains_borrowed_slice(ok) || type_contains_borrowed_slice(err)
-        }
-        Type::Tuple(elements) => elements.iter().any(type_contains_borrowed_slice),
-        Type::Map(key, value) => {
-            type_contains_borrowed_slice(key) || type_contains_borrowed_slice(value)
-        }
-        Type::Array(inner) => type_contains_borrowed_slice(inner),
-        Type::Int | Type::Bool | Type::String | Type::Struct(_) | Type::Enum(_) => false,
-    }
+            .any(|param| type_context.type_contains_borrowed_slice(&param.ty))
 }
 
 fn render_collection_edge(collection: &Expr, result_ty: &Type, from_end: bool) -> String {
