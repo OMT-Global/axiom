@@ -70,130 +70,36 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ## Execution plan
 
-The work should stay incremental. Each slice must keep stage0 stable and leave stage1 in a
-working state with concrete tests.
-
-### Slice 2 completed: multi-file callable baseline
-
-Done in the current bootstrap:
-
-- Package-local relative imports are supported.
-- Imported modules can expose structs and functions through `pub struct` and `pub fn`.
-- Project analysis now walks a small recursive module graph and rewrites cross-file calls before type checking.
-- Compile-fail coverage now includes missing imports, private import calls, imported top-level statements, circular imports, basic struct misuse, and basic array misuse.
+The detailed execution spec for turning stage1 into the first workable compiler now
+lives in [docs/stage1-agent-grade-compiler.md](stage1-agent-grade-compiler.md).
 
 Current proof points:
 
 - `stage1/examples/hello` remains the single-file callable baseline.
-- `stage1/examples/modules` is the checked-in multi-file package example.
-- `stage1/examples/arrays` is the checked-in array/bootstrap collection example.
-- `stage1/examples/slices` is the checked-in borrowed-slice return plus collection-helper bootstrap example.
-- `stage1/examples/borrowed_shapes` is the checked-in named-struct plus enum-payload borrowed-slice example.
-- `stage1/examples/tuples` is the checked-in tuple/bootstrap aggregate example.
-- `stage1/examples/maps` is the checked-in map/bootstrap collection example.
-- `stage1/examples/structs` is the checked-in structured-data bootstrap example.
-- `stage1/examples/enums` is the checked-in tuple-payload plus named-payload enum-and-match bootstrap example.
-- `stage1/examples/outcomes` is the checked-in `Option<T>` / `Result<T, E>` bootstrap example with imported types.
-- `make stage1-test stage1-smoke` now covers all ten examples.
+- `stage1/examples/modules` proves the multi-file package baseline.
+- `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
+  and `stage1/examples/structs` cover the current structured-data floor.
+- `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
+  and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
+- `make stage1-test stage1-smoke` now covers all ten checked-in stage1 examples.
 
-### Slice 3: structured data and branching semantics
+Agent-grade compiler milestone summary:
 
-Goal: add the minimum useful data model for service code.
+- `AG0`: freeze the current borrowed-projection baseline as the stage1 entry floor.
+- `AG1`: finish ownership and borrowing.
+- `AG2`: add the minimum generic abstraction layer.
+- `AG3`: add package graph support, stable module rules, and real capability enforcement.
+- `AG4`: add the stdlib, async runtime, and HTTP-service-capable runtime surface.
+- `AG5`: add `axiomc test` plus the CLI/worker/service fixtures that close the
+  first agent-grade compiler bar.
 
-- Struct declarations, literals, named struct types, field access, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed slice types, borrowed array slice expressions, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, both tuple-style and named-payload enum variants with exhaustive statement-level `match`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, and `Option<T>` / `Result<T, E>` are now in the bootstrap.
-- Extend comparisons and control-flow typing across structured data where appropriate.
+Important bar definition:
 
-Exit criteria:
-
-- Stage1 can express request/response-style data and explicit success/failure flows without encoding everything as strings.
-- Compile-fail tests cover bad field access, invalid constructors, and non-exhaustive matches.
-- The example set includes one small service-style program using structs or enums.
-
-### Slice 4: ownership and borrowing
-
-Goal: replace the bootstrap move rule with a real Rust-like safety model.
-
-- Generalize moves beyond `string` bindings to non-`Copy` values.
-- Add immutable and mutable borrows, lexical lifetime tracking, and aliasing checks.
-- Teach the checker about moves through function calls, branches, loops, and aggregate fields.
-- Build a dedicated compile-fail corpus for move-after-use, double mutable borrow, mutable-plus-shared borrow, and borrow-outlives-owner errors.
-
-Execution order inside Slice 4:
-
-1. Promote borrowed slices from bootstrap special cases into first-class borrow values.
-   - Unify provenance tracking for borrowed locals, temporary expressions, `match` bindings, aggregate wrappers, and borrowed return values.
-   - Extend the same model to borrowed projections that appear inside structs, tuple elements, enum payloads, and nested collection shapes instead of only direct local bindings.
-2. Tighten control-flow and loop joins.
-   - Keep dead-branch pruning for statically false control-flow, then add conservative merge rules for unknown `if` / `while` paths so borrows survive exactly as long as they must across back-edges and join points.
-   - Lock this with compile-fail cases for branch-local borrows, loop-carried borrows, and post-loop owner moves.
-3. Add mutable borrows in a deliberately narrow order.
-   - Start with borrowed slices and borrowed locals before widening to aggregate projections.
-   - Reject double mutable borrow, mutable-plus-shared aliasing, and mutation through moved values before trying to optimize ergonomics.
-4. Add first-class partial-move and projection-sensitive ownership.
-   - Track field/tuple/enum payload moves separately where it is sound instead of conservatively consuming the entire aggregate in every case.
-   - Recheck calls, destructuring, and `match` lowering against that finer-grained ownership model.
-5. Finish the ownership surface with diagnostics and a real failure corpus.
-   - Emit stable machine-readable ownership diagnostics with spans, notes, and rule-specific error kinds.
-   - Keep dedicated compile-fail suites for move-after-use, conflicting borrows, borrow-outlives-owner, invalid returned borrows, and loop/control-flow regressions.
-
-Generic-abstraction track after Slice 4:
-
-- Do not add user-defined generics until the borrow model above is stable enough to represent borrowed data inside generic signatures without more bootstrap exceptions.
-- Start with monomorphized generic functions over existing stage1 types and built-ins (`Option<T>`, `Result<T, E>`, arrays, maps, borrowed slices).
-- Then add generic structs and enums, still using monomorphized native codegen before any trait/interface system exists.
-- Keep the initial generic surface intentionally small: explicit type arguments, no higher-kinded abstractions, and no trait bounds until method/interface work starts.
-- Add compile-fail coverage for mismatched instantiations, unconstrained type parameters, borrowed generic return misuse, and recursive generic layout hazards.
-
-Exit criteria:
-
-- Ownership errors are driven by first-class rules, not bootstrap special cases.
-- Borrow-check failures produce stable machine-readable diagnostics.
-- Stage1 examples include at least one passing ownership-heavy program and several locked failing cases.
-
-### Slice 5: package graph and capability enforcement
-
-Goal: make stage1 usable for real projects instead of isolated examples.
-
-- Implement dependencies, workspaces, lockfile validation, and package-local module resolution.
-- Replace the current placeholder capability view with manifest-driven enforcement in the compiler/runtime boundary.
-- Add stable package commands for building and checking multi-package workspaces.
-- Add tests for deterministic lockfiles, offline rebuilds, capability-denied calls, and allowed capability flows.
-
-Exit criteria:
-
-- `axiomc check/build/run` work across a small workspace with at least one dependency edge.
-- Capability-denied programs fail before native execution.
-- `axiom.lock` is part of reproducible builds instead of placeholder metadata.
-
-### Slice 6: standard library and async runtime
-
-Goal: make Axiom plausible for CLI, worker, and service workloads.
-
-- Add the first stage1 standard library modules: `std.io`, `std.fs`, `std.env`, `std.time`, `std.json`, `std.http`, `std.process`, `std.collections`, `std.sync`, and `std.crypto.hash`.
-- Add async functions, `await`, task spawning, channels, cancellation, and timeout primitives.
-- Connect stdlib operations to capability enforcement instead of implicit host access.
-- Add integration tests for file I/O, JSON, HTTP client/server flows, process execution, and async coordination.
-
-Exit criteria:
-
-- Stage1 can implement a small HTTP worker and a queue-style agent task runner.
-- Capability-aware stdlib calls are covered by integration tests.
-- Async programs build and run without falling back to stage0.
-
-### Slice 7: native backend and toolchain completeness
-
-Goal: move from bootstrap compiler to credible production toolchain.
-
-- Replace generated-Rust codegen with a real native backend, starting with Cranelift AOT.
-- Add `axiom test`, `axiom fmt`, `axiom bench`, `axiom doc`, and `axiom publish`.
-- Add benchmark gates for CLI startup, JSON throughput, HTTP echo, and worker throughput.
-- Improve diagnostics with richer spans, notes, and stable JSON output contracts.
-
-Exit criteria:
-
-- Native binaries come from the stage1 backend directly, not `rustc` on generated Rust.
-- Toolchain commands cover the full local loop without relying on stage0.
-- Benchmarks establish a tracked baseline against simple Go and Rust reference implementations.
+- The first workable-compiler bar is **agent-grade**, not direct-native parity.
+- Generated-Rust codegen remains acceptable at that bar as long as the public
+  workflow is fully `axiomc`-driven.
+- The required proof workloads are a multi-package CLI, a queue-style worker,
+  and a small HTTP service.
 
 ## Working rules for future stage1 work
 
