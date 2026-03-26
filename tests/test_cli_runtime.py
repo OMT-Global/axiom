@@ -265,7 +265,7 @@ class CliRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["file"], str(src))
         self.assertEqual(payload["output"], str(bc))
         self.assertGreater(payload["bytes"], 0)
-        self.assertEqual(payload["bytecode"]["version_minor"], 9)
+        self.assertEqual(payload["bytecode"]["version_minor"], 10)
         self.assertGreater(payload["bytecode"]["instruction_count"], 0)
 
     def test_compile_reports_json_error(self) -> None:

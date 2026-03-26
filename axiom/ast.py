@@ -12,7 +12,15 @@ class Program:
     stmts: List["Stmt"]
 
 
-TypeName = Literal["int", "string", "bool"]
+TypeName = Literal["int", "string", "bool", "int[]", "string[]", "bool[]"]
+
+
+def element_type(array_type: TypeName) -> TypeName:
+    """Return the element type for an array type (e.g. 'int[]' -> 'int')."""
+    if array_type.endswith("[]"):
+        base = array_type[:-2]
+        return base  # type: ignore[return-value]
+    raise AssertionError(f"not an array type: {array_type}")
 
 
 @dataclass(frozen=True)
@@ -172,7 +180,20 @@ class Binary:
     span: Span
 
 
-Expr = Union[IntLit, StringLit, BoolLit, VarRef, UnaryNeg, Binary, CallExpr]
+@dataclass(frozen=True)
+class ArrayLit:
+    elements: List["Expr"]
+    span: Span
+
+
+@dataclass(frozen=True)
+class IndexExpr:
+    array: "Expr"
+    index: "Expr"
+    span: Span
+
+
+Expr = Union[IntLit, StringLit, BoolLit, VarRef, UnaryNeg, Binary, CallExpr, ArrayLit, IndexExpr]
 
 
 def expr_span(e: Expr) -> Span:
