@@ -227,12 +227,19 @@ class Checker:
                 return resolved
         raise AxiomCompileError(f"undefined function {fn_name!r}", span)
 
+    def _check_expr_expecting(self, expr: Expr, expected: TypeName) -> TypeName:
+        """Check expr, using expected as a hint for empty array literals."""
+        if isinstance(expr, ArrayLit) and not expr.elements and expected.endswith("[]"):
+            self.expr_types[id(expr)] = expected
+            return expected
+        return self._check_expr(expr)
+
     def _check_stmt(self, stmt: object) -> None:
         if isinstance(stmt, LetStmt):
             if stmt.name in RESERVED_IDENTIFIER_NAMES:
                 raise AxiomCompileError(f"reserved identifier {stmt.name!r}", stmt.span)
-            expr_type = self._check_expr(stmt.expr)
             expected_type = self._require_let_type(stmt)
+            expr_type = self._check_expr_expecting(stmt.expr, expected_type)
             if expr_type != expected_type:
                 raise AxiomCompileError(
                     f"let binding {stmt.name!r} expects {expected_type}, got {expr_type}",
@@ -242,7 +249,7 @@ class Checker:
             return
         if isinstance(stmt, AssignStmt):
             expected = self._resolve_var_type(stmt.name, stmt.span)
-            actual = self._check_expr(stmt.expr)
+            actual = self._check_expr_expecting(stmt.expr, expected)
             if actual != expected:
                 raise AxiomCompileError(
                     f"assignment to {stmt.name!r} expects {expected}, got {actual}",
@@ -252,7 +259,7 @@ class Checker:
         if isinstance(stmt, ReturnStmt):
             if self._current_return_type is None:
                 raise AxiomCompileError("return outside function", stmt.span)
-            actual = self._check_expr(stmt.expr)
+            actual = self._check_expr_expecting(stmt.expr, self._current_return_type)
             if actual != self._current_return_type:
                 raise AxiomCompileError(
                     f"return expects {self._current_return_type}, got {actual}",

@@ -547,7 +547,7 @@ class Parser:
             return VarRef(str(tok.value), tok.span)
         if t.kind == TokenKind.MINUS:
             minus = self._bump()
-            inner = self._parse_primary()
+            inner = self._parse_postfix()
             return UnaryNeg(expr=inner, span=Span(minus.span.start, expr_span(inner).end))
         if t.kind == TokenKind.LPAREN:
             lparen_token = self._bump()
