@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
 from .ast import (
+    ArrayLit,
     AssignStmt,
     Binary,
     BinOp,
@@ -15,6 +16,7 @@ from .ast import (
     FunctionDefStmt,
     IfStmt,
     ImportStmt,
+    IndexExpr,
     IntLit,
     LetStmt,
     Param,
@@ -204,6 +206,9 @@ class Compiler:
             out.append(Instr(Op.CONST_STRING, self._intern("")))
         elif return_type == "bool":
             out.append(Instr(Op.CONST_BOOL, 0))
+        elif return_type.endswith("[]"):
+            # Empty array literal as default return.
+            out.append(Instr(Op.MAKE_ARRAY, 0))
         else:
             raise AxiomCompileError(f"unsupported return type {return_type!r}")
         out.append(Instr(Op.RET))
@@ -394,6 +399,16 @@ class Compiler:
                 out.append(Instr(Op.CMP_GE))
             else:
                 raise AssertionError("unknown binop")
+            return
+        if isinstance(expr, ArrayLit):
+            for elem in expr.elements:
+                self._compile_expr(elem, out)
+            out.append(Instr(Op.MAKE_ARRAY, len(expr.elements)))
+            return
+        if isinstance(expr, IndexExpr):
+            self._compile_expr(expr.array, out)
+            self._compile_expr(expr.index, out)
+            out.append(Instr(Op.LOAD_INDEX))
             return
         raise AssertionError("unknown expr")
 

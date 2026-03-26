@@ -240,6 +240,27 @@ class Vm:
                 return
             elif i.op == Op.CLOSE_UPVALUE:
                 continue
+            elif i.op == Op.MAKE_ARRAY:
+                n = int(i.arg)
+                if len(self.stack) < n:
+                    raise AxiomRuntimeError("stack underflow on MAKE_ARRAY")
+                elements = [self.stack.pop() for _ in range(n)]
+                elements.reverse()
+                self.stack.append(elements)
+            elif i.op == Op.LOAD_INDEX:
+                if len(self.stack) < 2:
+                    raise AxiomRuntimeError("stack underflow on LOAD_INDEX")
+                index = self.stack.pop()
+                array = self.stack.pop()
+                if not isinstance(array, list):
+                    raise AxiomRuntimeError("cannot index a non-array value")
+                if type(index) is not int:
+                    raise AxiomRuntimeError("array index must be int")
+                if index < 0 or index >= len(array):
+                    raise AxiomRuntimeError(
+                        f"array index {index} out of bounds (length {len(array)})"
+                    )
+                self.stack.append(array[index])
             else:
                 raise AxiomRuntimeError(f"unknown opcode {i.op}")
 

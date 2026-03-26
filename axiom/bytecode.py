@@ -8,7 +8,7 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 9
+VERSION_MINOR = 10
 
 
 class Op:
@@ -38,6 +38,8 @@ class Op:
     LOAD_UPVALUE = 0x16
     STORE_UPVALUE = 0x17
     CLOSE_UPVALUE = 0x18
+    MAKE_ARRAY = 0x1C
+    LOAD_INDEX = 0x1D
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,10 @@ class Bytecode:
                     raise AxiomCompileError("CONST_STRING missing arg")
                 if self.version_minor < 8:
                     raise AxiomCompileError("CONST_STRING requires bytecode version 0.8+")
+                out += struct.pack("<I", int(ins.arg))
+            elif ins.op == Op.MAKE_ARRAY:
+                if ins.arg is None:
+                    raise AxiomCompileError("MAKE_ARRAY missing arg")
                 out += struct.pack("<I", int(ins.arg))
             elif ins.op in (
                 Op.LOAD,
@@ -213,6 +219,9 @@ class Bytecode:
                     raise ValueError("CONST_STRING requires bytecode version 0.8+")
                 (index,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(index)))
+            elif op == Op.MAKE_ARRAY:
+                (n,) = struct.unpack("<I", take(4))
+                ins.append(Instr(op, int(n)))
             elif op in (
                 Op.LOAD,
                 Op.STORE,

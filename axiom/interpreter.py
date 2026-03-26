@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, TextIO, Tuple
 
 from .ast import (
+    ArrayLit,
+    IndexExpr,
     Program,
     LetStmt,
     ImportStmt,
@@ -205,6 +207,8 @@ class Interpreter:
             return ""
         if fn.return_type.name == "bool":
             return False
+        if fn.return_type.name.endswith("[]"):
+            return []
         raise AxiomRuntimeError(f"unsupported return type {fn.return_type.name!r}")
 
     def _call_host(self, fn_name: str, args: List[Value], out: TextIO) -> Value:
@@ -268,4 +272,19 @@ class Interpreter:
                     return compare_ge(a, b, context="operator '>='")
             except ValueError as e:
                 raise AxiomRuntimeError(str(e), expr.span) from e
+        if isinstance(expr, ArrayLit):
+            return [self._eval(elem, out) for elem in expr.elements]
+        if isinstance(expr, IndexExpr):
+            array = self._eval(expr.array, out)
+            index = self._eval(expr.index, out)
+            if not isinstance(array, list):
+                raise AxiomRuntimeError("cannot index a non-array value", expr.span)
+            if type(index) is not int:
+                raise AxiomRuntimeError("array index must be int", expr.index.span)
+            if index < 0 or index >= len(array):
+                raise AxiomRuntimeError(
+                    f"array index {index} out of bounds (length {len(array)})",
+                    expr.index.span,
+                )
+            return array[index]
         raise AssertionError("unknown expr")

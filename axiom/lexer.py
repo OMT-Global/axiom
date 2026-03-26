@@ -202,6 +202,10 @@ class Lexer:
             return Token(TokenKind.LBRACE, Span(start, start + 1))
         if ch == "}":
             return Token(TokenKind.RBRACE, Span(start, start + 1))
+        if ch == "[":
+            return Token(TokenKind.LBRACKET, Span(start, start + 1))
+        if ch == "]":
+            return Token(TokenKind.RBRACKET, Span(start, start + 1))
 
         if ch == "#":
             # comment to end of line (don't consume newline)

@@ -42,6 +42,8 @@ class TokenKind(Enum):
     RPAREN = auto()
     LBRACE = auto()
     RBRACE = auto()
+    LBRACKET = auto()
+    RBRACKET = auto()
     EOF = auto()
 
 

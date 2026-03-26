@@ -61,6 +61,13 @@ def _builtin_parse_int(args: List[Value], _out: TextIO) -> int:
         raise ValueError(f"host.int.parse expected integer string: {value!r}") from e
 
 
+def _builtin_array_len(args: List[Value], _out: TextIO) -> int:
+    arr = args[0]
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.len expected an array, got {value_kind(arr)}")
+    return len(arr)
+
+
 HOST_VERSION = VERSION_MINOR
 
 _DEFAULT_HOST_BUILTINS: List[HostBuiltin] = [
@@ -70,6 +77,7 @@ _DEFAULT_HOST_BUILTINS: List[HostBuiltin] = [
     HostBuiltin("abs", 1, False, _builtin_abs, ["int"], "int"),
     HostBuiltin("math.abs", 1, False, _builtin_abs, ["int"], "int"),
     HostBuiltin("int.parse", 1, False, _builtin_parse_int, ["string"], "int"),
+    HostBuiltin("array.len", 1, False, _builtin_array_len, ["value"], "int"),
 ]
 
 _HOST_BUILTINS_LIST: List[HostBuiltin] = list(_DEFAULT_HOST_BUILTINS)

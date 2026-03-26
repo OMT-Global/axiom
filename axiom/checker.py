@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .ast import (
+    ArrayLit,
     AssignStmt,
     Binary,
     BinOp,
@@ -15,6 +16,7 @@ from .ast import (
     FunctionDefStmt,
     IfStmt,
     ImportStmt,
+    IndexExpr,
     IntLit,
     LetStmt,
     Param,
@@ -26,6 +28,7 @@ from .ast import (
     UnaryNeg,
     VarRef,
     WhileStmt,
+    element_type,
 )
 from .errors import AxiomCompileError
 from .host import HOST_BUILTINS
@@ -424,6 +427,40 @@ class Checker:
                 expr_type = "bool"
             else:
                 raise AssertionError("unknown binop")
+        elif isinstance(expr, ArrayLit):
+            if not expr.elements:
+                raise AxiomCompileError(
+                    "cannot infer type of empty array literal; use a typed let binding",
+                    expr.span,
+                )
+            first_type = self._check_expr(expr.elements[0])
+            if first_type not in ("int", "string", "bool"):
+                raise AxiomCompileError(
+                    f"arrays of {first_type!r} are not supported",
+                    expr.span,
+                )
+            for i, elem in enumerate(expr.elements[1:], start=1):
+                elem_type = self._check_expr(elem)
+                if elem_type != first_type:
+                    raise AxiomCompileError(
+                        f"array element {i} has type {elem_type!r}, expected {first_type!r}",
+                        elem.span,
+                    )
+            expr_type = f"{first_type}[]"  # type: ignore[assignment]
+        elif isinstance(expr, IndexExpr):
+            array_type = self._check_expr(expr.array)
+            if not array_type.endswith("[]"):
+                raise AxiomCompileError(
+                    f"cannot index non-array type {array_type!r}",
+                    expr.span,
+                )
+            index_type = self._check_expr(expr.index)
+            if index_type != "int":
+                raise AxiomCompileError(
+                    f"array index must be int, got {index_type!r}",
+                    expr.index.span,
+                )
+            expr_type = element_type(array_type)
         else:
             raise AssertionError("unknown expr")
 

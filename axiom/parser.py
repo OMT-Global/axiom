@@ -25,6 +25,8 @@ from .ast import (
     UnaryNeg,
     Binary,
     BinOp,
+    ArrayLit,
+    IndexExpr,
     Param,
     TypeRef,
     expr_span,
@@ -413,7 +415,13 @@ class Parser:
                 source=self.source,
                 path=self.source_path,
             )
-        return TypeRef(name=raw_name, span=token.span)
+        # Array type suffix: int[], string[], bool[]
+        if self._peek().kind == TokenKind.LBRACKET:
+            self._bump()  # eat [
+            rbracket = self._eat(TokenKind.RBRACKET)
+            array_name = f"{raw_name}[]"
+            return TypeRef(name=array_name, span=Span(token.span.start, rbracket.span.end))  # type: ignore[arg-type]
+        return TypeRef(name=raw_name, span=token.span)  # type: ignore[arg-type]
 
     def _parse_equality(self) -> Expr:
         node = self._parse_comparison()
@@ -465,7 +473,7 @@ class Parser:
         return node
 
     def _parse_mul_div(self) -> Expr:
-        node = self._parse_factor()
+        node = self._parse_postfix()
         while True:
             k = self._peek().kind
             if k == TokenKind.STAR:
@@ -475,11 +483,22 @@ class Parser:
             else:
                 break
             self._bump()
-            rhs = self._parse_factor()
+            rhs = self._parse_postfix()
             node = Binary(op=op, lhs=node, rhs=rhs, span=Span(expr_span(node).start, expr_span(rhs).end))
         return node
 
-    def _parse_factor(self) -> Expr:
+    def _parse_postfix(self) -> Expr:
+        node = self._parse_primary()
+        while self._peek().kind == TokenKind.LBRACKET:
+            self._bump()  # eat [
+            self._eat_newlines()
+            index = self._parse_expr()
+            self._eat_newlines()
+            rbracket = self._eat(TokenKind.RBRACKET)
+            node = IndexExpr(array=node, index=index, span=Span(expr_span(node).start, rbracket.span.end))
+        return node
+
+    def _parse_primary(self) -> Expr:
         t = self._peek()
         if t.kind == TokenKind.INT:
             tok = self._bump()
@@ -528,19 +547,40 @@ class Parser:
             return VarRef(str(tok.value), tok.span)
         if t.kind == TokenKind.MINUS:
             minus = self._bump()
-            inner = self._parse_factor()
+            inner = self._parse_primary()
             return UnaryNeg(expr=inner, span=Span(minus.span.start, expr_span(inner).end))
         if t.kind == TokenKind.LPAREN:
             lparen_token = self._bump()
             expr = self._parse_expr()
             rparen_token = self._eat(TokenKind.RPAREN)
             return _widen_span(expr, Span(lparen_token.span.start, rparen_token.span.end))
+        if t.kind == TokenKind.LBRACKET:
+            lbracket = self._bump()  # eat [
+            elements: List[Expr] = []
+            self._eat_newlines()
+            if self._peek().kind != TokenKind.RBRACKET:
+                while True:
+                    elements.append(self._parse_expr())
+                    self._eat_newlines()
+                    if self._peek().kind == TokenKind.COMMA:
+                        self._bump()
+                        self._eat_newlines()
+                        if self._peek().kind == TokenKind.RBRACKET:
+                            break  # trailing comma
+                        continue
+                    break
+            self._eat_newlines()
+            rbracket = self._eat(TokenKind.RBRACKET)
+            return ArrayLit(elements=elements, span=Span(lbracket.span.start, rbracket.span.end))
         raise AxiomParseError(
             "expected expression",
             t.span,
             source=self.source,
             path=self.source_path,
         )
+
+    # Keep _parse_factor as an alias so external callers aren't broken.
+    _parse_factor = _parse_primary
 
 
 _NON_ID_CHARS = re.compile(r"[^0-9A-Za-z_]")
@@ -580,4 +620,8 @@ def _widen_span(expr: Expr, span: Span) -> Expr:
         return UnaryNeg(expr=expr.expr, span=span)
     if isinstance(expr, Binary):
         return Binary(op=expr.op, lhs=expr.lhs, rhs=expr.rhs, span=span)
+    if isinstance(expr, ArrayLit):
+        return ArrayLit(elements=expr.elements, span=span)
+    if isinstance(expr, IndexExpr):
+        return IndexExpr(array=expr.array, index=expr.index, span=span)
     raise AssertionError("unknown expr type")

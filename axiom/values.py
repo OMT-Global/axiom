@@ -5,25 +5,45 @@ from typing import Literal
 from .intops import trunc_div
 
 
-Value = int | str | bool
-ValueKind = Literal["int", "string", "bool", "value"]
+Value = int | str | bool | list
+ValueKind = Literal["int", "string", "bool", "int[]", "string[]", "bool[]", "value"]
 
 
 def value_kind(value: Value) -> ValueKind:
-    if type(value) is int:
-        return "int"
     if type(value) is bool:
         return "bool"
+    if type(value) is int:
+        return "int"
     if isinstance(value, str):
         return "string"
+    if isinstance(value, list):
+        # Infer element type from the first element when possible.
+        if value:
+            first = value[0]
+            if type(first) is bool:
+                return "bool[]"
+            if type(first) is int:
+                return "int[]"
+            if isinstance(first, str):
+                return "string[]"
+        return "value"  # empty array — type not inferrable at runtime
     return "value"
 
 
 def kind_matches(value: Value, expected: ValueKind) -> bool:
-    return expected == "value" or value_kind(value) == expected
+    if expected == "value":
+        return True
+    vk = value_kind(value)
+    # A typed array is also accepted by the generic "value" kind (handled above).
+    # An array with no elements matches any array kind.
+    if isinstance(value, list) and not value and expected in ("int[]", "string[]", "bool[]"):
+        return True
+    return vk == expected
 
 
 def render_value(value: Value) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(render_value(v) for v in value) + "]"
     if isinstance(value, str):
         return value
     if type(value) is bool:
