@@ -153,6 +153,16 @@ class WhileStmt:
     span: Span
 
 
+@dataclass(frozen=True)
+class ForStmt:
+    """for <var> in <iterable> { <body> }"""
+
+    var: str
+    iterable: "Expr"
+    body: BlockStmt
+    span: Span
+
+
 Stmt = Union[
     LetStmt,
     AssignStmt,
@@ -163,6 +173,7 @@ Stmt = Union[
     BlockStmt,
     IfStmt,
     WhileStmt,
+    ForStmt,
     FunctionDefStmt,
 ]
 

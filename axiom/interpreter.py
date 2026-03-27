@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, TextIO, Tuple
 
 from .ast import (
     ArrayLit,
+    ForStmt,
     IndexExpr,
     Program,
     LetStmt,
@@ -151,6 +152,17 @@ class Interpreter:
                 if not cond_value:
                     break
                 self._exec_stmt(stmt.body, out)
+            return
+        if isinstance(stmt, ForStmt):
+            array = self._eval(stmt.iterable, out)
+            if not isinstance(array, list):
+                raise AxiomRuntimeError("for loop iterable must be an array", stmt.iterable.span)
+            for elem in array:
+                self.scopes.append({stmt.var: elem})
+                try:
+                    self._exec_stmt(stmt.body, out)
+                finally:
+                    self.scopes.pop()
             return
         raise AssertionError("unknown stmt")
 

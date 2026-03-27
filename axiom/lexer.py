@@ -95,6 +95,10 @@ class Lexer:
             return Token(TokenKind.ELSE, Span(start, end))
         if text == "while":
             return Token(TokenKind.WHILE, Span(start, end))
+        if text == "for":
+            return Token(TokenKind.FOR, Span(start, end))
+        if text == "in":
+            return Token(TokenKind.IN, Span(start, end))
         if text == "true":
             return Token(TokenKind.TRUE, Span(start, end), True)
         if text == "false":

@@ -133,6 +133,69 @@ def _builtin_array_set_bool(args: List[Value], _out: TextIO) -> list:
     return result
 
 
+def _builtin_string_len(args: List[Value], _out: TextIO) -> int:
+    return len(require_string(args[0], context="host.string.len"))
+
+
+def _builtin_string_concat(args: List[Value], _out: TextIO) -> str:
+    a = require_string(args[0], context="host.string.concat")
+    b = require_string(args[1], context="host.string.concat")
+    return a + b
+
+
+def _builtin_string_contains(args: List[Value], _out: TextIO) -> bool:
+    s = require_string(args[0], context="host.string.contains")
+    sub = require_string(args[1], context="host.string.contains")
+    return sub in s
+
+
+def _builtin_string_starts_with(args: List[Value], _out: TextIO) -> bool:
+    s = require_string(args[0], context="host.string.starts_with")
+    prefix = require_string(args[1], context="host.string.starts_with")
+    return s.startswith(prefix)
+
+
+def _builtin_string_ends_with(args: List[Value], _out: TextIO) -> bool:
+    s = require_string(args[0], context="host.string.ends_with")
+    suffix = require_string(args[1], context="host.string.ends_with")
+    return s.endswith(suffix)
+
+
+def _builtin_string_slice(args: List[Value], _out: TextIO) -> str:
+    s = require_string(args[0], context="host.string.slice")
+    start = require_int(args[1], context="host.string.slice start")
+    end = require_int(args[2], context="host.string.slice end")
+    return s[start:end]
+
+
+def _builtin_string_to_int(args: List[Value], _out: TextIO) -> int:
+    value = require_string(args[0], context="host.string.to_int")
+    try:
+        return int(value.strip())
+    except ValueError as e:
+        raise ValueError(f"host.string.to_int expected integer string: {value!r}") from e
+
+
+def _builtin_math_min(args: List[Value], _out: TextIO) -> int:
+    a = require_int(args[0], context="host.math.min")
+    b = require_int(args[1], context="host.math.min")
+    return min(a, b)
+
+
+def _builtin_math_max(args: List[Value], _out: TextIO) -> int:
+    a = require_int(args[0], context="host.math.max")
+    b = require_int(args[1], context="host.math.max")
+    return max(a, b)
+
+
+def _builtin_math_pow(args: List[Value], _out: TextIO) -> int:
+    base = require_int(args[0], context="host.math.pow")
+    exp = require_int(args[1], context="host.math.pow")
+    if exp < 0:
+        raise ValueError(f"host.math.pow: negative exponent {exp}")
+    return base ** exp
+
+
 HOST_VERSION = VERSION_MINOR
 
 _DEFAULT_HOST_BUILTINS: List[HostBuiltin] = [
@@ -149,6 +212,16 @@ _DEFAULT_HOST_BUILTINS: List[HostBuiltin] = [
     HostBuiltin("array.set_int", 3, False, _builtin_array_set_int, ["int[]", "int", "int"], "int[]"),
     HostBuiltin("array.set_string", 3, False, _builtin_array_set_string, ["string[]", "int", "string"], "string[]"),
     HostBuiltin("array.set_bool", 3, False, _builtin_array_set_bool, ["bool[]", "int", "bool"], "bool[]"),
+    HostBuiltin("string.len", 1, False, _builtin_string_len, ["string"], "int"),
+    HostBuiltin("string.concat", 2, False, _builtin_string_concat, ["string", "string"], "string"),
+    HostBuiltin("string.contains", 2, False, _builtin_string_contains, ["string", "string"], "bool"),
+    HostBuiltin("string.starts_with", 2, False, _builtin_string_starts_with, ["string", "string"], "bool"),
+    HostBuiltin("string.ends_with", 2, False, _builtin_string_ends_with, ["string", "string"], "bool"),
+    HostBuiltin("string.slice", 3, False, _builtin_string_slice, ["string", "int", "int"], "string"),
+    HostBuiltin("string.to_int", 1, False, _builtin_string_to_int, ["string"], "int"),
+    HostBuiltin("math.min", 2, False, _builtin_math_min, ["int", "int"], "int"),
+    HostBuiltin("math.max", 2, False, _builtin_math_max, ["int", "int"], "int"),
+    HostBuiltin("math.pow", 2, False, _builtin_math_pow, ["int", "int"], "int"),
 ]
 
 _HOST_BUILTINS_LIST: List[HostBuiltin] = list(_DEFAULT_HOST_BUILTINS)

@@ -1,0 +1,11 @@
+let nums = [1, 2, 3, 4, 5]
+let sum = 0
+for n in nums {
+  sum = sum + n
+}
+print sum
+
+let words = ["hello", "world"]
+for w in words {
+  print w
+}
