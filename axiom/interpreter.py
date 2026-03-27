@@ -35,6 +35,7 @@ from .semantic_plan import (
     build_semantic_plan,
 )
 from .values import (
+    FunctionValue,
     Value,
     add_values,
     compare_eq,
@@ -209,6 +210,8 @@ class Interpreter:
             return False
         if fn.return_type.name.endswith("[]"):
             return []
+        if fn.return_type.name.startswith("fn("):
+            raise AxiomRuntimeError("function with fn return type returned without a value")
         raise AxiomRuntimeError(f"unsupported return type {fn.return_type.name!r}")
 
     def _call_host(self, fn_name: str, args: List[Value], out: TextIO) -> Value:
@@ -237,9 +240,24 @@ class Interpreter:
         if isinstance(expr, BoolLit):
             return expr.value
         if isinstance(expr, VarRef):
-            return self._lookup(expr.name, expr.span)
+            # First try variable scope; fall back to function reference.
+            for scope in reversed(self.scopes):
+                if expr.name in scope:
+                    return scope[expr.name]
+            try:
+                fn_name = self._resolve_function(expr.name)
+                return FunctionValue(fn_name)
+            except AxiomRuntimeError:
+                raise AxiomRuntimeError(f"undefined variable {expr.name!r}", expr.span)
         if isinstance(expr, CallExpr):
             args = [self._eval(arg, out) for arg in expr.args]
+            # If callee is a fn-typed local variable, call through it.
+            for scope in reversed(self.scopes):
+                if expr.callee in scope:
+                    val = scope[expr.callee]
+                    if isinstance(val, FunctionValue):
+                        return self._call(val.name, args, out)
+                    break
             return self._call(expr.callee, args, out)
         if isinstance(expr, UnaryNeg):
             try:

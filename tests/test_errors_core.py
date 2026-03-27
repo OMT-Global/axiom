@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 from axiom.api import compile_to_bytecode, parse_program
-from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
+from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError, MultiAxiomError
 from axiom.host import register_host_builtin, reset_host_builtins, unregister_host_builtin
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
@@ -227,6 +227,50 @@ print counter()
 
         with self.assertRaises(ValueError):
             register_host_builtin("print", 0, False, noop)
+
+    def test_multi_error_top_level_collects_all(self) -> None:
+        # Two independent type errors at top level — should be collected together.
+        src = """
+let x: int = "hello"
+let y: bool = 42
+"""
+        with self.assertRaises(MultiAxiomError) as cm:
+            compile_to_bytecode(src)
+        errors = cm.exception.errors
+        self.assertEqual(len(errors), 2)
+        messages = " ".join(str(e) for e in errors)
+        self.assertIn("string", messages)
+        self.assertIn("int", messages)
+
+    def test_multi_error_function_body_collects_all(self) -> None:
+        # Two independent type errors inside a function body.
+        src = """
+fn broken(): int {
+  let x: int = "wrong"
+  let y: bool = 99
+  return 0
+}
+"""
+        with self.assertRaises(MultiAxiomError) as cm:
+            compile_to_bytecode(src)
+        self.assertGreaterEqual(len(cm.exception.errors), 2)
+
+    def test_multi_error_to_dict(self) -> None:
+        src = """
+let x: int = "a"
+let y: bool = 1
+"""
+        with self.assertRaises(MultiAxiomError) as cm:
+            compile_to_bytecode(src)
+        d = cm.exception.to_dict()
+        self.assertEqual(d["kind"], "MultiAxiomError")
+        self.assertIsInstance(d["errors"], list)
+        self.assertGreaterEqual(len(d["errors"]), 2)
+
+    def test_single_error_still_raises_axiom_compile_error(self) -> None:
+        # A single error should still raise AxiomCompileError, not MultiAxiomError.
+        with self.assertRaises(AxiomCompileError):
+            compile_to_bytecode('let x: int = "hello"\n')
 
 
 if __name__ == "__main__":

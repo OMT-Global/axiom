@@ -171,3 +171,20 @@ class AxiomCompileError(AxiomError):
 
 class AxiomRuntimeError(AxiomError):
     pass
+
+
+class MultiAxiomError(Exception):
+    """Raised when the checker collects multiple errors in a single pass."""
+
+    def __init__(self, errors: list[AxiomCompileError]) -> None:
+        super().__init__(f"{len(errors)} error(s) found")
+        self.errors = list(errors)
+
+    def __str__(self) -> str:
+        return "\n\n".join(str(e) for e in self.errors)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "MultiAxiomError",
+            "errors": [e.to_dict() for e in self.errors],
+        }

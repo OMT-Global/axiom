@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 from .intops import trunc_div
 
 
-Value = int | str | bool | list
-ValueKind = Literal["int", "string", "bool", "int[]", "string[]", "bool[]", "value"]
+@dataclass(frozen=True)
+class FunctionValue:
+    """A first-class function reference, holding the canonical function name."""
+
+    name: str
+
+
+Value = int | str | bool | list | FunctionValue
+ValueKind = Literal["int", "string", "bool", "int[]", "string[]", "bool[]", "fn", "value"]
 
 
 def value_kind(value: Value) -> ValueKind:
@@ -27,6 +35,8 @@ def value_kind(value: Value) -> ValueKind:
             if isinstance(first, str):
                 return "string[]"
         return "value"  # empty array — type not inferrable at runtime
+    if isinstance(value, FunctionValue):
+        return "fn"
     return "value"
 
 
@@ -42,6 +52,8 @@ def kind_matches(value: Value, expected: ValueKind) -> bool:
 
 
 def render_value(value: Value) -> str:
+    if isinstance(value, FunctionValue):
+        return f"<fn {value.name}>"
     if isinstance(value, list):
         return "[" + ", ".join(render_value(v) for v in value) + "]"
     if isinstance(value, str):

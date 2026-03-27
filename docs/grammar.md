@@ -1,4 +1,4 @@
-# Axiom grammar (v0.9)
+# Axiom grammar (v0.11)
 
 Whitespace is generally ignored except newlines, which can terminate statements.
 
@@ -36,15 +36,19 @@ call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace: h
 args           := expr ("," expr)* ;
 
 terminator     := ";" | NEWLINE | EOF ;
-type_name      := "int" | "string" | "bool" ;
+type_name      := "int" | "string" | "bool"
+               | type_name "[]"                                       # array type: int[], string[], bool[]
+               | "fn" "(" (type_name ("," type_name)*)? ")" ":" type_name ;  # function type: fn(int,string):bool
 
 expr           := equality ;
 equality       := comparison (("==" | "!=") comparison)* ;
 comparison     := term (("<" | "<=" | ">" | ">=") term)* ;
 term           := factor (("+" | "-") factor)* ;
-factor         := unary (("*" | "/") unary)* ;
-unary          := "-" unary | primary ;
-primary        := INT | STRING | "true" | "false" | IDENT | call_expr | "(" expr ")" ;
+factor         := postfix (("*" | "/") postfix)* ;
+postfix        := primary ("[" expr "]")* ;                           # index expressions: xs[i]
+unary          := "-" postfix | primary ;
+primary        := INT | STRING | "true" | "false" | IDENT | call_expr | "(" expr ")"
+               | "[" (expr ("," expr)* ","?)? "]" ;                  # array literal: [1, 2, 3]
 STRING         := double-quoted UTF-8 string ;
 ```
 
