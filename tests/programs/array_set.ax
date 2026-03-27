@@ -1,0 +1,10 @@
+let xs: int[] = [1, 2, 3]
+xs = host.array.set_int(xs, 1, 99)
+print xs[0]
+print xs[1]
+print xs[2]
+
+let words: string[] = ["a", "b", "c"]
+words = host.array.set_string(words, 0, "hello")
+print words[0]
+print words[1]

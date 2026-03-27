@@ -209,6 +209,10 @@ class Compiler:
         elif return_type.endswith("[]"):
             # Empty array literal as default return.
             out.append(Instr(Op.MAKE_ARRAY, 0))
+        elif return_type.startswith("fn("):
+            raise AxiomCompileError(
+                f"function {fn_name!r} with fn return type must always return explicitly"
+            )
         else:
             raise AxiomCompileError(f"unsupported return type {return_type!r}")
         out.append(Instr(Op.RET))
@@ -355,10 +359,30 @@ class Compiler:
             out.append(Instr(Op.CONST_BOOL, 1 if expr.value else 0))
             return
         if isinstance(expr, VarRef):
-            slot, is_local = self._resolve_var(expr.name, expr.span)
-            out.append(Instr(Op.LOAD if is_local else Op.LOAD_UPVALUE, slot))
+            binding = self._try_resolve_var(expr.name)
+            if binding is not None:
+                slot, is_local = binding
+                out.append(Instr(Op.LOAD if is_local else Op.LOAD_UPVALUE, slot))
+            else:
+                # Function reference — push a FunctionValue onto the stack.
+                fn_name = self._try_resolve_function(expr.name)
+                if fn_name is None or fn_name not in self.function_ids:
+                    raise AxiomCompileError(
+                        f"undefined variable or function {expr.name!r}", expr.span
+                    )
+                out.append(Instr(Op.LOAD_FN, self.function_ids[fn_name]))
             return
         if isinstance(expr, CallExpr):
+            # Check if callee is a fn-typed local variable (indirect call).
+            binding = self._try_resolve_var(expr.callee)
+            if binding is not None:
+                slot, is_local = binding
+                for arg in expr.args:
+                    self._compile_expr(arg, out)
+                out.append(Instr(Op.LOAD if is_local else Op.LOAD_UPVALUE, slot))
+                out.append(Instr(Op.CALL_INDIRECT, len(expr.args)))
+                return
+            # Direct function call.
             fn_name = self._resolve_function(expr.callee, expr.span)
             for arg in expr.args:
                 self._compile_expr(arg, out)
@@ -412,11 +436,26 @@ class Compiler:
             return
         raise AssertionError("unknown expr")
 
-    def _resolve_function(self, fn_name: str, span) -> str:
+    def _try_resolve_var(self, name: str) -> Optional[tuple[int, bool]]:
+        for scope in reversed(self.scope_stack):
+            if name in scope:
+                return scope[name], True
+        source = self._parent_bindings.get(name)
+        if source is None:
+            return None
+        return source.index, False
+
+    def _try_resolve_function(self, fn_name: str) -> Optional[str]:
         if fn_name.startswith("host."):
             return fn_name
         if self.semantic_plan is not None:
             resolved = self.semantic_plan.resolve_function(fn_name, self.function_scope_stack)
             if resolved is not None:
                 return resolved
+        return None
+
+    def _resolve_function(self, fn_name: str, span) -> str:
+        resolved = self._try_resolve_function(fn_name)
+        if resolved is not None:
+            return resolved
         raise AxiomCompileError(f"undefined function {fn_name!r}", span)

@@ -68,6 +68,71 @@ def _builtin_array_len(args: List[Value], _out: TextIO) -> int:
     return len(arr)
 
 
+def _builtin_array_push_int(args: List[Value], _out: TextIO) -> list:
+    arr, val = args
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.push_int: expected int[], got {value_kind(arr)}")
+    result = list(arr)
+    result.append(require_int(val, context="host.array.push_int"))
+    return result
+
+
+def _builtin_array_push_string(args: List[Value], _out: TextIO) -> list:
+    arr, val = args
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.push_string: expected string[], got {value_kind(arr)}")
+    result = list(arr)
+    result.append(require_string(val, context="host.array.push_string"))
+    return result
+
+
+def _builtin_array_push_bool(args: List[Value], _out: TextIO) -> list:
+    arr, val = args
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.push_bool: expected bool[], got {value_kind(arr)}")
+    from .values import require_bool
+    result = list(arr)
+    result.append(require_bool(val, context="host.array.push_bool"))
+    return result
+
+
+def _builtin_array_set_int(args: List[Value], _out: TextIO) -> list:
+    arr, idx, val = args
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.set_int: expected int[], got {value_kind(arr)}")
+    i = require_int(idx, context="host.array.set_int index")
+    if i < 0 or i >= len(arr):
+        raise ValueError(f"host.array.set_int: index {i} out of bounds (length {len(arr)})")
+    result = list(arr)
+    result[i] = require_int(val, context="host.array.set_int")
+    return result
+
+
+def _builtin_array_set_string(args: List[Value], _out: TextIO) -> list:
+    arr, idx, val = args
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.set_string: expected string[], got {value_kind(arr)}")
+    i = require_int(idx, context="host.array.set_string index")
+    if i < 0 or i >= len(arr):
+        raise ValueError(f"host.array.set_string: index {i} out of bounds (length {len(arr)})")
+    result = list(arr)
+    result[i] = require_string(val, context="host.array.set_string")
+    return result
+
+
+def _builtin_array_set_bool(args: List[Value], _out: TextIO) -> list:
+    arr, idx, val = args
+    if not isinstance(arr, list):
+        raise ValueError(f"host.array.set_bool: expected bool[], got {value_kind(arr)}")
+    i = require_int(idx, context="host.array.set_bool index")
+    if i < 0 or i >= len(arr):
+        raise ValueError(f"host.array.set_bool: index {i} out of bounds (length {len(arr)})")
+    from .values import require_bool
+    result = list(arr)
+    result[i] = require_bool(val, context="host.array.set_bool")
+    return result
+
+
 HOST_VERSION = VERSION_MINOR
 
 _DEFAULT_HOST_BUILTINS: List[HostBuiltin] = [
@@ -78,6 +143,12 @@ _DEFAULT_HOST_BUILTINS: List[HostBuiltin] = [
     HostBuiltin("math.abs", 1, False, _builtin_abs, ["int"], "int"),
     HostBuiltin("int.parse", 1, False, _builtin_parse_int, ["string"], "int"),
     HostBuiltin("array.len", 1, False, _builtin_array_len, ["value"], "int"),
+    HostBuiltin("array.push_int", 2, False, _builtin_array_push_int, ["int[]", "int"], "int[]"),
+    HostBuiltin("array.push_string", 2, False, _builtin_array_push_string, ["string[]", "string"], "string[]"),
+    HostBuiltin("array.push_bool", 2, False, _builtin_array_push_bool, ["bool[]", "bool"], "bool[]"),
+    HostBuiltin("array.set_int", 3, False, _builtin_array_set_int, ["int[]", "int", "int"], "int[]"),
+    HostBuiltin("array.set_string", 3, False, _builtin_array_set_string, ["string[]", "int", "string"], "string[]"),
+    HostBuiltin("array.set_bool", 3, False, _builtin_array_set_bool, ["bool[]", "int", "bool"], "bool[]"),
 ]
 
 _HOST_BUILTINS_LIST: List[HostBuiltin] = list(_DEFAULT_HOST_BUILTINS)

@@ -29,8 +29,10 @@ from .ast import (
     VarRef,
     WhileStmt,
     element_type,
+    make_fn_type,
+    parse_fn_type,
 )
-from .errors import AxiomCompileError
+from .errors import AxiomCompileError, MultiAxiomError
 from .host import HOST_BUILTINS
 from .semantic_plan import (
     RESERVED_IDENTIFIER_NAMES,
@@ -69,6 +71,20 @@ class Checker:
     expr_types: Dict[int, TypeName] = field(default_factory=dict)
     _parent_types: Dict[str, TypeName] = field(default_factory=dict)
     _current_return_type: Optional[TypeName] = None
+    _errors: List[AxiomCompileError] = field(default_factory=list)
+
+    def _record(self, err: AxiomCompileError) -> None:
+        """Collect an error for deferred reporting."""
+        self._errors.append(err)
+
+    def _flush_errors(self) -> None:
+        """Raise MultiAxiomError if any errors were collected, then clear."""
+        if self._errors:
+            errors = list(self._errors)
+            self._errors.clear()
+            if len(errors) == 1:
+                raise errors[0]
+            raise MultiAxiomError(errors)
 
     def check(self, program: Program) -> CheckedProgram:
         self.semantic_plan = build_semantic_plan(
@@ -85,24 +101,42 @@ class Checker:
         self.expr_types = {}
         self._parent_types = {}
         self._current_return_type = None
+        self._errors = []
 
         self.function_defs = dict(self.semantic_plan.function_defs)
         self.function_decl_order = list(self.semantic_plan.function_decl_order)
         self.function_scopes = dict(self.semantic_plan.function_scopes)
         self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
+
+        # Collect signature errors before checking bodies.
         for fn_name in self.function_decl_order:
             fn = self.function_defs[fn_name]
-            self.function_signatures[fn_name] = FunctionSignature(
-                name=fn_name,
-                param_types=[
-                    self._require_param_type(fn_name=fn_name, param=param)
-                    for param in fn.params
-                ],
-                return_type=self._require_return_type(fn_name=fn_name, fn=fn),
-            )
+            try:
+                sig = FunctionSignature(
+                    name=fn_name,
+                    param_types=[
+                        self._require_param_type(fn_name=fn_name, param=param)
+                        for param in fn.params
+                    ],
+                    return_type=self._require_return_type(fn_name=fn_name, fn=fn),
+                )
+                self.function_signatures[fn_name] = sig
+            except AxiomCompileError as e:
+                self._record(e)
+
+        # Stop early if signatures are broken — body checks would cascade badly.
+        self._flush_errors()
 
         for stmt in program.stmts:
-            self._check_stmt(stmt)
+            try:
+                self._check_stmt(stmt)
+            except AxiomCompileError as e:
+                self._record(e)
+            except MultiAxiomError as e:
+                for err in e.errors:
+                    self._record(err)
+
+        self._flush_errors()
 
         return CheckedProgram(
             program=program,
@@ -134,19 +168,32 @@ class Checker:
         for param in fn.params:
             self._bind_param(param)
 
+        fn_errors: List[AxiomCompileError] = []
         try:
             for stmt in fn.body.stmts:
-                self._check_stmt(stmt)
-            if not self._block_guarantees_return(fn.body):
-                raise AxiomCompileError(
-                    f"function {fn_name!r} may exit without returning {signature.return_type}",
-                    fn.span,
+                try:
+                    self._check_stmt(stmt)
+                except AxiomCompileError as e:
+                    fn_errors.append(e)
+                except MultiAxiomError as e:
+                    fn_errors.extend(e.errors)
+            if not fn_errors and not self._block_guarantees_return(fn.body):
+                fn_errors.append(
+                    AxiomCompileError(
+                        f"function {fn_name!r} may exit without returning {signature.return_type}",
+                        fn.span,
+                    )
                 )
         finally:
             self.scope_stack = saved_scope_stack
             self.function_scope_stack = saved_function_scope_stack
             self._parent_types = saved_parent_types
             self._current_return_type = saved_return_type
+
+        if len(fn_errors) == 1:
+            raise fn_errors[0]
+        if fn_errors:
+            raise MultiAxiomError(fn_errors)
 
     def _visible_types(self) -> Dict[str, TypeName]:
         types = dict(self._parent_types)
@@ -210,21 +257,33 @@ class Checker:
             )
         current[param.name] = param.type_ref.name
 
-    def _resolve_var_type(self, name: str, span) -> TypeName:
+    def _try_resolve_var_type(self, name: str) -> Optional[TypeName]:
         for scope in reversed(self.scope_stack):
             if name in scope:
                 return scope[name]
         if name in self._parent_types:
             return self._parent_types[name]
+        return None
+
+    def _resolve_var_type(self, name: str, span) -> TypeName:
+        result = self._try_resolve_var_type(name)
+        if result is not None:
+            return result
         raise AxiomCompileError(f"undefined variable {name!r}", span)
 
-    def _resolve_function(self, fn_name: str, span) -> str:
+    def _try_resolve_function(self, fn_name: str) -> Optional[str]:
         if fn_name.startswith("host."):
             return fn_name
         if self.semantic_plan is not None:
             resolved = self.semantic_plan.resolve_function(fn_name, self.function_scope_stack)
             if resolved is not None:
                 return resolved
+        return None
+
+    def _resolve_function(self, fn_name: str, span) -> str:
+        resolved = self._try_resolve_function(fn_name)
+        if resolved is not None:
+            return resolved
         raise AxiomCompileError(f"undefined function {fn_name!r}", span)
 
     def _check_expr_expecting(self, expr: Expr, expected: TypeName) -> TypeName:
@@ -361,28 +420,67 @@ class Checker:
         elif isinstance(expr, BoolLit):
             expr_type = "bool"
         elif isinstance(expr, VarRef):
-            expr_type = self._resolve_var_type(expr.name, expr.span)
-        elif isinstance(expr, CallExpr):
-            fn_name = self._resolve_function(expr.callee, expr.span)
-            if fn_name.startswith("host."):
-                expr_type = self._check_host_call(expr, fn_name)
+            var_type = self._try_resolve_var_type(expr.name)
+            if var_type is not None:
+                expr_type = var_type
             else:
-                sig = self.function_signatures[fn_name]
-                if len(sig.param_types) != len(expr.args):
+                # Try resolving as a first-class function reference.
+                fn_name = self._try_resolve_function(expr.name)
+                if fn_name is None:
+                    raise AxiomCompileError(f"undefined variable {expr.name!r}", expr.span)
+                if fn_name not in self.function_signatures:
                     raise AxiomCompileError(
-                        f"function {fn_name!r} expects {len(sig.param_types)} args, got {len(expr.args)}",
+                        f"function {expr.name!r} used before its signature was resolved",
+                        expr.span,
+                    )
+                sig = self.function_signatures[fn_name]
+                expr_type = make_fn_type(sig.param_types, sig.return_type)
+        elif isinstance(expr, CallExpr):
+            # Check if callee is a fn-typed local variable (indirect call).
+            var_type = self._try_resolve_var_type(expr.callee)
+            if var_type is not None and var_type.startswith("fn("):
+                param_types, return_type = parse_fn_type(var_type)
+                if len(param_types) != len(expr.args):
+                    raise AxiomCompileError(
+                        f"call through {expr.callee!r} expects {len(param_types)} args, got {len(expr.args)}",
                         expr.span,
                     )
                 for index, (arg, expected_type) in enumerate(
-                    zip(expr.args, sig.param_types, strict=True)
+                    zip(expr.args, param_types, strict=True)
                 ):
                     actual = self._check_expr(arg)
                     if actual != expected_type:
                         raise AxiomCompileError(
-                            f"function {fn_name!r} argument {index + 1} expects {expected_type}, got {actual}",
+                            f"call through {expr.callee!r} argument {index + 1} expects {expected_type}, got {actual}",
                             arg.span,
                         )
-                expr_type = sig.return_type
+                expr_type = return_type
+            elif var_type is not None:
+                raise AxiomCompileError(
+                    f"cannot call non-function variable {expr.callee!r} of type {var_type!r}",
+                    expr.span,
+                )
+            else:
+                fn_name = self._resolve_function(expr.callee, expr.span)
+                if fn_name.startswith("host."):
+                    expr_type = self._check_host_call(expr, fn_name)
+                else:
+                    sig = self.function_signatures[fn_name]
+                    if len(sig.param_types) != len(expr.args):
+                        raise AxiomCompileError(
+                            f"function {fn_name!r} expects {len(sig.param_types)} args, got {len(expr.args)}",
+                            expr.span,
+                        )
+                    for index, (arg, expected_type) in enumerate(
+                        zip(expr.args, sig.param_types, strict=True)
+                    ):
+                        actual = self._check_expr(arg)
+                        if actual != expected_type:
+                            raise AxiomCompileError(
+                                f"function {fn_name!r} argument {index + 1} expects {expected_type}, got {actual}",
+                                arg.span,
+                            )
+                    expr_type = sig.return_type
         elif isinstance(expr, UnaryNeg):
             inner_type = self._check_expr(expr.expr)
             if inner_type != "int":

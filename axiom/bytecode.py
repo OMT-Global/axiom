@@ -8,7 +8,7 @@ from .errors import AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
-VERSION_MINOR = 10
+VERSION_MINOR = 11
 
 
 class Op:
@@ -40,6 +40,8 @@ class Op:
     CLOSE_UPVALUE = 0x18
     MAKE_ARRAY = 0x1C
     LOAD_INDEX = 0x1D
+    LOAD_FN = 0x1E
+    CALL_INDIRECT = 0x1F
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,8 @@ class Bytecode:
                 Op.HOST_CALL,
                 Op.LOAD_UPVALUE,
                 Op.STORE_UPVALUE,
+                Op.LOAD_FN,
+                Op.CALL_INDIRECT,
             ):
                 if ins.arg is None:
                     raise AxiomCompileError("opcode missing arg")
@@ -231,6 +235,8 @@ class Bytecode:
                 Op.HOST_CALL,
                 Op.LOAD_UPVALUE,
                 Op.STORE_UPVALUE,
+                Op.LOAD_FN,
+                Op.CALL_INDIRECT,
             ):
                 (slot,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(slot)))
