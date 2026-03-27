@@ -17,6 +17,8 @@ class TokenKind(Enum):
     ELSE = auto()
     AS = auto()
     WHILE = auto()
+    FOR = auto()
+    IN = auto()
     TRUE = auto()
     FALSE = auto()
     IDENT = auto()

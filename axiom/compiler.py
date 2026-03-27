@@ -13,6 +13,7 @@ from .ast import (
     CallExpr,
     Expr,
     ExprStmt,
+    ForStmt,
     FunctionDefStmt,
     IfStmt,
     ImportStmt,
@@ -251,6 +252,12 @@ class Compiler:
             raise AxiomCompileError(f"undefined variable {name!r}", span)
         return source.index, False
 
+    def _alloc_temp_slot(self) -> int:
+        """Allocate an anonymous local slot (not visible in any scope)."""
+        slot = self.next_slot
+        self.next_slot += 1
+        return slot
+
     def _slot_for_let(self, name: str, span) -> int:
         if name in RESERVED_IDENTIFIER_NAMES:
             raise AxiomCompileError(f"reserved identifier {name!r}", span)
@@ -345,6 +352,50 @@ class Compiler:
             self._compile_stmt(stmt.body, out, in_function=in_function)
             out.append(Instr(Op.JMP, loop_start))
             out[jmp_false_idx] = Instr(Op.JMP_IF_FALSE, len(out))
+            return
+        if isinstance(stmt, ForStmt):
+            # Compile: evaluate iterable, store length and index in hidden slots.
+            self._compile_expr(stmt.iterable, out)
+            arr_slot = self._alloc_temp_slot()
+            out.append(Instr(Op.STORE, arr_slot))
+
+            out.append(Instr(Op.LOAD, arr_slot))
+            out.append(Instr(Op.HOST_CALL, self._intern("array.len")))
+            len_slot = self._alloc_temp_slot()
+            out.append(Instr(Op.STORE, len_slot))
+
+            out.append(Instr(Op.CONST_I64, 0))
+            idx_slot = self._alloc_temp_slot()
+            out.append(Instr(Op.STORE, idx_slot))
+
+            # Allocate the loop variable in a fresh scope.
+            self.scope_stack.append({})
+            var_slot = self._slot_for_let(stmt.var, stmt.span)
+
+            loop_start = len(out)
+            out.append(Instr(Op.LOAD, idx_slot))
+            out.append(Instr(Op.LOAD, len_slot))
+            out.append(Instr(Op.CMP_LT))
+            jmp_exit_idx = len(out)
+            out.append(Instr(Op.JMP_IF_FALSE, 0))
+
+            # Load arr[idx] into the loop variable.
+            out.append(Instr(Op.LOAD, arr_slot))
+            out.append(Instr(Op.LOAD, idx_slot))
+            out.append(Instr(Op.LOAD_INDEX))
+            out.append(Instr(Op.STORE, var_slot))
+
+            self._compile_stmt(stmt.body, out, in_function=in_function)
+
+            # Increment index.
+            out.append(Instr(Op.LOAD, idx_slot))
+            out.append(Instr(Op.CONST_I64, 1))
+            out.append(Instr(Op.ADD))
+            out.append(Instr(Op.STORE, idx_slot))
+            out.append(Instr(Op.JMP, loop_start))
+            out[jmp_exit_idx] = Instr(Op.JMP_IF_FALSE, len(out))
+
+            self.scope_stack.pop()
             return
         raise AssertionError("unknown stmt")
 

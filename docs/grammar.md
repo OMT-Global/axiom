@@ -13,6 +13,7 @@ stmt           := let_stmt
                | print_stmt
                | if_stmt
                | while_stmt
+               | for_stmt
                | block
                | expr_stmt ;
 
@@ -24,11 +25,12 @@ fn_stmt        := "fn" IDENT "(" params? ")" ":" type_name block ;  # IDENT and 
 params         := param ("," param)* ;
 param          := IDENT ":" type_name ;
 return_stmt    := "return" expr terminator ;
-let_stmt       := "let" IDENT ":" type_name "=" expr terminator ;
+let_stmt       := "let" IDENT (":" type_name)? "=" expr terminator ;  # type annotation is optional; inferred from RHS when omitted
 assign_stmt    := IDENT "=" expr terminator ;
 print_stmt     := "print" expr terminator ;
 if_stmt        := "if" expr block ("else" block)? ;
 while_stmt     := "while" expr block ;
+for_stmt       := "for" IDENT "in" expr block ;              # iterate over an array; IDENT bound to each element
 block          := "{" NEWLINE* stmt* "}" ;
 expr_stmt      := expr terminator ;
 call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace: host.* or imported module.*

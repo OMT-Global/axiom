@@ -13,6 +13,7 @@ from .ast import (
     CallExpr,
     Expr,
     ExprStmt,
+    ForStmt,
     FunctionDefStmt,
     IfStmt,
     ImportStmt,
@@ -297,14 +298,25 @@ class Checker:
         if isinstance(stmt, LetStmt):
             if stmt.name in RESERVED_IDENTIFIER_NAMES:
                 raise AxiomCompileError(f"reserved identifier {stmt.name!r}", stmt.span)
-            expected_type = self._require_let_type(stmt)
-            expr_type = self._check_expr_expecting(stmt.expr, expected_type)
-            if expr_type != expected_type:
-                raise AxiomCompileError(
-                    f"let binding {stmt.name!r} expects {expected_type}, got {expr_type}",
-                    stmt.span,
-                )
-            self.scope_stack[-1][stmt.name] = expected_type
+            if stmt.type_ref is not None:
+                # Explicit annotation: check RHS matches.
+                expected_type = stmt.type_ref.name
+                expr_type = self._check_expr_expecting(stmt.expr, expected_type)
+                if expr_type != expected_type:
+                    raise AxiomCompileError(
+                        f"let binding {stmt.name!r} expects {expected_type}, got {expr_type}",
+                        stmt.span,
+                    )
+                self.scope_stack[-1][stmt.name] = expected_type
+            else:
+                # No annotation: infer from RHS.
+                expr_type = self._check_expr(stmt.expr)
+                if expr_type == "value":
+                    raise AxiomCompileError(
+                        f"cannot infer type of {stmt.name!r}; add a type annotation",
+                        stmt.span,
+                    )
+                self.scope_stack[-1][stmt.name] = expr_type
             return
         if isinstance(stmt, AssignStmt):
             expected = self._resolve_var_type(stmt.name, stmt.span)
@@ -367,6 +379,21 @@ class Checker:
                     stmt.cond.span,
                 )
             self._check_stmt(stmt.body)
+            return
+        if isinstance(stmt, ForStmt):
+            iter_type = self._check_expr(stmt.iterable)
+            if not iter_type.endswith("[]"):
+                raise AxiomCompileError(
+                    f"for loop expects an array, got {iter_type!r}",
+                    stmt.iterable.span,
+                )
+            elem_type = element_type(iter_type)
+            # Bind the loop variable in a new scope wrapping the body.
+            self.scope_stack.append({stmt.var: elem_type})
+            try:
+                self._check_stmt(stmt.body)
+            finally:
+                self.scope_stack.pop()
             return
         raise AssertionError("unknown stmt")
 

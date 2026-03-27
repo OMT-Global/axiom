@@ -16,6 +16,7 @@ from .ast import (
     BlockStmt,
     IfStmt,
     WhileStmt,
+    ForStmt,
     Expr,
     IntLit,
     StringLit,
@@ -143,6 +144,8 @@ class Parser:
             return self._parse_if()
         if k == TokenKind.WHILE:
             return self._parse_while()
+        if k == TokenKind.FOR:
+            return self._parse_for()
         if k == TokenKind.IDENT and self._peek_n(1).kind == TokenKind.EQ:
             return self._parse_assign()
         return self._parse_expr_stmt()
@@ -258,6 +261,26 @@ class Parser:
         cond = self._parse_expr()
         body = self._parse_block()
         return WhileStmt(cond=cond, body=body, span=Span(start, body.span.end))
+
+    def _parse_for(self) -> ForStmt:
+        start = self._eat(TokenKind.FOR).span.start
+        var_tok = self._eat(TokenKind.IDENT)
+        if var_tok.value == "host":
+            raise AxiomParseError(
+                "loop variable cannot be 'host'",
+                var_tok.span,
+                source=self.source,
+                path=self.source_path,
+            )
+        self._eat(TokenKind.IN)
+        iterable = self._parse_expr()
+        body = self._parse_block()
+        return ForStmt(
+            var=str(var_tok.value),
+            iterable=iterable,
+            body=body,
+            span=Span(start, body.span.end),
+        )
 
     def _parse_let(self) -> LetStmt:
         start = self._bump().span.start

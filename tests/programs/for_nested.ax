@@ -1,0 +1,12 @@
+fn sum_array(arr: int[]): int {
+  let total = 0
+  for x in arr {
+    total = total + x
+  }
+  return total
+}
+
+let a = [10, 20, 30]
+let b = [1, 2, 3, 4]
+print sum_array(a)
+print sum_array(b)

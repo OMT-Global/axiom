@@ -1,0 +1,4 @@
+print host.math.min(3, 7)
+print host.math.max(3, 7)
+print host.math.pow(2, 10)
+print host.math.abs(-5)

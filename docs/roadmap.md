@@ -57,7 +57,15 @@ bootstrap compiler now lives in `stage1/` and is described in `docs/stage1.md`.
   pass and raises `MultiAxiomError`; single-error path still raises `AxiomCompileError`
   for backward compatibility
 
-## Phase 10 (next)
+## Phase 10 ✅
+- **10A** Type inference for `let`: omit the annotation and the checker infers the
+  type from the RHS expression; empty array literals still require an annotation
+- **10B** `for` loop over arrays: `for x in arr { }` iterates over every element;
+  compiles to an indexed while-loop using three anonymous temp slots; fully type-checked
+- **10C** New host builtins: `host.string.len/concat/contains/starts_with/ends_with/slice/to_int`
+  and `host.math.min/max/pow`
+
+## Phase 11 (next)
+- Richer diagnostics: span-accurate notes, "did you mean?" suggestions
 - Package and module ergonomics for larger multi-file programs
-- Richer diagnostics and tooling around the typed core
 - Stage1 AG1 agent-grade compiler bootstrap
