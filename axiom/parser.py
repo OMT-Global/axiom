@@ -399,6 +399,26 @@ class Parser:
 
     def _parse_type_ref(self) -> TypeRef:
         token = self._peek()
+        # Function type: fn(T1, T2, ...): R
+        if token.kind == TokenKind.FN:
+            start = token.span.start
+            self._bump()  # eat 'fn'
+            self._eat(TokenKind.LPAREN)
+            param_type_names: List[str] = []
+            if self._peek().kind != TokenKind.RPAREN:
+                while True:
+                    pt = self._parse_type_ref()
+                    param_type_names.append(pt.name)
+                    if self._peek().kind == TokenKind.COMMA:
+                        self._bump()
+                        continue
+                    break
+            self._eat(TokenKind.RPAREN)
+            self._eat(TokenKind.COLON)
+            return_type_ref = self._parse_type_ref()
+            fn_type_str = "fn(" + ",".join(param_type_names) + "):" + return_type_ref.name
+            return TypeRef(name=fn_type_str, span=Span(start, return_type_ref.span.end))
+        # Simple type: int, string, bool (with optional [] suffix)
         if token.kind != TokenKind.IDENT:
             raise AxiomParseError(
                 "expected type name",
@@ -420,8 +440,8 @@ class Parser:
             self._bump()  # eat [
             rbracket = self._eat(TokenKind.RBRACKET)
             array_name = f"{raw_name}[]"
-            return TypeRef(name=array_name, span=Span(token.span.start, rbracket.span.end))  # type: ignore[arg-type]
-        return TypeRef(name=raw_name, span=token.span)  # type: ignore[arg-type]
+            return TypeRef(name=array_name, span=Span(token.span.start, rbracket.span.end))
+        return TypeRef(name=raw_name, span=token.span)
 
     def _parse_equality(self) -> Expr:
         node = self._parse_comparison()

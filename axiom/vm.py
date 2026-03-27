@@ -7,6 +7,7 @@ from .bytecode import Bytecode, FunctionMeta, Op
 from .errors import AxiomRuntimeError
 from .host import HOST_BUILTINS, HOST_BUILTIN_BY_ID, call_host_builtin, call_host_builtin_id
 from .values import (
+    FunctionValue,
     Value,
     add_values,
     compare_eq,
@@ -261,6 +262,48 @@ class Vm:
                         f"array index {index} out of bounds (length {len(array)})"
                     )
                 self.stack.append(array[index])
+            elif i.op == Op.LOAD_FN:
+                fn_id = int(i.arg)
+                functions = self.functions if self.functions is not None else []
+                if fn_id < 0 or fn_id >= len(functions):
+                    raise AxiomRuntimeError(f"bad LOAD_FN index {fn_id}")
+                fn_name = self._strings[functions[fn_id].name_index]
+                self.stack.append(FunctionValue(fn_name))
+            elif i.op == Op.CALL_INDIRECT:
+                arity = int(i.arg)
+                # Stack layout: [..., arg0, arg1, ..., argN-1, fn_val]
+                if len(self.stack) < arity + 1:
+                    raise AxiomRuntimeError("stack underflow on CALL_INDIRECT")
+                fn_val = self.stack.pop()
+                if not isinstance(fn_val, FunctionValue):
+                    raise AxiomRuntimeError("CALL_INDIRECT expected a function value on stack")
+                fn_idx = self._function_name_to_index.get(fn_val.name)
+                if fn_idx is None:
+                    raise AxiomRuntimeError(f"undefined function {fn_val.name!r}")
+                functions = self.functions if self.functions is not None else []
+                fn = functions[fn_idx]
+                if arity != fn.arity:
+                    raise AxiomRuntimeError(
+                        f"indirect call arity mismatch: expected {fn.arity}, got {arity}"
+                    )
+                args = [self.stack.pop() for _ in range(arity)]
+                args.reverse()
+                new_locals = [_Cell(0) for _ in range(fn.locals_count)]
+                for idx, value in enumerate(args):
+                    new_locals[idx].value = value
+                new_upvalues = self._build_call_upvalues(fn_idx, fn)
+                self.frames.append(
+                    _Frame(
+                        locals=self._locals,
+                        upvalues=self._upvalues,
+                        ret_ip=self.ip,
+                        function_index=self._current_function,
+                    )
+                )
+                self._locals = new_locals
+                self._upvalues = new_upvalues
+                self._current_function = fn_idx
+                self.ip = fn.entry
             else:
                 raise AxiomRuntimeError(f"unknown opcode {i.op}")
 

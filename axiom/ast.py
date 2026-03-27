@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import List, Literal, Optional, Union
+from typing import List, Optional, Union
 
 from .errors import Span
 
@@ -12,15 +12,61 @@ class Program:
     stmts: List["Stmt"]
 
 
-TypeName = Literal["int", "string", "bool", "int[]", "string[]", "bool[]"]
+# TypeName is any valid Axiom type string: "int", "string", "bool",
+# "int[]", "string[]", "bool[]", or "fn(T1,...):R" for function types.
+TypeName = str
+
+_SIMPLE_TYPES = frozenset(["int", "string", "bool"])
+_ARRAY_TYPES = frozenset(["int[]", "string[]", "bool[]"])
 
 
 def element_type(array_type: TypeName) -> TypeName:
     """Return the element type for an array type (e.g. 'int[]' -> 'int')."""
     if array_type.endswith("[]"):
-        base = array_type[:-2]
-        return base  # type: ignore[return-value]
+        return array_type[:-2]
     raise AssertionError(f"not an array type: {array_type}")
+
+
+def make_fn_type(param_types: List[TypeName], return_type: TypeName) -> TypeName:
+    """Build a canonical function type string, e.g. 'fn(int,string):bool'."""
+    return "fn(" + ",".join(param_types) + "):" + return_type
+
+
+def parse_fn_type(type_name: TypeName) -> tuple[List[TypeName], TypeName]:
+    """Parse 'fn(T1,...):R' -> (param_types, return_type).
+
+    Handles nested fn types by tracking parenthesis depth.
+    """
+    assert type_name.startswith("fn("), f"not a fn type: {type_name!r}"
+    rest = type_name[3:]  # after "fn("
+    # Find matching closing paren
+    depth = 1
+    i = 0
+    while i < len(rest) and depth > 0:
+        if rest[i] == "(":
+            depth += 1
+        elif rest[i] == ")":
+            depth -= 1
+        i += 1
+    params_str = rest[: i - 1]
+    return_str = rest[i + 1 :]  # after "):"
+    if not params_str:
+        param_types: List[TypeName] = []
+    else:
+        # Split by comma, respecting nested parens
+        param_types = []
+        depth = 0
+        start = 0
+        for j, ch in enumerate(params_str):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                param_types.append(params_str[start:j].strip())
+                start = j + 1
+        param_types.append(params_str[start:].strip())
+    return param_types, return_str
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,7 @@
+let xs: int[] = []
+xs = host.array.push_int(xs, 10)
+xs = host.array.push_int(xs, 20)
+xs = host.array.push_int(xs, 30)
+print host.array.len(xs)
+print xs[0]
+print xs[2]
