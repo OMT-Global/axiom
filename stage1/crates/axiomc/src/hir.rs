@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::manifest::{CapabilityConfig, CapabilityKind};
 use crate::syntax;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -227,6 +228,7 @@ struct LowerContext<'a> {
     enums: &'a HashMap<String, EnumDef>,
     variants: &'a HashMap<String, VariantInfo>,
     functions: &'a HashMap<String, FunctionSig>,
+    capabilities: &'a CapabilityConfig,
     current_return: Option<Type>,
     current_borrow_return_params: HashSet<String>,
 }
@@ -239,6 +241,14 @@ struct VariantInfo {
 }
 
 pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
+    let capabilities = CapabilityConfig::default();
+    lower_with_capabilities(program, &capabilities)
+}
+
+pub fn lower_with_capabilities(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+) -> Result<Program, Diagnostic> {
     let (struct_names, enum_names) = collect_type_names(&program.structs, &program.enums)?;
     let (enums, variants) = collect_enum_definitions(&program.enums, &struct_names, &enum_names)?;
     let structs = collect_struct_definitions(&program.structs, &enum_names)?;
@@ -250,7 +260,12 @@ pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
     let mut lowered_functions = Vec::new();
     for function in &program.functions {
         lowered_functions.push(lower_function(
-            function, &structs, &enums, &variants, &functions,
+            function,
+            &structs,
+            &enums,
+            &variants,
+            &functions,
+            capabilities,
         )?);
     }
     let ctx = LowerContext {
@@ -258,6 +273,7 @@ pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
         enums: &enums,
         variants: &variants,
         functions: &functions,
+        capabilities,
         current_return: None,
         current_borrow_return_params: HashSet::new(),
     };
@@ -575,6 +591,7 @@ fn lower_function(
     enums: &HashMap<String, EnumDef>,
     variants: &HashMap<String, VariantInfo>,
     functions: &HashMap<String, FunctionSig>,
+    capabilities: &CapabilityConfig,
 ) -> Result<Function, Diagnostic> {
     let return_ty = lower_type(
         &function.return_ty,
@@ -591,6 +608,7 @@ fn lower_function(
         enums,
         variants,
         functions,
+        capabilities,
         current_return: Some(return_ty.clone()),
         current_borrow_return_params: signature
             .borrow_return_params
@@ -1347,6 +1365,168 @@ fn lower_expr_with_expected(
                     ty: Type::Int,
                 });
             }
+            if name == "fs_read" {
+                require_capability(ctx.capabilities, CapabilityKind::Fs, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("fs_read expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("fs_read expects a string argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if name == "net_resolve" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("net_resolve expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_resolve expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if name == "process_status" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Process,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("process_status expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "process_status expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Int,
+                });
+            }
+            if name == "clock_now_ms" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Clock,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if !args.is_empty() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("clock_now_ms expects 0 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: Vec::new(),
+                    ty: Type::Int,
+                });
+            }
+            if name == "env_get" {
+                require_capability(ctx.capabilities, CapabilityKind::Env, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("env_get expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("env_get expects a string argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if name == "crypto_sha256" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Crypto,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("crypto_sha256 expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_sha256 expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::String,
+                });
+            }
             if name == "first" || name == "last" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
@@ -2073,6 +2253,26 @@ fn lower_expr_with_expected(
             })
         }
     }
+}
+
+fn require_capability(
+    capabilities: &CapabilityConfig,
+    kind: CapabilityKind,
+    intrinsic_name: &str,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
+    if capabilities.enabled(kind) {
+        return Ok(());
+    }
+    Err(Diagnostic::new(
+        "capability",
+        format!(
+            "call to {intrinsic_name:?} requires [capabilities].{} = true",
+            kind.name()
+        ),
+    )
+    .with_span(line, column))
 }
 
 fn lower_variant_constructor(

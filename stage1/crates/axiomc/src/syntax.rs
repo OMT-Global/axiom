@@ -277,6 +277,17 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             index += 1;
             continue;
         }
+        if trimmed.starts_with("pub import ")
+            || trimmed.starts_with("pub use ")
+            || trimmed.starts_with("export ")
+        {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap does not support re-exports; expose public symbols from their defining module instead",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1));
+        }
         if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
@@ -304,6 +315,19 @@ fn parse_import(trimmed: &str, path: &Path, line_no: usize) -> Result<Option<Imp
     let Some(rest) = trimmed.strip_prefix("import ") else {
         return Ok(None);
     };
+    if let Some((import_path, alias)) = rest.split_once(" as ")
+        && serde_json::from_str::<String>(import_path.trim()).is_ok()
+    {
+        let message = if alias.trim().is_empty() {
+            "stage1 bootstrap does not support import aliases"
+        } else {
+            "stage1 bootstrap does not support import aliases; import exported symbols directly"
+        };
+        let column = trimmed.find(" as ").map(|index| index + 2).unwrap_or(1);
+        return Err(Diagnostic::new("parse", message)
+            .with_path(path.display().to_string())
+            .with_span(line_no, column));
+    }
     let import_path = serde_json::from_str::<String>(rest).map_err(|_| {
         Diagnostic::new("parse", "import must use a quoted relative path")
             .with_path(path.display().to_string())
@@ -345,6 +369,17 @@ fn parse_stmt_list(
             return Err(Diagnostic::new(
                 "parse",
                 "stage1 bootstrap only supports imports at the top level",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1));
+        }
+        if trimmed.starts_with("pub import ")
+            || trimmed.starts_with("pub use ")
+            || trimmed.starts_with("export ")
+        {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap does not support re-exports inside blocks",
             )
             .with_path(path.display().to_string())
             .with_span(line_no, 1));
@@ -1111,6 +1146,17 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             return Err(Diagnostic::new("parse", "field access is incomplete")
                 .with_path(path.display().to_string())
                 .with_span(line_no, column));
+        }
+        if field.ends_with(')')
+            && let Some(open_paren) = find_top_level_char(field, '(')
+            && matches!(find_matching_paren(field, open_paren), Some(close) if close == field.len() - 1)
+        {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap does not support namespace-qualified calls; import exported functions directly",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + dot + 1));
         }
         if field.chars().all(|ch| ch.is_ascii_digit()) {
             let index = field.parse::<usize>().map_err(|_| {

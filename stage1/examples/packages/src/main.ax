@@ -1,0 +1,5 @@
+import "core/banner.ax"
+import "core/math.ax"
+
+print answer()
+print banner("hello from", label())

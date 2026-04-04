@@ -1,7 +1,8 @@
 use crate::diagnostics::Diagnostic;
-use crate::manifest::{Manifest, lockfile_path};
+use crate::manifest::{DependencySpec, Manifest, load_manifest, lockfile_path};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Lockfile {
@@ -27,12 +28,65 @@ pub fn expected_lockfile(manifest: &Manifest) -> Lockfile {
     }
 }
 
+pub fn expected_lockfile_for_project(
+    project_root: &Path,
+    manifest: &Manifest,
+) -> Result<Lockfile, Diagnostic> {
+    let project_root = normalize_path(project_root);
+    let mut package = expected_lockfile(manifest).package;
+    let mut visited = BTreeSet::from([project_root.clone()]);
+    collect_workspace_packages(
+        &project_root,
+        &project_root,
+        manifest,
+        &mut visited,
+        &mut package,
+    )?;
+    collect_dependency_packages(
+        &project_root,
+        &project_root,
+        manifest,
+        &mut visited,
+        &mut package,
+    )?;
+    if let Some((root, dependencies)) = package.split_first_mut() {
+        dependencies.sort_by(|left, right| {
+            left.source
+                .cmp(&right.source)
+                .then(left.name.cmp(&right.name))
+        });
+        package = std::iter::once(root.clone())
+            .chain(dependencies.iter().cloned())
+            .collect();
+    }
+    Ok(Lockfile {
+        version: 1,
+        package,
+    })
+}
+
 pub fn render_lockfile(manifest: &Manifest) -> Result<String, Diagnostic> {
     toml::to_string_pretty(&expected_lockfile(manifest))
         .map_err(|err| Diagnostic::new("lockfile", format!("failed to render axiom.lock: {err}")))
 }
 
+pub fn render_lockfile_for_project(
+    project_root: &Path,
+    manifest: &Manifest,
+) -> Result<String, Diagnostic> {
+    toml::to_string_pretty(&expected_lockfile_for_project(project_root, manifest)?)
+        .map_err(|err| Diagnostic::new("lockfile", format!("failed to render axiom.lock: {err}")))
+}
+
 pub fn validate_lockfile(project_root: &Path, manifest: &Manifest) -> Result<(), Diagnostic> {
+    let expected = expected_lockfile_for_project(project_root, manifest)?;
+    validate_lockfile_packages(project_root, &expected.package)
+}
+
+pub fn validate_lockfile_packages(
+    project_root: &Path,
+    packages: &[LockedPackage],
+) -> Result<(), Diagnostic> {
     let path = lockfile_path(project_root);
     let content = std::fs::read_to_string(&path).map_err(|err| {
         Diagnostic::new("lockfile", format!("failed to read axiom.lock: {err}"))
@@ -42,7 +96,10 @@ pub fn validate_lockfile(project_root: &Path, manifest: &Manifest) -> Result<(),
         Diagnostic::new("lockfile", format!("invalid axiom.lock: {err}"))
             .with_path(path.display().to_string())
     })?;
-    let expected = expected_lockfile(manifest);
+    let expected = Lockfile {
+        version: 1,
+        package: packages.to_vec(),
+    };
     if lockfile != expected {
         return Err(
             Diagnostic::new(
@@ -53,4 +110,152 @@ pub fn validate_lockfile(project_root: &Path, manifest: &Manifest) -> Result<(),
         );
     }
     Ok(())
+}
+
+fn dependency_root(project_root: &Path, spec: &DependencySpec) -> PathBuf {
+    normalize_path(project_root.join(&spec.path))
+}
+
+fn collect_dependency_packages(
+    root_project_root: &Path,
+    project_root: &Path,
+    manifest: &Manifest,
+    visited: &mut BTreeSet<PathBuf>,
+    packages: &mut Vec<LockedPackage>,
+) -> Result<(), Diagnostic> {
+    for spec in manifest.dependencies.values() {
+        let dependency_root = dependency_root(project_root, spec);
+        if !visited.insert(dependency_root.clone()) {
+            continue;
+        }
+        let dependency_manifest = load_manifest(&dependency_root)?;
+        packages.push(LockedPackage {
+            name: dependency_manifest.package.name.clone(),
+            version: dependency_manifest.package.version.clone(),
+            source: format!(
+                "path:{}",
+                normalize_dependency_source(
+                    &relative_path(root_project_root, &dependency_root)
+                        .display()
+                        .to_string(),
+                )
+            ),
+        });
+        collect_dependency_packages(
+            root_project_root,
+            &dependency_root,
+            &dependency_manifest,
+            visited,
+            packages,
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_workspace_packages(
+    root_project_root: &Path,
+    project_root: &Path,
+    manifest: &Manifest,
+    visited: &mut BTreeSet<PathBuf>,
+    packages: &mut Vec<LockedPackage>,
+) -> Result<(), Diagnostic> {
+    for member in manifest
+        .workspace
+        .as_ref()
+        .into_iter()
+        .flat_map(|workspace| workspace.members.iter())
+    {
+        let member_root = normalize_path(project_root.join(member));
+        if !visited.insert(member_root.clone()) {
+            continue;
+        }
+        let member_manifest = load_manifest(&member_root)?;
+        packages.push(LockedPackage {
+            name: member_manifest.package.name.clone(),
+            version: member_manifest.package.version.clone(),
+            source: format!(
+                "path:{}",
+                normalize_dependency_source(
+                    &relative_path(root_project_root, &member_root)
+                        .display()
+                        .to_string(),
+                )
+            ),
+        });
+        collect_workspace_packages(
+            root_project_root,
+            &member_root,
+            &member_manifest,
+            visited,
+            packages,
+        )?;
+        collect_dependency_packages(
+            root_project_root,
+            &member_root,
+            &member_manifest,
+            visited,
+            packages,
+        )?;
+    }
+    Ok(())
+}
+
+fn relative_path(from: &Path, to: &Path) -> PathBuf {
+    let from_components = from.components().collect::<Vec<_>>();
+    let to_components = to.components().collect::<Vec<_>>();
+    let mut shared = 0usize;
+    while shared < from_components.len()
+        && shared < to_components.len()
+        && from_components[shared] == to_components[shared]
+    {
+        shared += 1;
+    }
+
+    let mut relative = PathBuf::new();
+    for _ in shared..from_components.len() {
+        relative.push("..");
+    }
+    for component in &to_components[shared..] {
+        relative.push(component.as_os_str());
+    }
+    relative
+}
+
+fn normalize_dependency_source(path: &str) -> String {
+    let mut normalized = PathBuf::new();
+    let mut saw_component = false;
+    for component in Path::new(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push("..");
+                }
+                saw_component = true;
+            }
+            Component::Normal(value) => {
+                normalized.push(value);
+                saw_component = true;
+            }
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    if !saw_component {
+        return String::from(".");
+    }
+    normalized.to_string_lossy().replace('\\', "/")
+}
+
+fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.as_ref().components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }

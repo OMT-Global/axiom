@@ -26,8 +26,17 @@ stage0/stage1 split that can build a native hello-world and carry the 1.0 packag
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 ```
+
+`axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
+as a native artifact, executes it, and compares stdout against a sibling
+`*.stdout` golden file when present. Projects that need explicit naming or inline
+expectations can still declare `[[tests]]` entries in `axiom.toml`.
 
 ## Current gaps
 
@@ -51,20 +60,20 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Package and build graph gaps
 
-- `axiom.toml` and `axiom.lock` exist, but dependencies and workspaces are still rejected.
-- The current import model is still intentionally small: relative path imports only, direct `pub struct` / `pub enum` / `pub fn` exports only, no aliases, no re-exports, and no namespace-qualified calls.
+- `axiom.toml` and `axiom.lock` now support deterministic local path dependency graphs plus package-root workspace members with relative local paths, but there is still no workspace-only manifest or package-selection flow.
+- The current import model is still intentionally small: package-local relative path imports plus dependency-prefixed imports like `core/math.ax`, direct `pub struct` / `pub enum` / `pub fn` exports only, and explicit parser diagnostics for unsupported aliases, re-exports, and namespace-qualified calls.
 - There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape.
 
 ### Runtime and standard library gaps
 
 - There is no stage1 standard library yet.
-- Capability metadata exists, but there is no enforced runtime capability system behind file, network, process, env, clock, or crypto APIs.
+- Capability enforcement now exists for a compiler-known intrinsic slice across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`, but there is still no general stdlib module surface.
 - No async runtime, channels, cancellation, timers, or service-grade I/O surface exists.
 
 ### Backend and tooling gaps
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
-- There is no stage1 formatter, test runner, benchmark harness, doc generator, publisher, or LSP server.
+- There is no stage1 formatter, benchmark harness, doc generator, publisher, or LSP server yet.
 - Diagnostics are still bootstrap-grade: useful JSON exists, but span quality, notes, and compile-fail coverage are limited.
 - There are no performance targets or regression gates yet.
 
@@ -76,12 +85,16 @@ lives in [docs/stage1-agent-grade-compiler.md](stage1-agent-grade-compiler.md).
 Current proof points:
 
 - `stage1/examples/hello` remains the single-file callable baseline.
-- `stage1/examples/modules` proves the multi-file package baseline.
+- `stage1/examples/modules` proves the multi-file package baseline and the new
+  `axiomc test` discovery flow.
+- `stage1/examples/packages` proves the local path dependency baseline and root-package lockfile validation.
+- `stage1/examples/workspace` proves the package-root workspace-member baseline and workspace-aware root lockfile validation.
+- `stage1/examples/capabilities` proves the capability-gated fs/net/env/clock/crypto path, while the Rust suite covers the remaining process intrinsic contract.
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
-- `make stage1-test stage1-smoke` now covers all ten checked-in stage1 examples.
+- `make stage1-test stage1-smoke` now covers all thirteen checked-in stage1 examples.
 
 Agent-grade compiler milestone summary:
 
@@ -90,8 +103,8 @@ Agent-grade compiler milestone summary:
 - `AG2`: add the minimum generic abstraction layer.
 - `AG3`: add package graph support, stable module rules, and real capability enforcement.
 - `AG4`: add the stdlib, async runtime, and HTTP-service-capable runtime surface.
-- `AG5`: add `axiomc test` plus the CLI/worker/service fixtures that close the
-  first agent-grade compiler bar.
+- `AG5`: expand `axiomc test` plus the CLI/worker/service fixtures that close
+  the first agent-grade compiler bar.
 
 Important bar definition:
 

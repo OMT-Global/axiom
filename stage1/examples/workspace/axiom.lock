@@ -1,0 +1,16 @@
+version = 1
+
+[[package]]
+name = "workspace-stage1"
+version = "0.1.0"
+source = "path"
+
+[[package]]
+name = "core-member"
+version = "0.1.0"
+source = "path:members/core"
+
+[[package]]
+name = "util-member"
+version = "0.1.0"
+source = "path:members/util"

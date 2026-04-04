@@ -17,9 +17,10 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 6] = [
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Manifest {
     pub package: PackageSection,
-    pub dependencies: BTreeMap<String, String>,
+    pub dependencies: BTreeMap<String, DependencySpec>,
     pub workspace: Option<WorkspaceSection>,
     pub build: BuildSection,
+    pub tests: Vec<TestTarget>,
     pub capabilities: CapabilityConfig,
 }
 
@@ -38,6 +39,18 @@ pub struct WorkspaceSection {
 pub struct BuildSection {
     pub entry: String,
     pub out_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DependencySpec {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TestTarget {
+    pub name: String,
+    pub entry: String,
+    pub stdout: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -71,9 +84,10 @@ pub struct CapabilityDescriptor {
 #[derive(Debug, Deserialize)]
 struct RawManifest {
     package: Option<RawPackageSection>,
-    dependencies: Option<BTreeMap<String, String>>,
+    dependencies: Option<BTreeMap<String, RawDependencySpec>>,
     workspace: Option<RawWorkspaceSection>,
     build: Option<RawBuildSection>,
+    tests: Option<Vec<RawTestTarget>>,
     capabilities: Option<RawCapabilityConfig>,
 }
 
@@ -92,6 +106,25 @@ struct RawWorkspaceSection {
 struct RawBuildSection {
     entry: Option<String>,
     out_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawDependencySpec {
+    Path(String),
+    Detailed(RawDependencyDetail),
+}
+
+#[derive(Debug, Deserialize)]
+struct RawDependencyDetail {
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTestTarget {
+    name: Option<String>,
+    entry: Option<String>,
+    stdout: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -214,18 +247,19 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     let out_dir = required_field(build.out_dir, path, "build.out_dir")?;
     validate_relative_path(path, "build.entry", &entry)?;
     validate_relative_path(path, "build.out_dir", &out_dir)?;
-    let workspace = raw.workspace.map(|workspace| WorkspaceSection {
-        members: workspace.members.unwrap_or_default(),
-    });
+    let dependencies = normalize_dependencies(raw.dependencies.unwrap_or_default(), path)?;
+    let tests = normalize_tests(raw.tests.unwrap_or_default(), path)?;
+    let workspace = normalize_workspace(raw.workspace, path)?;
     let capabilities = raw.capabilities.unwrap_or_default();
     Ok(Manifest {
         package: PackageSection {
             name: package_name,
             version: package_version,
         },
-        dependencies: raw.dependencies.unwrap_or_default(),
+        dependencies,
         workspace,
         build: BuildSection { entry, out_dir },
+        tests,
         capabilities: CapabilityConfig {
             fs: capabilities.fs.unwrap_or(false),
             net: capabilities.net.unwrap_or(false),
@@ -235,6 +269,36 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             crypto: capabilities.crypto.unwrap_or(false),
         },
     })
+}
+
+fn normalize_workspace(
+    raw_workspace: Option<RawWorkspaceSection>,
+    path: &Path,
+) -> Result<Option<WorkspaceSection>, Diagnostic> {
+    let Some(raw_workspace) = raw_workspace else {
+        return Ok(None);
+    };
+    let mut members = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, member) in raw_workspace
+        .members
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+    {
+        let field_name = format!("workspace.members[{index}]");
+        let member = required_field(Some(member), path, &field_name)?;
+        validate_relative_path(path, &field_name, &member)?;
+        if !seen.insert(member.clone()) {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("duplicate workspace member {member:?}"),
+            )
+            .with_path(path.display().to_string()));
+        }
+        members.push(member);
+    }
+    Ok(Some(WorkspaceSection { members }))
 }
 
 fn required_field(
@@ -249,6 +313,56 @@ fn required_field(
                 .with_path(path.display().to_string()),
         ),
     }
+}
+
+fn normalize_dependencies(
+    raw_dependencies: BTreeMap<String, RawDependencySpec>,
+    path: &Path,
+) -> Result<BTreeMap<String, DependencySpec>, Diagnostic> {
+    let mut dependencies = BTreeMap::new();
+    for (name, raw_spec) in raw_dependencies {
+        if name.trim().is_empty() {
+            return Err(
+                Diagnostic::new("manifest", "dependency names must not be empty")
+                    .with_path(path.display().to_string()),
+            );
+        }
+        let raw_path = match raw_spec {
+            RawDependencySpec::Path(value) => value,
+            RawDependencySpec::Detailed(detail) => {
+                required_field(detail.path, path, &format!("dependencies.{name}.path"))?
+            }
+        };
+        validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
+        dependencies.insert(name, DependencySpec { path: raw_path });
+    }
+    Ok(dependencies)
+}
+
+fn normalize_tests(
+    raw_tests: Vec<RawTestTarget>,
+    path: &Path,
+) -> Result<Vec<TestTarget>, Diagnostic> {
+    let mut tests = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    for (index, raw_test) in raw_tests.into_iter().enumerate() {
+        let field_prefix = format!("tests[{index}]");
+        let name = required_field(raw_test.name, path, &format!("{field_prefix}.name"))?;
+        if !names.insert(name.clone()) {
+            return Err(
+                Diagnostic::new("manifest", format!("duplicate test target {name:?}"))
+                    .with_path(path.display().to_string()),
+            );
+        }
+        let entry = required_field(raw_test.entry, path, &format!("{field_prefix}.entry"))?;
+        validate_relative_path(path, &format!("{field_prefix}.entry"), &entry)?;
+        tests.push(TestTarget {
+            name,
+            entry,
+            stdout: raw_test.stdout,
+        });
+    }
+    Ok(tests)
 }
 
 fn validate_relative_path(path: &Path, field_name: &str, value: &str) -> Result<(), Diagnostic> {
@@ -268,6 +382,16 @@ fn validate_relative_path(path: &Path, field_name: &str, value: &str) -> Result<
             format!("{field_name} must not use parent traversal"),
         )
         .with_path(path.display().to_string()));
+    }
+    Ok(())
+}
+
+fn validate_dependency_path(path: &Path, field_name: &str, value: &str) -> Result<(), Diagnostic> {
+    if Path::new(value).is_absolute() {
+        return Err(
+            Diagnostic::new("manifest", format!("{field_name} must be relative"))
+                .with_path(path.display().to_string()),
+        );
     }
     Ok(())
 }

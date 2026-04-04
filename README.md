@@ -22,7 +22,7 @@ Axiom currently supports:
 - `if` / `while`
 - nested functions and lexical closures
 - file-based imports
-- package manifests and build/run/check commands
+- package manifests and build/run/check/test commands
 - bytecode compilation and VM execution
 - registry-backed host capabilities
 
@@ -79,6 +79,27 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hel
 # Run the stage1 multi-file module example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/modules
 
+# Run the stage1 package test suite
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+
+# Run the stage1 local dependency example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/packages
+
+# Run the stage1 local dependency test suite
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
+
+# Run the stage1 package-root workspace example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/workspace
+
+# Run the stage1 package-root workspace test suite
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
+
+# Run the stage1 capability-gated intrinsic example
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/capabilities
+
+# Run the stage1 capability-gated intrinsic tests
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
+
 # Run the stage1 array example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arrays
 
@@ -131,6 +152,12 @@ make smoke
 make stage1-test
 make stage1-smoke
 
+# Run the stage1 package test suite directly
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
+
 # Inspect host capabilities
 python -m axiom host list
 python -m axiom host describe
@@ -146,8 +173,8 @@ Supported syntax today:
 - `fn name(arg: type, ...): type { ... }`
 - `if expr { ... } else { ... }`
 - `while expr { ... }`
-- `import "path"` and `import "path" as alias`
-- calls like `name(arg)` and `module.name(arg)`
+- `import "path"`
+- direct calls like `name(arg)` after importing exported symbols
 - host calls like `host.version()` and `host.int.parse("41")`
 
 Runtime rules:

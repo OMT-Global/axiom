@@ -8,7 +8,8 @@ and slice summary; this file is the detailed execution contract for future work.
 
 AG0 is the current entry floor and must remain intact before any downstream work starts.
 
-- Stage1 already has a real `axiomc` CLI with `new`, `check`, `build`, `run`, and `caps`.
+- Stage1 already has a real `axiomc` CLI with `new`, `check`, `build`, `run`,
+  `test`, and `caps`.
 - The backend is still generated Rust plus `rustc`. That is acceptable for the
   agent-grade milestone as long as the public workflow is fully `axiomc`-driven.
 - The current language floor includes multi-file modules, structs, enums,
@@ -131,16 +132,24 @@ Acceptance:
 
 Goal: make stage1 usable across real multi-package codebases.
 
+Status: complete for the current stage1 bootstrap contract.
+
+- `AG3.1` local path dependency graphs, package-root workspace members, and root lockfile validation are landed.
+- `AG3.2` now rejects import aliases, re-exports, and namespace-qualified calls with explicit parser diagnostics.
+- `AG3.3` now denies capability-gated compiler-known intrinsics across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`.
+- Workspace-only manifests and package-selection flow are still open.
+
 Work packages:
 
 - `AG3.1`: dependencies and workspaces
-  - Accept dependency entries and workspace membership in `axiom.toml`.
+  - Accept local path dependency entries in `axiom.toml` and support package-root workspace membership with relative local members.
   - Validate `axiom.lock` against the resolved graph.
 - `AG3.2`: stable module/import rules
   - Lock the import model for package-local modules plus dependency imports.
-  - Reject unsupported aliasing/re-export behavior explicitly rather than implicitly.
+  - Reject unsupported aliasing, re-exports, and namespace-qualified calls explicitly rather than implicitly.
 - `AG3.3`: capability enforcement
   - Move capability handling from metadata-only to compile/build/run enforcement.
+  - Keep new stage1 runtime entrypoints capability-aware by default instead of allowing metadata-only drift.
   - Capability-denied programs must fail before native execution.
 
 Acceptance:
@@ -192,7 +201,9 @@ Goal: make the stage1 public workflow complete enough to call the compiler worka
 Work packages:
 
 - `AG5.1`: `axiomc test`
-  - Add a public stage1 test command for package/workspace-level test execution.
+  - Stabilize the public stage1 test command for package/workspace-level test
+    execution and carry it from bootstrap source discovery plus golden-output
+    assertions to the agent-grade proof workloads.
 - `AG5.2`: stable JSON contract
   - Lock JSON diagnostics for `check`, `build`, `test`, and `caps`.
 - `AG5.3`: proof workload fixtures
