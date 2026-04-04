@@ -3,11 +3,12 @@ use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
-    CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, binary_path,
-    capability_descriptors, entry_path, generated_rust_path, load_manifest, manifest_path,
-    out_dir_path,
+    BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
+    binary_path, capability_descriptors, entry_path, generated_rust_path, load_manifest,
+    manifest_path, out_dir_path,
 };
 use crate::mir;
+use crate::stdlib;
 use crate::syntax;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -367,7 +368,54 @@ fn load_package_graph(project_root: &Path) -> Result<PackageGraph, Diagnostic> {
     let mut graph = PackageGraph::default();
     let mut visiting = Vec::new();
     load_package_graph_recursive(project_root, &mut graph, &mut visiting)?;
+    register_stdlib_package(&mut graph);
     Ok(graph)
+}
+
+/// Registers the synthetic `<stdlib>` package in the graph. The synthetic
+/// manifest enables every capability so `validate_module_capabilities` does not
+/// reject stdlib wrappers against their own package config; actual capability
+/// enforcement still runs on the flattened program via
+/// `hir::lower_with_capabilities`, which uses the **entry** package's
+/// capabilities. That keeps stdlib wrappers transparent for capability rules:
+/// an import of `std/time.ax` does not grant clock access unless the importing
+/// package's manifest also declares `[capabilities] clock = true`.
+fn register_stdlib_package(graph: &mut PackageGraph) {
+    let root = stdlib::stdlib_root();
+    if graph.packages.contains_key(&root) {
+        return;
+    }
+    let manifest = Manifest {
+        package: PackageSection {
+            name: stdlib::STDLIB_PACKAGE_NAME.to_string(),
+            version: stdlib::STDLIB_PACKAGE_VERSION.to_string(),
+        },
+        dependencies: BTreeMap::new(),
+        workspace: None,
+        build: BuildSection {
+            entry: String::from("lib.ax"),
+            out_dir: String::from("dist"),
+        },
+        tests: Vec::new(),
+        capabilities: CapabilityConfig {
+            fs: true,
+            net: true,
+            process: true,
+            env: true,
+            clock: true,
+            crypto: true,
+        },
+    };
+    graph.packages.insert(
+        root.clone(),
+        PackageContext {
+            root: root.clone(),
+            manifest,
+            source_root: root,
+            dependencies: BTreeMap::new(),
+            workspace_members: Vec::new(),
+        },
+    );
 }
 
 fn load_package_graph_recursive(
@@ -752,13 +800,28 @@ fn load_module_recursive(
     }
     let package = graph.context(package_root)?;
 
-    let source = fs::read_to_string(&module_path).map_err(|err| {
-        Diagnostic::new(
-            "source",
-            format!("failed to read {}: {err}", module_path.display()),
-        )
-        .with_path(module_path.display().to_string())
-    })?;
+    let source = if stdlib::is_stdlib_path(&module_path) {
+        stdlib::stdlib_source_for(&module_path)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "source",
+                    format!(
+                        "internal error: missing stdlib source for {}",
+                        module_path.display()
+                    ),
+                )
+                .with_path(module_path.display().to_string())
+            })?
+    } else {
+        fs::read_to_string(&module_path).map_err(|err| {
+            Diagnostic::new(
+                "source",
+                format!("failed to read {}: {err}", module_path.display()),
+            )
+            .with_path(module_path.display().to_string())
+        })?
+    };
     let program = syntax::parse_program(&source, &module_path)?;
     if !is_entry && !program.stmts.is_empty() {
         let stmt = &program.stmts[0];
@@ -2019,7 +2082,32 @@ fn resolve_import_path(
     }
     let mut components = relative.components();
     if let Some(Component::Normal(first)) = components.next() {
-        let dependency_name = first.to_string_lossy().to_string();
+        let first_name = first.to_string_lossy().to_string();
+        if first_name == stdlib::STDLIB_IMPORT_PREFIX {
+            let mut remainder = PathBuf::new();
+            for component in components {
+                remainder.push(component.as_os_str());
+            }
+            if remainder.as_os_str().is_empty() {
+                return Err(Diagnostic::new(
+                    "import",
+                    "stdlib import must include a module path (e.g. import \"std/time.ax\")",
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column));
+            }
+            if !stdlib::stdlib_has_module(&remainder) {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("unknown stdlib module {:?}", import.path),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column));
+            }
+            let virtual_path = stdlib::stdlib_source_path(&remainder.to_string_lossy());
+            return Ok((stdlib::stdlib_root(), virtual_path));
+        }
+        let dependency_name = first_name;
         if let Some(dependency_root) = package.dependencies.get(&dependency_name) {
             let dependency = graph.context(dependency_root)?;
             let mut remainder = PathBuf::new();

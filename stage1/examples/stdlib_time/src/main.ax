@@ -1,0 +1,4 @@
+import "std/time.ax"
+
+let now: int = now_ms()
+print now > 0

@@ -13,6 +13,7 @@ The Rust compiler is intentionally small in this bootstrap slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
 - Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
+- Stage1 now ships a synthetic standard library surface under the `std/` import prefix. The first module is `std/time.ax`, which exposes `now_ms(): int` on top of the existing `clock_now_ms` intrinsic. Stdlib wrappers are transparent to capability enforcement: importing `std/time.ax` still requires the importing package to declare `[capabilities] clock = true`.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
 - A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, branch-local moves conservatively propagate after `if` and `match`, statically false `if` / `while` branches are now ignored instead of poisoning later ownership state, and live borrowed slices now block moving their owned collection roots until the borrow scope ends, including when those borrows are wrapped in local tuples, named structs, enum payloads, `Option` / `Result` values, passed through sibling expression evaluation, or introduced by temporary `match` expressions.
@@ -66,8 +67,8 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Runtime and standard library gaps
 
-- There is no stage1 standard library yet.
-- Capability enforcement now exists for a compiler-known intrinsic slice across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`, but there is still no general stdlib module surface.
+- The AG4.1 stdlib surface has been opened with a single synthetic module (`std/time.ax` exposing `now_ms()`); the remaining AG4.1 modules (`std.io`, `std.fs`, `std.env`, `std.json`, `std.http`, `std.process`, `std.collections`, `std.sync`, `std.crypto.hash`) are still unimplemented.
+- Capability enforcement exists for a compiler-known intrinsic slice across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`, and stdlib wrappers preserve that enforcement against the importing package's manifest, but the general stdlib module surface is still mostly empty.
 - No async runtime, channels, cancellation, timers, or service-grade I/O surface exists.
 
 ### Backend and tooling gaps
@@ -90,6 +91,7 @@ Current proof points:
 - `stage1/examples/packages` proves the local path dependency baseline and root-package lockfile validation.
 - `stage1/examples/workspace` proves the package-root workspace-member baseline and workspace-aware root lockfile validation.
 - `stage1/examples/capabilities` proves the capability-gated fs/net/env/clock/crypto path, while the Rust suite covers the remaining process intrinsic contract.
+- `stage1/examples/stdlib_time` proves the AG4.1 synthetic stdlib surface: `import "std/time.ax"` brings `now_ms()` into scope and remains subject to the importing package's `[capabilities] clock` flag.
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,

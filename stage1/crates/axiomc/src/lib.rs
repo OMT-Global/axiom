@@ -6,6 +6,7 @@ pub mod manifest;
 pub mod mir;
 pub mod new_project;
 pub mod project;
+pub mod stdlib;
 pub mod syntax;
 
 #[cfg(test)]
@@ -1160,6 +1161,109 @@ mod tests {
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_time_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-time-app");
+        create_project(&project, Some("stdlib-time-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-time-app",
+                false,
+                false,
+                false,
+                false,
+                true,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/time.ax\"\nlet now: int = now_ms()\nprint now > 0\n",
+        )
+        .expect("write source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/time.ax\"\nlet now: int = now_ms()\nprint now > 0\n",
+        )
+        .expect("write test");
+        fs::write(project.join("src/main_test.stdout"), "true\n").expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\n");
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_time_without_clock_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-time-denied");
+        create_project(&project, Some("stdlib-time-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-time-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/time.ax\"\nlet now: int = now_ms()\nprint now > 0\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message
+                .contains("requires [capabilities].clock = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn stage1_project_rejects_unknown_stdlib_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-unknown");
+        create_project(&project, Some("stdlib-unknown")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/bogus.ax\"\nprint 1\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected unknown stdlib module error");
+        assert!(
+            err.message.contains("unknown stdlib module"),
+            "unexpected diagnostic: {err:?}",
+        );
     }
 
     #[test]
