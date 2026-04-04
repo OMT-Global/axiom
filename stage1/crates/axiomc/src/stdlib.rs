@@ -8,9 +8,9 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this only provides `std/time.ax`, exposing `now_ms()` on top of the
-//! existing `clock_now_ms` intrinsic. Additional AG4.1 modules land in
-//! follow-on slices.
+//! Today this provides `std/time.ax` (`now_ms()` on top of `clock_now_ms`) and
+//! `std/env.ax` (`get_env(key)` on top of `env_get`). Additional AG4.1 modules
+//! land in follow-on slices.
 
 use std::path::{Path, PathBuf};
 
@@ -29,10 +29,16 @@ pub(crate) const STDLIB_PACKAGE_VERSION: &str = "0.0.0";
 /// Compile-time table of stdlib module sources keyed by their path relative to
 /// the stdlib import prefix. Keeping stage1 stdlib sources in-tree as `&str`
 /// avoids any filesystem lookup and keeps the bootstrap hermetic.
-const STDLIB_SOURCES: &[(&str, &str)] = &[(
-    "time.ax",
-    "pub fn now_ms(): int {\nreturn clock_now_ms()\n}\n",
-)];
+const STDLIB_SOURCES: &[(&str, &str)] = &[
+    (
+        "time.ax",
+        "pub fn now_ms(): int {\nreturn clock_now_ms()\n}\n",
+    ),
+    (
+        "env.ax",
+        "pub fn get_env(key: string): Option<string> {\nreturn env_get(key)\n}\n",
+    ),
+];
 
 pub(crate) fn stdlib_root() -> PathBuf {
     PathBuf::from(STDLIB_ROOT)
