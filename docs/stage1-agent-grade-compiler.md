@@ -163,9 +163,9 @@ Acceptance:
 Goal: provide the minimum runtime and stdlib needed for agents, workers, and small services.
 
 Status: in progress. AG4.1 has been kicked off with the synthetic stdlib
-plumbing, and two modules are landed (`std/time.ax` and `std/env.ax`). The
-remaining AG4.1 modules, AG4.2 async runtime, AG4.3 HTTP service support, and
-AG4.4 capability-aware integration work are still open.
+plumbing, and three modules are landed (`std/time.ax`, `std/env.ax`, and
+`std/fs.ax`). The remaining AG4.1 modules, AG4.2 async runtime, AG4.3 HTTP
+service support, and AG4.4 capability-aware integration work are still open.
 
 Work packages:
 
@@ -187,8 +187,12 @@ Work packages:
     intrinsic. Covered by `stage1/examples/stdlib_env` and two Rust tests
     (`stage1_project_imports_synthetic_stdlib_env_module`,
     `stage1_project_rejects_stdlib_env_without_env_capability`).
+  - `std.fs` — **landed** as `std/fs.ax` exposing
+    `read_file(path: string): Option<string>` on top of the existing `fs_read`
+    intrinsic. Covered by `stage1/examples/stdlib_fs` and two Rust tests
+    (`stage1_project_imports_synthetic_stdlib_fs_module`,
+    `stage1_project_rejects_stdlib_fs_without_fs_capability`).
   - `std.io`
-  - `std.fs`
   - `std.json`
   - `std.http`
   - `std.process`

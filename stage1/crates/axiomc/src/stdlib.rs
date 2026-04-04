@@ -8,9 +8,10 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides `std/time.ax` (`now_ms()` on top of `clock_now_ms`) and
-//! `std/env.ax` (`get_env(key)` on top of `env_get`). Additional AG4.1 modules
-//! land in follow-on slices.
+//! Today this provides `std/time.ax` (`now_ms()` on top of `clock_now_ms`),
+//! `std/env.ax` (`get_env(key)` on top of `env_get`), and `std/fs.ax`
+//! (`read_file(path)` on top of `fs_read`). Additional AG4.1 modules land in
+//! follow-on slices.
 
 use std::path::{Path, PathBuf};
 
@@ -37,6 +38,10 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "env.ax",
         "pub fn get_env(key: string): Option<string> {\nreturn env_get(key)\n}\n",
+    ),
+    (
+        "fs.ax",
+        "pub fn read_file(path: string): Option<string> {\nreturn fs_read(path)\n}\n",
     ),
 ];
 
