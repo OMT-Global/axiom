@@ -1,0 +1,11 @@
+version = 1
+
+[[package]]
+name = "packages-stage1"
+version = "0.1.0"
+source = "path"
+
+[[package]]
+name = "core-stage1"
+version = "0.1.0"
+source = "path:deps/core"

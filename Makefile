@@ -31,6 +31,19 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/modules --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/modules --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/modules
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/packages --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/packages --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/packages
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/workspace --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/workspace --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/workspace
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/capabilities --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/capabilities --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/capabilities
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/arrays --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/arrays --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/arrays

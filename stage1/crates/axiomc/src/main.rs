@@ -1,6 +1,8 @@
 use axiomc::diagnostics::Diagnostic;
 use axiomc::new_project::create_project;
-use axiomc::project::{build_project, check_project, project_capabilities, run_project};
+use axiomc::project::{
+    build_project, check_project, project_capabilities, run_project, run_project_tests,
+};
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use std::path::PathBuf;
@@ -32,6 +34,11 @@ enum Command {
     Run {
         path: PathBuf,
     },
+    Test {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     Caps {
         path: Option<PathBuf>,
         #[arg(long)]
@@ -62,6 +69,7 @@ fn main() {
                             "entry": output.entry,
                             "statement_count": output.statement_count,
                             "capabilities": output.capabilities,
+                            "packages": output.packages,
                         }))
                         .expect("json")
                     );
@@ -86,6 +94,7 @@ fn main() {
                             "binary": output.binary,
                             "generated_rust": output.generated_rust,
                             "statement_count": output.statement_count,
+                            "packages": output.packages,
                         }))
                         .expect("json")
                     );
@@ -99,6 +108,38 @@ fn main() {
         Command::Run { path } => match run_project(&path) {
             Ok(code) => code,
             Err(error) => print_error(error, false),
+        },
+        Command::Test { path, json } => match run_project_tests(&path) {
+            Ok(output) => {
+                let ok = output.failed == 0;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "ok": ok,
+                            "command": "test",
+                            "project": path.display().to_string(),
+                            "manifest": output.manifest,
+                            "packages": output.packages,
+                            "passed": output.passed,
+                            "failed": output.failed,
+                            "cases": output.cases,
+                        }))
+                        .expect("json")
+                    );
+                } else {
+                    for case in &output.cases {
+                        let status = if case.ok { "PASS" } else { "FAIL" };
+                        eprintln!("{status} {} ({})", case.name, case.entry);
+                        if let Some(error) = &case.error {
+                            eprintln!("  {}", error);
+                        }
+                    }
+                    eprintln!("passed: {} failed: {}", output.passed, output.failed);
+                }
+                if ok { 0 } else { 1 }
+            }
+            Err(error) => print_error(error, json),
         },
         Command::Caps { path, json } => {
             let project = path.unwrap_or_else(|| PathBuf::from("."));

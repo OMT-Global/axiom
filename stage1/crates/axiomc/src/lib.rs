@@ -12,20 +12,52 @@ pub mod syntax;
 mod tests {
     use crate::codegen::render_rust;
     use crate::hir;
-    use crate::lockfile::render_lockfile;
-    use crate::manifest::{
-        BuildSection, CapabilityConfig, Manifest, PackageSection, capability_descriptors,
-        load_manifest, render_manifest,
-    };
+    use crate::lockfile::{render_lockfile, render_lockfile_for_project};
+    use crate::manifest::{TestTarget, capability_descriptors, load_manifest, render_manifest};
     use crate::mir;
     use crate::new_project::create_project;
-    use crate::project::{build_project, check_project, project_capabilities};
+    use crate::project::{build_project, check_project, project_capabilities, run_project_tests};
     use crate::syntax::parse_program;
-    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
     use std::process::Command;
     use tempfile::tempdir;
+
+    fn render_manifest_with_capabilities(
+        name: &str,
+        fs: bool,
+        net: bool,
+        process: bool,
+        env: bool,
+        clock: bool,
+        crypto: bool,
+    ) -> String {
+        format!(
+            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
+        )
+    }
+
+    fn write_process_fixture(dir: &Path) -> String {
+        #[cfg(windows)]
+        {
+            let path = dir.join("status.cmd");
+            fs::write(&path, "@echo off\r\nexit /b 7\r\n").expect("write process fixture");
+            path.to_string_lossy().into_owned()
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let path = dir.join("status.sh");
+            fs::write(&path, "#!/bin/sh\nexit 7\n").expect("write process fixture");
+            let mut permissions = fs::metadata(&path)
+                .expect("read process fixture metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("chmod process fixture");
+            path.to_string_lossy().into_owned()
+        }
+    }
 
     #[test]
     fn new_project_writes_manifest_lockfile_and_source() {
@@ -35,6 +67,10 @@ mod tests {
         assert!(project.join("axiom.toml").exists());
         assert!(project.join("axiom.lock").exists());
         assert!(project.join("src/main.ax").exists());
+        assert!(project.join("src/main_test.ax").exists());
+        assert!(project.join("src/main_test.stdout").exists());
+        let manifest = load_manifest(&project).expect("load manifest");
+        assert_eq!(manifest.tests, Vec::<TestTarget>::new());
     }
 
     #[test]
@@ -690,38 +726,258 @@ mod tests {
     }
 
     #[test]
-    fn check_project_rejects_dependencies_in_bootstrap() {
+    fn stage1_project_supports_local_path_dependencies() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("deps");
+        let project = dir.path().join("deps-app");
+        let dependency = project.join("deps/core");
         create_project(&project, Some("deps-app")).expect("create project");
+        create_project(&dependency, Some("core-lib")).expect("create dependency");
+        fs::write(
+            dependency.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
         fs::write(
             project.join("axiom.toml"),
             format!(
-                "{}\n[dependencies]\nhttp = \"0.1.0\"\n",
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
                 render_manifest("deps-app")
             ),
         )
         .expect("write manifest");
-        let manifest = Manifest {
-            package: PackageSection {
-                name: String::from("deps-app"),
-                version: String::from("0.1.0"),
-            },
-            dependencies: BTreeMap::new(),
-            workspace: None,
-            build: BuildSection {
-                entry: String::from("src/main.ax"),
-                out_dir: String::from("dist"),
-            },
-            capabilities: CapabilityConfig::default(),
-        };
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write root source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write root test");
+        fs::write(project.join("src/main_test.stdout"), "42\n").expect("write expected stdout");
+        let manifest = load_manifest(&project).expect("load manifest");
         fs::write(
             project.join("axiom.lock"),
-            render_lockfile(&manifest).expect("lockfile"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let error = check_project(&project).expect_err("dependencies should fail");
-        assert!(error.message.contains("does not support dependencies"));
+
+        check_project(&project).expect("check project");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_supports_workspace_members() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("workspace-root");
+        let core = project.join("members/core");
+        let util = project.join("members/util");
+        create_project(&project, Some("workspace-root-app")).expect("create root project");
+        create_project(&core, Some("workspace-core")).expect("create core member");
+        create_project(&util, Some("workspace-util")).expect("create util member");
+
+        fs::write(
+            core.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("write core source");
+        fs::write(
+            util.join("src/extra.ax"),
+            "pub fn helper(): int {\nreturn 7\n}\n",
+        )
+        .expect("write util source");
+
+        let core_manifest = load_manifest(&core).expect("load core manifest");
+        fs::write(
+            core.join("axiom.lock"),
+            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
+        )
+        .expect("write core lockfile");
+        let util_manifest = load_manifest(&util).expect("load util manifest");
+        fs::write(
+            util.join("axiom.lock"),
+            render_lockfile_for_project(&util, &util_manifest).expect("util lockfile"),
+        )
+        .expect("write util lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[workspace]\nmembers = [\"members/core\", \"members/util\"]\n\n[dependencies]\ncore = {{ path = \"members/core\" }}\n",
+                render_manifest("workspace-root-app")
+            ),
+        )
+        .expect("write workspace manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write root source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write root test");
+        fs::write(project.join("src/main_test.stdout"), "42\n").expect("write golden");
+
+        let manifest = load_manifest(&project).expect("load root manifest");
+        let lockfile = render_lockfile_for_project(&project, &manifest).expect("root lockfile");
+        assert!(lockfile.contains("path:members/core"));
+        assert!(lockfile.contains("path:members/util"));
+        fs::write(project.join("axiom.lock"), lockfile).expect("write root lockfile");
+
+        let checked = check_project(&project).expect("check workspace root");
+        assert_eq!(checked.packages.len(), 3);
+        let built = build_project(&project).expect("build workspace root");
+        assert_eq!(built.packages.len(), 3);
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+
+        let tests = run_project_tests(&project).expect("run workspace tests");
+        assert_eq!(tests.packages.len(), 3);
+        assert_eq!(tests.passed, 3);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn workspace_members_must_appear_in_root_lockfile() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("workspace-lock");
+        let core = project.join("members/core");
+        let util = project.join("members/util");
+        create_project(&project, Some("workspace-lock-app")).expect("create root project");
+        create_project(&core, Some("workspace-lock-core")).expect("create core member");
+        create_project(&util, Some("workspace-lock-util")).expect("create util member");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[workspace]\nmembers = [\"members/core\", \"members/util\"]\n\n[dependencies]\ncore = {{ path = \"members/core\" }}\n",
+                render_manifest("workspace-lock-app")
+            ),
+        )
+        .expect("write workspace manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/main.ax\"\nprint \"done\"\n",
+        )
+        .expect("write root source");
+
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile(&manifest).expect("minimal lockfile"),
+        )
+        .expect("write incomplete lockfile");
+
+        let error = check_project(&project).expect_err("workspace members should be locked");
+        assert_eq!(error.kind, "lockfile");
+        assert!(
+            error
+                .message
+                .contains("axiom.lock does not match axiom.toml")
+        );
+    }
+
+    #[test]
+    fn workspace_members_reject_parent_traversal() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("workspace-invalid");
+        create_project(&project, Some("workspace-invalid-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[workspace]\nmembers = [\"../outside\"]\n",
+                render_manifest("workspace-invalid-app")
+            ),
+        )
+        .expect("write manifest");
+
+        let error = check_project(&project).expect_err("workspace member traversal should fail");
+        assert_eq!(error.kind, "manifest");
+        assert!(error.message.contains("must not use parent traversal"));
+    }
+
+    #[test]
+    fn dependency_package_must_enable_its_own_capabilities() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("dep-cap-root");
+        let dependency = project.join("deps/core");
+        create_project(&project, Some("dep-cap-root-app")).expect("create root project");
+        create_project(&dependency, Some("dep-cap-core")).expect("create dependency");
+
+        fs::write(
+            dependency.join("src/time.ax"),
+            "pub fn tick(): int {\nreturn clock_now_ms()\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest_with_capabilities(
+                    "dep-cap-root-app",
+                    false,
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                )
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/time.ax\"\nprint tick()\n",
+        )
+        .expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error = check_project(&project).expect_err("dependency capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .path
+                .as_ref()
+                .is_some_and(|path| path.ends_with("deps/core/src/time.ax"))
+        );
+        assert!(
+            error
+                .message
+                .contains("requires [capabilities].clock = true")
+        );
     }
 
     #[test]
@@ -735,6 +991,322 @@ mod tests {
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 6);
+    }
+
+    #[test]
+    fn check_project_rejects_clock_intrinsic_without_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("clock-denied");
+        create_project(&project, Some("clock-denied-app")).expect("create project");
+        fs::write(project.join("src/main.ax"), "print clock_now_ms()\n").expect("write source");
+
+        let error = check_project(&project).expect_err("clock capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains("requires [capabilities].clock = true")
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_env_intrinsic_without_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("env-denied");
+        create_project(&project, Some("env-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let value: Option<string> = env_get(\"PATH\")\nprint \"never\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("env capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(error.message.contains("requires [capabilities].env = true"));
+    }
+
+    #[test]
+    fn check_project_rejects_fs_intrinsic_without_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("fs-denied");
+        create_project(&project, Some("fs-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "match fs_read(\"missing.txt\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("fs capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(error.message.contains("requires [capabilities].fs = true"));
+    }
+
+    #[test]
+    fn check_project_rejects_net_intrinsic_without_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-denied");
+        create_project(&project, Some("net-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "match net_resolve(\"localhost\") {\nSome(address) {\nprint address\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("net capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(error.message.contains("requires [capabilities].net = true"));
+    }
+
+    #[test]
+    fn check_project_rejects_process_intrinsic_without_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("process-denied");
+        create_project(&project, Some("process-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "print process_status(\"fixture\")\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("process capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains("requires [capabilities].process = true")
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_crypto_intrinsic_without_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("crypto-denied");
+        create_project(&project, Some("crypto-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "print crypto_sha256(\"abc\")\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("crypto capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains("requires [capabilities].crypto = true")
+        );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_capability_intrinsics() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("capability-intrinsics");
+        create_project(&project, Some("capability-intrinsics-app")).expect("create project");
+        let fixture_path = project.join("fixture.txt");
+        fs::write(&fixture_path, "fs ok\n").expect("write fs fixture");
+        let process_path = write_process_fixture(&project);
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "capability-intrinsics-app",
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            format!(
+                "match fs_read({fixture:?}) {{\nSome(value) {{\nprint value\n}}\nNone {{\nprint \"missing\"\n}}\n}}\nmatch net_resolve(\"localhost\") {{\nSome(_address) {{\nprint true\n}}\nNone {{\nprint false\n}}\n}}\nprint process_status({process:?})\nprint crypto_sha256(\"abc\")\nlet now: int = clock_now_ms()\nprint now > 0\nmatch env_get(\"__AXIOM_STAGE1_MISSING__\") {{\nSome(value) {{\nprint value\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
+                fixture = fixture_path.to_string_lossy(),
+                process = process_path,
+            ),
+        )
+        .expect("write source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            format!(
+                "match fs_read({fixture:?}) {{\nSome(value) {{\nprint value\n}}\nNone {{\nprint \"missing\"\n}}\n}}\nmatch net_resolve(\"localhost\") {{\nSome(_address) {{\nprint true\n}}\nNone {{\nprint false\n}}\n}}\nprint process_status({process:?})\nprint crypto_sha256(\"abc\")\nlet now: int = clock_now_ms()\nprint now > 0\nmatch env_get(\"__AXIOM_STAGE1_MISSING__\") {{\nSome(value) {{\nprint value\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
+                fixture = fixture_path.to_string_lossy(),
+                process = process_path,
+            ),
+        )
+        .expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "fs ok\n\ntrue\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "fs ok\n\ntrue\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn manifest_parses_test_targets() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("tests");
+        create_project(&project, Some("tests-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\nstdout = \"42\\n\"\n",
+                render_manifest("tests-app")
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        assert_eq!(
+            manifest.tests,
+            vec![TestTarget {
+                name: String::from("math-smoke"),
+                entry: String::from("src/math_test.ax"),
+                stdout: Some(String::from("42\n")),
+            }]
+        );
+    }
+
+    #[test]
+    fn run_project_tests_executes_manifest_cases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner");
+        create_project(&project, Some("runner-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\nstdout = \"42\\n\"\n",
+                render_manifest("runner-app")
+            ),
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn lucky(base: int): int {\nreturn base + 2\n}\n",
+        )
+        .expect("write module");
+        fs::write(
+            project.join("src/math_test.ax"),
+            "import \"math.ax\"\nprint lucky(40)\n",
+        )
+        .expect("write test");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 2);
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.cases.len(), 2);
+        let math_case = output
+            .cases
+            .iter()
+            .find(|case| case.name == "math-smoke")
+            .expect("math case");
+        assert_eq!(math_case.stdout, "42\n");
+        assert!(math_case.ok);
+        assert!(
+            output
+                .cases
+                .iter()
+                .any(|case| case.entry == "src/main_test.ax")
+        );
+    }
+
+    #[test]
+    fn run_project_tests_reports_stdout_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-fail");
+        create_project(&project, Some("runner-fail-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\nstdout = \"99\\n\"\n",
+                render_manifest("runner-fail-app")
+            ),
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn lucky(base: int): int {\nreturn base + 2\n}\n",
+        )
+        .expect("write module");
+        fs::write(
+            project.join("src/math_test.ax"),
+            "import \"math.ax\"\nprint lucky(40)\n",
+        )
+        .expect("write test");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 1);
+        assert_eq!(output.failed, 1);
+        let math_case = output
+            .cases
+            .iter()
+            .find(|case| case.name == "math-smoke")
+            .expect("math case");
+        assert_eq!(math_case.stdout, "42\n");
+        assert!(!math_case.ok);
+        assert!(
+            math_case
+                .error
+                .as_ref()
+                .expect("error")
+                .message
+                .contains("stdout did not match")
+        );
+    }
+
+    #[test]
+    fn run_project_tests_discovers_src_suffix_cases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-discovery");
+        create_project(&project, Some("runner-discovery-app")).expect("create project");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn lucky(base: int): int {\nreturn base + 2\n}\n",
+        )
+        .expect("write module");
+        fs::write(
+            project.join("src/math_test.ax"),
+            "import \"math.ax\"\nprint lucky(40)\n",
+        )
+        .expect("write test");
+        fs::write(project.join("src/math_test.stdout"), "42\n").expect("write golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 2);
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.cases.len(), 2);
+        assert!(
+            output
+                .cases
+                .iter()
+                .any(|case| case.entry == "src/main_test.ax")
+        );
+        let math_case = output
+            .cases
+            .iter()
+            .find(|case| case.entry == "src/math_test.ax")
+            .expect("math test");
+        assert_eq!(math_case.stdout, "42\n");
+        assert!(math_case.ok);
     }
 
     #[test]
@@ -1010,6 +1582,55 @@ mod tests {
         let error = check_project(&project).expect_err("missing import should fail");
         assert!(error.message.contains("missing import"));
         assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn check_project_rejects_import_aliases_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("import-alias");
+        create_project(&project, Some("import-alias-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"math.ax\" as math\nprint \"skip\"\n",
+        )
+        .expect("write source");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("write module");
+
+        let error = check_project(&project).expect_err("import aliases should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support import aliases"));
+    }
+
+    #[test]
+    fn check_project_rejects_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("re-export");
+        create_project(&project, Some("re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub use \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
+    fn check_project_rejects_namespace_qualified_calls_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("qualified-call");
+        create_project(&project, Some("qualified-call-app")).expect("create project");
+        fs::write(project.join("src/main.ax"), "print math.answer()\n").expect("write source");
+
+        let error = check_project(&project).expect_err("qualified calls should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("namespace-qualified calls"));
     }
 
     #[test]

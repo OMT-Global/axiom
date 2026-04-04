@@ -3,16 +3,26 @@ use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
-    CapabilityDescriptor, Manifest, binary_path, capability_descriptors, entry_path,
-    generated_rust_path, load_manifest, manifest_path, out_dir_path,
+    CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, binary_path,
+    capability_descriptors, entry_path, generated_rust_path, load_manifest, manifest_path,
+    out_dir_path,
 };
 use crate::mir;
 use crate::syntax;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CheckedPackage {
+    pub package_root: String,
+    pub manifest: String,
+    pub entry: String,
+    pub statement_count: usize,
+    pub capabilities: Vec<CapabilityDescriptor>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckOutput {
@@ -20,6 +30,17 @@ pub struct CheckOutput {
     pub entry: String,
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
+    pub packages: Vec<CheckedPackage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltPackage {
+    pub package_root: String,
+    pub manifest: String,
+    pub entry: String,
+    pub binary: String,
+    pub generated_rust: String,
+    pub statement_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,43 +50,99 @@ pub struct BuildOutput {
     pub binary: String,
     pub generated_rust: String,
     pub statement_count: usize,
+    pub packages: Vec<BuiltPackage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TestCaseResult {
+    pub package_root: String,
+    pub name: String,
+    pub entry: String,
+    pub ok: bool,
+    pub binary: Option<String>,
+    pub generated_rust: Option<String>,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub expected_stdout: Option<String>,
+    pub error: Option<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TestOutput {
+    pub manifest: String,
+    pub packages: Vec<String>,
+    pub cases: Vec<TestCaseResult>,
+    pub passed: usize,
+    pub failed: usize,
 }
 
 pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
-    let analyzed = analyze_project(project_root)?;
+    let project_root = normalize_path(project_root);
+    let graph = load_package_graph(&project_root)?;
+    let mut packages = Vec::new();
+    for package_root in workspace_package_roots(&graph, &project_root)? {
+        let analyzed = analyze_package(&graph, &package_root)?;
+        packages.push(CheckedPackage {
+            package_root: package_root.display().to_string(),
+            manifest: manifest_path(&package_root).display().to_string(),
+            entry: analyzed.entry_path.display().to_string(),
+            statement_count: analyzed.mir.statement_count(),
+            capabilities: capability_descriptors(&analyzed.manifest.capabilities),
+        });
+    }
+    let root = packages.first().cloned().ok_or_else(|| {
+        Diagnostic::new(
+            "manifest",
+            format!(
+                "internal error: no packages discovered for {}",
+                project_root.display()
+            ),
+        )
+    })?;
     Ok(CheckOutput {
-        manifest: manifest_path(project_root).display().to_string(),
-        entry: analyzed.entry_path.display().to_string(),
-        statement_count: analyzed.mir.statement_count(),
-        capabilities: capability_descriptors(&analyzed.manifest.capabilities),
+        manifest: root.manifest,
+        entry: root.entry,
+        statement_count: root.statement_count,
+        capabilities: root.capabilities,
+        packages,
     })
 }
 
 pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
-    let analyzed = analyze_project(project_root)?;
-    let out_dir = out_dir_path(project_root, &analyzed.manifest);
-    fs::create_dir_all(&out_dir).map_err(|err| {
+    let project_root = normalize_path(project_root);
+    let graph = load_package_graph(&project_root)?;
+    let mut packages = Vec::new();
+    for package_root in workspace_package_roots(&graph, &project_root)? {
+        let analyzed = analyze_package(&graph, &package_root)?;
+        let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
+        let binary = binary_path(&package_root, &analyzed.manifest);
+        build_artifacts(&analyzed, &generated_rust, &binary)?;
+        packages.push(BuiltPackage {
+            package_root: package_root.display().to_string(),
+            manifest: manifest_path(&package_root).display().to_string(),
+            entry: analyzed.entry_path.display().to_string(),
+            binary: binary.display().to_string(),
+            generated_rust: generated_rust.display().to_string(),
+            statement_count: analyzed.mir.statement_count(),
+        });
+    }
+    let root = packages.first().cloned().ok_or_else(|| {
         Diagnostic::new(
-            "build",
-            format!("failed to create {}: {err}", out_dir.display()),
+            "manifest",
+            format!(
+                "internal error: no packages discovered for {}",
+                project_root.display()
+            ),
         )
     })?;
-    let generated_rust = generated_rust_path(project_root, &analyzed.manifest);
-    let rust_source = render_rust(&analyzed.mir);
-    fs::write(&generated_rust, rust_source).map_err(|err| {
-        Diagnostic::new(
-            "build",
-            format!("failed to write {}: {err}", generated_rust.display()),
-        )
-    })?;
-    let binary = binary_path(project_root, &analyzed.manifest);
-    compile_native(&generated_rust, &binary)?;
     Ok(BuildOutput {
-        manifest: manifest_path(project_root).display().to_string(),
-        entry: analyzed.entry_path.display().to_string(),
-        binary: binary.display().to_string(),
-        generated_rust: generated_rust.display().to_string(),
-        statement_count: analyzed.mir.statement_count(),
+        manifest: root.manifest,
+        entry: root.entry,
+        binary: root.binary,
+        generated_rust: root.generated_rust,
+        statement_count: root.statement_count,
+        packages,
     })
 }
 
@@ -77,9 +154,154 @@ pub fn run_project(project_root: &Path) -> Result<i32, Diagnostic> {
     Ok(status.code().unwrap_or(1))
 }
 
+pub fn run_project_tests(project_root: &Path) -> Result<TestOutput, Diagnostic> {
+    let project_root = normalize_path(project_root);
+    let graph = load_package_graph(&project_root)?;
+    let manifest_path_text = manifest_path(&project_root).display().to_string();
+    let mut packages = Vec::new();
+    let mut cases = Vec::new();
+    for package_root in workspace_package_roots(&graph, &project_root)? {
+        let manifest = graph.context(&package_root)?.manifest.clone();
+        validate_lockfile(&package_root, &manifest)?;
+        let tests = collect_test_targets(&package_root, &manifest)?;
+        if tests.is_empty() {
+            continue;
+        }
+        packages.push(package_root.display().to_string());
+        for test in &tests {
+            cases.push(run_test_case(&package_root, &graph, &manifest, test));
+        }
+    }
+    if cases.is_empty() {
+        return Err(Diagnostic::new(
+            "test",
+            "no tests discovered under src/**/*_test.ax across the workspace and no [[tests]] configured in axiom.toml",
+        )
+        .with_path(manifest_path_text));
+    }
+    let passed = cases.iter().filter(|case| case.ok).count();
+    let failed = cases.len().saturating_sub(passed);
+    Ok(TestOutput {
+        manifest: manifest_path(&project_root).display().to_string(),
+        packages,
+        cases,
+        passed,
+        failed,
+    })
+}
+
+fn collect_test_targets(
+    project_root: &Path,
+    manifest: &Manifest,
+) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
+    let mut tests = manifest.tests.clone();
+    let mut seen_entries = tests
+        .iter()
+        .map(|test| test.entry.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for discovered in discover_test_targets(project_root)? {
+        if seen_entries.insert(discovered.entry.clone()) {
+            tests.push(discovered);
+        }
+    }
+    Ok(tests)
+}
+
+fn discover_test_targets(
+    project_root: &Path,
+) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
+    let src_root = project_root.join("src");
+    if !src_root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut tests = Vec::new();
+    collect_discovered_tests(project_root, &src_root, &mut tests)?;
+    tests.sort_by(|left, right| left.entry.cmp(&right.entry));
+    Ok(tests)
+}
+
+fn collect_discovered_tests(
+    project_root: &Path,
+    dir: &Path,
+    tests: &mut Vec<crate::manifest::TestTarget>,
+) -> Result<(), Diagnostic> {
+    let entries = fs::read_dir(dir).map_err(|err| {
+        Diagnostic::new("test", format!("failed to read {}: {err}", dir.display()))
+            .with_path(dir.display().to_string())
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            Diagnostic::new("test", format!("failed to read {}: {err}", dir.display()))
+                .with_path(dir.display().to_string())
+        })?;
+        let path = entry.path();
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            collect_discovered_tests(project_root, &path, tests)?;
+            continue;
+        }
+        if path.extension().and_then(|value| value.to_str()) != Some("ax") {
+            continue;
+        }
+        let stem = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if !stem.ends_with("_test") {
+            continue;
+        }
+        let relative = normalize_path(path.strip_prefix(project_root).unwrap_or(&path));
+        let stdout_path = path.with_extension("stdout");
+        let stdout = if stdout_path.exists() {
+            Some(fs::read_to_string(&stdout_path).map_err(|err| {
+                Diagnostic::new(
+                    "test",
+                    format!("failed to read {}: {err}", stdout_path.display()),
+                )
+                .with_path(stdout_path.display().to_string())
+            })?)
+        } else {
+            None
+        };
+        tests.push(crate::manifest::TestTarget {
+            name: relative.with_extension("").display().to_string(),
+            entry: relative.display().to_string(),
+            stdout,
+        });
+    }
+    Ok(())
+}
+
 pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescriptor>, Diagnostic> {
     let manifest = load_manifest(project_root)?;
     Ok(capability_descriptors(&manifest.capabilities))
+}
+
+#[derive(Debug, Clone)]
+struct PackageContext {
+    root: PathBuf,
+    manifest: Manifest,
+    source_root: PathBuf,
+    dependencies: BTreeMap<String, PathBuf>,
+    workspace_members: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PackageGraph {
+    packages: HashMap<PathBuf, PackageContext>,
+}
+
+impl PackageGraph {
+    fn context(&self, package_root: &Path) -> Result<&PackageContext, Diagnostic> {
+        self.packages.get(package_root).ok_or_else(|| {
+            Diagnostic::new(
+                "manifest",
+                format!(
+                    "internal error: unknown package root {}",
+                    package_root.display()
+                ),
+            )
+        })
+    }
 }
 
 struct AnalyzedProject {
@@ -93,6 +315,9 @@ struct LoadedModule {
     path: PathBuf,
     program: syntax::Program,
     is_entry: bool,
+    package_root: PathBuf,
+    source_root: PathBuf,
+    package_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -109,35 +334,27 @@ struct ModuleSymbols {
     private_enums: HashSet<String>,
 }
 
-fn analyze_project(project_root: &Path) -> Result<AnalyzedProject, Diagnostic> {
-    let manifest = load_manifest(project_root)?;
-    if manifest
-        .workspace
-        .as_ref()
-        .is_some_and(|workspace| !workspace.members.is_empty())
-    {
-        return Err(Diagnostic::new(
-            "manifest",
-            "stage1 bootstrap does not support workspace members yet",
-        )
-        .with_path(manifest_path(project_root).display().to_string()));
-    }
-    if !manifest.dependencies.is_empty() {
-        return Err(Diagnostic::new(
-            "manifest",
-            "stage1 bootstrap does not support dependencies yet",
-        )
-        .with_path(manifest_path(project_root).display().to_string()));
-    }
-    validate_lockfile(project_root, &manifest)?;
-    let entry = entry_path(project_root, &manifest);
-    let source_root = entry
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| project_root.to_path_buf());
-    let modules = load_modules(project_root, &entry)?;
-    let flattened = flatten_modules(&modules, &source_root)?;
-    let hir = hir::lower(&flattened)?;
+fn analyze_package(
+    graph: &PackageGraph,
+    package_root: &Path,
+) -> Result<AnalyzedProject, Diagnostic> {
+    let package_root = normalize_path(package_root);
+    let manifest = graph.context(&package_root)?.manifest.clone();
+    validate_lockfile(&package_root, &manifest)?;
+    let entry = entry_path(&package_root, &manifest);
+    analyze_entry(graph, &package_root, manifest, entry)
+}
+
+fn analyze_entry(
+    graph: &PackageGraph,
+    package_root: &Path,
+    manifest: Manifest,
+    entry: PathBuf,
+) -> Result<AnalyzedProject, Diagnostic> {
+    let modules = load_modules(graph, package_root, &entry)?;
+    validate_module_capabilities(graph, &modules)?;
+    let flattened = flatten_modules(graph, &modules)?;
+    let hir = hir::lower_with_capabilities(&flattened, &manifest.capabilities)?;
     let mir = mir::lower(&hir);
     Ok(AnalyzedProject {
         manifest,
@@ -146,12 +363,364 @@ fn analyze_project(project_root: &Path) -> Result<AnalyzedProject, Diagnostic> {
     })
 }
 
-fn load_modules(project_root: &Path, entry_path: &Path) -> Result<Vec<LoadedModule>, Diagnostic> {
+fn load_package_graph(project_root: &Path) -> Result<PackageGraph, Diagnostic> {
+    let mut graph = PackageGraph::default();
+    let mut visiting = Vec::new();
+    load_package_graph_recursive(project_root, &mut graph, &mut visiting)?;
+    Ok(graph)
+}
+
+fn load_package_graph_recursive(
+    project_root: &Path,
+    graph: &mut PackageGraph,
+    visiting: &mut Vec<PathBuf>,
+) -> Result<(), Diagnostic> {
+    let project_root = normalize_path(project_root);
+    if graph.packages.contains_key(&project_root) {
+        return Ok(());
+    }
+    if visiting.contains(&project_root) {
+        return Err(Diagnostic::new(
+            "manifest",
+            format!("dependency cycle detected at {}", project_root.display()),
+        )
+        .with_path(manifest_path(&project_root).display().to_string()));
+    }
+    let manifest = load_manifest(&project_root)?;
+    let workspace_members = resolve_workspace_members(&project_root, &manifest)?;
+    let source_root = entry_path(&project_root, &manifest)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| project_root.clone());
+    visiting.push(project_root.clone());
+    let mut dependencies = BTreeMap::new();
+    for (name, spec) in &manifest.dependencies {
+        let dependency_root = normalize_path(project_root.join(&spec.path));
+        if !dependency_root.exists() {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!(
+                    "dependency {name:?} is missing at {}",
+                    dependency_root.display()
+                ),
+            )
+            .with_path(manifest_path(&project_root).display().to_string()));
+        }
+        load_package_graph_recursive(&dependency_root, graph, visiting)?;
+        dependencies.insert(name.clone(), dependency_root);
+    }
+    for member_root in &workspace_members {
+        load_package_graph_recursive(member_root, graph, visiting)?;
+    }
+    visiting.pop();
+    graph.packages.insert(
+        project_root.clone(),
+        PackageContext {
+            root: project_root,
+            manifest,
+            source_root,
+            dependencies,
+            workspace_members,
+        },
+    );
+    Ok(())
+}
+
+fn resolve_workspace_members(
+    project_root: &Path,
+    manifest: &Manifest,
+) -> Result<Vec<PathBuf>, Diagnostic> {
+    let mut members = Vec::new();
+    let mut seen = HashSet::new();
+    for (index, member) in manifest
+        .workspace
+        .as_ref()
+        .into_iter()
+        .flat_map(|workspace| workspace.members.iter())
+        .enumerate()
+    {
+        if member.trim().is_empty() {
+            return Err(
+                Diagnostic::new("manifest", "workspace member paths must not be empty")
+                    .with_path(manifest_path(project_root).display().to_string()),
+            );
+        }
+        let candidate = Path::new(member);
+        if candidate.is_absolute() {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("workspace.members[{index}] must be relative"),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
+        }
+        if candidate
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("workspace.members[{index}] must not use parent traversal"),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
+        }
+        let member_root = normalize_path(project_root.join(member));
+        if member_root == project_root {
+            return Err(Diagnostic::new(
+                "manifest",
+                "workspace members must not include the root package",
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
+        }
+        if !member_root.exists() {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!(
+                    "workspace member {member:?} is missing at {}",
+                    member_root.display()
+                ),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
+        }
+        let member_manifest = manifest_path(&member_root);
+        if !member_manifest.exists() {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("workspace member {member:?} is missing axiom.toml"),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
+        }
+        if seen.insert(member_root.clone()) {
+            members.push(member_root);
+        }
+    }
+    Ok(members)
+}
+
+fn build_artifacts(
+    analyzed: &AnalyzedProject,
+    generated_rust: &Path,
+    binary: &Path,
+) -> Result<(), Diagnostic> {
+    if let Some(parent) = generated_rust.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            Diagnostic::new(
+                "build",
+                format!("failed to create {}: {err}", parent.display()),
+            )
+        })?;
+    }
+    if let Some(parent) = binary.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            Diagnostic::new(
+                "build",
+                format!("failed to create {}: {err}", parent.display()),
+            )
+        })?;
+    }
+    let rust_source = render_rust(&analyzed.mir);
+    fs::write(generated_rust, rust_source).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to write {}: {err}", generated_rust.display()),
+        )
+    })?;
+    compile_native(generated_rust, binary)
+}
+
+fn run_test_case(
+    project_root: &Path,
+    graph: &PackageGraph,
+    manifest: &Manifest,
+    test: &crate::manifest::TestTarget,
+) -> TestCaseResult {
+    let entry_path = project_root.join(&test.entry);
+    let generated_rust = test_generated_rust_path(project_root, manifest, &test.name);
+    let binary = test_binary_path(project_root, manifest, &test.name);
+    let analyzed = match analyze_entry(graph, project_root, manifest.clone(), entry_path.clone()) {
+        Ok(analyzed) => analyzed,
+        Err(error) => {
+            return TestCaseResult {
+                package_root: project_root.display().to_string(),
+                name: test.name.clone(),
+                entry: test.entry.clone(),
+                ok: false,
+                binary: None,
+                generated_rust: None,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                expected_stdout: test.stdout.clone(),
+                error: Some(error),
+            };
+        }
+    };
+    if let Err(error) = build_artifacts(&analyzed, &generated_rust, &binary) {
+        return TestCaseResult {
+            package_root: project_root.display().to_string(),
+            name: test.name.clone(),
+            entry: test.entry.clone(),
+            ok: false,
+            binary: Some(binary.display().to_string()),
+            generated_rust: Some(generated_rust.display().to_string()),
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            expected_stdout: test.stdout.clone(),
+            error: Some(error),
+        };
+    }
+
+    match Command::new(&binary).output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code();
+            let error = if !output.status.success() {
+                Some(
+                    Diagnostic::new(
+                        "test",
+                        format!(
+                            "test {:?} exited with status {}",
+                            test.name,
+                            exit_code.unwrap_or(1)
+                        ),
+                    )
+                    .with_path(entry_path.display().to_string()),
+                )
+            } else if let Some(expected_stdout) = &test.stdout {
+                if &stdout != expected_stdout {
+                    Some(
+                        Diagnostic::new(
+                            "test",
+                            format!("test {:?} stdout did not match expected output", test.name),
+                        )
+                        .with_path(entry_path.display().to_string()),
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            TestCaseResult {
+                package_root: project_root.display().to_string(),
+                name: test.name.clone(),
+                entry: test.entry.clone(),
+                ok: error.is_none(),
+                binary: Some(binary.display().to_string()),
+                generated_rust: Some(generated_rust.display().to_string()),
+                exit_code,
+                stdout,
+                stderr,
+                expected_stdout: test.stdout.clone(),
+                error,
+            }
+        }
+        Err(err) => TestCaseResult {
+            package_root: project_root.display().to_string(),
+            name: test.name.clone(),
+            entry: test.entry.clone(),
+            ok: false,
+            binary: Some(binary.display().to_string()),
+            generated_rust: Some(generated_rust.display().to_string()),
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            expected_stdout: test.stdout.clone(),
+            error: Some(
+                Diagnostic::new(
+                    "test",
+                    format!("failed to execute {}: {err}", binary.display()),
+                )
+                .with_path(entry_path.display().to_string()),
+            ),
+        },
+    }
+}
+
+fn workspace_package_roots(
+    graph: &PackageGraph,
+    project_root: &Path,
+) -> Result<Vec<PathBuf>, Diagnostic> {
+    let mut roots = Vec::new();
+    let mut seen = BTreeSet::new();
+    collect_workspace_package_roots(graph, project_root, &mut seen, &mut roots)?;
+    Ok(roots)
+}
+
+fn collect_workspace_package_roots(
+    graph: &PackageGraph,
+    package_root: &Path,
+    seen: &mut BTreeSet<PathBuf>,
+    roots: &mut Vec<PathBuf>,
+) -> Result<(), Diagnostic> {
+    let package_root = normalize_path(package_root);
+    if !seen.insert(package_root.clone()) {
+        return Ok(());
+    }
+    roots.push(package_root.clone());
+    let package = graph.context(&package_root)?;
+    for member in &package.workspace_members {
+        collect_workspace_package_roots(graph, member, seen, roots)?;
+    }
+    Ok(())
+}
+
+fn test_generated_rust_path(project_root: &Path, manifest: &Manifest, test_name: &str) -> PathBuf {
+    out_dir_path(project_root, manifest)
+        .join("tests")
+        .join(format!(
+            "{}.generated.rs",
+            test_artifact_name(manifest, test_name)
+        ))
+}
+
+fn test_binary_path(project_root: &Path, manifest: &Manifest, test_name: &str) -> PathBuf {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    out_dir_path(project_root, manifest)
+        .join("tests")
+        .join(format!(
+            "{}{}",
+            test_artifact_name(manifest, test_name),
+            suffix
+        ))
+}
+
+fn test_artifact_name(manifest: &Manifest, test_name: &str) -> String {
+    format!("{}-{}", manifest.package.name, slugify_test_name(test_name))
+}
+
+fn slugify_test_name(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        String::from("test")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn load_modules(
+    graph: &PackageGraph,
+    package_root: &Path,
+    entry_path: &Path,
+) -> Result<Vec<LoadedModule>, Diagnostic> {
     let mut ordered = Vec::new();
     let mut loaded = HashMap::new();
     let mut visiting = Vec::new();
     load_module_recursive(
-        project_root,
+        graph,
+        package_root,
         entry_path,
         true,
         &mut ordered,
@@ -162,7 +731,8 @@ fn load_modules(project_root: &Path, entry_path: &Path) -> Result<Vec<LoadedModu
 }
 
 fn load_module_recursive(
-    project_root: &Path,
+    graph: &PackageGraph,
+    package_root: &Path,
     module_path: &Path,
     is_entry: bool,
     ordered: &mut Vec<LoadedModule>,
@@ -180,6 +750,7 @@ fn load_module_recursive(
     if loaded.contains_key(&module_path) {
         return Ok(());
     }
+    let package = graph.context(package_root)?;
 
     let source = fs::read_to_string(&module_path).map_err(|err| {
         Diagnostic::new(
@@ -201,8 +772,17 @@ fn load_module_recursive(
 
     visiting.push(module_path.clone());
     for import in &program.imports {
-        let import_path = resolve_import_path(project_root, &module_path, import)?;
-        load_module_recursive(project_root, &import_path, false, ordered, loaded, visiting)?;
+        let (import_package_root, import_path) =
+            resolve_import_path(graph, package_root, &module_path, import)?;
+        load_module_recursive(
+            graph,
+            &import_package_root,
+            &import_path,
+            false,
+            ordered,
+            loaded,
+            visiting,
+        )?;
     }
     visiting.pop();
 
@@ -211,20 +791,185 @@ fn load_module_recursive(
         path: module_path,
         program,
         is_entry,
+        package_root: package.root.clone(),
+        source_root: package.source_root.clone(),
+        package_name: package.manifest.package.name.clone(),
     });
     Ok(())
 }
 
-fn flatten_modules(
+fn validate_module_capabilities(
+    graph: &PackageGraph,
     modules: &[LoadedModule],
-    source_root: &Path,
+) -> Result<(), Diagnostic> {
+    for module in modules {
+        let package = graph.context(&module.package_root)?;
+        validate_program_capabilities(
+            &module.path,
+            &module.program,
+            &package.manifest.capabilities,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_program_capabilities(
+    module_path: &Path,
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+) -> Result<(), Diagnostic> {
+    for function in &program.functions {
+        for stmt in &function.body {
+            validate_stmt_capabilities(module_path, stmt, capabilities)?;
+        }
+    }
+    for stmt in &program.stmts {
+        validate_stmt_capabilities(module_path, stmt, capabilities)?;
+    }
+    Ok(())
+}
+
+fn validate_stmt_capabilities(
+    module_path: &Path,
+    stmt: &syntax::Stmt,
+    capabilities: &CapabilityConfig,
+) -> Result<(), Diagnostic> {
+    match stmt {
+        syntax::Stmt::Let { expr, .. }
+        | syntax::Stmt::Print { expr, .. }
+        | syntax::Stmt::Return { expr, .. } => {
+            validate_expr_capabilities(module_path, expr, capabilities)?;
+        }
+        syntax::Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            validate_expr_capabilities(module_path, cond, capabilities)?;
+            for stmt in then_block {
+                validate_stmt_capabilities(module_path, stmt, capabilities)?;
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    validate_stmt_capabilities(module_path, stmt, capabilities)?;
+                }
+            }
+        }
+        syntax::Stmt::While { cond, body, .. } => {
+            validate_expr_capabilities(module_path, cond, capabilities)?;
+            for stmt in body {
+                validate_stmt_capabilities(module_path, stmt, capabilities)?;
+            }
+        }
+        syntax::Stmt::Match { expr, arms, .. } => {
+            validate_expr_capabilities(module_path, expr, capabilities)?;
+            for arm in arms {
+                for stmt in &arm.body {
+                    validate_stmt_capabilities(module_path, stmt, capabilities)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_expr_capabilities(
+    module_path: &Path,
+    expr: &syntax::Expr,
+    capabilities: &CapabilityConfig,
+) -> Result<(), Diagnostic> {
+    match expr {
+        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => Ok(()),
+        syntax::Expr::Call {
+            name,
+            args,
+            line,
+            column,
+        } => {
+            if let Some(kind) = intrinsic_capability(name)
+                && !capabilities.enabled(kind)
+            {
+                return Err(Diagnostic::new(
+                    "capability",
+                    format!(
+                        "call to {name:?} requires [capabilities].{} = true",
+                        kind.name()
+                    ),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(*line, *column));
+            }
+            for arg in args {
+                validate_expr_capabilities(module_path, arg, capabilities)?;
+            }
+            Ok(())
+        }
+        syntax::Expr::BinaryAdd { lhs, rhs, .. } | syntax::Expr::BinaryCompare { lhs, rhs, .. } => {
+            validate_expr_capabilities(module_path, lhs, capabilities)?;
+            validate_expr_capabilities(module_path, rhs, capabilities)
+        }
+        syntax::Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                validate_expr_capabilities(module_path, &field.expr, capabilities)?;
+            }
+            Ok(())
+        }
+        syntax::Expr::FieldAccess { base, .. } | syntax::Expr::TupleIndex { base, .. } => {
+            validate_expr_capabilities(module_path, base, capabilities)
+        }
+        syntax::Expr::TupleLiteral { elements, .. }
+        | syntax::Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                validate_expr_capabilities(module_path, element, capabilities)?;
+            }
+            Ok(())
+        }
+        syntax::Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                validate_expr_capabilities(module_path, &entry.key, capabilities)?;
+                validate_expr_capabilities(module_path, &entry.value, capabilities)?;
+            }
+            Ok(())
+        }
+        syntax::Expr::Slice {
+            base, start, end, ..
+        } => {
+            validate_expr_capabilities(module_path, base, capabilities)?;
+            if let Some(start) = start {
+                validate_expr_capabilities(module_path, start, capabilities)?;
+            }
+            if let Some(end) = end {
+                validate_expr_capabilities(module_path, end, capabilities)?;
+            }
+            Ok(())
+        }
+        syntax::Expr::Index { base, index, .. } => {
+            validate_expr_capabilities(module_path, base, capabilities)?;
+            validate_expr_capabilities(module_path, index, capabilities)
+        }
+    }
+}
+
+fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
+    match name {
+        "fs_read" => Some(CapabilityKind::Fs),
+        "net_resolve" => Some(CapabilityKind::Net),
+        "process_status" => Some(CapabilityKind::Process),
+        "clock_now_ms" => Some(CapabilityKind::Clock),
+        "env_get" => Some(CapabilityKind::Env),
+        "crypto_sha256" => Some(CapabilityKind::Crypto),
+        _ => None,
+    }
+}
+
+fn flatten_modules(
+    graph: &PackageGraph,
+    modules: &[LoadedModule],
 ) -> Result<syntax::Program, Diagnostic> {
     let mut symbols = HashMap::new();
     for module in modules {
-        symbols.insert(
-            module.path.clone(),
-            build_module_symbols(module, source_root)?,
-        );
+        symbols.insert(module.path.clone(), build_module_symbols(module)?);
     }
 
     let mut flattened_functions = Vec::new();
@@ -241,7 +986,8 @@ fn flatten_modules(
         let mut private_imported = HashSet::new();
         let mut private_imported_types = HashSet::new();
         for import in &module.program.imports {
-            let import_path = resolve_import_path(source_root, &module.path, import)?;
+            let (_, import_path) =
+                resolve_import_path(graph, &module.package_root, &module.path, import)?;
             let imported_symbols = symbols.get(&import_path).ok_or_else(|| {
                 Diagnostic::new(
                     "import",
@@ -354,11 +1100,8 @@ fn flatten_modules(
     })
 }
 
-fn build_module_symbols(
-    module: &LoadedModule,
-    source_root: &Path,
-) -> Result<ModuleSymbols, Diagnostic> {
-    let module_id = module_id_for_path(&module.path, source_root);
+fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnostic> {
+    let module_id = module_id_for_path(&module.path, &module.source_root, &module.package_name);
     let mut functions = HashMap::new();
     let mut public_functions = HashMap::new();
     let mut private_functions = HashSet::new();
@@ -1251,10 +1994,12 @@ fn merge_visible_types(
 }
 
 fn resolve_import_path(
-    project_root: &Path,
+    graph: &PackageGraph,
+    package_root: &Path,
     module_path: &Path,
     import: &syntax::Import,
-) -> Result<PathBuf, Diagnostic> {
+) -> Result<(PathBuf, PathBuf), Diagnostic> {
+    let package = graph.context(package_root)?;
     let relative = Path::new(&import.path);
     if relative.is_absolute() {
         return Err(Diagnostic::new("import", "stage1 imports must be relative")
@@ -1272,11 +2017,48 @@ fn resolve_import_path(
         .with_path(module_path.display().to_string())
         .with_span(import.line, import.column));
     }
-    let base_dir = module_path.parent().unwrap_or(project_root);
+    let mut components = relative.components();
+    if let Some(Component::Normal(first)) = components.next() {
+        let dependency_name = first.to_string_lossy().to_string();
+        if let Some(dependency_root) = package.dependencies.get(&dependency_name) {
+            let dependency = graph.context(dependency_root)?;
+            let mut remainder = PathBuf::new();
+            for component in components {
+                remainder.push(component.as_os_str());
+            }
+            if remainder.as_os_str().is_empty() {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("dependency import {dependency_name:?} must include a module path"),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column));
+            }
+            let candidate = normalize_path(dependency.source_root.join(remainder));
+            if !candidate.starts_with(&dependency.source_root) {
+                return Err(Diagnostic::new(
+                    "import",
+                    "dependency imports must stay inside the package",
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column));
+            }
+            if !candidate.exists() {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("missing import {}", candidate.display()),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column));
+            }
+            return Ok((dependency.root.clone(), candidate));
+        }
+    }
+    let base_dir = module_path.parent().unwrap_or(&package.source_root);
     let candidate = normalize_path(base_dir.join(relative));
-    if !candidate.starts_with(project_root) {
+    if !candidate.starts_with(&package.root) {
         return Err(
-            Diagnostic::new("import", "stage1 imports must stay inside the project")
+            Diagnostic::new("import", "stage1 imports must stay inside the package")
                 .with_path(module_path.display().to_string())
                 .with_span(import.line, import.column),
         );
@@ -1288,7 +2070,7 @@ fn resolve_import_path(
                 .with_span(import.line, import.column),
         );
     }
-    Ok(candidate)
+    Ok((package.root.clone(), candidate))
 }
 
 fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
@@ -1305,10 +2087,10 @@ fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
     normalized
 }
 
-fn module_id_for_path(path: &Path, source_root: &Path) -> String {
+fn module_id_for_path(path: &Path, source_root: &Path, package_name: &str) -> String {
     let relative = path.strip_prefix(source_root).unwrap_or(path);
     let stem = relative.with_extension("");
-    let mut out = String::new();
+    let mut out = slug_identifier(package_name);
     for component in stem.components() {
         let component = component.as_os_str().to_string_lossy();
         if !out.is_empty() {
@@ -1324,6 +2106,22 @@ fn module_id_for_path(path: &Path, source_root: &Path) -> String {
     }
     if out.is_empty() {
         String::from("module")
+    } else {
+        out
+    }
+}
+
+fn slug_identifier(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        String::from("package")
     } else {
         out
     }

@@ -53,6 +53,141 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    (len - 1) as i64\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
+    out.push_str("    std::fs::read_to_string(path).ok()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_net_resolve(host: String) -> Option<String> {\n");
+    out.push_str("    use std::net::ToSocketAddrs;\n");
+    out.push_str("    (host.as_str(), 0)\n");
+    out.push_str("        .to_socket_addrs()\n");
+    out.push_str("        .ok()?\n");
+    out.push_str("        .next()\n");
+    out.push_str("        .map(|addr| addr.ip().to_string())\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_process_status(program: String) -> i64 {\n");
+    out.push_str("    std::process::Command::new(program)\n");
+    out.push_str("        .status()\n");
+    out.push_str("        .ok()\n");
+    out.push_str("        .and_then(|status| status.code())\n");
+    out.push_str("        .map(i64::from)\n");
+    out.push_str("        .unwrap_or(-1)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_clock_now_ms() -> i64 {\n");
+    out.push_str("    use std::time::{SystemTime, UNIX_EPOCH};\n");
+    out.push_str("    let now = SystemTime::now()\n");
+    out.push_str("        .duration_since(UNIX_EPOCH)\n");
+    out.push_str("        .expect(\"system clock must be after unix epoch\");\n");
+    out.push_str("    now.as_millis() as i64\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_env_get(name: String) -> Option<String> {\n");
+    out.push_str("    std::env::var(name).ok()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_crypto_sha256(input: String) -> String {\n");
+    out.push_str("    const K: [u32; 64] = [\n");
+    out.push_str("        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,\n");
+    out.push_str("        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,\n");
+    out.push_str("        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,\n");
+    out.push_str("        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,\n");
+    out.push_str("        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,\n");
+    out.push_str("        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,\n");
+    out.push_str("        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,\n");
+    out.push_str("        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,\n");
+    out.push_str("        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,\n");
+    out.push_str("        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,\n");
+    out.push_str("        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,\n");
+    out.push_str("        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,\n");
+    out.push_str("        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,\n");
+    out.push_str("        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,\n");
+    out.push_str("        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,\n");
+    out.push_str("        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,\n");
+    out.push_str("    ];\n");
+    out.push_str("    let mut state: [u32; 8] = [\n");
+    out.push_str("        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,\n");
+    out.push_str("        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,\n");
+    out.push_str("    ];\n");
+    out.push_str("    let mut data = input.into_bytes();\n");
+    out.push_str("    let bit_len = (data.len() as u64) * 8;\n");
+    out.push_str("    data.push(0x80);\n");
+    out.push_str("    while data.len() % 64 != 56 {\n");
+    out.push_str("        data.push(0);\n");
+    out.push_str("    }\n");
+    out.push_str("    data.extend_from_slice(&bit_len.to_be_bytes());\n");
+    out.push_str("    for chunk in data.chunks(64) {\n");
+    out.push_str("        let mut schedule = [0u32; 64];\n");
+    out.push_str("        for (index, word) in schedule.iter_mut().take(16).enumerate() {\n");
+    out.push_str("            let start = index * 4;\n");
+    out.push_str("            *word = u32::from_be_bytes([\n");
+    out.push_str("                chunk[start],\n");
+    out.push_str("                chunk[start + 1],\n");
+    out.push_str("                chunk[start + 2],\n");
+    out.push_str("                chunk[start + 3],\n");
+    out.push_str("            ]);\n");
+    out.push_str("        }\n");
+    out.push_str("        for index in 16..64 {\n");
+    out.push_str("            let s0 = schedule[index - 15].rotate_right(7)\n");
+    out.push_str("                ^ schedule[index - 15].rotate_right(18)\n");
+    out.push_str("                ^ (schedule[index - 15] >> 3);\n");
+    out.push_str("            let s1 = schedule[index - 2].rotate_right(17)\n");
+    out.push_str("                ^ schedule[index - 2].rotate_right(19)\n");
+    out.push_str("                ^ (schedule[index - 2] >> 10);\n");
+    out.push_str("            schedule[index] = schedule[index - 16]\n");
+    out.push_str("                .wrapping_add(s0)\n");
+    out.push_str("                .wrapping_add(schedule[index - 7])\n");
+    out.push_str("                .wrapping_add(s1);\n");
+    out.push_str("        }\n");
+    out.push_str("        let mut a = state[0];\n");
+    out.push_str("        let mut b = state[1];\n");
+    out.push_str("        let mut c = state[2];\n");
+    out.push_str("        let mut d = state[3];\n");
+    out.push_str("        let mut e = state[4];\n");
+    out.push_str("        let mut f = state[5];\n");
+    out.push_str("        let mut g = state[6];\n");
+    out.push_str("        let mut h = state[7];\n");
+    out.push_str("        for index in 0..64 {\n");
+    out.push_str(
+        "            let sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);\n",
+    );
+    out.push_str("            let choice = (e & f) ^ ((!e) & g);\n");
+    out.push_str("            let temp1 = h\n");
+    out.push_str("                .wrapping_add(sigma1)\n");
+    out.push_str("                .wrapping_add(choice)\n");
+    out.push_str("                .wrapping_add(K[index])\n");
+    out.push_str("                .wrapping_add(schedule[index]);\n");
+    out.push_str(
+        "            let sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);\n",
+    );
+    out.push_str("            let majority = (a & b) ^ (a & c) ^ (b & c);\n");
+    out.push_str("            let temp2 = sigma0.wrapping_add(majority);\n");
+    out.push_str("            h = g;\n");
+    out.push_str("            g = f;\n");
+    out.push_str("            f = e;\n");
+    out.push_str("            e = d.wrapping_add(temp1);\n");
+    out.push_str("            d = c;\n");
+    out.push_str("            c = b;\n");
+    out.push_str("            b = a;\n");
+    out.push_str("            a = temp1.wrapping_add(temp2);\n");
+    out.push_str("        }\n");
+    out.push_str("        state[0] = state[0].wrapping_add(a);\n");
+    out.push_str("        state[1] = state[1].wrapping_add(b);\n");
+    out.push_str("        state[2] = state[2].wrapping_add(c);\n");
+    out.push_str("        state[3] = state[3].wrapping_add(d);\n");
+    out.push_str("        state[4] = state[4].wrapping_add(e);\n");
+    out.push_str("        state[5] = state[5].wrapping_add(f);\n");
+    out.push_str("        state[6] = state[6].wrapping_add(g);\n");
+    out.push_str("        state[7] = state[7].wrapping_add(h);\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut output = String::new();\n");
+    out.push_str("    for value in state {\n");
+    out.push_str("        output.push_str(&format!(\"{value:08x}\"));\n");
+    out.push_str("    }\n");
+    out.push_str("    output\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str(
         "fn axiom_map_get<K: Eq + std::hash::Hash, V: Copy>(values: &HashMap<K, V>, key: &K) -> V {\n",
     );
@@ -380,6 +515,22 @@ fn render_expr(expr: &Expr) -> String {
         Expr::VarRef { name, .. } => name.clone(),
         Expr::Call { name, args, .. } if name == "len" => {
             format!("({}).len() as i64", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_read" => {
+            format!("axiom_fs_read({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "net_resolve" => {
+            format!("axiom_net_resolve({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "process_status" => {
+            format!("axiom_process_status({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, .. } if name == "clock_now_ms" => String::from("axiom_clock_now_ms()"),
+        Expr::Call { name, args, .. } if name == "env_get" => {
+            format!("axiom_env_get({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "crypto_sha256" => {
+            format!("axiom_crypto_sha256({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, ty } if name == "first" => {
             render_collection_edge(&args[0], ty, false)

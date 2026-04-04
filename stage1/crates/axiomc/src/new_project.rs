@@ -51,6 +51,7 @@ pub fn create_project(path: &Path, name: Option<&str>) -> Result<(), Diagnostic>
             entry: String::from("src/main.ax"),
             out_dir: String::from("dist"),
         },
+        tests: Vec::new(),
         capabilities: CapabilityConfig::default(),
     };
     let lock_text = render_lockfile(&manifest)?;
@@ -61,6 +62,21 @@ pub fn create_project(path: &Path, name: Option<&str>) -> Result<(), Diagnostic>
     fs::write(src_dir.join("main.ax"), "print \"hello from stage1\"\n").map_err(|err| {
         Diagnostic::new("new", format!("failed to write src/main.ax: {err}"))
             .with_path(src_dir.join("main.ax").display().to_string())
+    })?;
+    fs::write(
+        src_dir.join("main_test.ax"),
+        "print \"hello from stage1\"\n",
+    )
+    .map_err(|err| {
+        Diagnostic::new("new", format!("failed to write src/main_test.ax: {err}"))
+            .with_path(src_dir.join("main_test.ax").display().to_string())
+    })?;
+    fs::write(src_dir.join("main_test.stdout"), "hello from stage1\n").map_err(|err| {
+        Diagnostic::new(
+            "new",
+            format!("failed to write src/main_test.stdout: {err}"),
+        )
+        .with_path(src_dir.join("main_test.stdout").display().to_string())
     })?;
     Ok(())
 }

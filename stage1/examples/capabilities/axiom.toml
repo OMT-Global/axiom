@@ -1,0 +1,15 @@
+[package]
+name = "capabilities-stage1"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = true
+net = true
+process = false
+env = true
+clock = true
+crypto = true
