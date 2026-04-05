@@ -163,13 +163,13 @@ Acceptance:
 Goal: provide the minimum runtime and stdlib needed for agents, workers, and small services.
 
 Status: in progress. AG4.1 has been kicked off with the synthetic stdlib
-plumbing, and all five modules that can ship as thin wrappers over existing
-intrinsics are landed (`std/time.ax`, `std/env.ax`, `std/fs.ax`,
-`std/process.ax`, and `std/crypto_hash.ax`). The remaining AG4.1 modules
-(`std.io`, `std.json`, `std.http`, `std.collections`, `std.sync`) require new
-stdlib intrinsics, the AG4.2 async runtime, or AG2 generics. AG4.2 async
-runtime, AG4.3 HTTP service support, and AG4.4 capability-aware integration
-work are still open.
+plumbing, and every stage1 capability-gated intrinsic now has a matching
+thin-wrapper stdlib module: `std/time.ax`, `std/env.ax`, `std/fs.ax`,
+`std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. The remaining AG4.1
+modules (`std.io`, `std.json`, `std.http`, `std.collections`, `std.sync`)
+require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics.
+AG4.2 async runtime, AG4.3 HTTP service support, and AG4.4 capability-aware
+integration work are still open.
 
 Work packages:
 
@@ -196,6 +196,12 @@ Work packages:
     intrinsic. Covered by `stage1/examples/stdlib_fs` and two Rust tests
     (`stage1_project_imports_synthetic_stdlib_fs_module`,
     `stage1_project_rejects_stdlib_fs_without_fs_capability`).
+  - `std.net` — **landed** (extension beyond the original AG4.1 list to close
+    the capability/wrapper symmetry) as `std/net.ax` exposing
+    `resolve(host: string): Option<string>` on top of the existing
+    `net_resolve` intrinsic. Covered by `stage1/examples/stdlib_net` and two
+    Rust tests (`stage1_project_imports_synthetic_stdlib_net_module`,
+    `stage1_project_rejects_stdlib_net_without_net_capability`).
   - `std.process` — **landed** as `std/process.ax` exposing
     `run_status(command: string): int` on top of the existing `process_status`
     intrinsic. Covered by `stage1/examples/stdlib_process` and two Rust tests
