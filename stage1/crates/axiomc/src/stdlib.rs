@@ -8,8 +8,8 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides six stdlib modules backed by existing capability-gated
-//! intrinsics — one thin wrapper per capability class:
+//! Today this provides seven stdlib modules. Six are thin wrappers over
+//! capability-gated intrinsics, one per capability class:
 //!
 //! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
@@ -22,9 +22,15 @@
 //!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
 //!   separator issues in the virtual stdlib table.)
 //!
-//! The remaining AG4.1 modules (`std.io`, `std.json`, `std.http`,
-//! `std.collections`, `std.sync`) require new stdlib intrinsics, the AG4.2
-//! async runtime, or AG2 generics and land in follow-on slices.
+//! The seventh module is the first stdlib surface not tied to a capability
+//! flag, matching the ambient status of the `print` statement:
+//!
+//! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
+//!   intrinsic (writes a line to stderr and returns bytes written).
+//!
+//! The remaining AG4.1 modules (`std.json`, `std.http`, `std.collections`,
+//! `std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or
+//! AG2 generics and land in follow-on slices.
 
 use std::path::{Path, PathBuf};
 
@@ -67,6 +73,10 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "crypto_hash.ax",
         "pub fn sha256(input: string): string {\nreturn crypto_sha256(input)\n}\n",
+    ),
+    (
+        "io.ax",
+        "pub fn eprintln(text: string): int {\nreturn io_eprintln(text)\n}\n",
     ),
 ];
 

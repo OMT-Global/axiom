@@ -1,0 +1,4 @@
+import "std/io.ax"
+
+let n: int = eprintln("hello stderr")
+print n > 0

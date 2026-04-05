@@ -165,11 +165,14 @@ Goal: provide the minimum runtime and stdlib needed for agents, workers, and sma
 Status: in progress. AG4.1 has been kicked off with the synthetic stdlib
 plumbing, and every stage1 capability-gated intrinsic now has a matching
 thin-wrapper stdlib module: `std/time.ax`, `std/env.ax`, `std/fs.ax`,
-`std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. The remaining AG4.1
-modules (`std.io`, `std.json`, `std.http`, `std.collections`, `std.sync`)
-require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics.
-AG4.2 async runtime, AG4.3 HTTP service support, and AG4.4 capability-aware
-integration work are still open.
+`std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. AG4.1 also now
+includes the first stdlib module not tied to a capability flag, `std/io.ax`,
+which wraps a new ungated `io_eprintln` intrinsic and establishes the
+"ambient stdio" precedent alongside the existing `print` statement. The
+remaining AG4.1 modules (`std.json`, `std.http`, `std.collections`,
+`std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or AG2
+generics. AG4.2 async runtime, AG4.3 HTTP service support, and AG4.4
+capability-aware integration work are still open.
 
 Work packages:
 
@@ -214,8 +217,16 @@ Work packages:
     `stage1/examples/stdlib_crypto_hash` and two Rust tests
     (`stage1_project_imports_synthetic_stdlib_crypto_hash_module`,
     `stage1_project_rejects_stdlib_crypto_hash_without_crypto_capability`).
-  - `std.io` — blocked on a new `io_*` intrinsic surface (stage1 today only
-    exposes `print` as a statement keyword).
+  - `std.io` — **landed** as `std/io.ax` exposing
+    `eprintln(text: string): int` on top of a new ungated `io_eprintln`
+    intrinsic that writes a line to stderr and returns the number of bytes
+    written (`-1` on error). This is the first stdlib module not tied to a
+    capability flag: stderr output is ambient, matching `print`'s ungated
+    statement form, so the wrapper does not call `require_capability` and the
+    importing package needs no manifest opt-in. Covered by
+    `stage1/examples/stdlib_io` and one Rust test
+    (`stage1_project_imports_synthetic_stdlib_io_module`). There is no
+    companion denial test because `std.io` has no capability to withhold.
   - `std.json` — blocked on a JSON parser/serialiser in the runtime.
   - `std.http` — blocked on AG4.3 HTTP client/server runtime support.
   - `std.collections` — blocked on AG2 generics (len/first/last are already
