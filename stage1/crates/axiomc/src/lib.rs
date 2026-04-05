@@ -1413,6 +1413,167 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_process_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-process-app");
+        create_project(&project, Some("stdlib-process-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-process-app",
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/process.ax\"\nlet status: int = run_status(\"__axiom_stage1_missing_binary__\")\nprint status\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(project.join("src/main_test.stdout"), "-1\n").expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "-1\n");
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_process_without_process_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-process-denied");
+        create_project(&project, Some("stdlib-process-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-process-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/process.ax\"\nlet status: int = run_status(\"x\")\nprint status\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].process = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_crypto_hash_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-crypto-hash-app");
+        create_project(&project, Some("stdlib-crypto-hash-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-crypto-hash-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/crypto_hash.ax\"\nprint sha256(\"abc\")\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_crypto_hash_without_crypto_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-crypto-hash-denied");
+        create_project(&project, Some("stdlib-crypto-hash-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-crypto-hash-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/crypto_hash.ax\"\nprint sha256(\"abc\")\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].crypto = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_rejects_unknown_stdlib_module() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-unknown");
