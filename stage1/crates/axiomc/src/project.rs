@@ -1018,6 +1018,7 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
         "net_resolve" => Some(CapabilityKind::Net),
+        "http_get" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),
         "clock_now_ms" => Some(CapabilityKind::Clock),
         "env_get" => Some(CapabilityKind::Env),

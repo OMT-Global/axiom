@@ -1441,6 +1441,34 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if name == "http_get" {
+                // HTTP GET shares the `net` capability surface: any code that
+                // can open a raw TCP socket could implement HTTP itself, so a
+                // separate `http` manifest flag would not add meaningful
+                // isolation in stage1.
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("http_get expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("http_get expects a string argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
             if name == "process_status" {
                 require_capability(
                     ctx.capabilities,

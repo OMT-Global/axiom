@@ -76,6 +76,55 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("        .map(|addr| addr.ip().to_string())\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_http_get(url: String) -> Option<String> {\n");
+    out.push_str("    use std::io::{Read, Write};\n");
+    out.push_str("    use std::net::TcpStream;\n");
+    out.push_str("    use std::time::Duration;\n");
+    out.push_str("    // Stage1 HTTP client: http:// only, HTTP/1.0 with\n");
+    out.push_str("    // Connection: close so we can read the body to EOF\n");
+    out.push_str("    // without parsing Content-Length or chunked transfer\n");
+    out.push_str("    // encoding. Returns the response body on 2xx, None on\n");
+    out.push_str("    // any parse / connect / non-2xx error. HTTPS and TLS\n");
+    out.push_str("    // are deliberately out of scope at this slice.\n");
+    out.push_str("    let rest = url.strip_prefix(\"http://\")?;\n");
+    out.push_str("    let (host_port, path) = match rest.find('/') {\n");
+    out.push_str("        Some(idx) => (&rest[..idx], &rest[idx..]),\n");
+    out.push_str("        None => (rest, \"/\"),\n");
+    out.push_str("    };\n");
+    out.push_str("    if host_port.is_empty() {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let (host, port) = match host_port.rfind(':') {\n");
+    out.push_str("        Some(idx) => {\n");
+    out.push_str("            let parsed: u16 = host_port[idx + 1..].parse().ok()?;\n");
+    out.push_str("            (&host_port[..idx], parsed)\n");
+    out.push_str("        }\n");
+    out.push_str("        None => (host_port, 80u16),\n");
+    out.push_str("    };\n");
+    out.push_str("    let mut stream = TcpStream::connect((host, port)).ok()?;\n");
+    out.push_str("    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;\n");
+    out.push_str("    stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;\n");
+    out.push_str("    let request = format!(\n");
+    out.push_str("        \"GET {} HTTP/1.0\\r\\nHost: {}\\r\\nUser-Agent: axiom-stage1/0.1\\r\\nConnection: close\\r\\n\\r\\n\",\n");
+    out.push_str("        path, host\n");
+    out.push_str("    );\n");
+    out.push_str("    stream.write_all(request.as_bytes()).ok()?;\n");
+    out.push_str("    let mut raw = Vec::new();\n");
+    out.push_str("    stream.read_to_end(&mut raw).ok()?;\n");
+    out.push_str("    let sep = raw.windows(4).position(|w| w == b\"\\r\\n\\r\\n\")?;\n");
+    out.push_str("    let head = &raw[..sep];\n");
+    out.push_str("    let body = &raw[sep + 4..];\n");
+    out.push_str("    let status_line_end = head.iter().position(|b| *b == b'\\r').unwrap_or(head.len());\n");
+    out.push_str("    let status_line = std::str::from_utf8(&head[..status_line_end]).ok()?;\n");
+    out.push_str("    let mut parts = status_line.splitn(3, ' ');\n");
+    out.push_str("    let _version = parts.next()?;\n");
+    out.push_str("    let status_code: u16 = parts.next()?.parse().ok()?;\n");
+    out.push_str("    if !(200..300).contains(&status_code) {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    String::from_utf8(body.to_vec()).ok()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_process_status(program: String) -> i64 {\n");
     out.push_str("    std::process::Command::new(program)\n");
     out.push_str("        .status()\n");
@@ -531,6 +580,9 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "http_get" => {
+            format!("axiom_http_get({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "net_resolve" => {
             format!("axiom_net_resolve({})", render_expr(&args[0]))

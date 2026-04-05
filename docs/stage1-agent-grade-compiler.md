@@ -165,14 +165,18 @@ Goal: provide the minimum runtime and stdlib needed for agents, workers, and sma
 Status: in progress. AG4.1 has been kicked off with the synthetic stdlib
 plumbing, and every stage1 capability-gated intrinsic now has a matching
 thin-wrapper stdlib module: `std/time.ax`, `std/env.ax`, `std/fs.ax`,
-`std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. AG4.1 also now
-includes the first stdlib module not tied to a capability flag, `std/io.ax`,
-which wraps a new ungated `io_eprintln` intrinsic and establishes the
-"ambient stdio" precedent alongside the existing `print` statement. The
-remaining AG4.1 modules (`std.json`, `std.http`, `std.collections`,
-`std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or AG2
-generics. AG4.2 async runtime, AG4.3 HTTP service support, and AG4.4
-capability-aware integration work are still open.
+`std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. AG4.1 now also
+includes `std/http.ax`, a blocking HTTP/1.0 client on top of a new
+`http_get` intrinsic that shares the `net` capability with `std/net.ax` and
+demonstrates that the `std.*` surface is not limited to one wrapper per
+capability (HTTPS/TLS land in a follow-on slice). It also includes
+`std/io.ax`, the first stdlib module not tied to a capability flag, which
+wraps a new ungated `io_eprintln` intrinsic and establishes the "ambient
+stdio" precedent alongside the existing `print` statement. The remaining
+AG4.1 modules (`std.json`, `std.collections`, `std.sync`) require new
+stdlib intrinsics, the AG4.2 async runtime, or AG2 generics. AG4.2 async
+runtime, AG4.3 HTTP *server* support, and AG4.4 capability-aware integration
+work are still open.
 
 Work packages:
 
@@ -228,7 +232,18 @@ Work packages:
     (`stage1_project_imports_synthetic_stdlib_io_module`). There is no
     companion denial test because `std.io` has no capability to withhold.
   - `std.json` — blocked on a JSON parser/serialiser in the runtime.
-  - `std.http` — blocked on AG4.3 HTTP client/server runtime support.
+  - `std.http` — **landed (client only)** as `std/http.ax` exposing
+    `get(url: string): Option<string>` on top of a new `http_get` intrinsic
+    that implements a blocking HTTP/1.0 client over raw TCP in the generated
+    Rust runtime (http:// only; HTTPS/TLS and AG4.3 HTTP *server* support
+    stay as follow-on work). `http_get` shares the existing `net` capability
+    because any code that can open a raw TCP socket could implement HTTP
+    itself, so a separate `http` manifest flag would not add meaningful
+    isolation in stage1. Covered by `stage1/examples/stdlib_http` and two
+    Rust tests (`stage1_project_imports_synthetic_stdlib_http_module`,
+    which spins up a local `TcpListener` serving a canned HTTP/1.0 response
+    to exercise the success path, and
+    `stage1_project_rejects_stdlib_http_without_net_capability`).
   - `std.collections` — blocked on AG2 generics (len/first/last are already
     polymorphic builtins; anything richer needs user-facing generics).
   - `std.sync` — blocked on the AG4.2 async runtime.
