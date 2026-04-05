@@ -1695,6 +1695,105 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_http_module() {
+        // `std/http.ax` wraps a new `http_get` intrinsic that shares the
+        // existing `net` capability. The test spins up a local TCP listener
+        // that serves a canned HTTP/1.0 200 response so the success path
+        // (response body parsing) is exercised deterministically without
+        // touching the network.
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let body = "stage1-http-ok";
+            let response = format!(
+                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-http-app");
+        create_project(&project, Some("stdlib-http-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-http-app",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = format!(
+            "import \"std/http.ax\"\nmatch get(\"http://{}/\") {{\nSome(body) {{\nprint body\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
+            addr
+        );
+        fs::write(project.join("src/main.ax"), &source).expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        server.join().expect("server thread");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "stage1-http-ok\n");
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_http_without_net_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-http-denied");
+        create_project(&project, Some("stdlib-http-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-http-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/http.ax\"\nmatch get(\"http://127.0.0.1:1/\") {\nSome(_b) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].net = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_rejects_unknown_stdlib_module() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-unknown");

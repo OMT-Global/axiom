@@ -8,8 +8,8 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides seven stdlib modules. Six are thin wrappers over
-//! capability-gated intrinsics, one per capability class:
+//! Today this provides eight stdlib modules. Six are thin wrappers over
+//! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
@@ -22,15 +22,25 @@
 //!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
 //!   separator issues in the virtual stdlib table.)
 //!
-//! The seventh module is the first stdlib surface not tied to a capability
+//! The seventh module shares an existing capability class with a peer
+//! wrapper, demonstrating that the `std.*` surface is not limited to one
+//! wrapper per capability:
+//!
+//! * `std/http.ax` — `get(url)` on top of the new `http_get` intrinsic. HTTP
+//!   shares the `net` capability surface because any code that can open a
+//!   raw TCP socket could implement HTTP itself, so a separate `http`
+//!   manifest flag would not add meaningful isolation in stage1. The
+//!   stage1 client is http:// only: HTTPS/TLS land in a follow-on slice.
+//!
+//! The eighth module is the first stdlib surface not tied to a capability
 //! flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
 //!   intrinsic (writes a line to stderr and returns bytes written).
 //!
-//! The remaining AG4.1 modules (`std.json`, `std.http`, `std.collections`,
-//! `std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or
-//! AG2 generics and land in follow-on slices.
+//! The remaining AG4.1 modules (`std.json`, `std.collections`, `std.sync`)
+//! require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics
+//! and land in follow-on slices.
 
 use std::path::{Path, PathBuf};
 
@@ -77,6 +87,10 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "io.ax",
         "pub fn eprintln(text: string): int {\nreturn io_eprintln(text)\n}\n",
+    ),
+    (
+        "http.ax",
+        "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
     ),
 ];
 
