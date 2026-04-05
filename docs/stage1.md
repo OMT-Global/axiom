@@ -13,7 +13,7 @@ The Rust compiler is intentionally small in this bootstrap slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
 - Supported source subset is top-level `import`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
-- Stage1 now ships a synthetic standard library surface under the `std/` import prefix. Five modules are landed: `std/time.ax` exposes `now_ms(): int` on top of `clock_now_ms`, `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. Stdlib wrappers are transparent to capability enforcement: each stdlib module requires the importing package to declare the matching capability flag (`clock`, `env`, `fs`, `process`, or `crypto`).
+- Stage1 now ships a synthetic standard library surface under the `std/` import prefix with one thin wrapper per capability class. Six modules are landed: `std/time.ax` exposes `now_ms(): int` on top of `clock_now_ms`, `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve`, `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. Stdlib wrappers are transparent to capability enforcement: each stdlib module requires the importing package to declare the matching capability flag (`clock`, `env`, `fs`, `net`, `process`, or `crypto`).
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
 - A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, branch-local moves conservatively propagate after `if` and `match`, statically false `if` / `while` branches are now ignored instead of poisoning later ownership state, and live borrowed slices now block moving their owned collection roots until the borrow scope ends, including when those borrows are wrapped in local tuples, named structs, enum payloads, `Option` / `Result` values, passed through sibling expression evaluation, or introduced by temporary `match` expressions.
@@ -67,7 +67,7 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Runtime and standard library gaps
 
-- The AG4.1 stdlib surface now covers all five AG4.1 modules that can ship as thin wrappers over existing intrinsics: `std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/process.ax`, and `std/crypto_hash.ax`. The remaining AG4.1 modules (`std.io`, `std.json`, `std.http`, `std.collections`, `std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics and stay as follow-on work.
+- The AG4.1 stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module: `std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. The remaining AG4.1 modules (`std.io`, `std.json`, `std.http`, `std.collections`, `std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics and stay as follow-on work.
 - Capability enforcement exists for a compiler-known intrinsic slice across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`, and stdlib wrappers preserve that enforcement against the importing package's manifest, but the general stdlib module surface is still mostly empty.
 - No async runtime, channels, cancellation, timers, or service-grade I/O surface exists.
 
@@ -94,13 +94,14 @@ Current proof points:
 - `stage1/examples/stdlib_time` proves the AG4.1 synthetic stdlib surface: `import "std/time.ax"` brings `now_ms()` into scope and remains subject to the importing package's `[capabilities] clock` flag.
 - `stage1/examples/stdlib_env` extends AG4.1 with `import "std/env.ax"`, bringing `get_env(key)` into scope and staying subject to the importing package's `[capabilities] env` flag.
 - `stage1/examples/stdlib_fs` extends AG4.1 with `import "std/fs.ax"`, bringing `read_file(path)` into scope and staying subject to the importing package's `[capabilities] fs` flag.
+- `stage1/examples/stdlib_net` extends AG4.1 with `import "std/net.ax"`, bringing `resolve(host)` into scope and staying subject to the importing package's `[capabilities] net` flag.
 - `stage1/examples/stdlib_process` extends AG4.1 with `import "std/process.ax"`, bringing `run_status(command)` into scope and staying subject to the importing package's `[capabilities] process` flag.
 - `stage1/examples/stdlib_crypto_hash` extends AG4.1 with `import "std/crypto_hash.ax"`, bringing `sha256(input)` into scope and staying subject to the importing package's `[capabilities] crypto` flag.
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
-- `make stage1-test stage1-smoke` now covers all seventeen checked-in stage1 examples.
+- `make stage1-test stage1-smoke` now covers all eighteen checked-in stage1 examples.
 
 Agent-grade compiler milestone summary:
 

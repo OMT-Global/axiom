@@ -1574,6 +1574,81 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_net_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-net-app");
+        create_project(&project, Some("stdlib-net-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-net-app",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout == "true\n" || stdout == "false\n",
+            "unexpected stdout for stdlib_net smoke: {stdout:?}"
+        );
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_net_without_net_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-net-denied");
+        create_project(&project, Some("stdlib-net-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-net-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_a) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].net = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_rejects_unknown_stdlib_module() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-unknown");

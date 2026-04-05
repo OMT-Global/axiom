@@ -8,14 +8,16 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides five AG4.1 modules backed by existing capability-gated
-//! intrinsics:
+//! Today this provides six stdlib modules backed by existing capability-gated
+//! intrinsics — one thin wrapper per capability class:
 //!
-//! * `std/time.ax` — `now_ms()` on top of `clock_now_ms`.
-//! * `std/env.ax` — `get_env(key)` on top of `env_get`.
-//! * `std/fs.ax` — `read_file(path)` on top of `fs_read`.
-//! * `std/process.ax` — `run_status(command)` on top of `process_status`.
-//! * `std/crypto_hash.ax` — `sha256(input)` on top of `crypto_sha256`.
+//! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
+//! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
+//! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
+//! * `std/net.ax` — `resolve(host)` on top of `net_resolve` (net).
+//! * `std/process.ax` — `run_status(command)` on top of `process_status`
+//!   (process).
+//! * `std/crypto_hash.ax` — `sha256(input)` on top of `crypto_sha256` (crypto).
 //!   (This is the stage1 spelling of the `std.crypto.hash` module from the
 //!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
 //!   separator issues in the virtual stdlib table.)
@@ -53,6 +55,10 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "fs.ax",
         "pub fn read_file(path: string): Option<string> {\nreturn fs_read(path)\n}\n",
+    ),
+    (
+        "net.ax",
+        "pub fn resolve(host: string): Option<string> {\nreturn net_resolve(host)\n}\n",
     ),
     (
         "process.ax",
