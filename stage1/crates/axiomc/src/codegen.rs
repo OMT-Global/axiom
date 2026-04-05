@@ -53,6 +53,16 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    (len - 1) as i64\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_io_eprintln(text: String) -> i64 {\n");
+    out.push_str("    use std::io::Write;\n");
+    out.push_str("    let stderr = std::io::stderr();\n");
+    out.push_str("    let mut handle = stderr.lock();\n");
+    out.push_str("    match handle.write_all(text.as_bytes()).and_then(|_| handle.write_all(b\"\\n\")) {\n");
+    out.push_str("        Ok(()) => (text.len() as i64) + 1,\n");
+    out.push_str("        Err(_) => -1,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    std::fs::read_to_string(path).ok()\n");
     out.push_str("}\n\n");
@@ -515,6 +525,9 @@ fn render_expr(expr: &Expr) -> String {
         Expr::VarRef { name, .. } => name.clone(),
         Expr::Call { name, args, .. } if name == "len" => {
             format!("({}).len() as i64", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "io_eprintln" => {
+            format!("axiom_io_eprintln({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
