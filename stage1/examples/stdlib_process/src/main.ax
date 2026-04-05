@@ -1,0 +1,4 @@
+import "std/process.ax"
+
+let status: int = run_status("__axiom_stage1_missing_binary__")
+print status

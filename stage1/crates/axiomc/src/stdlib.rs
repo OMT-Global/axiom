@@ -8,10 +8,21 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides `std/time.ax` (`now_ms()` on top of `clock_now_ms`),
-//! `std/env.ax` (`get_env(key)` on top of `env_get`), and `std/fs.ax`
-//! (`read_file(path)` on top of `fs_read`). Additional AG4.1 modules land in
-//! follow-on slices.
+//! Today this provides five AG4.1 modules backed by existing capability-gated
+//! intrinsics:
+//!
+//! * `std/time.ax` — `now_ms()` on top of `clock_now_ms`.
+//! * `std/env.ax` — `get_env(key)` on top of `env_get`.
+//! * `std/fs.ax` — `read_file(path)` on top of `fs_read`.
+//! * `std/process.ax` — `run_status(command)` on top of `process_status`.
+//! * `std/crypto_hash.ax` — `sha256(input)` on top of `crypto_sha256`.
+//!   (This is the stage1 spelling of the `std.crypto.hash` module from the
+//!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
+//!   separator issues in the virtual stdlib table.)
+//!
+//! The remaining AG4.1 modules (`std.io`, `std.json`, `std.http`,
+//! `std.collections`, `std.sync`) require new stdlib intrinsics, the AG4.2
+//! async runtime, or AG2 generics and land in follow-on slices.
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +53,14 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "fs.ax",
         "pub fn read_file(path: string): Option<string> {\nreturn fs_read(path)\n}\n",
+    ),
+    (
+        "process.ax",
+        "pub fn run_status(command: string): int {\nreturn process_status(command)\n}\n",
+    ),
+    (
+        "crypto_hash.ax",
+        "pub fn sha256(input: string): string {\nreturn crypto_sha256(input)\n}\n",
     ),
 ];
 

@@ -163,9 +163,13 @@ Acceptance:
 Goal: provide the minimum runtime and stdlib needed for agents, workers, and small services.
 
 Status: in progress. AG4.1 has been kicked off with the synthetic stdlib
-plumbing, and three modules are landed (`std/time.ax`, `std/env.ax`, and
-`std/fs.ax`). The remaining AG4.1 modules, AG4.2 async runtime, AG4.3 HTTP
-service support, and AG4.4 capability-aware integration work are still open.
+plumbing, and all five modules that can ship as thin wrappers over existing
+intrinsics are landed (`std/time.ax`, `std/env.ax`, `std/fs.ax`,
+`std/process.ax`, and `std/crypto_hash.ax`). The remaining AG4.1 modules
+(`std.io`, `std.json`, `std.http`, `std.collections`, `std.sync`) require new
+stdlib intrinsics, the AG4.2 async runtime, or AG2 generics. AG4.2 async
+runtime, AG4.3 HTTP service support, and AG4.4 capability-aware integration
+work are still open.
 
 Work packages:
 
@@ -192,13 +196,25 @@ Work packages:
     intrinsic. Covered by `stage1/examples/stdlib_fs` and two Rust tests
     (`stage1_project_imports_synthetic_stdlib_fs_module`,
     `stage1_project_rejects_stdlib_fs_without_fs_capability`).
-  - `std.io`
-  - `std.json`
-  - `std.http`
-  - `std.process`
-  - `std.collections`
-  - `std.sync`
-  - `std.crypto.hash`
+  - `std.process` — **landed** as `std/process.ax` exposing
+    `run_status(command: string): int` on top of the existing `process_status`
+    intrinsic. Covered by `stage1/examples/stdlib_process` and two Rust tests
+    (`stage1_project_imports_synthetic_stdlib_process_module`,
+    `stage1_project_rejects_stdlib_process_without_process_capability`).
+  - `std.crypto.hash` — **landed** as `std/crypto_hash.ax` (stage1 uses a flat
+    filename to avoid cross-platform path separator issues in the virtual
+    stdlib table) exposing `sha256(input: string): string` on top of the
+    existing `crypto_sha256` intrinsic. Covered by
+    `stage1/examples/stdlib_crypto_hash` and two Rust tests
+    (`stage1_project_imports_synthetic_stdlib_crypto_hash_module`,
+    `stage1_project_rejects_stdlib_crypto_hash_without_crypto_capability`).
+  - `std.io` — blocked on a new `io_*` intrinsic surface (stage1 today only
+    exposes `print` as a statement keyword).
+  - `std.json` — blocked on a JSON parser/serialiser in the runtime.
+  - `std.http` — blocked on AG4.3 HTTP client/server runtime support.
+  - `std.collections` — blocked on AG2 generics (len/first/last are already
+    polymorphic builtins; anything richer needs user-facing generics).
+  - `std.sync` — blocked on the AG4.2 async runtime.
 - `AG4.2`: async runtime
   - `async fn`
   - `await`
