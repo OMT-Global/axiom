@@ -3141,4 +3141,70 @@ mod tests {
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "7\nfrom import\n");
     }
+
+    // ------------------------------------------------------------------
+    // AG1.1: unknown-branch and loop join handling
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn check_project_rejects_moving_outer_string_inside_while_body() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("loop-move-outer");
+        create_project(&project, Some("loop-move-outer-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let label: string = \"hello\"\nlet running: bool = true\nwhile running {\nlet sink: string = label\nprint sink\n}\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("moving outer non-copy value inside loop body should fail");
+        assert!(
+            error.message.contains("cannot move non-copy value")
+                && error.message.contains("inside loop body"),
+            "unexpected error message: {}",
+            error.message
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_allows_copy_move_inside_while_body() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("loop-copy-ok");
+        create_project(&project, Some("loop-copy-ok-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let count: int = 42\nlet running: bool = true\nwhile running {\nlet dup: int = count\nprint dup\n}\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("copy values should be reusable inside loop bodies");
+    }
+
+    #[test]
+    fn check_project_allows_use_after_while_when_body_does_not_move() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("loop-no-move");
+        create_project(&project, Some("loop-no-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let label: string = \"hello\"\nlet running: bool = false\nwhile running {\nprint label\n}\nprint label\n",
+        )
+        .expect("write source");
+        check_project(&project)
+            .expect("values not moved inside loop should remain available after loop");
+    }
+
+    #[test]
+    fn check_project_allows_local_string_move_inside_while_body() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("loop-local-move");
+        create_project(&project, Some("loop-local-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let running: bool = true\nwhile running {\nlet inner: string = \"fresh\"\nlet sink: string = inner\nprint sink\n}\n",
+        )
+        .expect("write source");
+        check_project(&project)
+            .expect("moving loop-local values should be allowed");
+    }
 }
