@@ -860,6 +860,28 @@ fn lower_stmt(
             let before = env.clone();
             let mut body_env = before.clone();
             let (body, body_after, body_returns) = lower_block(body, &mut body_env, ctx)?;
+            // AG1.1: reject moves of outer non-Copy variables inside the loop
+            // body — on subsequent iterations the value would not be available.
+            if !body_returns {
+                for (name, pre_binding) in &before {
+                    if pre_binding.moved || pre_binding.ty.is_copy() {
+                        continue;
+                    }
+                    if let Some(post_binding) = body_after.get(name) {
+                        if post_binding.moved {
+                            return Err(Diagnostic::new(
+                                "ownership",
+                                format!(
+                                    "cannot move non-copy value `{}` inside loop body — \
+                                     value would not be available on subsequent iterations",
+                                    name
+                                ),
+                            )
+                            .with_span(*line, *column));
+                        }
+                    }
+                }
+            }
             merge_loop_state(env, &before, &body_after, body_returns);
             Ok(Stmt::While {
                 cond: lowered_cond,
@@ -1158,30 +1180,29 @@ fn merge_loop_state(
     body_after: &HashMap<String, Binding>,
     body_returns: bool,
 ) {
+    // AG1.1: the loop body may execute zero times, so post-loop ownership
+    // state preserves the pre-loop moved flags.  Moves of outer non-Copy
+    // values inside the body are rejected earlier (before this function is
+    // called), so the only moved-state change that can reach here is for
+    // values that were already moved before the loop.  Borrow counts still
+    // take the max of pre-loop and body-after to stay conservative.
     env.clear();
     for (name, binding) in before {
-        let body_moved = if body_returns {
-            binding.moved
-        } else {
-            body_after
-                .get(name)
-                .map(|entry| entry.moved)
-                .unwrap_or(binding.moved)
-        };
         env.insert(
             name.clone(),
             Binding {
                 ty: binding.ty.clone(),
-                moved: binding.moved || body_moved,
+                moved: binding.moved,
                 borrow_origin: binding.borrow_origin.clone(),
                 borrowed_owners: binding.borrowed_owners.clone(),
                 active_borrow_count: if body_returns {
                     binding.active_borrow_count
                 } else {
-                    body_after
+                    let body_count = body_after
                         .get(name)
                         .map(|entry| entry.active_borrow_count)
-                        .unwrap_or(binding.active_borrow_count)
+                        .unwrap_or(binding.active_borrow_count);
+                    binding.active_borrow_count.max(body_count)
                 },
             },
         );

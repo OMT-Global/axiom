@@ -76,11 +76,25 @@ Acceptance:
 
 Goal: replace the remaining bootstrap ownership special cases with a stable lexical borrow model.
 
+Status: in progress. AG1.1 is landed.
+
 Work packages:
 
-- `AG1.1`: unknown-branch and loop join handling
-  - Add conservative merge rules for non-constant `if` / `while` paths.
-  - Keep dead-branch pruning for constant false paths.
+- `AG1.1`: unknown-branch and loop join handling — **landed**
+  - Moving an outer non-`Copy` value inside a `while` body is now a compile
+    error ("cannot move non-copy value … inside loop body — value would not be
+    available on subsequent iterations").
+  - Post-loop ownership state preserves pre-loop moved flags since the body may
+    execute zero times.
+  - Dead-branch pruning for statically false `if` / `while` conditions is
+    preserved unchanged.
+  - `if` / `else` branch merge retains OR semantics (moved in either branch →
+    moved after the `if`), which is sound for the current bootstrap scope.
+  - Covered by four new Rust tests:
+    `check_project_rejects_moving_outer_string_inside_while_body`,
+    `check_project_allows_copy_move_inside_while_body`,
+    `check_project_allows_use_after_while_when_body_does_not_move`,
+    `check_project_allows_local_string_move_inside_while_body`.
 - `AG1.2`: mutable borrows
   - Start with borrowed locals and borrowed slices.
   - Reject double mutable borrow and mutable-plus-shared aliasing.
