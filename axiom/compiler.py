@@ -36,6 +36,7 @@ from .semantic_plan import (
     SemanticPlan,
     build_semantic_plan,
 )
+from .suggestions import suggestion_suffix
 
 
 @dataclass(frozen=True)
@@ -249,7 +250,12 @@ class Compiler:
                 return scope[name], True
         source = self._parent_bindings.get(name)
         if source is None:
-            raise AxiomCompileError(f"undefined variable {name!r}", span)
+            candidates = set(self._visible_bindings().keys())
+            candidates.update(self._visible_functions())
+            raise AxiomCompileError(
+                f"undefined variable {name!r}{suggestion_suffix(name, candidates)}",
+                span,
+            )
         return source.index, False
 
     def _alloc_temp_slot(self) -> int:
@@ -418,8 +424,12 @@ class Compiler:
                 # Function reference — push a FunctionValue onto the stack.
                 fn_name = self._try_resolve_function(expr.name)
                 if fn_name is None or fn_name not in self.function_ids:
+                    candidates = set(self._visible_bindings().keys())
+                    candidates.update(self._visible_functions())
                     raise AxiomCompileError(
-                        f"undefined variable or function {expr.name!r}", expr.span
+                        f"undefined variable or function {expr.name!r}"
+                        f"{suggestion_suffix(expr.name, candidates)}",
+                        expr.span,
                     )
                 out.append(Instr(Op.LOAD_FN, self.function_ids[fn_name]))
             return
@@ -509,4 +519,15 @@ class Compiler:
         resolved = self._try_resolve_function(fn_name)
         if resolved is not None:
             return resolved
-        raise AxiomCompileError(f"undefined function {fn_name!r}", span)
+        raise AxiomCompileError(
+            f"undefined function {fn_name!r}"
+            f"{suggestion_suffix(fn_name, self._visible_functions())}",
+            span,
+        )
+
+    def _visible_functions(self) -> List[str]:
+        visible: set[str] = set()
+        for scope in self.function_scope_stack:
+            visible.update(scope.keys())
+        visible.update(self.function_defs.keys())
+        return sorted(visible)

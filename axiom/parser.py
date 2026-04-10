@@ -33,6 +33,7 @@ from .ast import (
     expr_span,
 )
 from .errors import Span, AxiomParseError
+from .suggestions import suggestion_suffix
 from .token import Token, TokenKind
 
 
@@ -453,7 +454,8 @@ class Parser:
         raw_name = str(token.value)
         if raw_name not in {"int", "string", "bool"}:
             raise AxiomParseError(
-                f"unknown type {raw_name!r}",
+                f"unknown type {raw_name!r}"
+                f"{suggestion_suffix(raw_name, ('int', 'string', 'bool'))}",
                 token.span,
                 source=self.source,
                 path=self.source_path,

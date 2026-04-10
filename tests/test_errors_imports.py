@@ -153,6 +153,19 @@ class ImportErrorTests(unittest.TestCase):
             self.assertIn("main.ax:1", msg)
             self.assertIn('import "missing.ax"', msg)
             self.assertIn("^", msg)
+            self.assertIn("searched:", msg)
+
+    def test_compile_missing_import_suggests_close_match(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("metrics.ax").write_text(
+                "fn ready(): int { return 1 }\n",
+                encoding="utf-8",
+            )
+            root.joinpath("main.ax").write_text('import "metric"\n', encoding="utf-8")
+            with self.assertRaises(AxiomCompileError) as cm:
+                compile_file(root / "main.ax")
+            self.assertIn("did you mean 'metrics'?", str(cm.exception))
 
     def test_compile_circular_import(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -163,6 +176,7 @@ class ImportErrorTests(unittest.TestCase):
                 compile_file(root / "a.ax")
             msg = str(cm.exception)
             self.assertIn("circular import", msg)
+            self.assertIn("cycle: a.ax -> b.ax -> a.ax", msg)
             self.assertIn("b.ax:1", msg)
             self.assertIn('import "a"', msg)
             self.assertIn("^", msg)

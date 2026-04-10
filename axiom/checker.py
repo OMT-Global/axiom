@@ -40,6 +40,7 @@ from .semantic_plan import (
     SemanticPlan,
     build_semantic_plan,
 )
+from .suggestions import suggestion_suffix
 from .values import ValueKind
 
 
@@ -270,7 +271,11 @@ class Checker:
         result = self._try_resolve_var_type(name)
         if result is not None:
             return result
-        raise AxiomCompileError(f"undefined variable {name!r}", span)
+        raise AxiomCompileError(
+            f"undefined variable {name!r}"
+            f"{suggestion_suffix(name, self._visible_types().keys())}",
+            span,
+        )
 
     def _try_resolve_function(self, fn_name: str) -> Optional[str]:
         if fn_name.startswith("host."):
@@ -285,7 +290,18 @@ class Checker:
         resolved = self._try_resolve_function(fn_name)
         if resolved is not None:
             return resolved
-        raise AxiomCompileError(f"undefined function {fn_name!r}", span)
+        raise AxiomCompileError(
+            f"undefined function {fn_name!r}"
+            f"{suggestion_suffix(fn_name, self._visible_functions())}",
+            span,
+        )
+
+    def _visible_functions(self) -> List[str]:
+        visible: set[str] = set()
+        for scope in self.function_scope_stack:
+            visible.update(scope.keys())
+        visible.update(self.function_defs.keys())
+        return sorted(visible)
 
     def _check_expr_expecting(self, expr: Expr, expected: TypeName) -> TypeName:
         """Check expr, using expected as a hint for empty array literals."""
@@ -401,7 +417,11 @@ class Checker:
         host_fn = fn_name[len("host.") :]
         builtin = HOST_BUILTINS.get(host_fn)
         if builtin is None:
-            raise AxiomCompileError(f"undefined host function {fn_name!r}", expr.span)
+            raise AxiomCompileError(
+                f"undefined host function {fn_name!r}"
+                f"{suggestion_suffix(host_fn, HOST_BUILTINS.keys())}",
+                expr.span,
+            )
         if self.allowed_host_calls is not None and host_fn not in self.allowed_host_calls:
             raise AxiomCompileError(
                 f"host call {fn_name!r} is not permitted by package policy",
@@ -454,7 +474,13 @@ class Checker:
                 # Try resolving as a first-class function reference.
                 fn_name = self._try_resolve_function(expr.name)
                 if fn_name is None:
-                    raise AxiomCompileError(f"undefined variable {expr.name!r}", expr.span)
+                    candidates = set(self._visible_types().keys())
+                    candidates.update(self._visible_functions())
+                    raise AxiomCompileError(
+                        f"undefined variable {expr.name!r}"
+                        f"{suggestion_suffix(expr.name, candidates)}",
+                        expr.span,
+                    )
                 if fn_name not in self.function_signatures:
                     raise AxiomCompileError(
                         f"function {expr.name!r} used before its signature was resolved",

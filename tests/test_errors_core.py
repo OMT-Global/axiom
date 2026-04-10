@@ -54,6 +54,18 @@ print x
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("print unknown(1)\n")
 
+    def test_compile_undefined_function_suggests_close_match(self) -> None:
+        src = """
+fn answer(value: int): int {
+  return value + 1
+}
+
+print anser(41)
+"""
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode(src)
+        self.assertIn("did you mean 'answer'?", str(cm.exception))
+
     def test_parse_reserved_host_function_name(self) -> None:
         with self.assertRaises(AxiomParseError):
             compile_to_bytecode(
@@ -220,6 +232,29 @@ print counter()
     def test_compile_unknown_host_function(self) -> None:
         with self.assertRaises(AxiomCompileError):
             compile_to_bytecode("host.unknown(1)\n")
+
+    def test_compile_unknown_host_function_suggests_close_match(self) -> None:
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode("print host.abx(-5)\n")
+        self.assertIn("did you mean 'abs'?", str(cm.exception))
+
+    def test_compile_unknown_type_suggests_close_match(self) -> None:
+        with self.assertRaises(AxiomParseError) as cm:
+            compile_to_bytecode("let ready: boool = true\n")
+        self.assertIn("did you mean 'bool'?", str(cm.exception))
+
+    def test_compile_undefined_variable_suggests_close_match(self) -> None:
+        src = """
+fn main(): int {
+  let answer: int = 41
+  return asnwer + 1
+}
+
+print main()
+"""
+        with self.assertRaises(AxiomCompileError) as cm:
+            compile_to_bytecode(src)
+        self.assertIn("did you mean 'answer'?", str(cm.exception))
 
     def test_host_registry_duplicate_name(self) -> None:
         def noop(args: list[int], _out) -> int:

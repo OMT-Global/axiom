@@ -29,6 +29,7 @@ from .ast import (
 from .errors import AxiomCompileError, AxiomError, Span
 from .lexer import Lexer
 from .parser import Parser
+from .suggestions import import_path_candidates, suggestion_suffix
 
 
 def parse_program(src: str, path: Path | str | None = None) -> Program:
@@ -56,6 +57,7 @@ class ModuleLoader:
     module_search_paths: Optional[Sequence[Path]] = None
     seen: Set[Path] = field(default_factory=set)
     loading: Set[Path] = field(default_factory=set)
+    loading_stack: List[Path] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.module_search_paths = normalize_module_search_paths(self.module_search_paths)
@@ -75,26 +77,29 @@ class ModuleLoader:
             return Program(stmts=[])
 
         if path in self.loading:
+            message = self._circular_import_message(path)
             if import_span is not None and import_source is not None and importer_path is not None:
                 raise AxiomCompileError(
-                    f"circular import of {path}",
+                    message,
                     import_span,
                     source=import_source,
                     path=str(importer_path),
                 )
-            raise AxiomCompileError(f"circular import of {path}")
+            raise AxiomCompileError(message)
 
         if not path.exists():
+            message = self._missing_import_message(path)
             if import_span is not None and import_source is not None and importer_path is not None:
                 raise AxiomCompileError(
-                    f"cannot resolve import file {path}",
+                    message,
                     import_span,
                     source=import_source,
                     path=str(importer_path),
                 )
-            raise AxiomCompileError(f"cannot resolve import file {path}")
+            raise AxiomCompileError(message)
 
         self.loading.add(path)
+        self.loading_stack.append(path)
         try:
             src = path.read_text(encoding="utf-8")
             program = parse_program(src, path=path)
@@ -147,6 +152,10 @@ class ModuleLoader:
             )
             raise
         finally:
+            if self.loading_stack and self.loading_stack[-1] == path:
+                self.loading_stack.pop()
+            else:
+                self.loading_stack = [item for item in self.loading_stack if item != path]
             self.loading.discard(path)
 
         self.seen.add(path)
@@ -166,12 +175,42 @@ class ModuleLoader:
 
         search_paths = [base_path.parent]
         search_paths.extend(self.module_search_paths or [])
+        searched_locations: List[str] = []
 
         for root in search_paths:
             candidate_path = root / candidate
+            searched_locations.append(str(candidate_path))
             if candidate_path.exists():
                 return candidate_path
-        raise AxiomCompileError(f"cannot resolve import file {candidate}")
+        raise AxiomCompileError(
+            self._missing_import_message(
+                candidate,
+                searched_locations=searched_locations,
+                search_paths=search_paths,
+            )
+        )
+
+    def _circular_import_message(self, path: Path) -> str:
+        cycle_start = 0
+        if path in self.loading_stack:
+            cycle_start = self.loading_stack.index(path)
+        chain = self.loading_stack[cycle_start:] + [path]
+        rendered = " -> ".join(item.name for item in chain)
+        return f"circular import of {path}; cycle: {rendered}"
+
+    def _missing_import_message(
+        self,
+        path: Path,
+        *,
+        searched_locations: Optional[Sequence[str]] = None,
+        search_paths: Optional[Sequence[Path]] = None,
+    ) -> str:
+        message = f"cannot resolve import file {path}"
+        if searched_locations:
+            message += f"; searched: {', '.join(searched_locations)}"
+        if search_paths:
+            message += suggestion_suffix(path.stem, import_path_candidates(search_paths))
+        return message
 
 
 def load_program_file(
