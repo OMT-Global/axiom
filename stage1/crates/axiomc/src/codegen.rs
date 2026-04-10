@@ -57,7 +57,9 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    use std::io::Write;\n");
     out.push_str("    let stderr = std::io::stderr();\n");
     out.push_str("    let mut handle = stderr.lock();\n");
-    out.push_str("    match handle.write_all(text.as_bytes()).and_then(|_| handle.write_all(b\"\\n\")) {\n");
+    out.push_str(
+        "    match handle.write_all(text.as_bytes()).and_then(|_| handle.write_all(b\"\\n\")) {\n",
+    );
     out.push_str("        Ok(()) => (text.len() as i64) + 1,\n");
     out.push_str("        Err(_) => -1,\n");
     out.push_str("    }\n");
@@ -114,7 +116,9 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    let sep = raw.windows(4).position(|w| w == b\"\\r\\n\\r\\n\")?;\n");
     out.push_str("    let head = &raw[..sep];\n");
     out.push_str("    let body = &raw[sep + 4..];\n");
-    out.push_str("    let status_line_end = head.iter().position(|b| *b == b'\\r').unwrap_or(head.len());\n");
+    out.push_str(
+        "    let status_line_end = head.iter().position(|b| *b == b'\\r').unwrap_or(head.len());\n",
+    );
     out.push_str("    let status_line = std::str::from_utf8(&head[..status_line_end]).ok()?;\n");
     out.push_str("    let mut parts = status_line.splitn(3, ' ');\n");
     out.push_str("    let _version = parts.next()?;\n");
@@ -882,12 +886,21 @@ impl crate::mir::CompareOp {
     }
 }
 
-pub fn compile_native(generated_rust: &Path, binary_path: &Path) -> Result<(), Diagnostic> {
-    let status = Command::new("rustc")
+pub fn compile_native(
+    generated_rust: &Path,
+    binary_path: &Path,
+    target: Option<&str>,
+) -> Result<(), Diagnostic> {
+    let mut command = Command::new("rustc");
+    command
         .arg("--crate-name")
         .arg("axiom_stage1_bootstrap")
         .arg("--edition=2024")
-        .arg("-O")
+        .arg("-O");
+    if let Some(target) = target {
+        command.arg("--target").arg(target);
+    }
+    let status = command
         .arg(generated_rust)
         .arg("-o")
         .arg(binary_path)

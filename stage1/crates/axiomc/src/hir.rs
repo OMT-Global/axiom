@@ -1400,7 +1400,10 @@ fn lower_expr_with_expected(
                 if lowered.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("io_eprintln expects a string argument, got {}", lowered.ty()),
+                        format!(
+                            "io_eprintln expects a string argument, got {}",
+                            lowered.ty()
+                        ),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }

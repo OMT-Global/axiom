@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckedPackage {
@@ -42,6 +43,7 @@ pub struct BuiltPackage {
     pub binary: String,
     pub generated_rust: String,
     pub statement_count: usize,
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +53,7 @@ pub struct BuildOutput {
     pub binary: String,
     pub generated_rust: String,
     pub statement_count: usize,
+    pub target: Option<String>,
     pub packages: Vec<BuiltPackage>,
 }
 
@@ -66,6 +69,7 @@ pub struct TestCaseResult {
     pub stdout: String,
     pub stderr: String,
     pub expected_stdout: Option<String>,
+    pub duration_ms: u64,
     pub error: Option<Diagnostic>,
 }
 
@@ -76,6 +80,17 @@ pub struct TestOutput {
     pub cases: Vec<TestCaseResult>,
     pub passed: usize,
     pub failed: usize,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TestOptions {
+    pub filter: Option<String>,
 }
 
 pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
@@ -111,6 +126,13 @@ pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
 }
 
 pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
+    build_project_with_options(project_root, &BuildOptions::default())
+}
+
+pub fn build_project_with_options(
+    project_root: &Path,
+    options: &BuildOptions,
+) -> Result<BuildOutput, Diagnostic> {
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
     let mut packages = Vec::new();
@@ -118,7 +140,7 @@ pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
         let analyzed = analyze_package(&graph, &package_root)?;
         let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
         let binary = binary_path(&package_root, &analyzed.manifest);
-        build_artifacts(&analyzed, &generated_rust, &binary)?;
+        build_artifacts(&analyzed, &generated_rust, &binary, options)?;
         packages.push(BuiltPackage {
             package_root: package_root.display().to_string(),
             manifest: manifest_path(&package_root).display().to_string(),
@@ -126,6 +148,7 @@ pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
             binary: binary.display().to_string(),
             generated_rust: generated_rust.display().to_string(),
             statement_count: analyzed.mir.statement_count(),
+            target: options.target.clone(),
         });
     }
     let root = packages.first().cloned().ok_or_else(|| {
@@ -143,6 +166,7 @@ pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
         binary: root.binary,
         generated_rust: root.generated_rust,
         statement_count: root.statement_count,
+        target: root.target,
         packages,
     })
 }
@@ -156,15 +180,23 @@ pub fn run_project(project_root: &Path) -> Result<i32, Diagnostic> {
 }
 
 pub fn run_project_tests(project_root: &Path) -> Result<TestOutput, Diagnostic> {
+    run_project_tests_with_options(project_root, &TestOptions::default())
+}
+
+pub fn run_project_tests_with_options(
+    project_root: &Path,
+    options: &TestOptions,
+) -> Result<TestOutput, Diagnostic> {
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
     let manifest_path_text = manifest_path(&project_root).display().to_string();
     let mut packages = Vec::new();
     let mut cases = Vec::new();
+    let started = Instant::now();
     for package_root in workspace_package_roots(&graph, &project_root)? {
         let manifest = graph.context(&package_root)?.manifest.clone();
         validate_lockfile(&package_root, &manifest)?;
-        let tests = collect_test_targets(&package_root, &manifest)?;
+        let tests = collect_test_targets(&package_root, &manifest, options.filter.as_deref())?;
         if tests.is_empty() {
             continue;
         }
@@ -188,12 +220,14 @@ pub fn run_project_tests(project_root: &Path) -> Result<TestOutput, Diagnostic> 
         cases,
         passed,
         failed,
+        duration_ms: started.elapsed().as_millis() as u64,
     })
 }
 
 fn collect_test_targets(
     project_root: &Path,
     manifest: &Manifest,
+    filter: Option<&str>,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let mut tests = manifest.tests.clone();
     let mut seen_entries = tests
@@ -204,6 +238,9 @@ fn collect_test_targets(
         if seen_entries.insert(discovered.entry.clone()) {
             tests.push(discovered);
         }
+    }
+    if let Some(filter) = filter {
+        tests.retain(|test| test_matches_filter(test, filter));
     }
     Ok(tests)
 }
@@ -548,6 +585,7 @@ fn build_artifacts(
     analyzed: &AnalyzedProject,
     generated_rust: &Path,
     binary: &Path,
+    options: &BuildOptions,
 ) -> Result<(), Diagnostic> {
     if let Some(parent) = generated_rust.parent() {
         fs::create_dir_all(parent).map_err(|err| {
@@ -572,7 +610,7 @@ fn build_artifacts(
             format!("failed to write {}: {err}", generated_rust.display()),
         )
     })?;
-    compile_native(generated_rust, binary)
+    compile_native(generated_rust, binary, options.target.as_deref())
 }
 
 fn run_test_case(
@@ -581,6 +619,7 @@ fn run_test_case(
     manifest: &Manifest,
     test: &crate::manifest::TestTarget,
 ) -> TestCaseResult {
+    let started = Instant::now();
     let entry_path = project_root.join(&test.entry);
     let generated_rust = test_generated_rust_path(project_root, manifest, &test.name);
     let binary = test_binary_path(project_root, manifest, &test.name);
@@ -598,11 +637,17 @@ fn run_test_case(
                 stdout: String::new(),
                 stderr: String::new(),
                 expected_stdout: test.stdout.clone(),
+                duration_ms: started.elapsed().as_millis() as u64,
                 error: Some(error),
             };
         }
     };
-    if let Err(error) = build_artifacts(&analyzed, &generated_rust, &binary) {
+    if let Err(error) = build_artifacts(
+        &analyzed,
+        &generated_rust,
+        &binary,
+        &BuildOptions::default(),
+    ) {
         return TestCaseResult {
             package_root: project_root.display().to_string(),
             name: test.name.clone(),
@@ -614,6 +659,7 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
+            duration_ms: started.elapsed().as_millis() as u64,
             error: Some(error),
         };
     }
@@ -661,6 +707,7 @@ fn run_test_case(
                 stdout,
                 stderr,
                 expected_stdout: test.stdout.clone(),
+                duration_ms: started.elapsed().as_millis() as u64,
                 error,
             }
         }
@@ -675,6 +722,7 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
+            duration_ms: started.elapsed().as_millis() as u64,
             error: Some(
                 Diagnostic::new(
                     "test",
@@ -756,6 +804,10 @@ fn slugify_test_name(value: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn test_matches_filter(test: &crate::manifest::TestTarget, filter: &str) -> bool {
+    test.name.contains(filter) || test.entry.contains(filter)
 }
 
 fn load_modules(

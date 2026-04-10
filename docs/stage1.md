@@ -26,8 +26,10 @@ stage0/stage1 split that can build a native hello-world and carry the 1.0 packag
 ```bash
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target "$(rustc -vV | sed -n 's/^host: //p')"
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --filter core --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
@@ -37,7 +39,18 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
 as a native artifact, executes it, and compares stdout against a sibling
 `*.stdout` golden file when present. Projects that need explicit naming or inline
-expectations can still declare `[[tests]]` entries in `axiom.toml`.
+expectations can still declare `[[tests]]` entries in `axiom.toml`. The command
+now also accepts `--filter <pattern>` to run a subset of discovered tests by
+test name or entry path.
+
+## JSON contract
+
+`axiomc check --json`, `build --json`, `test --json`, and `caps --json` all now
+emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
+Successful payloads always include `ok`, `command`, and `project`, while
+`axiomc test --json` additionally reports `filter` and per-run/per-case
+`duration_ms`. Build payloads report the requested Rust target triple when
+`--target <triple>` is used.
 
 ## Current gaps
 
