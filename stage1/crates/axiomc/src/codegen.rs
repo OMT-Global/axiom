@@ -918,12 +918,21 @@ impl crate::mir::CompareOp {
     }
 }
 
-pub fn compile_native(generated_rust: &Path, binary_path: &Path) -> Result<(), Diagnostic> {
-    let status = Command::new("rustc")
+pub fn compile_native(
+    generated_rust: &Path,
+    binary_path: &Path,
+    target: Option<&str>,
+) -> Result<(), Diagnostic> {
+    let mut command = Command::new("rustc");
+    command
         .arg("--crate-name")
         .arg("axiom_stage1_bootstrap")
         .arg("--edition=2024")
-        .arg("-O")
+        .arg("-O");
+    if let Some(target) = target {
+        command.arg("--target").arg(target);
+    }
+    let status = command
         .arg(generated_rust)
         .arg("-o")
         .arg(binary_path)

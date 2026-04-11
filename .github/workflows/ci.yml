@@ -51,3 +51,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Run tests
         run: python -m unittest discover -v
+
+  test_stage1_hosted:
+    name: test (stage1 rust hosted)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run stage1 crate tests
+        run: make stage1-test
+      - name: Run stage1 smoke tests
+        run: make stage1-smoke
