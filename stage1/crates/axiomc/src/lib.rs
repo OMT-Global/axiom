@@ -2824,6 +2824,48 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_moving_owner_while_option_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("option-wrapped-live-mut-borrow");
+        create_project(&project, Some("option-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: Option<&mut [string]> = Some(values[:])\nmatch wrapped {\nSome(view) {\nprint len(view)\n}\nNone {\nprint 0\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("option-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_struct_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-wrapped-live-mut-borrow");
+        create_project(&project, Some("struct-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window {\nview: &mut [string]\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet window: Window = Window { view: values[:] }\nprint len(window.view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("struct-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owner_while_tuple_wrapped_slice_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tuple-wrapped-live-borrow");

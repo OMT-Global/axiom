@@ -914,7 +914,11 @@ fn lower_stmt(
             let lowered_expr = lower_expr(expr, env, ctx)?;
             let match_borrowed_owners = expr_borrowed_owners(&lowered_expr, env, ctx);
             let match_borrow_kind = borrow_kind_for_type(lowered_expr.ty(), ctx.structs, ctx.enums);
-            if let Some(borrow_kind) = match_borrow_kind {
+            let reuse_existing_match_binding =
+                matches!(lowered_expr, Expr::VarRef { .. }) && !match_borrowed_owners.is_empty();
+            if let Some(borrow_kind) = match_borrow_kind
+                && !reuse_existing_match_binding
+            {
                 increment_active_borrows(&match_borrowed_owners, env, borrow_kind)?;
             }
             if matches!(lowered_expr, Expr::VarRef { .. }) && !lowered_expr.ty().is_copy() {
@@ -1107,7 +1111,9 @@ fn lower_stmt(
                 .with_span(*line, *column));
             }
             merge_match_state(env, &before, &arm_states);
-            if let Some(borrow_kind) = match_borrow_kind {
+            if let Some(borrow_kind) = match_borrow_kind
+                && !reuse_existing_match_binding
+            {
                 release_active_borrow_owners(&match_borrowed_owners, env, borrow_kind);
             }
             Ok(Stmt::Match {
