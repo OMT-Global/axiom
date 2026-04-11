@@ -2866,6 +2866,26 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_moving_owner_while_enum_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("enum-wrapped-live-mut-borrow");
+        create_project(&project, Some("enum-wrapped-live-mut-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Snapshot {\nWindow(&mut [string])\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet snapshot: Snapshot = Window(values[:])\nmatch snapshot {\nWindow(view) {\nprint len(view)\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("enum-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owner_while_tuple_wrapped_slice_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tuple-wrapped-live-borrow");
