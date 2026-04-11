@@ -2729,6 +2729,60 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_mutable_borrow_while_shared_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("shared-then-mutable-borrow");
+        create_project(&project, Some("shared-then-mutable-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet shared: &[int] = values[:]\nlet mutable: &mut [int] = values[:]\nprint len(shared)\nprint len(mutable)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("mutable borrow should fail while a shared borrow is live");
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"values\" while a shared borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_shared_borrow_while_mutable_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutable-then-shared-borrow");
+        create_project(&project, Some("mutable-then-shared-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet mutable: &mut [int] = values[:]\nlet shared: &[int] = values[:]\nprint len(mutable)\nprint len(shared)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("shared borrow should fail while a mutable borrow is live");
+        assert!(error.message.contains(
+            "cannot create shared borrow of value \"values\" while a mutable borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_double_mutable_borrow() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("double-mutable-borrow");
+        create_project(&project, Some("double-mutable-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet first: &mut [int] = values[:]\nlet second: &mut [int] = values[:]\nprint len(first)\nprint len(second)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("second mutable borrow should fail while the first is live");
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"values\" while another mutable borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owner_while_tuple_wrapped_slice_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tuple-wrapped-live-borrow");
