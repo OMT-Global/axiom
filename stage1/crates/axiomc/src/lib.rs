@@ -2783,6 +2783,47 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_moving_owned_array_while_mutable_slice_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("live-mut-borrow-move");
+        create_project(&project, Some("live-mut-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet view: &mut [string] = values[:]\nprint len(view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("moving a mutably borrowed owner should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_tuple_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("tuple-wrapped-live-mut-borrow");
+        create_project(&project, Some("tuple-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: (&mut [string], int) = (values[:], 1)\nprint len(wrapped.0)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("tuple-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owner_while_tuple_wrapped_slice_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tuple-wrapped-live-borrow");

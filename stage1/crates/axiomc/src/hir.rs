@@ -2027,11 +2027,24 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
+            let expected_elements = match expected {
+                Some(Type::Tuple(expected_elements))
+                    if expected_elements.len() == elements.len() =>
+                {
+                    Some(expected_elements)
+                }
+                _ => None,
+            };
             let mut lowered_elements = Vec::new();
             let mut element_tys = Vec::new();
             let mut temporary_borrows = Vec::new();
-            for element in elements {
-                let lowered = lower_expr(element, env, ctx)?;
+            for (index, element) in elements.iter().enumerate() {
+                let lowered = lower_expr_with_expected(
+                    element,
+                    expected_elements.and_then(|expected| expected.get(index)),
+                    env,
+                    ctx,
+                )?;
                 record_temporary_borrows(&lowered, env, ctx, &mut temporary_borrows)?;
                 if !lowered.ty().is_copy() {
                     move_lowered_owner_value(&lowered, env)?;
