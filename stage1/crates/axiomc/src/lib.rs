@@ -159,6 +159,19 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_mutable_slice_signatures() {
+        let source = "fn passthrough(values: &mut [int]): &mut [int] {\nreturn values\n}\n\nfn count(values: &mut [string]): int {\nreturn len(values)\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn passthrough<'a>(values: &'a mut [i64]) -> &'a mut [i64] {"));
+        assert!(rendered.contains("return values;"));
+        assert!(rendered.contains("fn count<'a>(values: &'a mut [String]) -> i64 {"));
+        assert!(rendered.contains("return (values).len() as i64;"));
+    }
+
+    #[test]
     fn parser_lowers_borrowed_structs_and_enums() {
         let source = "struct Window {\nview: &[int]\n}\n\nenum Snapshot {\nWindow(Window)\nNamed { window: Window }\n}\n\nfn tail(values: &[int]): Window {\nreturn Window { view: values[1:] }\n}\n\nfn read(snapshot: Snapshot): int {\nmatch snapshot {\nWindow(window) {\nreturn first(window.view)\n}\nNamed { window } {\nreturn last(window.view)\n}\n}\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nlet window: Window = tail(numbers[:])\nprint first(window.view)\nprint read(Named { window: tail(numbers[:]) })\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -1242,8 +1255,7 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message
-                .contains("requires [capabilities].clock = true"),
+            err.message.contains("requires [capabilities].clock = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -1484,7 +1496,8 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message.contains("requires [capabilities].process = true"),
+            err.message
+                .contains("requires [capabilities].process = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -1568,7 +1581,8 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message.contains("requires [capabilities].crypto = true"),
+            err.message
+                .contains("requires [capabilities].crypto = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -1676,8 +1690,7 @@ mod tests {
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source =
-            "import \"std/io.ax\"\nlet n: int = eprintln(\"hello stderr\")\nprint n > 0\n";
+        let source = "import \"std/io.ax\"\nlet n: int = eprintln(\"hello stderr\")\nprint n > 0\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(project.join("src/main_test.stdout"), "true\n").expect("write golden");
@@ -3204,7 +3217,6 @@ mod tests {
             "let running: bool = true\nwhile running {\nlet inner: string = \"fresh\"\nlet sink: string = inner\nprint sink\n}\n",
         )
         .expect("write source");
-        check_project(&project)
-            .expect("moving loop-local values should be allowed");
+        check_project(&project).expect("moving loop-local values should be allowed");
     }
 }

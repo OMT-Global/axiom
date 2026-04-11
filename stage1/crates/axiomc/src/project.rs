@@ -1974,6 +1974,16 @@ fn rewrite_type_name(
             line,
             column,
         )?))),
+        syntax::TypeName::MutSlice(inner) => {
+            Ok(syntax::TypeName::MutSlice(Box::new(rewrite_type_name(
+                inner,
+                visible_types,
+                private_imported_types,
+                module_path,
+                line,
+                column,
+            )?)))
+        }
         syntax::TypeName::Result(ok, err) => Ok(syntax::TypeName::Result(
             Box::new(rewrite_type_name(
                 ok,

@@ -171,6 +171,7 @@ pub enum Type {
     Struct(String),
     Enum(String),
     Slice(Box<Type>),
+    MutSlice(Box<Type>),
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
@@ -291,6 +292,7 @@ impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
             Type::Int | Type::Bool | Type::Slice(_) => true,
+            Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
             Type::Tuple(elements) => elements.iter().all(Type::is_copy),
@@ -307,6 +309,7 @@ impl Type {
             Type::Struct(_)
             | Type::Enum(_)
             | Type::Slice(_)
+            | Type::MutSlice(_)
             | Type::Option(_)
             | Type::Result(_, _)
             | Type::Map(_, _)
@@ -1373,7 +1376,10 @@ fn lower_expr_with_expected(
                     .with_span(*line, *column));
                 }
                 let lowered = lower_expr(&args[0], env, ctx)?;
-                if !matches!(lowered.ty(), Type::Array(_) | Type::Slice(_)) {
+                if !matches!(
+                    lowered.ty(),
+                    Type::Array(_) | Type::Slice(_) | Type::MutSlice(_)
+                ) {
                     return Err(Diagnostic::new(
                         "type",
                         format!("len expects an array or slice value, got {}", lowered.ty()),
@@ -1400,7 +1406,10 @@ fn lower_expr_with_expected(
                 if lowered.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("io_eprintln expects a string argument, got {}", lowered.ty()),
+                        format!(
+                            "io_eprintln expects a string argument, got {}",
+                            lowered.ty()
+                        ),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
@@ -1611,9 +1620,9 @@ fn lower_expr_with_expected(
                 }
                 let lowered = lower_expr(&args[0], env, ctx)?;
                 let element_ty = match lowered.ty() {
-                    Type::Array(element_ty) | Type::Slice(element_ty) => {
-                        (*element_ty.clone()).clone()
-                    }
+                    Type::Array(element_ty)
+                    | Type::Slice(element_ty)
+                    | Type::MutSlice(element_ty) => (*element_ty.clone()).clone(),
                     _ => {
                         return Err(Diagnostic::new(
                             "type",
@@ -1625,7 +1634,9 @@ fn lower_expr_with_expected(
                         .with_span(args[0].line(), args[0].column()));
                     }
                 };
-                if matches!(lowered.ty(), Type::Slice(_)) && !element_ty.is_copy() {
+                if matches!(lowered.ty(), Type::Slice(_) | Type::MutSlice(_))
+                    && !element_ty.is_copy()
+                {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -2196,7 +2207,9 @@ fn lower_expr_with_expected(
         } => {
             let lowered_base = lower_expr(base, env, ctx)?;
             let element_ty = match lowered_base.ty() {
-                Type::Array(element_ty) | Type::Slice(element_ty) => (*element_ty.clone()).clone(),
+                Type::Array(element_ty) | Type::Slice(element_ty) | Type::MutSlice(element_ty) => {
+                    (*element_ty.clone()).clone()
+                }
                 _ => {
                     return Err(Diagnostic::new(
                         "type",
@@ -2241,11 +2254,15 @@ fn lower_expr_with_expected(
             } else {
                 None
             };
+            let ty = match lowered_base.ty() {
+                Type::MutSlice(_) => Type::MutSlice(Box::new(element_ty)),
+                _ => Type::Slice(Box::new(element_ty)),
+            };
             Ok(Expr::Slice {
                 base: Box::new(lowered_base),
                 start: lowered_start,
                 end: lowered_end,
-                ty: Type::Slice(Box::new(element_ty)),
+                ty,
             })
         }
         syntax::Expr::Index {
@@ -2271,7 +2288,7 @@ fn lower_expr_with_expected(
                     }
                     element_ty
                 }
-                Type::Slice(element_ty) => {
+                Type::Slice(element_ty) | Type::MutSlice(element_ty) => {
                     if lowered_index.ty() != &Type::Int {
                         return Err(Diagnostic::new(
                             "type",
@@ -2587,7 +2604,7 @@ fn expr_borrow_origin(
             .get(name)
             .and_then(|binding| binding.borrow_origin.clone()),
         Expr::Slice { base, .. } => match base.ty() {
-            Type::Slice(_) => expr_borrow_origin(base, env, ctx),
+            Type::Slice(_) | Type::MutSlice(_) => expr_borrow_origin(base, env, ctx),
             Type::Array(_) => Some(BorrowOrigin::Local),
             _ => Some(BorrowOrigin::Local),
         },
@@ -2734,7 +2751,7 @@ fn expr_borrowed_owners(
             .map(|binding| binding.borrowed_owners.clone())
             .unwrap_or_default(),
         Expr::Slice { base, .. } => match base.ty() {
-            Type::Slice(_) => expr_borrowed_owners(base, env, ctx),
+            Type::Slice(_) | Type::MutSlice(_) => expr_borrowed_owners(base, env, ctx),
             Type::Array(_) => owned_borrow_root(base).into_iter().collect(),
             _ => HashSet::new(),
         },
@@ -2790,7 +2807,9 @@ fn collect_expr_borrowed_owners(
 
 fn owned_borrow_root(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::VarRef { name, ty } if !matches!(ty, Type::Slice(_)) => Some(name.clone()),
+        Expr::VarRef { name, ty } if !matches!(ty, Type::Slice(_) | Type::MutSlice(_)) => {
+            Some(name.clone())
+        }
         Expr::FieldAccess { base, .. } => owned_borrow_root(base),
         Expr::TupleIndex { base, .. } => owned_borrow_root(base),
         _ => None,
@@ -2813,7 +2832,7 @@ fn contains_borrowed_slice_type_inner(
     visiting_enums: &mut HashSet<String>,
 ) -> bool {
     match ty {
-        Type::Slice(_) => true,
+        Type::Slice(_) | Type::MutSlice(_) => true,
         Type::Option(inner) => contains_borrowed_slice_type_inner(
             inner,
             structs,
@@ -3060,6 +3079,9 @@ fn lower_type<T, U>(
         syntax::TypeName::Slice(inner) => Ok(Type::Slice(Box::new(lower_type(
             inner, structs, enums, line, column,
         )?))),
+        syntax::TypeName::MutSlice(inner) => Ok(Type::MutSlice(Box::new(lower_type(
+            inner, structs, enums, line, column,
+        )?))),
         syntax::TypeName::Option(inner) => Ok(Type::Option(Box::new(lower_type(
             inner, structs, enums, line, column,
         )?))),
@@ -3282,6 +3304,7 @@ impl std::fmt::Display for Type {
             Type::Struct(name) => write!(f, "{name}"),
             Type::Enum(name) => write!(f, "{name}"),
             Type::Slice(inner) => write!(f, "&[{inner}]"),
+            Type::MutSlice(inner) => write!(f, "&mut [{inner}]"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
             Type::Result(ok, err) => write!(f, "Result<{ok}, {err}>"),
             Type::Tuple(elements) => write!(
