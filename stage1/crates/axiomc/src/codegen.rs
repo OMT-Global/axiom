@@ -48,6 +48,11 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    &values[start..end]\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_slice_view_mut<'a, T>(values: &'a mut [T], start: Option<i64>, end: Option<i64>) -> &'a mut [T] {\n");
+    out.push_str("    let (start, end) = axiom_array_slice_bounds(values.len(), start, end);\n");
+    out.push_str("    &mut values[start..end]\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_last_index(len: usize) -> i64 {\n");
     out.push_str("    assert!(len > 0, \"collection must not be empty\");\n");
     out.push_str("    (len - 1) as i64\n");
@@ -712,20 +717,38 @@ fn render_expr(expr: &Expr) -> String {
                 .unwrap_or_else(|| String::from("None"));
             match base.ty() {
                 Type::Array(_) => {
-                    format!(
-                        "axiom_slice_view(&{}, {}, {})",
-                        render_expr(base),
-                        start,
-                        end
-                    )
+                    if matches!(expr.ty(), Type::MutSlice(_)) {
+                        format!(
+                            "axiom_slice_view_mut(&mut {}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    } else {
+                        format!(
+                            "axiom_slice_view(&{}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    }
                 }
                 Type::Slice(_) | Type::MutSlice(_) => {
-                    format!(
-                        "axiom_slice_view({}, {}, {})",
-                        render_expr(base),
-                        start,
-                        end
-                    )
+                    if matches!(expr.ty(), Type::MutSlice(_)) {
+                        format!(
+                            "axiom_slice_view_mut({}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    } else {
+                        format!(
+                            "axiom_slice_view({}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    }
                 }
                 _ => unreachable!("type checker rejects slicing non-array values"),
             }

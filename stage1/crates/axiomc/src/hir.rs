@@ -2254,8 +2254,11 @@ fn lower_expr_with_expected(
             } else {
                 None
             };
-            let ty = match lowered_base.ty() {
-                Type::MutSlice(_) => Type::MutSlice(Box::new(element_ty)),
+            let ty = match (expected, lowered_base.ty()) {
+                (Some(Type::MutSlice(_)), Type::Array(_) | Type::MutSlice(_)) => {
+                    Type::MutSlice(Box::new(element_ty))
+                }
+                (_, Type::MutSlice(_)) => Type::MutSlice(Box::new(element_ty)),
                 _ => Type::Slice(Box::new(element_ty)),
             };
             Ok(Expr::Slice {

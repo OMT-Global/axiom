@@ -172,6 +172,25 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_mutable_slice_views() {
+        let source = "fn tail(values: &mut [int]): &mut [int] {\nlet rest: &mut [int] = values[1:]\nreturn rest\n}\n\nfn local_tail_len(): int {\nlet values: [int] = [3, 7, 9, 11]\nlet rest: &mut [int] = values[1:]\nreturn len(rest)\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(
+            rendered
+                .contains("let rest: &mut [i64] = axiom_slice_view_mut(values, Some(1), None);")
+        );
+        assert!(
+            rendered.contains(
+                "let rest: &mut [i64] = axiom_slice_view_mut(&mut values, Some(1), None);"
+            )
+        );
+        assert!(rendered.contains("fn axiom_slice_view_mut<'a, T>(values: &'a mut [T], start: Option<i64>, end: Option<i64>) -> &'a mut [T] {"));
+    }
+
+    #[test]
     fn parser_lowers_borrowed_structs_and_enums() {
         let source = "struct Window {\nview: &[int]\n}\n\nenum Snapshot {\nWindow(Window)\nNamed { window: Window }\n}\n\nfn tail(values: &[int]): Window {\nreturn Window { view: values[1:] }\n}\n\nfn read(snapshot: Snapshot): int {\nmatch snapshot {\nWindow(window) {\nreturn first(window.view)\n}\nNamed { window } {\nreturn last(window.view)\n}\n}\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nlet window: Window = tail(numbers[:])\nprint first(window.view)\nprint read(Named { window: tail(numbers[:]) })\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
