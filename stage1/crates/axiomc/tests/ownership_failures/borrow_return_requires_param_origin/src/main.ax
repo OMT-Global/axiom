@@ -1,0 +1,6 @@
+fn tail(values: &[int]): &[int] {
+let local: [int] = [3, 7, 9, 11]
+return local[1:]
+}
+
+print 0

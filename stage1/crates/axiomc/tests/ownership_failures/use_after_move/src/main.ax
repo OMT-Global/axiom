@@ -1,0 +1,4 @@
+let greeting: string = "hello"
+let alias: string = greeting
+print alias
+print greeting
