@@ -81,6 +81,13 @@ mod tests {
             .expect("host target")
     }
 
+    fn ownership_failure_fixture(case: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("ownership_failures")
+            .join(case)
+    }
+
     #[test]
     fn new_project_writes_manifest_lockfile_and_source() {
         let dir = tempdir().expect("tempdir");
@@ -2162,6 +2169,45 @@ mod tests {
     }
 
     #[test]
+    fn ownership_compile_fail_corpus_reports_stable_codes() {
+        let cases = [
+            (
+                "use_after_move",
+                "use_after_move",
+                "use of moved value",
+            ),
+            (
+                "borrow_return_requires_param_origin",
+                "borrow_return_requires_param_origin",
+                "returning borrowed values requires data derived from one of the borrowed parameters",
+            ),
+            (
+                "mutable_borrow_while_shared_live",
+                "mutable_borrow_while_shared_live",
+                "cannot create mutable borrow of value",
+            ),
+            (
+                "loop_move_outer_non_copy",
+                "loop_move_outer_non_copy",
+                "cannot move non-copy value",
+            ),
+        ];
+
+        for (case, code, message) in cases {
+            let project = ownership_failure_fixture(case);
+            let error = check_project(&project)
+                .expect_err(&format!("ownership fixture {case} should fail"));
+            assert_eq!(error.kind, "ownership", "fixture {case}");
+            assert_eq!(error.code.as_deref(), Some(code), "fixture {case}");
+            assert!(
+                error.message.contains(message),
+                "fixture {case}: {:?}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
     fn check_project_rejects_branch_move_followed_by_outer_use() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("branch-moves");
@@ -3676,7 +3722,8 @@ mod tests {
         assert_eq!(caps_payload["command"], "caps");
         assert_eq!(caps_payload["ok"], true);
 
-        let error = crate::diagnostics::Diagnostic::new("test", "boom");
+        let error = crate::diagnostics::Diagnostic::new("ownership", "boom")
+            .with_code("use_after_move");
         let error_payload = json_contract::error("test", &error);
         assert_eq!(
             error_payload["schema_version"],
@@ -3684,6 +3731,8 @@ mod tests {
         );
         assert_eq!(error_payload["command"], "test");
         assert_eq!(error_payload["ok"], false);
+        assert_eq!(error_payload["error"]["kind"], "ownership");
+        assert_eq!(error_payload["error"]["code"], "use_after_move");
         assert_eq!(error_payload["error"]["message"], "boom");
     }
 }

@@ -1,0 +1,5 @@
+let greeting: string = "hello"
+while true {
+let alias: string = greeting
+print alias
+}

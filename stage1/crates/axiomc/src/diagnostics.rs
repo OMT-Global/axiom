@@ -3,6 +3,8 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Diagnostic {
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     pub message: String,
     pub path: Option<String>,
     pub line: Option<usize>,
@@ -13,11 +15,17 @@ impl Diagnostic {
     pub fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
+            code: None,
             message: message.into(),
             path: None,
             line: None,
             column: None,
         }
+    }
+
+    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = Some(code.into());
+        self
     }
 
     pub fn with_path(mut self, path: impl Into<String>) -> Self {

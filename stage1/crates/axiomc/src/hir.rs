@@ -249,6 +249,18 @@ struct VariantInfo {
     payload_names: Vec<String>,
 }
 
+const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
+const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str =
+    "borrow_return_requires_param_origin";
+const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
+const OWNERSHIP_USE_AFTER_MOVE: &str = "use_after_move";
+const OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE: &str =
+    "shared_borrow_while_mutable_live";
+const OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE: &str =
+    "mutable_borrow_while_mutable_live";
+const OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE: &str =
+    "mutable_borrow_while_shared_live";
+
 pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
     let capabilities = CapabilityConfig::default();
     lower_with_capabilities(program, &capabilities)
@@ -294,6 +306,10 @@ pub fn lower_with_capabilities(
         functions: lowered_functions,
         stmts,
     })
+}
+
+fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
+    Diagnostic::new("ownership", message).with_code(code)
 }
 
 impl Type {
@@ -886,8 +902,8 @@ fn lower_stmt(
                     }
                     if let Some(post_binding) = body_after.get(name) {
                         if post_binding.moved {
-                            return Err(Diagnostic::new(
-                                "ownership",
+                            return Err(ownership_error(
+                                OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY,
                                 format!(
                                     "cannot move non-copy value `{}` inside loop body — \
                                      value would not be available on subsequent iterations",
@@ -1144,8 +1160,8 @@ fn lower_stmt(
                     Some(BorrowOrigin::Param(origin))
                         if ctx.current_borrow_return_params.contains(&origin) => {}
                     _ => {
-                        return Err(Diagnostic::new(
-                            "ownership",
+                        return Err(ownership_error(
+                            OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN,
                             format!(
                                 "returning borrowed values requires data derived from one of the borrowed parameters in stage1"
                             ),
@@ -1372,11 +1388,13 @@ fn lower_expr_with_expected(
         syntax::Expr::VarRef { name, line, column } => {
             if let Some(binding) = env.get(name) {
                 if binding.moved {
-                    return Err(Diagnostic::new(
-                        "ownership",
-                        format!("use of moved value {name:?}"),
-                    )
-                    .with_span(*line, *column));
+                    return Err(
+                        ownership_error(
+                            OWNERSHIP_USE_AFTER_MOVE,
+                            format!("use of moved value {name:?}"),
+                        )
+                        .with_span(*line, *column),
+                    );
                 }
                 return Ok(Expr::VarRef {
                     name: name.clone(),
@@ -2591,14 +2609,14 @@ fn move_lowered_value(expr: &Expr, env: &mut HashMap<String, Binding>) -> Result
         )
     })?;
     if binding.active_borrow_count > 0 {
-        return Err(Diagnostic::new(
-            "ownership",
+        return Err(ownership_error(
+            OWNERSHIP_MOVE_WHILE_BORROWED,
             format!("cannot move value {name:?} while borrowed slices are still live"),
         ));
     }
     if binding.moved {
-        return Err(Diagnostic::new(
-            "ownership",
+        return Err(ownership_error(
+            OWNERSHIP_USE_AFTER_MOVE,
             format!("use of moved value {name:?}"),
         ));
     }
@@ -3172,24 +3190,24 @@ fn increment_active_borrows(
         })?;
         match borrow_kind {
             BorrowKind::Shared if binding.active_mut_borrow_count > 0 => {
-                return Err(Diagnostic::new(
-                    "ownership",
+                return Err(ownership_error(
+                    OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE,
                     format!(
                         "cannot create shared borrow of value {owner_name:?} while a mutable borrow is still live"
                     ),
                 ));
             }
             BorrowKind::Mutable if binding.active_mut_borrow_count > 0 => {
-                return Err(Diagnostic::new(
-                    "ownership",
+                return Err(ownership_error(
+                    OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE,
                     format!(
                         "cannot create mutable borrow of value {owner_name:?} while another mutable borrow is still live"
                     ),
                 ));
             }
             BorrowKind::Mutable if binding.active_borrow_count > 0 => {
-                return Err(Diagnostic::new(
-                    "ownership",
+                return Err(ownership_error(
+                    OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE,
                     format!(
                         "cannot create mutable borrow of value {owner_name:?} while a shared borrow is still live"
                     ),

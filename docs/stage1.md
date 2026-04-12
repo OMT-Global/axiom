@@ -71,11 +71,11 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Type and ownership gaps
 
-- Ownership is still bootstrap-grade even though it now covers all non-`Copy` stage1 values, conservatively handles non-`Copy` field access, and enforces immutable live-borrow checks for owned values behind borrowed slices.
+- Ownership now has a stable current-stage contract for all non-`Copy` stage1 values, including shared and mutable borrowed-slice conflicts, loop-body move rejection, and stable machine-readable ownership error codes in `--json` diagnostics, but it is still intentionally narrower than a full Rust-style borrow checker.
 - AG1.1 loop-join handling is now landed: moving an outer non-`Copy` value inside a `while` body is a compile error, and post-loop ownership state preserves the pre-loop state since the body may execute zero times. Dead-branch pruning for statically false conditions is preserved.
 - Borrowed slices can now flow through direct `&[T]` returns, named structs, enum payloads, and aggregate return types like `Option<&[T]>` or tuples when they are derived from one or more borrowed parameters, `Option` / `Result` match bindings preserve enough borrow provenance to return those borrowed payloads again, conservative call summaries now keep borrowed-return provenance alive across multiple borrowed parameters, statically false control-flow is now skipped instead of contaminating move state, and live borrowed slices now block later owner moves until their scope ends even when those borrows are stored inside local aggregate wrappers, named structs, enum payloads, or temporary `match` / call expressions, but there are still no general borrows, mutable borrows, lifetime checks, precise path-sensitive borrow narrowing beyond constant conditions, or first-class partial-move analysis for aggregates and function calls.
 - Exhaustiveness checking now exists for statement-level enum `match`, but there is still no typed error propagation and no control-flow-sensitive ownership diagnostics beyond simple branches.
-- Compile-fail coverage now exists for several bootstrap ownership failures including AG1.1 loop-body move rejection, but there is still no dedicated corpus yet for the broader future borrow rules that a Rust-like language actually needs.
+- A dedicated checked-in ownership compile-fail corpus now lives under `stage1/crates/axiomc/tests/ownership_failures`, covering move-after-use, invalid borrowed returns, conflicting borrows, and loop/control-flow hazards. The checked-in ownership-heavy proof point remains `stage1/examples/borrowed_shapes`, and it stays in `make stage1-smoke`.
 
 ### Package and build graph gaps
 
@@ -93,7 +93,7 @@ still far from the stated 1.0 target for service and agent workloads.
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
 - There is no stage1 formatter, benchmark harness, doc generator, publisher, or LSP server yet.
-- Diagnostics are still bootstrap-grade: useful JSON exists, but span quality, notes, and compile-fail coverage are limited.
+- Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
 - There are no performance targets or regression gates yet.
 
 ## Execution plan
