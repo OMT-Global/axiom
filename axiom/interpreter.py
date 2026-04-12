@@ -35,6 +35,7 @@ from .semantic_plan import (
     SemanticPlan,
     build_semantic_plan,
 )
+from .suggestions import suggestion_suffix
 from .values import (
     FunctionValue,
     Value,
@@ -96,7 +97,23 @@ class Interpreter:
             resolved = self.semantic_plan.resolve_function(name, self.function_scope_stack)
             if resolved is not None:
                 return resolved
-        raise AxiomRuntimeError(f"undefined function {name!r}")
+        raise AxiomRuntimeError(
+            f"undefined function {name!r}"
+            f"{suggestion_suffix(name, self._visible_functions())}"
+        )
+
+    def _visible_functions(self) -> List[str]:
+        visible: set[str] = set()
+        for scope in self.function_scope_stack:
+            visible.update(scope.keys())
+        visible.update(self.functions.keys())
+        return sorted(visible)
+
+    def _visible_variables(self) -> List[str]:
+        visible: set[str] = set()
+        for scope in self.scopes:
+            visible.update(scope.keys())
+        return sorted(visible)
 
     def _exec_stmt(self, stmt, out: TextIO) -> None:
         if isinstance(stmt, LetStmt):
@@ -170,7 +187,11 @@ class Interpreter:
         for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
-        raise AxiomRuntimeError(f"undefined variable {name!r}", span)
+        raise AxiomRuntimeError(
+            f"undefined variable {name!r}"
+            f"{suggestion_suffix(name, self._visible_variables())}",
+            span,
+        )
 
     def _assign(self, name: str, value: Value, span) -> None:
         if name in RESERVED_IDENTIFIER_NAMES:
@@ -179,7 +200,11 @@ class Interpreter:
             if name in scope:
                 scope[name] = value
                 return
-        raise AxiomRuntimeError(f"undefined variable {name!r}", span)
+        raise AxiomRuntimeError(
+            f"undefined variable {name!r}"
+            f"{suggestion_suffix(name, self._visible_variables())}",
+            span,
+        )
 
     def _call(self, fn_name: str, args: List[Value], out: TextIO) -> Value:
         if fn_name.startswith("host."):
@@ -230,7 +255,10 @@ class Interpreter:
         host_name = fn_name[len("host.") :]
         builtin = HOST_BUILTINS.get(host_name)
         if builtin is None:
-            raise AxiomRuntimeError(f"undefined host function {fn_name!r}")
+            raise AxiomRuntimeError(
+                f"undefined host function {fn_name!r}"
+                f"{suggestion_suffix(host_name, HOST_BUILTINS.keys())}"
+            )
         if builtin.arity != len(args):
             raise AxiomRuntimeError(
                 f"host function {fn_name!r} expects {builtin.arity} args, got {len(args)}"
@@ -260,7 +288,13 @@ class Interpreter:
                 fn_name = self._resolve_function(expr.name)
                 return FunctionValue(fn_name)
             except AxiomRuntimeError:
-                raise AxiomRuntimeError(f"undefined variable {expr.name!r}", expr.span)
+                candidates = set(self._visible_variables())
+                candidates.update(self._visible_functions())
+                raise AxiomRuntimeError(
+                    f"undefined variable {expr.name!r}"
+                    f"{suggestion_suffix(expr.name, candidates)}",
+                    expr.span,
+                )
         if isinstance(expr, CallExpr):
             args = [self._eval(arg, out) for arg in expr.args]
             # If callee is a fn-typed local variable, call through it.
