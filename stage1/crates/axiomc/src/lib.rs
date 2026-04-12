@@ -1,6 +1,7 @@
 pub mod codegen;
 pub mod diagnostics;
 pub mod hir;
+pub mod json_contract;
 pub mod lockfile;
 pub mod manifest;
 pub mod mir;
@@ -13,11 +14,15 @@ pub mod syntax;
 mod tests {
     use crate::codegen::render_rust;
     use crate::hir;
+    use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{TestTarget, capability_descriptors, load_manifest, render_manifest};
     use crate::mir;
     use crate::new_project::create_project;
-    use crate::project::{build_project, check_project, project_capabilities, run_project_tests};
+    use crate::project::{
+        BuildOptions, TestOptions, build_project, build_project_with_options, check_project,
+        project_capabilities, run_project_tests, run_project_tests_with_options,
+    };
     use crate::syntax::parse_program;
     use std::fs;
     use std::path::Path;
@@ -58,6 +63,20 @@ mod tests {
             fs::set_permissions(&path, permissions).expect("chmod process fixture");
             path.to_string_lossy().into_owned()
         }
+    }
+
+    fn rust_host_target() -> String {
+        let output = Command::new("rustc")
+            .arg("-vV")
+            .output()
+            .expect("run rustc -vV");
+        assert!(output.status.success(), "rustc -vV failed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("host: "))
+            .map(str::to_string)
+            .expect("host target")
     }
 
     #[test]
@@ -156,6 +175,38 @@ mod tests {
                     "println!(\"{}\", { let values = words; let index = 0; axiom_array_take(values, index) });"
                 )
         );
+    }
+
+    #[test]
+    fn parser_lowers_mutable_slice_signatures() {
+        let source = "fn passthrough(values: &mut [int]): &mut [int] {\nreturn values\n}\n\nfn count(values: &mut [string]): int {\nreturn len(values)\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn passthrough<'a>(values: &'a mut [i64]) -> &'a mut [i64] {"));
+        assert!(rendered.contains("return values;"));
+        assert!(rendered.contains("fn count<'a>(values: &'a mut [String]) -> i64 {"));
+        assert!(rendered.contains("return (values).len() as i64;"));
+    }
+
+    #[test]
+    fn parser_lowers_mutable_slice_views() {
+        let source = "fn tail(values: &mut [int]): &mut [int] {\nlet rest: &mut [int] = values[1:]\nreturn rest\n}\n\nfn local_tail_len(): int {\nlet values: [int] = [3, 7, 9, 11]\nlet rest: &mut [int] = values[1:]\nreturn len(rest)\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(
+            rendered
+                .contains("let rest: &mut [i64] = axiom_slice_view_mut(values, Some(1), None);")
+        );
+        assert!(
+            rendered.contains(
+                "let rest: &mut [i64] = axiom_slice_view_mut(&mut values, Some(1), None);"
+            )
+        );
+        assert!(rendered.contains("fn axiom_slice_view_mut<'a, T>(values: &'a mut [T], start: Option<i64>, end: Option<i64>) -> &'a mut [T] {"));
     }
 
     #[test]
@@ -1242,8 +1293,7 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message
-                .contains("requires [capabilities].clock = true"),
+            err.message.contains("requires [capabilities].clock = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -1484,7 +1534,8 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message.contains("requires [capabilities].process = true"),
+            err.message
+                .contains("requires [capabilities].process = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -1568,7 +1619,8 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message.contains("requires [capabilities].crypto = true"),
+            err.message
+                .contains("requires [capabilities].crypto = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -1676,8 +1728,7 @@ mod tests {
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source =
-            "import \"std/io.ax\"\nlet n: int = eprintln(\"hello stderr\")\nprint n > 0\n";
+        let source = "import \"std/io.ax\"\nlet n: int = eprintln(\"hello stderr\")\nprint n > 0\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(project.join("src/main_test.stdout"), "true\n").expect("write golden");
@@ -2697,6 +2748,163 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_mutable_borrow_while_shared_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("shared-then-mutable-borrow");
+        create_project(&project, Some("shared-then-mutable-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet shared: &[int] = values[:]\nlet mutable: &mut [int] = values[:]\nprint len(shared)\nprint len(mutable)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("mutable borrow should fail while a shared borrow is live");
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"values\" while a shared borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_shared_borrow_while_mutable_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutable-then-shared-borrow");
+        create_project(&project, Some("mutable-then-shared-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet mutable: &mut [int] = values[:]\nlet shared: &[int] = values[:]\nprint len(mutable)\nprint len(shared)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("shared borrow should fail while a mutable borrow is live");
+        assert!(error.message.contains(
+            "cannot create shared borrow of value \"values\" while a mutable borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_double_mutable_borrow() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("double-mutable-borrow");
+        create_project(&project, Some("double-mutable-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet first: &mut [int] = values[:]\nlet second: &mut [int] = values[:]\nprint len(first)\nprint len(second)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("second mutable borrow should fail while the first is live");
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"values\" while another mutable borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owned_array_while_mutable_slice_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("live-mut-borrow-move");
+        create_project(&project, Some("live-mut-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet view: &mut [string] = values[:]\nprint len(view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("moving a mutably borrowed owner should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_tuple_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("tuple-wrapped-live-mut-borrow");
+        create_project(&project, Some("tuple-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: (&mut [string], int) = (values[:], 1)\nprint len(wrapped.0)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("tuple-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_option_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("option-wrapped-live-mut-borrow");
+        create_project(&project, Some("option-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: Option<&mut [string]> = Some(values[:])\nmatch wrapped {\nSome(view) {\nprint len(view)\n}\nNone {\nprint 0\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("option-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_struct_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-wrapped-live-mut-borrow");
+        create_project(&project, Some("struct-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window {\nview: &mut [string]\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet window: Window = Window { view: values[:] }\nprint len(window.view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("struct-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_enum_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("enum-wrapped-live-mut-borrow");
+        create_project(&project, Some("enum-wrapped-live-mut-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Snapshot {\nWindow(&mut [string])\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet snapshot: Snapshot = Window(values[:])\nmatch snapshot {\nWindow(view) {\nprint len(view)\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("enum-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owner_while_tuple_wrapped_slice_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tuple-wrapped-live-borrow");
@@ -3204,7 +3412,137 @@ mod tests {
             "let running: bool = true\nwhile running {\nlet inner: string = \"fresh\"\nlet sink: string = inner\nprint sink\n}\n",
         )
         .expect("write source");
-        check_project(&project)
-            .expect("moving loop-local values should be allowed");
+        check_project(&project).expect("moving loop-local values should be allowed");
+    }
+
+    #[test]
+    fn build_project_records_requested_target_triple() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("targeted-build");
+        create_project(&project, Some("targeted-build-app")).expect("create project");
+
+        let target = rust_host_target();
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: Some(target.clone()),
+            },
+        )
+        .expect("build project with explicit target");
+
+        assert_eq!(output.target.as_deref(), Some(target.as_str()));
+        assert!(project.join("dist/targeted-build-app").exists());
+    }
+
+    #[test]
+    fn run_project_tests_supports_name_filtering() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("filtered-tests");
+        create_project(&project, Some("filtered-tests-app")).expect("create project");
+        fs::write(project.join("src/math_test.ax"), "print 42\n").expect("write filtered test");
+        fs::write(project.join("src/math_test.stdout"), "42\n").expect("write filtered stdout");
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: Some(String::from("math")),
+            },
+        )
+        .expect("run filtered tests");
+
+        assert_eq!(output.passed, 1);
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.cases.len(), 1);
+        assert_eq!(output.cases[0].name, "src/math_test");
+        assert!(output.duration_ms > 0 || output.cases[0].duration_ms <= output.duration_ms);
+    }
+
+    #[test]
+    fn json_contract_check_payload_is_versioned() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("json-check");
+        create_project(&project, Some("json-check-app")).expect("create project");
+        let output = check_project(&project).expect("check project");
+
+        let payload = json_contract::check_success(&project, &output);
+        assert_eq!(
+            payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(payload["command"], "check");
+        assert_eq!(payload["ok"], true);
+        assert!(payload["packages"].is_array());
+    }
+
+    #[test]
+    fn json_contract_build_payload_includes_target() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("json-build");
+        create_project(&project, Some("json-build-app")).expect("create project");
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: Some(rust_host_target()),
+            },
+        )
+        .expect("build project");
+
+        let payload = json_contract::build_success(&project, &output);
+        assert_eq!(
+            payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(payload["command"], "build");
+        assert!(payload["target"].is_string());
+    }
+
+    #[test]
+    fn json_contract_test_payload_includes_filter_and_duration() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("json-test");
+        create_project(&project, Some("json-test-app")).expect("create project");
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: Some(String::from("main")),
+            },
+        )
+        .expect("test project");
+        let payload = json_contract::test_success(&project, Some("main"), &output);
+
+        assert_eq!(
+            payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(payload["command"], "test");
+        assert_eq!(payload["filter"], "main");
+        assert!(payload["duration_ms"].is_u64());
+    }
+
+    #[test]
+    fn json_contract_caps_and_error_payloads_are_versioned() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("json-caps");
+        create_project(&project, Some("json-caps-app")).expect("create project");
+        let caps = project_capabilities(&project).expect("project capabilities");
+
+        let caps_payload = json_contract::caps_success(&project, &caps);
+        assert_eq!(
+            caps_payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(caps_payload["command"], "caps");
+        assert_eq!(caps_payload["ok"], true);
+
+        let error = crate::diagnostics::Diagnostic::new("test", "boom");
+        let error_payload = json_contract::error("test", &error);
+        assert_eq!(
+            error_payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(error_payload["command"], "test");
+        assert_eq!(error_payload["ok"], false);
+        assert_eq!(error_payload["error"]["message"], "boom");
     }
 }
