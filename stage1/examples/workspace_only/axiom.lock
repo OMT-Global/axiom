@@ -1,0 +1,11 @@
+version = 1
+
+[[package]]
+name = "workspace-app"
+version = "0.1.0"
+source = "path:members/app"
+
+[[package]]
+name = "workspace-core"
+version = "0.1.0"
+source = "path:members/core"

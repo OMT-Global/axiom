@@ -2,8 +2,9 @@ use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::new_project::create_project;
 use axiomc::project::{
-    BuildOptions, TestOptions, build_project_with_options, check_project, project_capabilities,
-    run_project, run_project_tests_with_options,
+    BuildOptions, CheckOptions, RunOptions, TestOptions, build_project_with_options,
+    check_project_with_options, project_capabilities, run_project_with_options,
+    run_project_tests_with_options,
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -26,6 +27,8 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(short = 'p', long = "package")]
+        package: Option<String>,
     },
     Build {
         path: PathBuf,
@@ -33,9 +36,13 @@ enum Command {
         json: bool,
         #[arg(long)]
         target: Option<String>,
+        #[arg(short = 'p', long = "package")]
+        package: Option<String>,
     },
     Run {
         path: PathBuf,
+        #[arg(short = 'p', long = "package")]
+        package: Option<String>,
     },
     Test {
         path: PathBuf,
@@ -43,6 +50,8 @@ enum Command {
         json: bool,
         #[arg(long)]
         filter: Option<String>,
+        #[arg(short = 'p', long = "package")]
+        package: Option<String>,
     },
     Caps {
         path: Option<PathBuf>,
@@ -61,7 +70,16 @@ fn main() {
             }
             Err(error) => print_error("new", error, false),
         },
-        Command::Check { path, json } => match check_project(&path) {
+        Command::Check {
+            path,
+            json,
+            package,
+        } => match check_project_with_options(
+            &path,
+            &CheckOptions {
+                package: package.clone(),
+            },
+        ) {
             Ok(output) => {
                 if json {
                     println!("{}", json_contract::check_success(&path, &output));
@@ -72,8 +90,19 @@ fn main() {
             }
             Err(error) => print_error("check", error, json),
         },
-        Command::Build { path, json, target } => {
-            match build_project_with_options(&path, &BuildOptions { target }) {
+        Command::Build {
+            path,
+            json,
+            target,
+            package,
+        } => {
+            match build_project_with_options(
+                &path,
+                &BuildOptions {
+                    target,
+                    package: package.clone(),
+                },
+            ) {
                 Ok(output) => {
                     if json {
                         println!("{}", json_contract::build_success(&path, &output));
@@ -85,14 +114,25 @@ fn main() {
                 Err(error) => print_error("build", error, json),
             }
         }
-        Command::Run { path } => match run_project(&path) {
+        Command::Run { path, package } => match run_project_with_options(
+            &path,
+            &RunOptions {
+                package: package.clone(),
+            },
+        ) {
             Ok(code) => code,
             Err(error) => print_error("run", error, false),
         },
-        Command::Test { path, json, filter } => match run_project_tests_with_options(
+        Command::Test {
+            path,
+            json,
+            filter,
+            package,
+        } => match run_project_tests_with_options(
             &path,
             &TestOptions {
                 filter: filter.clone(),
+                package: package.clone(),
             },
         ) {
             Ok(output) => {

@@ -41,10 +41,10 @@ pub fn create_project(path: &Path, name: Option<&str>) -> Result<(), Diagnostic>
             .with_path(path.join(MANIFEST_FILENAME).display().to_string())
     })?;
     let manifest = Manifest {
-        package: PackageSection {
+        package: Some(PackageSection {
             name: project_name.clone(),
             version: String::from("0.1.0"),
-        },
+        }),
         dependencies: BTreeMap::new(),
         workspace: None,
         build: BuildSection {

@@ -84,20 +84,41 @@ pub struct TestOutput {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct CheckOptions {
+    pub package: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
     pub target: Option<String>,
+    pub package: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    pub package: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TestOptions {
     pub filter: Option<String>,
+    pub package: Option<String>,
 }
 
 pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
+    check_project_with_options(project_root, &CheckOptions::default())
+}
+
+pub fn check_project_with_options(
+    project_root: &Path,
+    options: &CheckOptions,
+) -> Result<CheckOutput, Diagnostic> {
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
+    validate_workspace_root_lockfile(&graph, &project_root)?;
     let mut packages = Vec::new();
-    for package_root in workspace_package_roots(&graph, &project_root)? {
+    for package_root in workspace_package_roots(&graph, &project_root, options.package.as_deref())?
+    {
         let analyzed = analyze_package(&graph, &package_root)?;
         packages.push(CheckedPackage {
             package_root: package_root.display().to_string(),
@@ -135,8 +156,10 @@ pub fn build_project_with_options(
 ) -> Result<BuildOutput, Diagnostic> {
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
+    validate_workspace_root_lockfile(&graph, &project_root)?;
     let mut packages = Vec::new();
-    for package_root in workspace_package_roots(&graph, &project_root)? {
+    for package_root in workspace_package_roots(&graph, &project_root, options.package.as_deref())?
+    {
         let analyzed = analyze_package(&graph, &package_root)?;
         let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
         let binary = binary_path(&package_root, &analyzed.manifest);
@@ -172,7 +195,31 @@ pub fn build_project_with_options(
 }
 
 pub fn run_project(project_root: &Path) -> Result<i32, Diagnostic> {
-    let built = build_project(project_root)?;
+    run_project_with_options(project_root, &RunOptions::default())
+}
+
+pub fn run_project_with_options(
+    project_root: &Path,
+    options: &RunOptions,
+) -> Result<i32, Diagnostic> {
+    let project_root = normalize_path(project_root);
+    let graph = load_package_graph(&project_root)?;
+    if options.package.is_none() && graph.context(&project_root)?.manifest.is_workspace_only() {
+        return Err(
+            Diagnostic::new(
+                "run",
+                "workspace-only manifests require -p/--package for `axiomc run`",
+            )
+            .with_path(manifest_path(&project_root).display().to_string()),
+        );
+    }
+    let built = build_project_with_options(
+        &project_root,
+        &BuildOptions {
+            target: None,
+            package: options.package.clone(),
+        },
+    )?;
     let status = Command::new(&built.binary).status().map_err(|err| {
         Diagnostic::new("run", format!("failed to execute {}: {err}", built.binary))
     })?;
@@ -189,11 +236,13 @@ pub fn run_project_tests_with_options(
 ) -> Result<TestOutput, Diagnostic> {
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
+    validate_workspace_root_lockfile(&graph, &project_root)?;
     let manifest_path_text = manifest_path(&project_root).display().to_string();
     let mut packages = Vec::new();
     let mut cases = Vec::new();
     let started = Instant::now();
-    for package_root in workspace_package_roots(&graph, &project_root)? {
+    for package_root in workspace_package_roots(&graph, &project_root, options.package.as_deref())?
+    {
         let manifest = graph.context(&package_root)?.manifest.clone();
         validate_lockfile(&package_root, &manifest)?;
         let tests = collect_test_targets(&package_root, &manifest, options.filter.as_deref())?;
@@ -378,6 +427,18 @@ fn analyze_package(
 ) -> Result<AnalyzedProject, Diagnostic> {
     let package_root = normalize_path(package_root);
     let manifest = graph.context(&package_root)?.manifest.clone();
+    if manifest.is_workspace_only() {
+        return Err(
+            Diagnostic::new(
+                "manifest",
+                format!(
+                    "workspace-only manifest at {} is not directly buildable",
+                    manifest_path(&package_root).display()
+                ),
+            )
+            .with_path(manifest_path(&package_root).display().to_string()),
+        );
+    }
     validate_lockfile(&package_root, &manifest)?;
     let entry = entry_path(&package_root, &manifest);
     analyze_entry(graph, &package_root, manifest, entry)
@@ -399,6 +460,17 @@ fn analyze_entry(
         entry_path: entry,
         mir,
     })
+}
+
+fn validate_workspace_root_lockfile(
+    graph: &PackageGraph,
+    project_root: &Path,
+) -> Result<(), Diagnostic> {
+    let manifest = graph.context(project_root)?.manifest.clone();
+    if manifest.is_workspace_only() {
+        validate_lockfile(project_root, &manifest)?;
+    }
+    Ok(())
 }
 
 fn load_package_graph(project_root: &Path) -> Result<PackageGraph, Diagnostic> {
@@ -423,10 +495,10 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
         return;
     }
     let manifest = Manifest {
-        package: PackageSection {
+        package: Some(PackageSection {
             name: stdlib::STDLIB_PACKAGE_NAME.to_string(),
             version: stdlib::STDLIB_PACKAGE_VERSION.to_string(),
-        },
+        }),
         dependencies: BTreeMap::new(),
         workspace: None,
         build: BuildSection {
@@ -473,10 +545,19 @@ fn load_package_graph_recursive(
     }
     let manifest = load_manifest(&project_root)?;
     let workspace_members = resolve_workspace_members(&project_root, &manifest)?;
-    let source_root = entry_path(&project_root, &manifest)
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| project_root.clone());
+    let source_root = if manifest.package.is_some() {
+        entry_path(&project_root, &manifest)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| project_root.clone())
+    } else {
+        let src_root = project_root.join("src");
+        if src_root.exists() {
+            src_root
+        } else {
+            project_root.clone()
+        }
+    };
     visiting.push(project_root.clone());
     let mut dependencies = BTreeMap::new();
     for (name, spec) in &manifest.dependencies {
@@ -737,10 +818,42 @@ fn run_test_case(
 fn workspace_package_roots(
     graph: &PackageGraph,
     project_root: &Path,
+    selected_package: Option<&str>,
 ) -> Result<Vec<PathBuf>, Diagnostic> {
     let mut roots = Vec::new();
     let mut seen = BTreeSet::new();
     collect_workspace_package_roots(graph, project_root, &mut seen, &mut roots)?;
+    if let Some(selected_package) = selected_package {
+        let matched = roots
+            .into_iter()
+            .filter(|root| {
+                graph.context(root)
+                    .ok()
+                    .and_then(|package| package.manifest.package.as_ref())
+                    .map(|package| package.name == selected_package)
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        if matched.is_empty() {
+            return Err(
+                Diagnostic::new(
+                    "manifest",
+                    format!("workspace package {selected_package:?} was not found"),
+                )
+                .with_path(manifest_path(project_root).display().to_string()),
+            );
+        }
+        if matched.len() > 1 {
+            return Err(
+                Diagnostic::new(
+                    "manifest",
+                    format!("workspace package name {selected_package:?} is ambiguous"),
+                )
+                .with_path(manifest_path(project_root).display().to_string()),
+            );
+        }
+        return Ok(matched);
+    }
     Ok(roots)
 }
 
@@ -754,8 +867,10 @@ fn collect_workspace_package_roots(
     if !seen.insert(package_root.clone()) {
         return Ok(());
     }
-    roots.push(package_root.clone());
     let package = graph.context(&package_root)?;
+    if package.manifest.package.is_some() {
+        roots.push(package_root.clone());
+    }
     for member in &package.workspace_members {
         collect_workspace_package_roots(graph, member, seen, roots)?;
     }
@@ -783,7 +898,11 @@ fn test_binary_path(project_root: &Path, manifest: &Manifest, test_name: &str) -
 }
 
 fn test_artifact_name(manifest: &Manifest, test_name: &str) -> String {
-    format!("{}-{}", manifest.package.name, slugify_test_name(test_name))
+    let package = manifest
+        .package
+        .as_ref()
+        .expect("test artifacts require a package manifest");
+    format!("{}-{}", package.name, slugify_test_name(test_name))
 }
 
 fn slugify_test_name(value: &str) -> String {
@@ -902,13 +1021,20 @@ fn load_module_recursive(
     visiting.pop();
 
     loaded.insert(module_path.clone(), ());
+    let package_name = package
+        .manifest
+        .package
+        .as_ref()
+        .expect("loaded modules require a package manifest")
+        .name
+        .clone();
     ordered.push(LoadedModule {
         path: module_path,
         program,
         is_entry,
         package_root: package.root.clone(),
         source_root: package.source_root.clone(),
-        package_name: package.manifest.package.name.clone(),
+        package_name,
     });
     Ok(())
 }

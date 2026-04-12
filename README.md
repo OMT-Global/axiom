@@ -94,6 +94,12 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/wor
 # Run the stage1 package-root workspace test suite
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
 
+# Run the stage1 workspace-only example by selecting a member package
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/workspace_only --package workspace-app
+
+# Run the stage1 workspace-only test suite
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
+
 # Run the stage1 capability-gated intrinsic example
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/capabilities
 
@@ -156,9 +162,11 @@ make stage1-smoke
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --filter core --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target "$(rustc -vV | sed -n 's/^host: //p')"
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/workspace_only --package workspace-app --json
 
 # Inspect host capabilities
 python -m axiom host list
