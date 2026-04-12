@@ -48,6 +48,11 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    &values[start..end]\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_slice_view_mut<'a, T>(values: &'a mut [T], start: Option<i64>, end: Option<i64>) -> &'a mut [T] {\n");
+    out.push_str("    let (start, end) = axiom_array_slice_bounds(values.len(), start, end);\n");
+    out.push_str("    &mut values[start..end]\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_last_index(len: usize) -> i64 {\n");
     out.push_str("    assert!(len > 0, \"collection must not be empty\");\n");
     out.push_str("    (len - 1) as i64\n");
@@ -323,7 +328,7 @@ impl<'a> TypeContext<'a> {
     ) -> bool {
         match ty {
             Type::Int | Type::Bool | Type::String => false,
-            Type::Slice(_) => true,
+            Type::Slice(_) | Type::MutSlice(_) => true,
             Type::Struct(name) => {
                 if !visiting_structs.insert(name.clone()) {
                     return false;
@@ -621,7 +626,9 @@ fn render_expr(expr: &Expr) -> String {
             Type::Bool => unreachable!("type checker rejects bool addition"),
             Type::Struct(_) => unreachable!("type checker rejects struct addition"),
             Type::Enum(_) => unreachable!("type checker rejects enum addition"),
-            Type::Slice(_) => unreachable!("type checker rejects slice addition"),
+            Type::Slice(_) | Type::MutSlice(_) => {
+                unreachable!("type checker rejects slice addition")
+            }
             Type::Option(_) => unreachable!("type checker rejects option addition"),
             Type::Result(_, _) => unreachable!("type checker rejects result addition"),
             Type::Tuple(_) => unreachable!("type checker rejects tuple addition"),
@@ -710,20 +717,38 @@ fn render_expr(expr: &Expr) -> String {
                 .unwrap_or_else(|| String::from("None"));
             match base.ty() {
                 Type::Array(_) => {
-                    format!(
-                        "axiom_slice_view(&{}, {}, {})",
-                        render_expr(base),
-                        start,
-                        end
-                    )
+                    if matches!(expr.ty(), Type::MutSlice(_)) {
+                        format!(
+                            "axiom_slice_view_mut(&mut {}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    } else {
+                        format!(
+                            "axiom_slice_view(&{}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    }
                 }
-                Type::Slice(_) => {
-                    format!(
-                        "axiom_slice_view({}, {}, {})",
-                        render_expr(base),
-                        start,
-                        end
-                    )
+                Type::Slice(_) | Type::MutSlice(_) => {
+                    if matches!(expr.ty(), Type::MutSlice(_)) {
+                        format!(
+                            "axiom_slice_view_mut({}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    } else {
+                        format!(
+                            "axiom_slice_view({}, {}, {})",
+                            render_expr(base),
+                            start,
+                            end
+                        )
+                    }
                 }
                 _ => unreachable!("type checker rejects slicing non-array values"),
             }
@@ -744,7 +769,7 @@ fn render_expr(expr: &Expr) -> String {
                     )
                 }
             }
-            Type::Slice(_) => {
+            Type::Slice(_) | Type::MutSlice(_) => {
                 format!(
                     "axiom_array_get({}, {})",
                     render_expr(base),
@@ -813,6 +838,13 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
                 None => format!("&[{inner}]"),
             }
         }
+        Type::MutSlice(inner) => {
+            let inner = rust_type_inner(inner, lifetime, type_context);
+            match lifetime {
+                Some(lifetime) => format!("&{lifetime} mut [{inner}]"),
+                None => format!("&mut [{inner}]"),
+            }
+        }
         Type::Option(inner) => {
             format!("Option<{}>", rust_type_inner(inner, lifetime, type_context))
         }
@@ -866,7 +898,7 @@ fn render_collection_edge(collection: &Expr, result_ty: &Type, from_end: bool) -
                 )
             }
         }
-        Type::Slice(_) => format!(
+        Type::Slice(_) | Type::MutSlice(_) => format!(
             "{{ let values = {rendered}; let index = {index}; axiom_array_get(values, index) }}"
         ),
         _ => unreachable!("type checker rejects first/last on non-collection values"),

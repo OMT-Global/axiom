@@ -178,6 +178,38 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_mutable_slice_signatures() {
+        let source = "fn passthrough(values: &mut [int]): &mut [int] {\nreturn values\n}\n\nfn count(values: &mut [string]): int {\nreturn len(values)\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn passthrough<'a>(values: &'a mut [i64]) -> &'a mut [i64] {"));
+        assert!(rendered.contains("return values;"));
+        assert!(rendered.contains("fn count<'a>(values: &'a mut [String]) -> i64 {"));
+        assert!(rendered.contains("return (values).len() as i64;"));
+    }
+
+    #[test]
+    fn parser_lowers_mutable_slice_views() {
+        let source = "fn tail(values: &mut [int]): &mut [int] {\nlet rest: &mut [int] = values[1:]\nreturn rest\n}\n\nfn local_tail_len(): int {\nlet values: [int] = [3, 7, 9, 11]\nlet rest: &mut [int] = values[1:]\nreturn len(rest)\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(
+            rendered
+                .contains("let rest: &mut [i64] = axiom_slice_view_mut(values, Some(1), None);")
+        );
+        assert!(
+            rendered.contains(
+                "let rest: &mut [i64] = axiom_slice_view_mut(&mut values, Some(1), None);"
+            )
+        );
+        assert!(rendered.contains("fn axiom_slice_view_mut<'a, T>(values: &'a mut [T], start: Option<i64>, end: Option<i64>) -> &'a mut [T] {"));
+    }
+
+    #[test]
     fn parser_lowers_borrowed_structs_and_enums() {
         let source = "struct Window {\nview: &[int]\n}\n\nenum Snapshot {\nWindow(Window)\nNamed { window: Window }\n}\n\nfn tail(values: &[int]): Window {\nreturn Window { view: values[1:] }\n}\n\nfn read(snapshot: Snapshot): int {\nmatch snapshot {\nWindow(window) {\nreturn first(window.view)\n}\nNamed { window } {\nreturn last(window.view)\n}\n}\n}\n\nlet numbers: [int] = [3, 7, 9, 11]\nlet window: Window = tail(numbers[:])\nprint first(window.view)\nprint read(Named { window: tail(numbers[:]) })\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2707,6 +2739,163 @@ mod tests {
         )
         .expect("write source");
         let error = check_project(&project).expect_err("moving a borrowed owner should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_mutable_borrow_while_shared_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("shared-then-mutable-borrow");
+        create_project(&project, Some("shared-then-mutable-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet shared: &[int] = values[:]\nlet mutable: &mut [int] = values[:]\nprint len(shared)\nprint len(mutable)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("mutable borrow should fail while a shared borrow is live");
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"values\" while a shared borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_shared_borrow_while_mutable_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutable-then-shared-borrow");
+        create_project(&project, Some("mutable-then-shared-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet mutable: &mut [int] = values[:]\nlet shared: &[int] = values[:]\nprint len(mutable)\nprint len(shared)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("shared borrow should fail while a mutable borrow is live");
+        assert!(error.message.contains(
+            "cannot create shared borrow of value \"values\" while a mutable borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_double_mutable_borrow() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("double-mutable-borrow");
+        create_project(&project, Some("double-mutable-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [1, 2, 3]\nlet first: &mut [int] = values[:]\nlet second: &mut [int] = values[:]\nprint len(first)\nprint len(second)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("second mutable borrow should fail while the first is live");
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"values\" while another mutable borrow is still live"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owned_array_while_mutable_slice_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("live-mut-borrow-move");
+        create_project(&project, Some("live-mut-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet view: &mut [string] = values[:]\nprint len(view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("moving a mutably borrowed owner should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_tuple_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("tuple-wrapped-live-mut-borrow");
+        create_project(&project, Some("tuple-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: (&mut [string], int) = (values[:], 1)\nprint len(wrapped.0)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("tuple-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_option_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("option-wrapped-live-mut-borrow");
+        create_project(&project, Some("option-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [string] = [\"alpha\", \"beta\"]\nlet wrapped: Option<&mut [string]> = Some(values[:])\nmatch wrapped {\nSome(view) {\nprint len(view)\n}\nNone {\nprint 0\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("option-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_struct_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-wrapped-live-mut-borrow");
+        create_project(&project, Some("struct-wrapped-live-mut-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window {\nview: &mut [string]\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet window: Window = Window { view: values[:] }\nprint len(window.view)\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("struct-wrapped mutable borrow should block owner move");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_while_enum_wrapped_mut_slice_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("enum-wrapped-live-mut-borrow");
+        create_project(&project, Some("enum-wrapped-live-mut-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Snapshot {\nWindow(&mut [string])\n}\n\nlet values: [string] = [\"alpha\", \"beta\"]\nlet snapshot: Snapshot = Window(values[:])\nmatch snapshot {\nWindow(view) {\nprint len(view)\n}\n}\nprint first(values)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("enum-wrapped mutable borrow should block owner move");
         assert!(
             error
                 .message

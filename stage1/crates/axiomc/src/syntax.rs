@@ -129,6 +129,7 @@ pub enum TypeName {
     String,
     Named(String),
     Slice(Box<TypeName>),
+    MutSlice(Box<TypeName>),
     Option(Box<TypeName>),
     Result(Box<TypeName>, Box<TypeName>),
     Tuple(Vec<TypeName>),
@@ -944,6 +945,25 @@ fn parse_type_name(
     line_no: usize,
     column: usize,
 ) -> Result<TypeName, Diagnostic> {
+    if raw.starts_with("&mut [")
+        && raw.ends_with(']')
+        && matches!(find_matching_square(raw, 5), Some(close) if close == raw.len() - 1)
+    {
+        let inner = raw[6..raw.len() - 1].trim();
+        if inner.is_empty() {
+            return Err(
+                Diagnostic::new("parse", "mutable slice type is missing an inner type")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column),
+            );
+        }
+        return Ok(TypeName::MutSlice(Box::new(parse_type_name(
+            inner,
+            path,
+            line_no,
+            column + 6,
+        )?)));
+    }
     if raw.starts_with("&[")
         && raw.ends_with(']')
         && matches!(find_matching_square(raw, 1), Some(close) if close == raw.len() - 1)
