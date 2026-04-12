@@ -32,6 +32,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/mo
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --filter core --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/packages --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/workspace_only --package workspace-app --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/workspace_only --package workspace-app
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 ```
@@ -41,7 +44,8 @@ as a native artifact, executes it, and compares stdout against a sibling
 `*.stdout` golden file when present. Projects that need explicit naming or inline
 expectations can still declare `[[tests]]` entries in `axiom.toml`. The command
 now also accepts `--filter <pattern>` to run a subset of discovered tests by
-test name or entry path.
+test name or entry path. Workspace-only roots are now supported as long as
+build/run commands select a concrete member package with `-p/--package`.
 
 ## JSON contract
 
@@ -75,7 +79,7 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Package and build graph gaps
 
-- `axiom.toml` and `axiom.lock` now support deterministic local path dependency graphs plus package-root workspace members with relative local paths, but there is still no workspace-only manifest or package-selection flow.
+- `axiom.toml` and `axiom.lock` now support deterministic local path dependency graphs, package-root workspace members, workspace-only roots, and `-p/--package` selection for member-targeted build/run/test flows.
 - The current import model is still intentionally small: package-local relative path imports plus dependency-prefixed imports like `core/math.ax`, direct `pub struct` / `pub enum` / `pub fn` exports only, and explicit parser diagnostics for unsupported aliases, re-exports, and namespace-qualified calls.
 - There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape.
 
@@ -104,6 +108,7 @@ Current proof points:
   `axiomc test` discovery flow.
 - `stage1/examples/packages` proves the local path dependency baseline and root-package lockfile validation.
 - `stage1/examples/workspace` proves the package-root workspace-member baseline and workspace-aware root lockfile validation.
+- `stage1/examples/workspace_only` proves workspace-only manifests plus `-p/--package` selection for member-targeted build/run while preserving workspace-wide test discovery.
 - `stage1/examples/capabilities` proves the capability-gated fs/net/env/clock/crypto path, while the Rust suite covers the remaining process intrinsic contract.
 - `stage1/examples/stdlib_time` proves the AG4.1 synthetic stdlib surface: `import "std/time.ax"` brings `now_ms()` into scope and remains subject to the importing package's `[capabilities] clock` flag.
 - `stage1/examples/stdlib_env` extends AG4.1 with `import "std/env.ax"`, bringing `get_env(key)` into scope and staying subject to the importing package's `[capabilities] env` flag.
@@ -117,7 +122,7 @@ Current proof points:
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
-- `make stage1-test stage1-smoke` now covers all twenty checked-in stage1 examples.
+- `make stage1-test stage1-smoke` now covers all twenty-one checked-in stage1 examples.
 
 Agent-grade compiler milestone summary:
 

@@ -20,11 +20,17 @@ pub struct LockedPackage {
 pub fn expected_lockfile(manifest: &Manifest) -> Lockfile {
     Lockfile {
         version: 1,
-        package: vec![LockedPackage {
-            name: manifest.package.name.clone(),
-            version: manifest.package.version.clone(),
-            source: String::from("path"),
-        }],
+        package: manifest
+            .package
+            .as_ref()
+            .map(|package| {
+                vec![LockedPackage {
+                    name: package.name.clone(),
+                    version: package.version.clone(),
+                    source: String::from("path"),
+                }]
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -49,7 +55,13 @@ pub fn expected_lockfile_for_project(
         &mut visited,
         &mut package,
     )?;
-    if let Some((root, dependencies)) = package.split_first_mut() {
+    if package.is_empty() {
+        package.sort_by(|left, right| {
+            left.source
+                .cmp(&right.source)
+                .then(left.name.cmp(&right.name))
+        });
+    } else if let Some((root, dependencies)) = package.split_first_mut() {
         dependencies.sort_by(|left, right| {
             left.source
                 .cmp(&right.source)
@@ -129,9 +141,19 @@ fn collect_dependency_packages(
             continue;
         }
         let dependency_manifest = load_manifest(&dependency_root)?;
+        let dependency_package = dependency_manifest.package.as_ref().ok_or_else(|| {
+            Diagnostic::new(
+                "manifest",
+                format!(
+                    "dependency at {} must define a [package] section",
+                    dependency_root.display()
+                ),
+            )
+            .with_path(dependency_root.join("axiom.toml").display().to_string())
+        })?;
         packages.push(LockedPackage {
-            name: dependency_manifest.package.name.clone(),
-            version: dependency_manifest.package.version.clone(),
+            name: dependency_package.name.clone(),
+            version: dependency_package.version.clone(),
             source: format!(
                 "path:{}",
                 normalize_dependency_source(
@@ -170,18 +192,20 @@ fn collect_workspace_packages(
             continue;
         }
         let member_manifest = load_manifest(&member_root)?;
-        packages.push(LockedPackage {
-            name: member_manifest.package.name.clone(),
-            version: member_manifest.package.version.clone(),
-            source: format!(
-                "path:{}",
-                normalize_dependency_source(
-                    &relative_path(root_project_root, &member_root)
-                        .display()
-                        .to_string(),
-                )
-            ),
-        });
+        if let Some(member_package) = member_manifest.package.as_ref() {
+            packages.push(LockedPackage {
+                name: member_package.name.clone(),
+                version: member_package.version.clone(),
+                source: format!(
+                    "path:{}",
+                    normalize_dependency_source(
+                        &relative_path(root_project_root, &member_root)
+                            .display()
+                            .to_string(),
+                    )
+                ),
+            });
+        }
         collect_workspace_packages(
             root_project_root,
             &member_root,

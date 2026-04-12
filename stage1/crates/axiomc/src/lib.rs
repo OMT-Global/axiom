@@ -20,8 +20,10 @@ mod tests {
     use crate::mir;
     use crate::new_project::create_project;
     use crate::project::{
-        BuildOptions, TestOptions, build_project, build_project_with_options, check_project,
-        project_capabilities, run_project_tests, run_project_tests_with_options,
+        BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
+        build_project_with_options, check_project, check_project_with_options,
+        project_capabilities, run_project_with_options, run_project_tests,
+        run_project_tests_with_options,
     };
     use crate::syntax::parse_program;
     use std::fs;
@@ -907,6 +909,141 @@ mod tests {
         assert_eq!(tests.packages.len(), 3);
         assert_eq!(tests.passed, 3);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn workspace_only_manifest_supports_package_selection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("workspace-only-root");
+        let app = project.join("members/app");
+        let core = project.join("members/core");
+        fs::create_dir_all(project.join("members")).expect("create workspace members dir");
+        create_project(&app, Some("workspace-app")).expect("create app member");
+        create_project(&core, Some("workspace-core")).expect("create core member");
+
+        fs::write(
+            core.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("write core source");
+        let core_manifest = load_manifest(&core).expect("load core manifest");
+        fs::write(
+            core.join("axiom.lock"),
+            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
+        )
+        .expect("write core lockfile");
+
+        fs::write(
+            app.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"../core\" }}\n",
+                render_manifest("workspace-app")
+            ),
+        )
+        .expect("write app manifest");
+        fs::write(
+            app.join("src/main.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write app source");
+        fs::write(
+            app.join("src/main_test.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write app test");
+        fs::write(app.join("src/main_test.stdout"), "42\n").expect("write app golden");
+        let app_manifest = load_manifest(&app).expect("load app manifest");
+        fs::write(
+            app.join("axiom.lock"),
+            render_lockfile_for_project(&app, &app_manifest).expect("app lockfile"),
+        )
+        .expect("write app lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            "[workspace]\nmembers = [\"members/app\", \"members/core\"]\n",
+        )
+        .expect("write workspace-only manifest");
+        let root_manifest = load_manifest(&project).expect("load root manifest");
+        assert!(root_manifest.is_workspace_only());
+        let root_lockfile =
+            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile");
+        assert!(root_lockfile.contains("path:members/app"));
+        assert!(root_lockfile.contains("path:members/core"));
+        fs::write(project.join("axiom.lock"), root_lockfile).expect("write root lockfile");
+
+        let checked = check_project(&project).expect("check workspace-only root");
+        assert_eq!(checked.packages.len(), 2);
+
+        let selected = check_project_with_options(
+            &project,
+            &CheckOptions {
+                package: Some(String::from("workspace-app")),
+            },
+        )
+        .expect("check selected workspace package");
+        assert_eq!(selected.packages.len(), 1);
+        assert!(selected.manifest.ends_with("members/app/axiom.toml"));
+
+        let built = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: None,
+                package: Some(String::from("workspace-app")),
+            },
+        )
+        .expect("build selected workspace package");
+        assert_eq!(built.packages.len(), 1);
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run selected workspace binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+
+        let tests = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: None,
+                package: Some(String::from("workspace-app")),
+            },
+        )
+        .expect("test selected workspace package");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+
+        let exit = run_project_with_options(
+            &project,
+            &RunOptions {
+                package: Some(String::from("workspace-app")),
+            },
+        )
+        .expect("run selected workspace package");
+        assert_eq!(exit, 0);
+    }
+
+    #[test]
+    fn workspace_only_manifest_requires_package_for_run() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("workspace-only-run");
+        let app = project.join("members/app");
+        fs::create_dir_all(project.join("members")).expect("create workspace members dir");
+        create_project(&app, Some("workspace-runner")).expect("create app member");
+
+        fs::write(
+            project.join("axiom.toml"),
+            "[workspace]\nmembers = [\"members/app\"]\n",
+        )
+        .expect("write workspace-only manifest");
+        let root_manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error = run_project_with_options(&project, &RunOptions::default())
+            .expect_err("workspace-only run should require package selection");
+        assert_eq!(error.kind, "run");
+        assert!(error.message.contains("require -p/--package"));
     }
 
     #[test]
@@ -3426,6 +3563,7 @@ mod tests {
             &project,
             &BuildOptions {
                 target: Some(target.clone()),
+                package: None,
             },
         )
         .expect("build project with explicit target");
@@ -3446,6 +3584,7 @@ mod tests {
             &project,
             &TestOptions {
                 filter: Some(String::from("math")),
+                package: None,
             },
         )
         .expect("run filtered tests");
@@ -3483,6 +3622,7 @@ mod tests {
             &project,
             &BuildOptions {
                 target: Some(rust_host_target()),
+                package: None,
             },
         )
         .expect("build project");
@@ -3506,6 +3646,7 @@ mod tests {
             &project,
             &TestOptions {
                 filter: Some(String::from("main")),
+                package: None,
             },
         )
         .expect("test project");

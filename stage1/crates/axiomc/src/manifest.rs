@@ -16,7 +16,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 6] = [
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Manifest {
-    pub package: PackageSection,
+    pub package: Option<PackageSection>,
     pub dependencies: BTreeMap<String, DependencySpec>,
     pub workspace: Option<WorkspaceSection>,
     pub build: BuildSection,
@@ -171,11 +171,19 @@ pub fn out_dir_path(project_root: &Path, manifest: &Manifest) -> PathBuf {
 
 pub fn binary_path(project_root: &Path, manifest: &Manifest) -> PathBuf {
     let suffix = if cfg!(windows) { ".exe" } else { "" };
-    out_dir_path(project_root, manifest).join(format!("{}{}", manifest.package.name, suffix))
+    let package = manifest
+        .package
+        .as_ref()
+        .expect("binary path requires a package manifest");
+    out_dir_path(project_root, manifest).join(format!("{}{}", package.name, suffix))
 }
 
 pub fn generated_rust_path(project_root: &Path, manifest: &Manifest) -> PathBuf {
-    out_dir_path(project_root, manifest).join(format!("{}.generated.rs", manifest.package.name))
+    let package = manifest
+        .package
+        .as_ref()
+        .expect("generated rust path requires a package manifest");
+    out_dir_path(project_root, manifest).join(format!("{}.generated.rs", package.name))
 }
 
 pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescriptor> {
@@ -208,6 +216,12 @@ impl CapabilityConfig {
     }
 }
 
+impl Manifest {
+    pub fn is_workspace_only(&self) -> bool {
+        self.package.is_none()
+    }
+}
+
 impl CapabilityKind {
     pub fn name(self) -> &'static str {
         match self {
@@ -233,13 +247,16 @@ impl CapabilityKind {
 }
 
 fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnostic> {
-    let package = raw.package.ok_or_else(|| {
-        Diagnostic::new("manifest", "missing [package] section")
-            .with_path(path.display().to_string())
-    })?;
-    let package_name = required_field(package.name, path, "package.name")?;
-    let package_version = required_field(package.version, path, "package.version")?;
-    let build = raw.build.unwrap_or(RawBuildSection {
+    let workspace = normalize_workspace(raw.workspace, path)?;
+    let package = normalize_package(raw.package, workspace.is_some(), path)?;
+    let raw_build = raw.build;
+    if package.is_none() && raw_build.is_some() {
+        return Err(
+            Diagnostic::new("manifest", "[build] requires a [package] section")
+                .with_path(path.display().to_string()),
+        );
+    }
+    let build = raw_build.unwrap_or(RawBuildSection {
         entry: Some(String::from("src/main.ax")),
         out_dir: Some(String::from("dist")),
     });
@@ -249,13 +266,9 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     validate_relative_path(path, "build.out_dir", &out_dir)?;
     let dependencies = normalize_dependencies(raw.dependencies.unwrap_or_default(), path)?;
     let tests = normalize_tests(raw.tests.unwrap_or_default(), path)?;
-    let workspace = normalize_workspace(raw.workspace, path)?;
     let capabilities = raw.capabilities.unwrap_or_default();
     Ok(Manifest {
-        package: PackageSection {
-            name: package_name,
-            version: package_version,
-        },
+        package,
         dependencies,
         workspace,
         build: BuildSection { entry, out_dir },
@@ -269,6 +282,28 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             crypto: capabilities.crypto.unwrap_or(false),
         },
     })
+}
+
+fn normalize_package(
+    raw_package: Option<RawPackageSection>,
+    has_workspace: bool,
+    path: &Path,
+) -> Result<Option<PackageSection>, Diagnostic> {
+    let Some(package) = raw_package else {
+        if has_workspace {
+            return Ok(None);
+        }
+        return Err(
+            Diagnostic::new("manifest", "missing [package] section")
+                .with_path(path.display().to_string()),
+        );
+    };
+    let package_name = required_field(package.name, path, "package.name")?;
+    let package_version = required_field(package.version, path, "package.version")?;
+    Ok(Some(PackageSection {
+        name: package_name,
+        version: package_version,
+    }))
 }
 
 fn normalize_workspace(
