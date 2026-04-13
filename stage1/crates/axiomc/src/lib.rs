@@ -22,8 +22,8 @@ mod tests {
     use crate::project::{
         BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        project_capabilities, run_project_with_options, run_project_tests,
-        run_project_tests_with_options,
+        project_capabilities, run_project_tests, run_project_tests_with_options,
+        run_project_with_options,
     };
     use crate::syntax::parse_program;
     use std::fs;
@@ -2171,11 +2171,7 @@ mod tests {
     #[test]
     fn ownership_compile_fail_corpus_reports_stable_codes() {
         let cases = [
-            (
-                "use_after_move",
-                "use_after_move",
-                "use of moved value",
-            ),
+            ("use_after_move", "use_after_move", "use of moved value"),
             (
                 "borrow_return_requires_param_origin",
                 "borrow_return_requires_param_origin",
@@ -2453,6 +2449,45 @@ mod tests {
     }
 
     #[test]
+    fn build_project_emits_native_binary_with_local_type_aliases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("local-type-alias");
+        create_project(&project, Some("local-type-alias-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "type Id = int\ntype Labels = [string]\n\nfn echo(value: Id): Id {\nreturn value\n}\n\nlet answer: Id = echo(42)\nlet labels: Labels = [\"alpha\", \"beta\"]\nprint answer\nprint len(labels)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with local type aliases");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n2\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_imported_public_type_aliases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-type-alias");
+        create_project(&project, Some("public-type-alias-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"types.ax\"\n\nlet answer: Id = 42\nlet labels: Labels = [\"alpha\", \"beta\"]\nprint answer\nprint len(labels)\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/types.ax"),
+            "pub type Id = int\npub type Label = string\npub type Labels = [Label]\n",
+        )
+        .expect("write types");
+        let built = build_project(&project).expect("build project with imported type aliases");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n2\n");
+    }
+
+    #[test]
     fn check_project_rejects_missing_import() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-import");
@@ -2517,6 +2552,56 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_private_imported_type_alias() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("private-type-alias");
+        create_project(&project, Some("private-type-alias-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"types.ax\"\nlet answer: Hidden = 42\nprint answer\n",
+        )
+        .expect("write main");
+        fs::write(project.join("src/types.ax"), "type Hidden = int\n").expect("write types");
+        let error = check_project(&project).expect_err("private type alias should fail");
+        assert!(error.message.contains("is not exported"));
+        assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn check_project_rejects_recursive_type_alias() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-type-alias");
+        create_project(&project, Some("recursive-type-alias-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "type Loop = Loop\nlet value: Loop = 42\nprint value\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("recursive type alias should fail");
+        assert!(error.message.contains("is recursive"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_type_alias_inside_function_block() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("block-type-alias");
+        create_project(&project, Some("block-type-alias-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn main(): int {\ntype Id = int\nreturn 42\n}\n\nprint main()\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("block type alias should fail");
+        assert!(
+            error
+                .message
+                .contains("only supports top-level type alias declarations")
+        );
+        assert_eq!(error.kind, "parse");
+    }
+
+    #[test]
     fn check_project_rejects_private_import_call() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("private-import");
@@ -2550,7 +2635,7 @@ mod tests {
         let error = check_project(&project).expect_err("module top-level statements should fail");
         assert!(
             error.message.contains(
-                "may only contain imports, struct declarations, enum declarations, and function declarations"
+                "may only contain imports, type alias declarations, struct declarations, enum declarations, and function declarations"
             )
         );
         assert_eq!(error.kind, "import");
@@ -3722,8 +3807,8 @@ mod tests {
         assert_eq!(caps_payload["command"], "caps");
         assert_eq!(caps_payload["ok"], true);
 
-        let error = crate::diagnostics::Diagnostic::new("ownership", "boom")
-            .with_code("use_after_move");
+        let error =
+            crate::diagnostics::Diagnostic::new("ownership", "boom").with_code("use_after_move");
         let error_payload = json_contract::error("test", &error);
         assert_eq!(
             error_payload["schema_version"],

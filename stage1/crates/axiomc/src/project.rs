@@ -205,13 +205,11 @@ pub fn run_project_with_options(
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
     if options.package.is_none() && graph.context(&project_root)?.manifest.is_workspace_only() {
-        return Err(
-            Diagnostic::new(
-                "run",
-                "workspace-only manifests require -p/--package for `axiomc run`",
-            )
-            .with_path(manifest_path(&project_root).display().to_string()),
-        );
+        return Err(Diagnostic::new(
+            "run",
+            "workspace-only manifests require -p/--package for `axiomc run`",
+        )
+        .with_path(manifest_path(&project_root).display().to_string()));
     }
     let built = build_project_with_options(
         &project_root,
@@ -413,6 +411,9 @@ struct ModuleSymbols {
     functions: HashMap<String, String>,
     public_functions: HashMap<String, String>,
     private_functions: HashSet<String>,
+    aliases: HashMap<String, String>,
+    public_aliases: HashMap<String, String>,
+    private_aliases: HashSet<String>,
     structs: HashMap<String, String>,
     public_structs: HashMap<String, String>,
     private_structs: HashSet<String>,
@@ -428,16 +429,14 @@ fn analyze_package(
     let package_root = normalize_path(package_root);
     let manifest = graph.context(&package_root)?.manifest.clone();
     if manifest.is_workspace_only() {
-        return Err(
-            Diagnostic::new(
-                "manifest",
-                format!(
-                    "workspace-only manifest at {} is not directly buildable",
-                    manifest_path(&package_root).display()
-                ),
-            )
-            .with_path(manifest_path(&package_root).display().to_string()),
-        );
+        return Err(Diagnostic::new(
+            "manifest",
+            format!(
+                "workspace-only manifest at {} is not directly buildable",
+                manifest_path(&package_root).display()
+            ),
+        )
+        .with_path(manifest_path(&package_root).display().to_string()));
     }
     validate_lockfile(&package_root, &manifest)?;
     let entry = entry_path(&package_root, &manifest);
@@ -827,7 +826,8 @@ fn workspace_package_roots(
         let matched = roots
             .into_iter()
             .filter(|root| {
-                graph.context(root)
+                graph
+                    .context(root)
                     .ok()
                     .and_then(|package| package.manifest.package.as_ref())
                     .map(|package| package.name == selected_package)
@@ -835,22 +835,18 @@ fn workspace_package_roots(
             })
             .collect::<Vec<_>>();
         if matched.is_empty() {
-            return Err(
-                Diagnostic::new(
-                    "manifest",
-                    format!("workspace package {selected_package:?} was not found"),
-                )
-                .with_path(manifest_path(project_root).display().to_string()),
-            );
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("workspace package {selected_package:?} was not found"),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
         }
         if matched.len() > 1 {
-            return Err(
-                Diagnostic::new(
-                    "manifest",
-                    format!("workspace package name {selected_package:?} is ambiguous"),
-                )
-                .with_path(manifest_path(project_root).display().to_string()),
-            );
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("workspace package name {selected_package:?} is ambiguous"),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
         }
         return Ok(matched);
     }
@@ -998,7 +994,7 @@ fn load_module_recursive(
         let stmt = &program.stmts[0];
         return Err(Diagnostic::new(
             "import",
-            "imported stage1 modules may only contain imports, struct declarations, enum declarations, and function declarations",
+            "imported stage1 modules may only contain imports, type alias declarations, struct declarations, enum declarations, and function declarations",
         )
         .with_path(module_path.display().to_string())
         .with_span(stmt_line(stmt), stmt_column(stmt)));
@@ -1215,6 +1211,7 @@ fn flatten_modules(
     }
 
     let mut flattened_functions = Vec::new();
+    let mut flattened_type_aliases = Vec::new();
     let mut flattened_structs = Vec::new();
     let mut flattened_enums = Vec::new();
     let mut flattened_stmts = Vec::new();
@@ -1223,6 +1220,7 @@ fn flatten_modules(
             continue;
         };
         let mut visible_functions = module_symbols.functions.clone();
+        let mut visible_aliases = module_symbols.aliases.clone();
         let mut visible_structs = module_symbols.structs.clone();
         let mut visible_enums = module_symbols.enums.clone();
         let mut private_imported = HashSet::new();
@@ -1258,6 +1256,24 @@ fn flatten_modules(
             for name in &imported_symbols.private_enums {
                 private_imported_types.insert(name.clone());
             }
+            for name in &imported_symbols.private_aliases {
+                private_imported_types.insert(name.clone());
+            }
+            for (export_name, internal_name) in &imported_symbols.public_aliases {
+                if let Some(existing) = visible_aliases.get(export_name)
+                    && existing != internal_name
+                {
+                    return Err(Diagnostic::new(
+                        "import",
+                        format!(
+                            "imported type alias {export_name:?} collides with an existing name"
+                        ),
+                    )
+                    .with_path(module.path.display().to_string())
+                    .with_span(import.line, import.column));
+                }
+                visible_aliases.insert(export_name.clone(), internal_name.clone());
+            }
             for (export_name, internal_name) in &imported_symbols.public_structs {
                 if let Some(existing) = visible_structs.get(export_name)
                     && existing != internal_name
@@ -1286,7 +1302,22 @@ fn flatten_modules(
             }
         }
 
-        let visible_types = merge_visible_types(&visible_structs, &visible_enums, &module.path)?;
+        let visible_types = merge_visible_types(
+            &visible_aliases,
+            &visible_structs,
+            &visible_enums,
+            &module.path,
+        )?;
+
+        for type_alias in &module.program.type_aliases {
+            flattened_type_aliases.push(rewrite_type_alias(
+                type_alias,
+                module_symbols,
+                &visible_types,
+                &private_imported_types,
+                &module.path,
+            )?);
+        }
 
         for struct_decl in &module.program.structs {
             flattened_structs.push(rewrite_struct(
@@ -1335,6 +1366,7 @@ fn flatten_modules(
 
     Ok(syntax::Program {
         imports: Vec::new(),
+        type_aliases: flattened_type_aliases,
         structs: flattened_structs,
         enums: flattened_enums,
         functions: flattened_functions,
@@ -1347,6 +1379,9 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
     let mut functions = HashMap::new();
     let mut public_functions = HashMap::new();
     let mut private_functions = HashSet::new();
+    let mut aliases = HashMap::new();
+    let mut public_aliases = HashMap::new();
+    let mut private_aliases = HashSet::new();
     let mut structs = HashMap::new();
     let mut public_structs = HashMap::new();
     let mut private_structs = HashSet::new();
@@ -1416,17 +1451,74 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
             private_functions.insert(function.name.clone());
         }
     }
+    for type_alias in &module.program.type_aliases {
+        if structs.contains_key(&type_alias.name) || enums.contains_key(&type_alias.name) {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate type name {:?}", type_alias.name),
+            )
+            .with_path(module.path.display().to_string())
+            .with_span(type_alias.line, type_alias.column));
+        }
+        let internal_name = format!("{module_id}_{}", type_alias.name);
+        if aliases
+            .insert(type_alias.name.clone(), internal_name.clone())
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate type alias {:?}", type_alias.name),
+            )
+            .with_path(module.path.display().to_string())
+            .with_span(type_alias.line, type_alias.column));
+        }
+        if type_alias.is_public {
+            public_aliases.insert(type_alias.name.clone(), internal_name);
+        } else {
+            private_aliases.insert(type_alias.name.clone());
+        }
+    }
     Ok(ModuleSymbols {
         module_id,
         functions,
         public_functions,
         private_functions,
+        aliases,
+        public_aliases,
+        private_aliases,
         structs,
         public_structs,
         private_structs,
         enums,
         public_enums,
         private_enums,
+    })
+}
+
+fn rewrite_type_alias(
+    type_alias: &syntax::TypeAliasDecl,
+    module_symbols: &ModuleSymbols,
+    visible_types: &HashMap<String, String>,
+    private_imported_types: &HashSet<String>,
+    module_path: &Path,
+) -> Result<syntax::TypeAliasDecl, Diagnostic> {
+    Ok(syntax::TypeAliasDecl {
+        name: module_symbols
+            .aliases
+            .get(&type_alias.name)
+            .cloned()
+            .unwrap_or_else(|| format!("{}_{}", module_symbols.module_id, type_alias.name)),
+        ty: rewrite_type_name(
+            &type_alias.ty,
+            visible_types,
+            private_imported_types,
+            module_path,
+            type_alias.line,
+            type_alias.column,
+        )?,
+        is_public: type_alias.is_public,
+        line: type_alias.line,
+        column: type_alias.column,
     })
 }
 
@@ -2225,11 +2317,24 @@ fn rewrite_type_name(
 }
 
 fn merge_visible_types(
+    visible_aliases: &HashMap<String, String>,
     visible_structs: &HashMap<String, String>,
     visible_enums: &HashMap<String, String>,
     module_path: &Path,
 ) -> Result<HashMap<String, String>, Diagnostic> {
-    let mut visible_types = visible_structs.clone();
+    let mut visible_types = visible_aliases.clone();
+    for (name, internal_name) in visible_structs {
+        if let Some(existing) = visible_types.get(name)
+            && existing != internal_name
+        {
+            return Err(Diagnostic::new(
+                "import",
+                format!("imported type {name:?} collides with an existing name"),
+            )
+            .with_path(module_path.display().to_string()));
+        }
+        visible_types.insert(name.clone(), internal_name.clone());
+    }
     for (name, internal_name) in visible_enums {
         if let Some(existing) = visible_types.get(name)
             && existing != internal_name

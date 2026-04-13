@@ -293,10 +293,8 @@ fn normalize_package(
         if has_workspace {
             return Ok(None);
         }
-        return Err(
-            Diagnostic::new("manifest", "missing [package] section")
-                .with_path(path.display().to_string()),
-        );
+        return Err(Diagnostic::new("manifest", "missing [package] section")
+            .with_path(path.display().to_string()));
     };
     let package_name = required_field(package.name, path, "package.name")?;
     let package_version = required_field(package.version, path, "package.version")?;
