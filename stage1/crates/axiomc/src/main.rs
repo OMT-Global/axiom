@@ -3,8 +3,8 @@ use axiomc::json_contract;
 use axiomc::new_project::create_project;
 use axiomc::project::{
     BuildOptions, CheckOptions, RunOptions, TestOptions, build_project_with_options,
-    check_project_with_options, project_capabilities, run_project_with_options,
-    run_project_tests_with_options,
+    check_project_with_options, project_capabilities, run_project_tests_with_options,
+    run_project_with_options,
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

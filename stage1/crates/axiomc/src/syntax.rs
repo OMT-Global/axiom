@@ -5,6 +5,7 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
     pub imports: Vec<Import>,
+    pub type_aliases: Vec<TypeAliasDecl>,
     pub structs: Vec<StructDecl>,
     pub enums: Vec<EnumDecl>,
     pub functions: Vec<Function>,
@@ -24,6 +25,15 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
+    pub is_public: bool,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TypeAliasDecl {
+    pub name: String,
+    pub ty: TypeName,
     pub is_public: bool,
     pub line: usize,
     pub column: usize,
@@ -249,6 +259,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     let lines: Vec<&str> = source.lines().collect();
     let mut index = 0;
     let mut imports = Vec::new();
+    let mut type_aliases = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
     let mut functions = Vec::new();
@@ -293,6 +304,11 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
+        if trimmed.starts_with("type ") || trimmed.starts_with("pub type ") {
+            type_aliases.push(parse_type_alias(trimmed, path, line_no)?);
+            index += 1;
+            continue;
+        }
         if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
             structs.push(parse_struct(&lines, &mut index, path)?);
             continue;
@@ -305,6 +321,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     }
     Ok(Program {
         imports,
+        type_aliases,
         structs,
         enums,
         functions,
@@ -393,6 +410,14 @@ fn parse_stmt_list(
             .with_path(path.display().to_string())
             .with_span(line_no, 1));
         }
+        if trimmed.starts_with("type ") || trimmed.starts_with("pub type ") {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap only supports top-level type alias declarations",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1));
+        }
         if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
             return Err(Diagnostic::new(
                 "parse",
@@ -459,7 +484,7 @@ fn parse_stmt(
     let message = if in_block {
         "stage1 bootstrap currently supports let, print, if/else, while, match, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level import, struct, enum, fn, let, print, if/else, while, and match statements"
+        "stage1 bootstrap currently supports top-level import, type, struct, enum, fn, let, print, if/else, while, and match statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())
@@ -517,6 +542,46 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         params,
         return_ty,
         body,
+        is_public,
+        line: line_no,
+        column: 1,
+    })
+}
+
+fn parse_type_alias(
+    trimmed: &str,
+    path: &Path,
+    line_no: usize,
+) -> Result<TypeAliasDecl, Diagnostic> {
+    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub type ") {
+        (true, rest)
+    } else {
+        let rest = trimmed.strip_prefix("type ").ok_or_else(|| {
+            Diagnostic::new("parse", "invalid type alias declaration")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        (false, rest)
+    };
+    let equals = find_top_level_char(header, '=').ok_or_else(|| {
+        Diagnostic::new("parse", "type alias declaration is missing '='")
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1)
+    })?;
+    let name = header[..equals].trim();
+    validate_ident(name, path, line_no, if is_public { 10 } else { 6 })?;
+    let target = header[equals + 1..].trim();
+    if target.is_empty() {
+        return Err(
+            Diagnostic::new("parse", "type alias is missing a target type")
+                .with_path(path.display().to_string())
+                .with_span(line_no, equals + 2),
+        );
+    }
+    let ty = parse_type_name(target, path, line_no, equals + 2)?;
+    Ok(TypeAliasDecl {
+        name: name.to_string(),
+        ty,
         is_public,
         line: line_no,
         column: 1,
