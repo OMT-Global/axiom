@@ -188,9 +188,9 @@ capability (HTTPS/TLS land in a follow-on slice). It also includes
 wraps a new ungated `io_eprintln` intrinsic and establishes the "ambient
 stdio" precedent alongside the existing `print` statement. The remaining
 AG4.1 modules (`std.json`, `std.collections`, `std.sync`) require new
-stdlib intrinsics, the AG4.2 async runtime, or AG2 generics. AG4.2 async
-runtime, AG4.3 HTTP *server* support, and AG4.4 capability-aware integration
-work are still open.
+stdlib intrinsics, the AG4.2 async runtime, or AG2 generics. AG4.4
+capability-aware integration for the currently landed stdlib/runtime surface is
+now complete; AG4.2 async runtime and AG4.3 HTTP *server* support remain open.
 
 Work packages:
 
@@ -272,7 +272,12 @@ Work packages:
 - `AG4.3`: HTTP service support
   - HTTP server support is required at this milestone, not just client support.
 - `AG4.4`: capability-aware integration
-  - Stdlib operations must be capability-gated instead of acting like implicit host access.
+  - **landed for the current stdlib/runtime surface**: compiler-known
+    intrinsics enforce all six manifest flags, stdlib wrappers preserve that
+    enforcement against the importing package's manifest, capability-denied
+    programs fail before native execution, and the Rust suite covers both
+    per-wrapper denial paths and cross-package capability interactions
+    (`dependency_package_must_enable_its_own_capabilities`).
 
 Acceptance:
 
