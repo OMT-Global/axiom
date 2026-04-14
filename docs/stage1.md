@@ -86,7 +86,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Runtime and standard library gaps
 
 - The AG4.1 stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface) and `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic). The remaining AG4.1 modules (`std.json`, `std.collections`, `std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics and stay as follow-on work.
-- Capability enforcement exists for a compiler-known intrinsic slice across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`, and stdlib wrappers preserve that enforcement against the importing package's manifest, but the general stdlib module surface is still mostly empty.
+- Capability-aware integration is now in place for the current stage1 runtime surface: compiler-known intrinsics enforce all six manifest flags, stdlib wrappers preserve that enforcement against the importing package's manifest, capability-denied programs fail before native execution, and the Rust suite covers cross-package capability interactions (`dependency_package_must_enable_its_own_capabilities`) plus per-wrapper denial paths.
 - No async runtime, channels, cancellation, timers, or service-grade I/O surface exists.
 
 ### Backend and tooling gaps
