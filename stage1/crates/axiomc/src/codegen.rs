@@ -70,6 +70,11 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_assert_fail(message: String, line: i64, column: i64) -> i64 {\n");
+    out.push_str("    eprintln!(\"assertion failed at {}:{}: {}\", line, column, message);\n");
+    out.push_str("    std::process::exit(1)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_json_parse_int(text: String) -> Option<i64> {\n");
     out.push_str("    text.trim().parse::<i64>().ok()\n");
     out.push_str("}\n\n");
@@ -658,6 +663,41 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Literal(LiteralValue::Bool(value)) => value.to_string(),
         Expr::Literal(LiteralValue::String(value)) => format!("String::from({value:?})"),
         Expr::VarRef { name, .. } => name.clone(),
+        Expr::Call { name, args, .. } if name == "assert_true" => {
+            format!(
+                "{{ let condition = {}; if condition {{ 0i64 }} else {{ axiom_assert_fail(String::from(\"expected condition to be true\"), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_contains" => {
+            format!(
+                "{{ let haystack = {}; let needle = {}; if haystack.contains(&needle) {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected {{:?}} to contain {{:?}}\", haystack, needle), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_eq" => {
+            format!(
+                "{{ let left = {}; let right = {}; if left == right {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected left == right, left={{:?}}, right={{:?}}\", left, right), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_ne" => {
+            format!(
+                "{{ let left = {}; let right = {}; if left != right {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected left != right, both were {{:?}}\", left), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
         Expr::Call { name, args, .. } if name == "len" => {
             format!("({}).len() as i64", render_expr(&args[0]))
         }

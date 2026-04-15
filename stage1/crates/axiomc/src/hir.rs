@@ -1500,6 +1500,103 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
+            if name == "assert_true" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_true expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Bool), env, ctx)?;
+                if lowered.ty() != &Type::Bool {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_true expects a bool argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![lowered], *line, *column),
+                    ty: Type::Int,
+                });
+            }
+            if name == "assert_contains" {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_contains expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let haystack =
+                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if haystack.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "assert_contains expects a string haystack, got {}",
+                            haystack.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let needle = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if needle.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "assert_contains expects a string needle, got {}",
+                            needle.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&haystack, env)?;
+                move_lowered_value(&needle, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![haystack, needle], *line, *column),
+                    ty: Type::Int,
+                });
+            }
+            if name == "assert_eq" || name == "assert_ne" {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lhs = lower_expr(&args[0], env, ctx)?;
+                if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects int, bool, or string arguments, got {}",
+                            lhs.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let rhs = lower_expr_with_expected(&args[1], Some(lhs.ty()), env, ctx)?;
+                if rhs.ty() != lhs.ty() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} requires both arguments to share one type"),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&lhs, env)?;
+                move_lowered_value(&rhs, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![lhs, rhs], *line, *column),
+                    ty: Type::Int,
+                });
+            }
             if name == "len" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
@@ -3656,6 +3753,19 @@ fn lower_compare_op(op: syntax::CompareOp) -> CompareOp {
         syntax::CompareOp::Gt => CompareOp::Gt,
         syntax::CompareOp::Ge => CompareOp::Ge,
     }
+}
+
+fn with_assert_location(args: Vec<Expr>, line: usize, column: usize) -> Vec<Expr> {
+    let mut args = args;
+    args.push(Expr::Literal {
+        ty: Type::Int,
+        value: LiteralValue::Int(line as i64),
+    });
+    args.push(Expr::Literal {
+        ty: Type::Int,
+        value: LiteralValue::Int(column as i64),
+    });
+    args
 }
 
 fn static_bool_value(expr: &Expr) -> Option<bool> {

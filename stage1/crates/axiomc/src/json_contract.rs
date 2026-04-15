@@ -47,6 +47,7 @@ pub fn test_success(project: &Path, filter: Option<&str>, output: &TestOutput) -
         "filter": filter,
         "passed": output.passed,
         "failed": output.failed,
+        "skipped": output.skipped,
         "duration_ms": output.duration_ms,
         "cases": output.cases,
     })
