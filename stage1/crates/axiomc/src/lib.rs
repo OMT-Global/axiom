@@ -2199,7 +2199,59 @@ mod tests {
                 .as_ref()
                 .expect("error")
                 .message
-                .contains("stdout did not match")
+                .contains("expected \"99\\n\", got \"42\\n\"")
+        );
+    }
+
+    #[test]
+    fn run_project_tests_supports_builtin_assertions() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-assertions");
+        create_project(&project, Some("runner-assertions-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "let eq_ok: int = assert_eq(40 + 2, 42)\nlet true_ok: int = assert_true(42 == 42)\nlet ne_ok: int = assert_ne(\"alpha\", \"beta\")\nlet contains_ok: int = assert_contains(\"axiom stage1\", \"stage1\")\nprint eq_ok + true_ok + ne_ok + contains_ok\n",
+        )
+        .expect("write assertion test");
+        fs::write(project.join("src/main_test.stdout"), "0\n").expect("write assertion golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 1);
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.skipped, 0);
+        let case = output.cases.first().expect("test case");
+        assert_eq!(case.stdout, "0\n");
+        assert!(case.ok);
+    }
+
+    #[test]
+    fn run_project_tests_reports_assertion_failure_details() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-assertion-fail");
+        create_project(&project, Some("runner-assertion-fail-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "let failed: int = assert_eq(41, 42)\nprint failed\n",
+        )
+        .expect("write failing assertion test");
+        fs::remove_file(project.join("src/main_test.stdout")).expect("remove default golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 0);
+        assert_eq!(output.failed, 1);
+        assert_eq!(output.skipped, 0);
+        let case = output.cases.first().expect("test case");
+        assert!(!case.ok);
+        assert!(
+            case.stderr
+                .contains("assertion failed at 1:14: expected left == right, left=41, right=42")
+        );
+        assert!(
+            case.error
+                .as_ref()
+                .expect("error")
+                .message
+                .contains("expected left == right, left=41, right=42")
         );
     }
 
@@ -3875,6 +3927,7 @@ mod tests {
         );
         assert_eq!(payload["command"], "test");
         assert_eq!(payload["filter"], "main");
+        assert_eq!(payload["skipped"], 0);
         assert!(payload["duration_ms"].is_u64());
     }
 
