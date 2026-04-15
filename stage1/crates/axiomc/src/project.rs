@@ -80,6 +80,7 @@ pub struct TestOutput {
     pub cases: Vec<TestCaseResult>,
     pub passed: usize,
     pub failed: usize,
+    pub skipped: usize,
     pub duration_ms: u64,
 }
 
@@ -267,6 +268,7 @@ pub fn run_project_tests_with_options(
         cases,
         passed,
         failed,
+        skipped: 0,
         duration_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -753,14 +755,24 @@ fn run_test_case(
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let exit_code = output.status.code();
             let error = if !output.status.success() {
+                let detail = stderr.trim();
                 Some(
                     Diagnostic::new(
                         "test",
-                        format!(
-                            "test {:?} exited with status {}",
-                            test.name,
-                            exit_code.unwrap_or(1)
-                        ),
+                        if detail.is_empty() {
+                            format!(
+                                "test {:?} exited with status {}",
+                                test.name,
+                                exit_code.unwrap_or(1)
+                            )
+                        } else {
+                            format!(
+                                "test {:?} exited with status {}: {}",
+                                test.name,
+                                exit_code.unwrap_or(1),
+                                detail
+                            )
+                        },
                     )
                     .with_path(entry_path.display().to_string()),
                 )
@@ -769,7 +781,10 @@ fn run_test_case(
                     Some(
                         Diagnostic::new(
                             "test",
-                            format!("test {:?} stdout did not match expected output", test.name),
+                            format!(
+                                "test {:?} stdout did not match expected output: expected {:?}, got {:?}",
+                                test.name, expected_stdout, stdout
+                            ),
                         )
                         .with_path(entry_path.display().to_string()),
                     )

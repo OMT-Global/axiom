@@ -41,11 +41,17 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
 as a native artifact, executes it, and compares stdout against a sibling
-`*.stdout` golden file when present. Projects that need explicit naming or inline
-expectations can still declare `[[tests]]` entries in `axiom.toml`. The command
-now also accepts `--filter <pattern>` to run a subset of discovered tests by
-test name or entry path. Workspace-only roots are now supported as long as
-build/run commands select a concrete member package with `-p/--package`.
+`*.stdout` golden file when present. Tests can also use the built-in assertion
+helpers `assert_eq`, `assert_ne`, `assert_true`, and `assert_contains`; they
+return `0` on success so they fit in the current statement-only bootstrap
+surface via ordinary `let` bindings, and they abort the test with a source
+location plus expected/actual detail on failure. Projects that need explicit
+naming or inline expectations can still declare `[[tests]]` entries in
+`axiom.toml`. The command now also accepts `--filter <pattern>` to run a subset
+of discovered tests by test name or entry path, and the default CLI summary now
+prints `passed` / `failed` / `skipped` counts. Workspace-only roots are now
+supported as long as build/run commands select a concrete member package with
+`-p/--package`.
 
 ## JSON contract
 
@@ -53,8 +59,8 @@ build/run commands select a concrete member package with `-p/--package`.
 emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
 Successful payloads always include `ok`, `command`, and `project`, while
 `axiomc test --json` additionally reports `filter` and per-run/per-case
-`duration_ms`. Build payloads report the requested Rust target triple when
-`--target <triple>` is used.
+`duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
+requested Rust target triple when `--target <triple>` is used.
 
 ## Current gaps
 

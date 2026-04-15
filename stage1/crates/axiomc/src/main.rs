@@ -152,8 +152,8 @@ fn main() {
                         eprintln!("  duration: {} ms", case.duration_ms);
                     }
                     eprintln!(
-                        "passed: {} failed: {} duration: {} ms",
-                        output.passed, output.failed, output.duration_ms
+                        "passed: {} failed: {} skipped: {} duration: {} ms",
+                        output.passed, output.failed, output.skipped, output.duration_ms
                     );
                 }
                 if ok { 0 } else { 1 }
