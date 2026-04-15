@@ -185,6 +185,11 @@ pub enum Expr {
         line: usize,
         column: usize,
     },
+    Try {
+        expr: Box<Expr>,
+        line: usize,
+        column: usize,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -1302,6 +1307,19 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         return Err(Diagnostic::new("parse", "expression is empty")
             .with_path(path.display().to_string())
             .with_span(line_no, column));
+    }
+    if raw.ends_with('?') {
+        let inner = raw[..raw.len() - 1].trim_end();
+        if inner.is_empty() {
+            return Err(Diagnostic::new("parse", "try expression is missing an operand")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+        }
+        return Ok(Expr::Try {
+            expr: Box::new(parse_term(inner, path, line_no, column)?),
+            line: line_no,
+            column: column + inner.len(),
+        });
     }
     if let Some(dot) = find_last_top_level_char(raw, '.') {
         let base_raw = raw[..dot].trim();
