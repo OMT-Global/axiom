@@ -116,6 +116,10 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    Stringify {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -1900,22 +1904,29 @@ fn lower_expr_with_expected(
             let rhs = lower_expr(rhs, env, ctx)?;
             let lhs_ty = lhs.ty().clone();
             let rhs_ty = rhs.ty().clone();
-            if lhs_ty != rhs_ty || !matches!(lhs_ty, Type::Int | Type::String) {
-                return Err(
-                    Diagnostic::new(
-                        "type",
-                        format!(
-                            "operator '+' expects matching int or string operands, got {lhs_ty} and {rhs_ty}"
-                        ),
-                    )
-                    .with_span(*line, *column),
-                );
+            if lhs_ty == Type::Int && rhs_ty == Type::Int {
+                return Ok(Expr::BinaryAdd {
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                    ty: Type::Int,
+                });
             }
-            Ok(Expr::BinaryAdd {
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                ty: lhs_ty,
-            })
+            if lhs_ty == Type::String || rhs_ty == Type::String {
+                return Ok(Expr::BinaryAdd {
+                    lhs: Box::new(coerce_expr_to_string(lhs, *line, *column)?),
+                    rhs: Box::new(coerce_expr_to_string(rhs, *line, *column)?),
+                    ty: Type::String,
+                });
+            }
+            Err(
+                Diagnostic::new(
+                    "type",
+                    format!(
+                        "operator '+' expects int operands, or string concatenation with int/bool/string operands, got {lhs_ty} and {rhs_ty}"
+                    ),
+                )
+                .with_span(*line, *column),
+            )
         }
         syntax::Expr::BinaryCompare {
             op,
@@ -2630,10 +2641,28 @@ fn move_lowered_owner_value(
 ) -> Result<(), Diagnostic> {
     match expr {
         Expr::VarRef { .. } => move_lowered_value(expr, env),
+        Expr::Stringify { expr, .. } => move_lowered_owner_value(expr, env),
         Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
         Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
         Expr::Index { base, .. } => move_lowered_owner_value(base, env),
         _ => Ok(()),
+    }
+}
+
+fn coerce_expr_to_string(expr: Expr, line: usize, column: usize) -> Result<Expr, Diagnostic> {
+    match expr.ty() {
+        Type::String => Ok(expr),
+        Type::Int | Type::Bool => Ok(Expr::Stringify {
+            expr: Box::new(expr),
+            ty: Type::String,
+        }),
+        other => Err(
+            Diagnostic::new(
+                "type",
+                format!("string concatenation expects int, bool, or string operands, got {other}"),
+            )
+            .with_span(line, column),
+        ),
     }
 }
 
@@ -2720,6 +2749,7 @@ fn expr_borrow_origin(
                 .iter()
                 .map(|element| expr_borrow_origin(element, env, ctx)),
         ),
+        Expr::Stringify { expr, .. } => expr_borrow_origin(expr, env, ctx),
         Expr::TupleIndex { base, .. } => expr_borrow_origin(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             merge_borrow_origins(entries.iter().flat_map(|entry| {
@@ -2862,6 +2892,7 @@ fn expr_borrowed_owners(
             })
             .unwrap_or_default(),
         Expr::TupleLiteral { elements, .. } => collect_expr_borrowed_owners(elements, env, ctx),
+        Expr::Stringify { expr, .. } => expr_borrowed_owners(expr, env, ctx),
         Expr::TupleIndex { base, .. } => expr_borrowed_owners(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             let mut owners = HashSet::new();
@@ -3456,6 +3487,7 @@ impl Expr {
             Expr::Call { ty, .. } => ty,
             Expr::BinaryAdd { ty, .. } => ty,
             Expr::BinaryCompare { ty, .. } => ty,
+            Expr::Stringify { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
             Expr::FieldAccess { ty, .. } => ty,
             Expr::TupleLiteral { ty, .. } => ty,

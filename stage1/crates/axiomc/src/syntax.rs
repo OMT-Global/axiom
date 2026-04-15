@@ -1306,12 +1306,7 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         }
     }
     if raw.starts_with('"') {
-        let parsed = serde_json::from_str::<String>(raw).map_err(|_| {
-            Diagnostic::new("parse", "invalid string literal")
-                .with_path(path.display().to_string())
-                .with_span(line_no, column)
-        })?;
-        return Ok(Expr::Literal(Literal::String(parsed)));
+        return parse_string_literal_expr(raw, path, line_no, column);
     }
     if raw == "true" {
         return Ok(Expr::Literal(Literal::Bool(true)));
@@ -1343,6 +1338,117 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         line: line_no,
         column,
     })
+}
+
+fn parse_string_literal_expr(
+    raw: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<Expr, Diagnostic> {
+    let parsed = serde_json::from_str::<String>(raw).map_err(|_| {
+        Diagnostic::new("parse", "invalid string literal")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column)
+    })?;
+    let parts = split_interpolated_string(&parsed, path, line_no, column)?;
+    let mut iter = parts.into_iter();
+    let Some(first) = iter.next() else {
+        return Ok(Expr::Literal(Literal::String(String::new())));
+    };
+    let mut expr = match first {
+        InterpolatedPart::String(text) => Expr::Literal(Literal::String(text)),
+        InterpolatedPart::Expr(expr) => expr,
+    };
+    for part in iter {
+        let rhs = match part {
+            InterpolatedPart::String(text) => Expr::Literal(Literal::String(text)),
+            InterpolatedPart::Expr(expr) => expr,
+        };
+        expr = Expr::BinaryAdd {
+            lhs: Box::new(expr),
+            rhs: Box::new(rhs),
+            line: line_no,
+            column,
+        };
+    }
+    Ok(expr)
+}
+
+enum InterpolatedPart {
+    String(String),
+    Expr(Expr),
+}
+
+fn split_interpolated_string(
+    value: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<Vec<InterpolatedPart>, Diagnostic> {
+    let mut parts = Vec::new();
+    let mut literal = String::new();
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                if let Some(next) = chars.peek()
+                    && matches!(next, '{' | '}')
+                {
+                    literal.push(chars.next().expect("peeked brace"));
+                } else {
+                    literal.push(ch);
+                }
+            }
+            '{' => {
+                if !literal.is_empty() {
+                    parts.push(InterpolatedPart::String(std::mem::take(&mut literal)));
+                }
+                let mut expr_text = String::new();
+                let mut closed = false;
+                while let Some(inner) = chars.next() {
+                    if inner == '}' {
+                        closed = true;
+                        break;
+                    }
+                    expr_text.push(inner);
+                }
+                if !closed {
+                    return Err(Diagnostic::new(
+                        "parse",
+                        "interpolated string is missing a closing '}'",
+                    )
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column));
+                }
+                let expr_text = expr_text.trim();
+                if expr_text.is_empty() {
+                    return Err(Diagnostic::new(
+                        "parse",
+                        "interpolated string expression is empty",
+                    )
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column));
+                }
+                parts.push(InterpolatedPart::Expr(parse_expr(
+                    expr_text, path, line_no, column,
+                )?));
+            }
+            '}' => {
+                return Err(Diagnostic::new(
+                    "parse",
+                    "interpolated string has an unexpected '}'",
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+            }
+            _ => literal.push(ch),
+        }
+    }
+    if !literal.is_empty() || parts.is_empty() {
+        parts.push(InterpolatedPart::String(literal));
+    }
+    Ok(parts)
 }
 
 fn parse_array_literal_elements(

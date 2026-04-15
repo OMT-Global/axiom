@@ -110,6 +110,10 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    Stringify {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -240,6 +244,7 @@ impl Expr {
             Expr::Call { ty, .. } => ty.clone(),
             Expr::BinaryAdd { ty, .. } => ty.clone(),
             Expr::BinaryCompare { ty, .. } => ty.clone(),
+            Expr::Stringify { ty, .. } => ty.clone(),
             Expr::StructLiteral { ty, .. } => ty.clone(),
             Expr::FieldAccess { ty, .. } => ty.clone(),
             Expr::TupleLiteral { ty, .. } => ty.clone(),
@@ -387,6 +392,10 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             op: lower_compare_op(*op),
             lhs: Box::new(lower_expr(lhs)),
             rhs: Box::new(lower_expr(rhs)),
+            ty: lower_type(ty),
+        },
+        hir::Expr::Stringify { expr, ty } => Expr::Stringify {
+            expr: Box::new(lower_expr(expr)),
             ty: lower_type(ty),
         },
         hir::Expr::StructLiteral { name, fields, ty } => Expr::StructLiteral {

@@ -123,6 +123,51 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_string_interpolation() {
+        let source = "fn banner(name: string, count: int, ready: bool): string {\nreturn \"hello {name} #{count} ready={ready}\"\n}\n\nprint banner(\"stage1\", 7, true)\nprint \"literal \\\\{brace\\\\}\"\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn banner(name: String, count: i64, ready: bool) -> String {"));
+        assert!(rendered.contains("(count).to_string()"));
+        assert!(rendered.contains("(ready).to_string()"));
+        assert!(rendered.contains("String::from(\"literal {brace}\")"));
+    }
+
+    #[test]
+    fn build_project_runs_string_interpolation() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("interpolation");
+        create_project(&project, Some("interpolation-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn banner(name: string, count: int, ready: bool): string {\nreturn \"hello {name} #{count} ready={ready}\"\n}\n\nprint banner(\"stage1\", 7, true)\nprint \"literal \\\\{brace\\\\}\"\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "hello stage1 #7 ready=true\nliteral {brace}\n"
+        );
+    }
+
+    #[test]
+    fn parser_rejects_unclosed_string_interpolation() {
+        let source = "print \"hello {name\"\n";
+        let error = parse_program(source, Path::new("main.ax")).expect_err("parse error");
+        assert_eq!(error.kind, "parse");
+        assert!(
+            error
+                .message
+                .contains("interpolated string is missing a closing '}'")
+        );
+    }
+
+    #[test]
     fn parser_lowers_struct_literals_and_field_access() {
         let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
