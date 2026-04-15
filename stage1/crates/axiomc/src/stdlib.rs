@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides eight stdlib modules. Six are thin wrappers over
+//! Today this provides nine stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
@@ -32,13 +32,15 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client is http:// only: HTTPS/TLS land in a follow-on slice.
 //!
-//! The eighth module is the first stdlib surface not tied to a capability
+//! The eighth and ninth modules are stdlib surfaces not tied to a capability
 //! flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
 //!   intrinsic (writes a line to stderr and returns bytes written).
+//! * `std/json.ax` — scalar/string JSON parsing and serialization helpers on
+//!   top of new ungated `json_parse_*` / `json_stringify_*` intrinsics.
 //!
-//! The remaining AG4.1 modules (`std.json`, `std.collections`, `std.sync`)
+//! The remaining AG4.1 modules (`std.collections`, `std.sync`)
 //! require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics
 //! and land in follow-on slices.
 
@@ -87,6 +89,15 @@ const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "io.ax",
         "pub fn eprintln(text: string): int {\nreturn io_eprintln(text)\n}\n",
+    ),
+    (
+        "json.ax",
+        "pub fn parse_int(text: string): Option<int> {\nreturn json_parse_int(text)\n}\n\
+pub fn parse_bool(text: string): Option<bool> {\nreturn json_parse_bool(text)\n}\n\
+pub fn parse_string(text: string): Option<string> {\nreturn json_parse_string(text)\n}\n\
+pub fn stringify_int(value: int): string {\nreturn json_stringify_int(value)\n}\n\
+pub fn stringify_bool(value: bool): string {\nreturn json_stringify_bool(value)\n}\n\
+pub fn stringify_string(value: string): string {\nreturn json_stringify_string(value)\n}\n",
     ),
     (
         "http.ax",

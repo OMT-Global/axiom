@@ -70,6 +70,83 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_int(text: String) -> Option<i64> {\n");
+    out.push_str("    text.trim().parse::<i64>().ok()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_bool(text: String) -> Option<bool> {\n");
+    out.push_str("    match text.trim() {\n");
+    out.push_str("        \"true\" => Some(true),\n");
+    out.push_str("        \"false\" => Some(false),\n");
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_string(text: String) -> Option<String> {\n");
+    out.push_str("    let text = text.trim();\n");
+    out.push_str("    if text.len() < 2 || !text.starts_with('\"') || !text.ends_with('\"') {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut out = String::new();\n");
+    out.push_str("    let mut chars = text[1..text.len() - 1].chars();\n");
+    out.push_str("    while let Some(ch) = chars.next() {\n");
+    out.push_str("        if ch != '\\\\' {\n");
+    out.push_str("            out.push(ch);\n");
+    out.push_str("            continue;\n");
+    out.push_str("        }\n");
+    out.push_str("        match chars.next()? {\n");
+    out.push_str("            '\"' => out.push('\"'),\n");
+    out.push_str("            '\\\\' => out.push('\\\\'),\n");
+    out.push_str("            '/' => out.push('/'),\n");
+    out.push_str("            'b' => out.push('\\u{0008}'),\n");
+    out.push_str("            'f' => out.push('\\u{000C}'),\n");
+    out.push_str("            'n' => out.push('\\n'),\n");
+    out.push_str("            'r' => out.push('\\r'),\n");
+    out.push_str("            't' => out.push('\\t'),\n");
+    out.push_str("            'u' => {\n");
+    out.push_str("                let mut value = 0u32;\n");
+    out.push_str("                for _ in 0..4 {\n");
+    out.push_str("                    value = (value << 4) + chars.next()?.to_digit(16)?;\n");
+    out.push_str("                }\n");
+    out.push_str("                out.push(char::from_u32(value)?);\n");
+    out.push_str("            }\n");
+    out.push_str("            _ => return None,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    Some(out)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_escape_string(value: &str) -> String {\n");
+    out.push_str("    let mut out = String::from(\"\\\"\");\n");
+    out.push_str("    for ch in value.chars() {\n");
+    out.push_str("        match ch {\n");
+    out.push_str("            '\"' => out.push_str(\"\\\\\\\"\"),\n");
+    out.push_str("            '\\\\' => out.push_str(\"\\\\\\\\\"),\n");
+    out.push_str("            '\\n' => out.push_str(\"\\\\n\"),\n");
+    out.push_str("            '\\r' => out.push_str(\"\\\\r\"),\n");
+    out.push_str("            '\\t' => out.push_str(\"\\\\t\"),\n");
+    out.push_str("            '\\u{0008}' => out.push_str(\"\\\\b\"),\n");
+    out.push_str("            '\\u{000C}' => out.push_str(\"\\\\f\"),\n");
+    out.push_str("            ch if ch.is_control() => out.push_str(&format!(\"\\\\u{:04x}\", ch as u32)),\n");
+    out.push_str("            _ => out.push(ch),\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    out.push('\"');\n");
+    out.push_str("    out\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_stringify_int(value: i64) -> String {\n");
+    out.push_str("    value.to_string()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_stringify_bool(value: bool) -> String {\n");
+    out.push_str("    value.to_string()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_stringify_string(value: String) -> String {\n");
+    out.push_str("    axiom_json_escape_string(&value)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    std::fs::read_to_string(path).ok()\n");
     out.push_str("}\n\n");
@@ -586,6 +663,24 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "io_eprintln" => {
             format!("axiom_io_eprintln({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_int" => {
+            format!("axiom_json_parse_int({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_bool" => {
+            format!("axiom_json_parse_bool({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_string" => {
+            format!("axiom_json_parse_string({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_stringify_int" => {
+            format!("axiom_json_stringify_int({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_stringify_bool" => {
+            format!("axiom_json_stringify_bool({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_stringify_string" => {
+            format!("axiom_json_stringify_string({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))

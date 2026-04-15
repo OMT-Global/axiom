@@ -1,0 +1,32 @@
+import "std/json.ax"
+
+match parse_int("42") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+match parse_string("\"agent\"") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+print stringify_bool(true)
+print stringify_int(7)
+print stringify_string("agent")
+
+match parse_bool("123") {
+Some(_value) {
+print "bad"
+}
+None {
+print "none"
+}
+}
