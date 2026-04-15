@@ -2118,9 +2118,11 @@ fn rewrite_expr(
             expr: Box::new(rewrite_expr(
                 expr,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
