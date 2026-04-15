@@ -2574,6 +2574,45 @@ mod tests {
     }
 
     #[test]
+    fn build_project_emits_native_binary_with_local_consts() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("local-consts");
+        create_project(&project, Some("local-consts-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const ANSWER: int = 40 + 2\nconst READY: bool = ANSWER == 42\nconst LABEL: string = \"stage\" + \"1\"\nprint ANSWER\nprint READY\nprint LABEL\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with local consts");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\nstage1\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_imported_public_consts() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-consts");
+        create_project(&project, Some("public-consts-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"values.ax\"\nprint ANSWER\nprint READY\nprint LABEL\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/values.ax"),
+            "pub const ANSWER: int = 40 + 2\npub const READY: bool = ANSWER == 42\npub const LABEL: string = \"stage\" + \"1\"\n",
+        )
+        .expect("write values");
+        let built = build_project(&project).expect("build project with imported consts");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\nstage1\n");
+    }
+
+    #[test]
     fn check_project_rejects_missing_import() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-import");
@@ -2669,6 +2708,36 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_recursive_const() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-const");
+        create_project(&project, Some("recursive-const-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const LOOP: int = LOOP\nprint LOOP\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("recursive const should fail");
+        assert!(error.message.contains("recursive const"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_const_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("const-type-mismatch");
+        create_project(&project, Some("const-type-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const ANSWER: bool = 42\nprint ANSWER\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("const type mismatch should fail");
+        assert!(error.message.contains("expects bool, got int"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn check_project_rejects_type_alias_inside_function_block() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("block-type-alias");
@@ -2683,6 +2752,25 @@ mod tests {
             error
                 .message
                 .contains("only supports top-level type alias declarations")
+        );
+        assert_eq!(error.kind, "parse");
+    }
+
+    #[test]
+    fn check_project_rejects_const_inside_function_block() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("block-const");
+        create_project(&project, Some("block-const-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn main(): int {\nconst ANSWER: int = 42\nreturn ANSWER\n}\n\nprint main()\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("block const should fail");
+        assert!(
+            error
+                .message
+                .contains("only supports top-level const declarations")
         );
         assert_eq!(error.kind, "parse");
     }
@@ -2721,7 +2809,7 @@ mod tests {
         let error = check_project(&project).expect_err("module top-level statements should fail");
         assert!(
             error.message.contains(
-                "may only contain imports, type alias declarations, struct declarations, enum declarations, and function declarations"
+                "may only contain imports, const declarations, type alias declarations, struct declarations, enum declarations, and function declarations"
             )
         );
         assert_eq!(error.kind, "import");
