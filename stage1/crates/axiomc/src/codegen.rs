@@ -773,6 +773,7 @@ fn render_expr(expr: &Expr) -> String {
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
         }
+        Expr::Try { expr, .. } => format!("({})?", render_expr(expr)),
         Expr::StructLiteral { name, fields, .. } => {
             let rendered_fields = fields
                 .iter()

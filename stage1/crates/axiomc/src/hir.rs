@@ -116,6 +116,10 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    Try {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -2273,6 +2277,73 @@ fn lower_expr_with_expected(
                 ty: Type::Bool,
             })
         }
+        syntax::Expr::Try { expr, line, column } => {
+            let Some(current_return) = ctx.current_return.as_ref() else {
+                return Err(
+                    Diagnostic::new("control", "`?` is only valid inside a function")
+                        .with_span(*line, *column),
+                );
+            };
+            let wrapped_expected = expected.and_then(|inner| match current_return {
+                Type::Option(_) => Some(Type::Option(Box::new(inner.clone()))),
+                Type::Result(_, err) => {
+                    Some(Type::Result(Box::new(inner.clone()), Box::new((**err).clone())))
+                }
+                _ => None,
+            });
+            let lowered = if let Some(wrapped_expected) = wrapped_expected.as_ref() {
+                lower_expr_with_expected(expr, Some(wrapped_expected), env, ctx)?
+            } else {
+                lower_expr(expr, env, ctx)?
+            };
+            let result_ty = match (lowered.ty(), current_return) {
+                (Type::Option(inner), Type::Option(_)) => (**inner).clone(),
+                (Type::Result(ok, err), Type::Result(_, return_err)) => {
+                    if err.as_ref() != return_err.as_ref() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "`?` cannot propagate Result error type {err} from a function returning Result<_, {return_err}>"
+                            ),
+                        )
+                        .with_span(*line, *column));
+                    }
+                    (**ok).clone()
+                }
+                (Type::Option(_), other) => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "`?` on Option<T> requires the enclosing function to return Option<_>, got {other}"
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                (Type::Result(_, _), other) => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "`?` on Result<T, E> requires the enclosing function to return Result<_, E>, got {other}"
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                (other, _) => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("`?` expects an Option<T> or Result<T, E> expression, got {other}"),
+                    )
+                    .with_span(*line, *column));
+                }
+            };
+            if !lowered.ty().is_copy() {
+                move_lowered_owner_value(&lowered, env)?;
+            }
+            Ok(Expr::Try {
+                expr: Box::new(lowered),
+                ty: result_ty,
+            })
+        }
         syntax::Expr::StructLiteral {
             name,
             fields,
@@ -2937,6 +3008,7 @@ fn move_lowered_owner_value(
 ) -> Result<(), Diagnostic> {
     match expr {
         Expr::VarRef { .. } => move_lowered_value(expr, env),
+        Expr::Try { expr, .. } => move_lowered_owner_value(expr, env),
         Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
         Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
         Expr::Index { base, .. } => move_lowered_owner_value(base, env),
@@ -3027,6 +3099,7 @@ fn expr_borrow_origin(
                 .iter()
                 .map(|element| expr_borrow_origin(element, env, ctx)),
         ),
+        Expr::Try { expr, .. } => expr_borrow_origin(expr, env, ctx),
         Expr::TupleIndex { base, .. } => expr_borrow_origin(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             merge_borrow_origins(entries.iter().flat_map(|entry| {
@@ -3169,6 +3242,7 @@ fn expr_borrowed_owners(
             })
             .unwrap_or_default(),
         Expr::TupleLiteral { elements, .. } => collect_expr_borrowed_owners(elements, env, ctx),
+        Expr::Try { expr, .. } => expr_borrowed_owners(expr, env, ctx),
         Expr::TupleIndex { base, .. } => expr_borrowed_owners(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             let mut owners = HashSet::new();
@@ -3818,6 +3892,7 @@ impl Expr {
             Expr::Call { ty, .. } => ty,
             Expr::BinaryAdd { ty, .. } => ty,
             Expr::BinaryCompare { ty, .. } => ty,
+            Expr::Try { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
             Expr::FieldAccess { ty, .. } => ty,
             Expr::TupleLiteral { ty, .. } => ty,
@@ -3894,6 +3969,7 @@ impl syntax::Expr {
             | syntax::Expr::Call { line, .. }
             | syntax::Expr::BinaryAdd { line, .. }
             | syntax::Expr::BinaryCompare { line, .. }
+            | syntax::Expr::Try { line, .. }
             | syntax::Expr::StructLiteral { line, .. }
             | syntax::Expr::FieldAccess { line, .. }
             | syntax::Expr::TupleLiteral { line, .. }
@@ -3912,6 +3988,7 @@ impl syntax::Expr {
             | syntax::Expr::Call { column, .. }
             | syntax::Expr::BinaryAdd { column, .. }
             | syntax::Expr::BinaryCompare { column, .. }
+            | syntax::Expr::Try { column, .. }
             | syntax::Expr::StructLiteral { column, .. }
             | syntax::Expr::FieldAccess { column, .. }
             | syntax::Expr::TupleLiteral { column, .. }

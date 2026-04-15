@@ -1164,6 +1164,9 @@ fn validate_expr_capabilities(
             validate_expr_capabilities(module_path, lhs, capabilities)?;
             validate_expr_capabilities(module_path, rhs, capabilities)
         }
+        syntax::Expr::Try { expr, .. } => {
+            validate_expr_capabilities(module_path, expr, capabilities)
+        }
         syntax::Expr::StructLiteral { fields, .. } => {
             for field in fields {
                 validate_expr_capabilities(module_path, &field.expr, capabilities)?;
@@ -2105,6 +2108,19 @@ fn rewrite_expr(
                 visible_types,
                 private_imported,
                 private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
+            expr: Box::new(rewrite_expr(
+                expr,
+                visible_functions,
+                visible_structs,
+                visible_types,
+                private_imported,
                 private_imported_types,
                 module_path,
             )?),

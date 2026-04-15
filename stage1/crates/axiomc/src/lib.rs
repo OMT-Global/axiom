@@ -300,6 +300,34 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_try_operator() {
+        let source = "fn maybe_label(ready: bool): Option<string> {\nif ready {\nreturn Some(\"ready\")\n}\nreturn None\n}\n\nfn load_count(ready: bool): Result<int, string> {\nif ready {\nreturn Ok(7)\n}\nreturn Err(\"boom\")\n}\n\nfn require_label(ready: bool): Option<string> {\nlet label: string = maybe_label(ready)?\nreturn Some(label)\n}\n\nfn next_count(ready: bool): Result<int, string> {\nlet count: int = load_count(ready)?\nreturn Ok(count + 1)\n}\n\nprint \"ready\"\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("(maybe_label(ready))?"));
+        assert!(rendered.contains("(load_count(ready))?"));
+    }
+
+    #[test]
+    fn build_project_runs_try_operator() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-operator");
+        create_project(&project, Some("try-operator-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn maybe_label(ready: bool): Option<string> {\nif ready {\nreturn Some(\"ready\")\n}\nreturn None\n}\n\nfn load_count(ready: bool): Result<int, string> {\nif ready {\nreturn Ok(7)\n}\nreturn Err(\"boom\")\n}\n\nfn require_label(ready: bool): Option<string> {\nlet label: string = maybe_label(ready)?\nreturn Some(label)\n}\n\nfn next_count(ready: bool): Result<int, string> {\nlet count: int = load_count(ready)?\nreturn Ok(count + 1)\n}\n\nfn render_option(value: Option<string>): string {\nmatch value {\nSome(label) {\nreturn label\n}\nNone {\nreturn \"none\"\n}\n}\n}\n\nfn render_result(value: Result<int, string>): string {\nmatch value {\nOk(count) {\nreturn \"ok\"\n}\nErr(message) {\nreturn message\n}\n}\n}\n\nprint render_option(require_label(true))\nprint render_option(require_label(false))\nprint render_result(next_count(true))\nprint render_result(next_count(false))\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\nnone\nok\nboom\n");
+    }
+
+    #[test]
     fn parser_lowers_enums_and_match() {
         let source = "enum Status {\nReady\nFailed\n}\n\nfn label(status: Status): string {\nmatch status {\nReady {\nreturn \"ready\"\n}\nFailed {\nreturn \"failed\"\n}\n}\n}\n\nlet status: Status = Ready\nprint label(status)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2539,6 +2567,40 @@ mod tests {
         let error = check_project(&project).expect_err("return mismatch should fail");
         assert!(error.message.contains("return expects int, got string"));
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_try_without_option_or_result_return() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-return-mismatch");
+        create_project(&project, Some("try-return-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn maybe_label(): Option<string> {\nreturn Some(\"ready\")\n}\n\nfn bad(): int {\nlet label: string = maybe_label()?\nreturn 0\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("type error");
+        assert_eq!(error.kind, "type");
+        assert!(
+            error
+                .message
+                .contains("`?` on Option<T> requires the enclosing function to return Option<_>")
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_try_result_error_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-result-error-mismatch");
+        create_project(&project, Some("try-result-error-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn load(): Result<int, string> {\nreturn Err(\"boom\")\n}\n\nfn bad(): Result<int, int> {\nlet count: int = load()?\nreturn Ok(count)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("type error");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("`?` cannot propagate Result error type string"));
     }
 
     #[test]
