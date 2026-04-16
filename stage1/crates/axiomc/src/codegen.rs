@@ -11,7 +11,77 @@ pub fn render_rust(program: &Program) -> String {
     let type_context = TypeContext::new(program);
     let mut out = String::new();
     out.push_str("#[allow(unused_imports)]\n");
-    out.push_str("use std::collections::HashMap;\n\n");
+    out.push_str("use std::cell::RefCell;\n");
+    out.push_str("use std::collections::HashMap;\n");
+    out.push_str("use std::panic::{self, PanicHookInfo};\n");
+    out.push_str("use std::sync::Once;\n\n");
+    out.push_str("thread_local! {\n");
+    out.push_str(
+        "    static AXIOM_STACK: RefCell<Vec<AxiomStackFrame>> = const { RefCell::new(Vec::new()) };\n",
+    );
+    out.push_str("}\n\n");
+    out.push_str("#[derive(Clone)]\n");
+    out.push_str("struct AxiomStackFrame {\n");
+    out.push_str("    function: &'static str,\n");
+    out.push_str("    file: &'static str,\n");
+    out.push_str("    line: usize,\n");
+    out.push_str("    column: usize,\n");
+    out.push_str("}\n\n");
+    out.push_str("struct AxiomFrameGuard;\n\n");
+    out.push_str("impl AxiomFrameGuard {\n");
+    out.push_str(
+        "    fn new(function: &'static str, file: &'static str, line: usize, column: usize) -> Self {\n",
+    );
+    out.push_str("        AXIOM_STACK.with(|stack| {\n");
+    out.push_str("            stack.borrow_mut().push(AxiomStackFrame {\n");
+    out.push_str("                function,\n");
+    out.push_str("                file,\n");
+    out.push_str("                line,\n");
+    out.push_str("                column,\n");
+    out.push_str("            });\n");
+    out.push_str("        });\n");
+    out.push_str("        Self\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("impl Drop for AxiomFrameGuard {\n");
+    out.push_str("    fn drop(&mut self) {\n");
+    out.push_str("        AXIOM_STACK.with(|stack| {\n");
+    out.push_str("            stack.borrow_mut().pop();\n");
+    out.push_str("        });\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("fn axiom_panic_message(info: &PanicHookInfo<'_>) -> String {\n");
+    out.push_str("    if let Some(message) = info.payload().downcast_ref::<&str>() {\n");
+    out.push_str("        (*message).to_string()\n");
+    out.push_str("    } else if let Some(message) = info.payload().downcast_ref::<String>() {\n");
+    out.push_str("        message.clone()\n");
+    out.push_str("    } else {\n");
+    out.push_str("        String::from(\"panic\")\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("fn axiom_install_panic_hook() {\n");
+    out.push_str("    static AXIOM_PANIC_HOOK: Once = Once::new();\n");
+    out.push_str("    AXIOM_PANIC_HOOK.call_once(|| {\n");
+    out.push_str("        panic::set_hook(Box::new(|info| {\n");
+    out.push_str("            eprintln!(\"panic: {}\", axiom_panic_message(info));\n");
+    out.push_str("            let frames = AXIOM_STACK.with(|stack| stack.borrow().clone());\n");
+    out.push_str("            if frames.is_empty() {\n");
+    out.push_str("                eprintln!(\"Axiom stack trace: <empty>\");\n");
+    out.push_str("                return;\n");
+    out.push_str("            }\n");
+    out.push_str("            eprintln!(\"Axiom stack trace (most recent call last):\");\n");
+    out.push_str("            for frame in frames.iter().rev() {\n");
+    out.push_str("                eprintln!(\n");
+    out.push_str("                    \"  at {} ({}:{}:{})\",\n");
+    out.push_str("                    frame.function,\n");
+    out.push_str("                    frame.file,\n");
+    out.push_str("                    frame.line,\n");
+    out.push_str("                    frame.column\n");
+    out.push_str("                );\n");
+    out.push_str("            }\n");
+    out.push_str("        }));\n");
+    out.push_str("    });\n");
+    out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_array_get<T: Copy>(values: &[T], index: i64) -> T {\n");
     out.push_str(
@@ -280,6 +350,11 @@ pub fn render_rust(program: &Program) -> String {
         out.push('\n');
     }
     out.push_str("fn main() {\n");
+    out.push_str("    axiom_install_panic_hook();\n");
+    out.push_str(&format!(
+        "    let _axiom_frame = AxiomFrameGuard::new(\"<main>\", {:?}, 1, 1);\n",
+        program.path
+    ));
     for stmt in &program.stmts {
         render_stmt(stmt, &type_context, &mut out, 1);
     }
@@ -477,6 +552,10 @@ fn render_function(function: &Function, type_context: &TypeContext<'_>, out: &mu
         lifetime,
         params,
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
+    ));
+    out.push_str(&format!(
+        "    let _axiom_frame = AxiomFrameGuard::new({:?}, {:?}, {}, {});\n",
+        function.source_name, function.path, function.line, function.column
     ));
     for stmt in &function.body {
         render_stmt(stmt, type_context, out, 1);

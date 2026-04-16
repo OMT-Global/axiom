@@ -3,6 +3,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
+    pub path: String,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub functions: Vec<Function>,
@@ -37,9 +38,13 @@ pub struct EnumVariantDef {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    pub source_name: String,
+    pub path: String,
     pub params: Vec<Param>,
     pub return_ty: Type,
     pub body: Vec<Stmt>,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -213,6 +218,7 @@ pub struct StructFieldValue {
 
 pub fn lower(program: &hir::Program) -> Program {
     Program {
+        path: program.path.clone(),
         structs: program.structs.iter().map(lower_struct).collect(),
         enums: program.enums.iter().map(lower_enum).collect(),
         functions: program.functions.iter().map(lower_function).collect(),
@@ -280,9 +286,13 @@ fn count_stmt(stmt: &Stmt) -> usize {
 fn lower_function(function: &hir::Function) -> Function {
     Function {
         name: function.name.clone(),
+        source_name: function.source_name.clone(),
+        path: function.path.clone(),
         params: function.params.iter().map(lower_param).collect(),
         return_ty: lower_type(&function.return_ty),
         body: function.body.iter().map(lower_stmt).collect(),
+        line: function.line,
+        column: function.column,
     }
 }
 
