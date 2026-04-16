@@ -1,5 +1,6 @@
     #!/usr/bin/env bash
     set -euo pipefail
+    umask 0077
 
     mode="${1:-"--all-files"}"
     ignore_globs=("scripts/check-detect-secrets.sh")
