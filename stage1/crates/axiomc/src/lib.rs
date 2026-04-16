@@ -319,6 +319,34 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_try_operator() {
+        let source = "fn maybe_label(ready: bool): Option<string> {\nif ready {\nreturn Some(\"ready\")\n}\nreturn None\n}\n\nfn load_count(ready: bool): Result<int, string> {\nif ready {\nreturn Ok(7)\n}\nreturn Err(\"boom\")\n}\n\nfn require_label(ready: bool): Option<string> {\nlet label: string = maybe_label(ready)?\nreturn Some(label)\n}\n\nfn next_count(ready: bool): Result<int, string> {\nlet count: int = load_count(ready)?\nreturn Ok(count + 1)\n}\n\nprint \"ready\"\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("(maybe_label(ready))?"));
+        assert!(rendered.contains("(load_count(ready))?"));
+    }
+
+    #[test]
+    fn build_project_runs_try_operator() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-operator");
+        create_project(&project, Some("try-operator-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn maybe_label(ready: bool): Option<string> {\nif ready {\nreturn Some(\"ready\")\n}\nreturn None\n}\n\nfn load_count(ready: bool): Result<int, string> {\nif ready {\nreturn Ok(7)\n}\nreturn Err(\"boom\")\n}\n\nfn require_label(ready: bool): Option<string> {\nlet label: string = maybe_label(ready)?\nreturn Some(label)\n}\n\nfn next_count(ready: bool): Result<int, string> {\nlet count: int = load_count(ready)?\nreturn Ok(count + 1)\n}\n\nfn render_option(value: Option<string>): string {\nmatch value {\nSome(label) {\nreturn label\n}\nNone {\nreturn \"none\"\n}\n}\n}\n\nfn render_result(value: Result<int, string>): string {\nmatch value {\nOk(count) {\nreturn \"ok\"\n}\nErr(message) {\nreturn message\n}\n}\n}\n\nprint render_option(require_label(true))\nprint render_option(require_label(false))\nprint render_result(next_count(true))\nprint render_result(next_count(false))\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\nnone\nok\nboom\n");
+    }
+
+    #[test]
     fn parser_lowers_enums_and_match() {
         let source = "enum Status {\nReady\nFailed\n}\n\nfn label(status: Status): string {\nmatch status {\nReady {\nreturn \"ready\"\n}\nFailed {\nreturn \"failed\"\n}\n}\n}\n\nlet status: Status = Ready\nprint label(status)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -1909,6 +1937,92 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_json_module() {
+        // `std/json.ax` stays ungated in stage1: parsing and serialising scalar
+        // JSON values does not cross a host capability boundary.
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-json-app");
+        create_project(&project, Some("stdlib-json-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-json-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "42\nagent\ntrue\n7\n\"agent\"\nnone\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\nagent\ntrue\n7\n\"agent\"\nnone\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_json_with_wrong_argument_type() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-json-bad-arg");
+        create_project(&project, Some("stdlib-json-bad-arg")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-json-bad-arg",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/json.ax\"\nmatch parse_int(true) {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected json type error");
+        assert!(
+            err.message.contains("expects argument type string, got bool"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_imports_synthetic_stdlib_http_module() {
         // `std/http.ax` wraps a new `http_get` intrinsic that shares the
         // existing `net` capability. The test spins up a local TCP listener
@@ -2211,7 +2325,59 @@ mod tests {
                 .as_ref()
                 .expect("error")
                 .message
-                .contains("stdout did not match")
+                .contains("expected \"99\\n\", got \"42\\n\"")
+        );
+    }
+
+    #[test]
+    fn run_project_tests_supports_builtin_assertions() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-assertions");
+        create_project(&project, Some("runner-assertions-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "let eq_ok: int = assert_eq(40 + 2, 42)\nlet true_ok: int = assert_true(42 == 42)\nlet ne_ok: int = assert_ne(\"alpha\", \"beta\")\nlet contains_ok: int = assert_contains(\"axiom stage1\", \"stage1\")\nprint eq_ok + true_ok + ne_ok + contains_ok\n",
+        )
+        .expect("write assertion test");
+        fs::write(project.join("src/main_test.stdout"), "0\n").expect("write assertion golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 1);
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.skipped, 0);
+        let case = output.cases.first().expect("test case");
+        assert_eq!(case.stdout, "0\n");
+        assert!(case.ok);
+    }
+
+    #[test]
+    fn run_project_tests_reports_assertion_failure_details() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-assertion-fail");
+        create_project(&project, Some("runner-assertion-fail-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "let failed: int = assert_eq(41, 42)\nprint failed\n",
+        )
+        .expect("write failing assertion test");
+        fs::remove_file(project.join("src/main_test.stdout")).expect("remove default golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 0);
+        assert_eq!(output.failed, 1);
+        assert_eq!(output.skipped, 0);
+        let case = output.cases.first().expect("test case");
+        assert!(!case.ok);
+        assert!(
+            case.stderr
+                .contains("assertion failed at 1:14: expected left == right, left=41, right=42")
+        );
+        assert!(
+            case.error
+                .as_ref()
+                .expect("error")
+                .message
+                .contains("expected left == right, left=41, right=42")
         );
     }
 
@@ -2502,6 +2668,40 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_try_without_option_or_result_return() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-return-mismatch");
+        create_project(&project, Some("try-return-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn maybe_label(): Option<string> {\nreturn Some(\"ready\")\n}\n\nfn bad(): int {\nlet label: string = maybe_label()?\nreturn 0\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("type error");
+        assert_eq!(error.kind, "type");
+        assert!(
+            error
+                .message
+                .contains("`?` on Option<T> requires the enclosing function to return Option<_>")
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_try_result_error_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-result-error-mismatch");
+        create_project(&project, Some("try-result-error-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn load(): Result<int, string> {\nreturn Err(\"boom\")\n}\n\nfn bad(): Result<int, int> {\nlet count: int = load()?\nreturn Ok(count)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("type error");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("`?` cannot propagate Result error type string"));
+    }
+
+    #[test]
     fn check_project_rejects_missing_function_return() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-return");
@@ -2583,6 +2783,45 @@ mod tests {
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n2\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_local_consts() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("local-consts");
+        create_project(&project, Some("local-consts-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const ANSWER: int = 40 + 2\nconst READY: bool = ANSWER == 42\nconst LABEL: string = \"stage\" + \"1\"\nprint ANSWER\nprint READY\nprint LABEL\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with local consts");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\nstage1\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_imported_public_consts() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-consts");
+        create_project(&project, Some("public-consts-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"values.ax\"\nprint ANSWER\nprint READY\nprint LABEL\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/values.ax"),
+            "pub const ANSWER: int = 40 + 2\npub const READY: bool = ANSWER == 42\npub const LABEL: string = \"stage\" + \"1\"\n",
+        )
+        .expect("write values");
+        let built = build_project(&project).expect("build project with imported consts");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\nstage1\n");
     }
 
     #[test]
@@ -2681,6 +2920,36 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_recursive_const() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-const");
+        create_project(&project, Some("recursive-const-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const LOOP: int = LOOP\nprint LOOP\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("recursive const should fail");
+        assert!(error.message.contains("recursive const"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_const_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("const-type-mismatch");
+        create_project(&project, Some("const-type-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const ANSWER: bool = 42\nprint ANSWER\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("const type mismatch should fail");
+        assert!(error.message.contains("expects bool, got int"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn check_project_rejects_type_alias_inside_function_block() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("block-type-alias");
@@ -2695,6 +2964,25 @@ mod tests {
             error
                 .message
                 .contains("only supports top-level type alias declarations")
+        );
+        assert_eq!(error.kind, "parse");
+    }
+
+    #[test]
+    fn check_project_rejects_const_inside_function_block() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("block-const");
+        create_project(&project, Some("block-const-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn main(): int {\nconst ANSWER: int = 42\nreturn ANSWER\n}\n\nprint main()\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("block const should fail");
+        assert!(
+            error
+                .message
+                .contains("only supports top-level const declarations")
         );
         assert_eq!(error.kind, "parse");
     }
@@ -2733,7 +3021,7 @@ mod tests {
         let error = check_project(&project).expect_err("module top-level statements should fail");
         assert!(
             error.message.contains(
-                "may only contain imports, type alias declarations, struct declarations, enum declarations, and function declarations"
+                "may only contain imports, const declarations, type alias declarations, struct declarations, enum declarations, and function declarations"
             )
         );
         assert_eq!(error.kind, "import");
@@ -3887,6 +4175,7 @@ mod tests {
         );
         assert_eq!(payload["command"], "test");
         assert_eq!(payload["filter"], "main");
+        assert_eq!(payload["skipped"], 0);
         assert!(payload["duration_ms"].is_u64());
     }
 

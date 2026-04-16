@@ -140,6 +140,88 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_assert_fail(message: String, line: i64, column: i64) -> i64 {\n");
+    out.push_str("    eprintln!(\"assertion failed at {}:{}: {}\", line, column, message);\n");
+    out.push_str("    std::process::exit(1)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_int(text: String) -> Option<i64> {\n");
+    out.push_str("    text.trim().parse::<i64>().ok()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_bool(text: String) -> Option<bool> {\n");
+    out.push_str("    match text.trim() {\n");
+    out.push_str("        \"true\" => Some(true),\n");
+    out.push_str("        \"false\" => Some(false),\n");
+    out.push_str("        _ => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_string(text: String) -> Option<String> {\n");
+    out.push_str("    let text = text.trim();\n");
+    out.push_str("    if text.len() < 2 || !text.starts_with('\"') || !text.ends_with('\"') {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut out = String::new();\n");
+    out.push_str("    let mut chars = text[1..text.len() - 1].chars();\n");
+    out.push_str("    while let Some(ch) = chars.next() {\n");
+    out.push_str("        if ch != '\\\\' {\n");
+    out.push_str("            out.push(ch);\n");
+    out.push_str("            continue;\n");
+    out.push_str("        }\n");
+    out.push_str("        match chars.next()? {\n");
+    out.push_str("            '\"' => out.push('\"'),\n");
+    out.push_str("            '\\\\' => out.push('\\\\'),\n");
+    out.push_str("            '/' => out.push('/'),\n");
+    out.push_str("            'b' => out.push('\\u{0008}'),\n");
+    out.push_str("            'f' => out.push('\\u{000C}'),\n");
+    out.push_str("            'n' => out.push('\\n'),\n");
+    out.push_str("            'r' => out.push('\\r'),\n");
+    out.push_str("            't' => out.push('\\t'),\n");
+    out.push_str("            'u' => {\n");
+    out.push_str("                let mut value = 0u32;\n");
+    out.push_str("                for _ in 0..4 {\n");
+    out.push_str("                    value = (value << 4) + chars.next()?.to_digit(16)?;\n");
+    out.push_str("                }\n");
+    out.push_str("                out.push(char::from_u32(value)?);\n");
+    out.push_str("            }\n");
+    out.push_str("            _ => return None,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    Some(out)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_escape_string(value: &str) -> String {\n");
+    out.push_str("    let mut out = String::from(\"\\\"\");\n");
+    out.push_str("    for ch in value.chars() {\n");
+    out.push_str("        match ch {\n");
+    out.push_str("            '\"' => out.push_str(\"\\\\\\\"\"),\n");
+    out.push_str("            '\\\\' => out.push_str(\"\\\\\\\\\"),\n");
+    out.push_str("            '\\n' => out.push_str(\"\\\\n\"),\n");
+    out.push_str("            '\\r' => out.push_str(\"\\\\r\"),\n");
+    out.push_str("            '\\t' => out.push_str(\"\\\\t\"),\n");
+    out.push_str("            '\\u{0008}' => out.push_str(\"\\\\b\"),\n");
+    out.push_str("            '\\u{000C}' => out.push_str(\"\\\\f\"),\n");
+    out.push_str("            ch if ch.is_control() => out.push_str(&format!(\"\\\\u{:04x}\", ch as u32)),\n");
+    out.push_str("            _ => out.push(ch),\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    out.push('\"');\n");
+    out.push_str("    out\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_stringify_int(value: i64) -> String {\n");
+    out.push_str("    value.to_string()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_stringify_bool(value: bool) -> String {\n");
+    out.push_str("    value.to_string()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_stringify_string(value: String) -> String {\n");
+    out.push_str("    axiom_json_escape_string(&value)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    std::fs::read_to_string(path).ok()\n");
     out.push_str("}\n\n");
@@ -660,11 +742,64 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Literal(LiteralValue::Bool(value)) => value.to_string(),
         Expr::Literal(LiteralValue::String(value)) => format!("String::from({value:?})"),
         Expr::VarRef { name, .. } => name.clone(),
+        Expr::Call { name, args, .. } if name == "assert_true" => {
+            format!(
+                "{{ let condition = {}; if condition {{ 0i64 }} else {{ axiom_assert_fail(String::from(\"expected condition to be true\"), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_contains" => {
+            format!(
+                "{{ let haystack = {}; let needle = {}; if haystack.contains(&needle) {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected {{:?}} to contain {{:?}}\", haystack, needle), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_eq" => {
+            format!(
+                "{{ let left = {}; let right = {}; if left == right {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected left == right, left={{:?}}, right={{:?}}\", left, right), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_ne" => {
+            format!(
+                "{{ let left = {}; let right = {}; if left != right {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected left != right, both were {{:?}}\", left), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
         Expr::Call { name, args, .. } if name == "len" => {
             format!("({}).len() as i64", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "io_eprintln" => {
             format!("axiom_io_eprintln({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_int" => {
+            format!("axiom_json_parse_int({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_bool" => {
+            format!("axiom_json_parse_bool({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_string" => {
+            format!("axiom_json_parse_string({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_stringify_int" => {
+            format!("axiom_json_stringify_int({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_stringify_bool" => {
+            format!("axiom_json_stringify_bool({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_stringify_string" => {
+            format!("axiom_json_stringify_string({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
@@ -717,6 +852,7 @@ fn render_expr(expr: &Expr) -> String {
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
         }
+        Expr::Try { expr, .. } => format!("({})?", render_expr(expr)),
         Expr::StructLiteral { name, fields, .. } => {
             let rendered_fields = fields
                 .iter()

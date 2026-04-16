@@ -6,6 +6,7 @@ use std::path::Path;
 pub struct Program {
     pub path: String,
     pub imports: Vec<Import>,
+    pub consts: Vec<ConstDecl>,
     pub type_aliases: Vec<TypeAliasDecl>,
     pub structs: Vec<StructDecl>,
     pub enums: Vec<EnumDecl>,
@@ -28,6 +29,16 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
+    pub is_public: bool,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ConstDecl {
+    pub name: String,
+    pub ty: TypeName,
+    pub expr: Expr,
     pub is_public: bool,
     pub line: usize,
     pub column: usize,
@@ -177,6 +188,11 @@ pub enum Expr {
         line: usize,
         column: usize,
     },
+    Try {
+        expr: Box<Expr>,
+        line: usize,
+        column: usize,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -262,6 +278,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     let lines: Vec<&str> = source.lines().collect();
     let mut index = 0;
     let mut imports = Vec::new();
+    let mut consts = Vec::new();
     let mut type_aliases = Vec::new();
     let mut structs = Vec::new();
     let mut enums = Vec::new();
@@ -307,6 +324,11 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
+        if trimmed.starts_with("const ") || trimmed.starts_with("pub const ") {
+            consts.push(parse_const_decl(trimmed, path, line_no)?);
+            index += 1;
+            continue;
+        }
         if trimmed.starts_with("type ") || trimmed.starts_with("pub type ") {
             type_aliases.push(parse_type_alias(trimmed, path, line_no)?);
             index += 1;
@@ -325,6 +347,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     Ok(Program {
         path: path.display().to_string(),
         imports,
+        consts,
         type_aliases,
         structs,
         enums,
@@ -414,6 +437,14 @@ fn parse_stmt_list(
             .with_path(path.display().to_string())
             .with_span(line_no, 1));
         }
+        if trimmed.starts_with("const ") || trimmed.starts_with("pub const ") {
+            return Err(Diagnostic::new(
+                "parse",
+                "stage1 bootstrap only supports top-level const declarations",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1));
+        }
         if trimmed.starts_with("type ") || trimmed.starts_with("pub type ") {
             return Err(Diagnostic::new(
                 "parse",
@@ -488,7 +519,7 @@ fn parse_stmt(
     let message = if in_block {
         "stage1 bootstrap currently supports let, print, if/else, while, match, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level import, type, struct, enum, fn, let, print, if/else, while, and match statements"
+        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, if/else, while, and match statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())
@@ -588,6 +619,59 @@ fn parse_type_alias(
     Ok(TypeAliasDecl {
         name: name.to_string(),
         ty,
+        is_public,
+        line: line_no,
+        column: 1,
+    })
+}
+
+fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstDecl, Diagnostic> {
+    let (is_public, header, column) = if let Some(rest) = trimmed.strip_prefix("pub const ") {
+        (true, rest, 11)
+    } else {
+        let rest = trimmed.strip_prefix("const ").ok_or_else(|| {
+            Diagnostic::new("parse", "invalid const declaration")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        (false, rest, 7)
+    };
+    let colon = find_top_level_char(header, ':').ok_or_else(|| {
+        Diagnostic::new("parse", "const declaration is missing ':'")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column)
+    })?;
+    let equals = find_top_level_char(header, '=').ok_or_else(|| {
+        Diagnostic::new("parse", "const declaration is missing '='")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column)
+    })?;
+    if equals <= colon {
+        return Err(Diagnostic::new(
+            "parse",
+            "const declaration must use `const NAME: Type = expr` syntax",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, column));
+    }
+    let name = header[..colon].trim();
+    validate_ident(name, path, line_no, column)?;
+    let ty_text = header[colon + 1..equals].trim();
+    if ty_text.is_empty() {
+        return Err(Diagnostic::new("parse", "const declaration is missing a type")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + colon + 1));
+    }
+    let expr_text = header[equals + 1..].trim();
+    if expr_text.is_empty() {
+        return Err(Diagnostic::new("parse", "const declaration is missing an initializer")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + equals + 1));
+    }
+    Ok(ConstDecl {
+        name: name.to_string(),
+        ty: parse_type_name(ty_text, path, line_no, column + colon + 2)?,
+        expr: parse_expr(expr_text, path, line_no, column + equals + 2)?,
         is_public,
         line: line_no,
         column: 1,
@@ -1229,6 +1313,19 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         return Err(Diagnostic::new("parse", "expression is empty")
             .with_path(path.display().to_string())
             .with_span(line_no, column));
+    }
+    if raw.ends_with('?') {
+        let inner = raw[..raw.len() - 1].trim_end();
+        if inner.is_empty() {
+            return Err(Diagnostic::new("parse", "try expression is missing an operand")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
+        }
+        return Ok(Expr::Try {
+            expr: Box::new(parse_term(inner, path, line_no, column)?),
+            line: line_no,
+            column: column + inner.len(),
+        });
     }
     if let Some(dot) = find_last_top_level_char(raw, '.') {
         let base_raw = raw[..dot].trim();

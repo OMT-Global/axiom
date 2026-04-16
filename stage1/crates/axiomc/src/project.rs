@@ -80,6 +80,7 @@ pub struct TestOutput {
     pub cases: Vec<TestCaseResult>,
     pub passed: usize,
     pub failed: usize,
+    pub skipped: usize,
     pub duration_ms: u64,
 }
 
@@ -267,6 +268,7 @@ pub fn run_project_tests_with_options(
         cases,
         passed,
         failed,
+        skipped: 0,
         duration_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -411,6 +413,9 @@ struct ModuleSymbols {
     functions: HashMap<String, String>,
     public_functions: HashMap<String, String>,
     private_functions: HashSet<String>,
+    consts: HashMap<String, syntax::ConstDecl>,
+    public_consts: HashMap<String, syntax::ConstDecl>,
+    private_consts: HashSet<String>,
     aliases: HashMap<String, String>,
     public_aliases: HashMap<String, String>,
     private_aliases: HashSet<String>,
@@ -750,14 +755,24 @@ fn run_test_case(
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let exit_code = output.status.code();
             let error = if !output.status.success() {
+                let detail = stderr.trim();
                 Some(
                     Diagnostic::new(
                         "test",
-                        format!(
-                            "test {:?} exited with status {}",
-                            test.name,
-                            exit_code.unwrap_or(1)
-                        ),
+                        if detail.is_empty() {
+                            format!(
+                                "test {:?} exited with status {}",
+                                test.name,
+                                exit_code.unwrap_or(1)
+                            )
+                        } else {
+                            format!(
+                                "test {:?} exited with status {}: {}",
+                                test.name,
+                                exit_code.unwrap_or(1),
+                                detail
+                            )
+                        },
                     )
                     .with_path(entry_path.display().to_string()),
                 )
@@ -766,7 +781,10 @@ fn run_test_case(
                     Some(
                         Diagnostic::new(
                             "test",
-                            format!("test {:?} stdout did not match expected output", test.name),
+                            format!(
+                                "test {:?} stdout did not match expected output: expected {:?}, got {:?}",
+                                test.name, expected_stdout, stdout
+                            ),
                         )
                         .with_path(entry_path.display().to_string()),
                     )
@@ -994,7 +1012,7 @@ fn load_module_recursive(
         let stmt = &program.stmts[0];
         return Err(Diagnostic::new(
             "import",
-            "imported stage1 modules may only contain imports, type alias declarations, struct declarations, enum declarations, and function declarations",
+            "imported stage1 modules may only contain imports, const declarations, type alias declarations, struct declarations, enum declarations, and function declarations",
         )
         .with_path(module_path.display().to_string())
         .with_span(stmt_line(stmt), stmt_column(stmt)));
@@ -1146,6 +1164,9 @@ fn validate_expr_capabilities(
             validate_expr_capabilities(module_path, lhs, capabilities)?;
             validate_expr_capabilities(module_path, rhs, capabilities)
         }
+        syntax::Expr::Try { expr, .. } => {
+            validate_expr_capabilities(module_path, expr, capabilities)
+        }
         syntax::Expr::StructLiteral { fields, .. } => {
             for field in fields {
                 validate_expr_capabilities(module_path, &field.expr, capabilities)?;
@@ -1220,10 +1241,12 @@ fn flatten_modules(
             continue;
         };
         let mut visible_functions = module_symbols.functions.clone();
+        let mut visible_consts = module_symbols.consts.clone();
         let mut visible_aliases = module_symbols.aliases.clone();
         let mut visible_structs = module_symbols.structs.clone();
         let mut visible_enums = module_symbols.enums.clone();
         let mut private_imported = HashSet::new();
+        let mut private_imported_consts = HashSet::new();
         let mut private_imported_types = HashSet::new();
         for import in &module.program.imports {
             let (_, import_path) =
@@ -1237,6 +1260,9 @@ fn flatten_modules(
             for name in &imported_symbols.private_functions {
                 private_imported.insert(name.clone());
             }
+            for name in &imported_symbols.private_consts {
+                private_imported_consts.insert(name.clone());
+            }
             for (export_name, internal_name) in &imported_symbols.public_functions {
                 if let Some(existing) = visible_functions.get(export_name)
                     && existing != internal_name
@@ -1249,6 +1275,17 @@ fn flatten_modules(
                     .with_span(import.line, import.column));
                 }
                 visible_functions.insert(export_name.clone(), internal_name.clone());
+            }
+            for (export_name, const_decl) in &imported_symbols.public_consts {
+                if visible_consts.contains_key(export_name) {
+                    return Err(Diagnostic::new(
+                        "import",
+                        format!("imported const {export_name:?} collides with an existing name"),
+                    )
+                    .with_path(module.path.display().to_string())
+                    .with_span(import.line, import.column));
+                }
+                visible_consts.insert(export_name.clone(), const_decl.clone());
             }
             for name in &imported_symbols.private_structs {
                 private_imported_types.insert(name.clone());
@@ -1308,6 +1345,20 @@ fn flatten_modules(
             &visible_enums,
             &module.path,
         )?;
+        for const_decl in &module.program.consts {
+            resolve_const_decl(
+                const_decl,
+                &visible_consts,
+                &visible_functions,
+                &visible_structs,
+                &visible_types,
+                &private_imported,
+                &private_imported_consts,
+                &private_imported_types,
+                &module.path,
+                &mut HashSet::new(),
+            )?;
+        }
 
         for type_alias in &module.program.type_aliases {
             flattened_type_aliases.push(rewrite_type_alias(
@@ -1342,9 +1393,11 @@ fn flatten_modules(
                 function,
                 module_symbols,
                 &visible_functions,
+                &visible_consts,
                 &visible_structs,
                 &visible_types,
                 &private_imported,
+                &private_imported_consts,
                 &private_imported_types,
                 &module.path,
             )?);
@@ -1354,9 +1407,11 @@ fn flatten_modules(
                 flattened_stmts.push(rewrite_stmt(
                     stmt,
                     &visible_functions,
+                    &visible_consts,
                     &visible_structs,
                     &visible_types,
                     &private_imported,
+                    &private_imported_consts,
                     &private_imported_types,
                     &module.path,
                 )?);
@@ -1371,6 +1426,7 @@ fn flatten_modules(
             .map(|module| module.path.display().to_string())
             .unwrap_or_default(),
         imports: Vec::new(),
+        consts: Vec::new(),
         type_aliases: flattened_type_aliases,
         structs: flattened_structs,
         enums: flattened_enums,
@@ -1384,6 +1440,9 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
     let mut functions = HashMap::new();
     let mut public_functions = HashMap::new();
     let mut private_functions = HashSet::new();
+    let mut consts = HashMap::new();
+    let mut public_consts = HashMap::new();
+    let mut private_consts = HashSet::new();
     let mut aliases = HashMap::new();
     let mut public_aliases = HashMap::new();
     let mut private_aliases = HashSet::new();
@@ -1456,6 +1515,35 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
             private_functions.insert(function.name.clone());
         }
     }
+    for const_decl in &module.program.consts {
+        if functions.contains_key(&const_decl.name)
+            || structs.contains_key(&const_decl.name)
+            || enums.contains_key(&const_decl.name)
+        {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate const {:?}", const_decl.name),
+            )
+            .with_path(module.path.display().to_string())
+            .with_span(const_decl.line, const_decl.column));
+        }
+        if consts
+            .insert(const_decl.name.clone(), const_decl.clone())
+            .is_some()
+        {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate const {:?}", const_decl.name),
+            )
+            .with_path(module.path.display().to_string())
+            .with_span(const_decl.line, const_decl.column));
+        }
+        if const_decl.is_public {
+            public_consts.insert(const_decl.name.clone(), const_decl.clone());
+        } else {
+            private_consts.insert(const_decl.name.clone());
+        }
+    }
     for type_alias in &module.program.type_aliases {
         if structs.contains_key(&type_alias.name) || enums.contains_key(&type_alias.name) {
             return Err(Diagnostic::new(
@@ -1488,6 +1576,9 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
         functions,
         public_functions,
         private_functions,
+        consts,
+        public_consts,
+        private_consts,
         aliases,
         public_aliases,
         private_aliases,
@@ -1608,9 +1699,11 @@ fn rewrite_function(
     function: &syntax::Function,
     module_symbols: &ModuleSymbols,
     visible_functions: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
     visible_structs: &HashMap<String, String>,
     visible_types: &HashMap<String, String>,
     private_imported: &HashSet<String>,
+    private_imported_consts: &HashSet<String>,
     private_imported_types: &HashSet<String>,
     module_path: &Path,
 ) -> Result<syntax::Function, Diagnostic> {
@@ -1627,9 +1720,11 @@ fn rewrite_function(
             rewrite_stmt(
                 stmt,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )
@@ -1668,9 +1763,11 @@ fn rewrite_function(
 fn rewrite_stmt(
     stmt: &syntax::Stmt,
     visible_functions: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
     visible_structs: &HashMap<String, String>,
     visible_types: &HashMap<String, String>,
     private_imported: &HashSet<String>,
+    private_imported_consts: &HashSet<String>,
     private_imported_types: &HashSet<String>,
     module_path: &Path,
 ) -> Result<syntax::Stmt, Diagnostic> {
@@ -1694,9 +1791,11 @@ fn rewrite_stmt(
             expr: rewrite_expr(
                 expr,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?,
@@ -1707,9 +1806,11 @@ fn rewrite_stmt(
             expr: rewrite_expr(
                 expr,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?,
@@ -1726,9 +1827,11 @@ fn rewrite_stmt(
             cond: rewrite_expr(
                 cond,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?,
@@ -1738,9 +1841,11 @@ fn rewrite_stmt(
                     rewrite_stmt(
                         stmt,
                         visible_functions,
+                        visible_consts,
                         visible_structs,
                         visible_types,
                         private_imported,
+                        private_imported_consts,
                         private_imported_types,
                         module_path,
                     )
@@ -1755,9 +1860,11 @@ fn rewrite_stmt(
                             rewrite_stmt(
                                 stmt,
                                 visible_functions,
+                                visible_consts,
                                 visible_structs,
                                 visible_types,
                                 private_imported,
+                                private_imported_consts,
                                 private_imported_types,
                                 module_path,
                             )
@@ -1777,9 +1884,11 @@ fn rewrite_stmt(
             cond: rewrite_expr(
                 cond,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?,
@@ -1789,9 +1898,11 @@ fn rewrite_stmt(
                     rewrite_stmt(
                         stmt,
                         visible_functions,
+                        visible_consts,
                         visible_structs,
                         visible_types,
                         private_imported,
+                        private_imported_consts,
                         private_imported_types,
                         module_path,
                     )
@@ -1809,9 +1920,11 @@ fn rewrite_stmt(
             expr: rewrite_expr(
                 expr,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?,
@@ -1829,9 +1942,11 @@ fn rewrite_stmt(
                                 rewrite_stmt(
                                     stmt,
                                     visible_functions,
+                                    visible_consts,
                                     visible_structs,
                                     visible_types,
                                     private_imported,
+                                    private_imported_consts,
                                     private_imported_types,
                                     module_path,
                                 )
@@ -1849,9 +1964,11 @@ fn rewrite_stmt(
             expr: rewrite_expr(
                 expr,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?,
@@ -1864,14 +1981,41 @@ fn rewrite_stmt(
 fn rewrite_expr(
     expr: &syntax::Expr,
     visible_functions: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
     visible_structs: &HashMap<String, String>,
     visible_types: &HashMap<String, String>,
     private_imported: &HashSet<String>,
+    private_imported_consts: &HashSet<String>,
     private_imported_types: &HashSet<String>,
     module_path: &Path,
 ) -> Result<syntax::Expr, Diagnostic> {
     Ok(match expr {
-        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => expr.clone(),
+        syntax::Expr::Literal(_) => expr.clone(),
+        syntax::Expr::VarRef { name, line, column } => {
+            if let Some(const_decl) = visible_consts.get(name) {
+                resolve_const_decl(
+                    const_decl,
+                    visible_consts,
+                    visible_functions,
+                    visible_structs,
+                    visible_types,
+                    private_imported,
+                    private_imported_consts,
+                    private_imported_types,
+                    module_path,
+                    &mut HashSet::new(),
+                )?
+            } else if private_imported_consts.contains(name) {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("const {name:?} is not exported by an imported module"),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(*line, *column));
+            } else {
+                expr.clone()
+            }
+        }
         syntax::Expr::Call {
             name,
             args,
@@ -1897,9 +2041,11 @@ fn rewrite_expr(
                         rewrite_expr(
                             arg,
                             visible_functions,
+                            visible_consts,
                             visible_structs,
                             visible_types,
                             private_imported,
+                            private_imported_consts,
                             private_imported_types,
                             module_path,
                         )
@@ -1918,18 +2064,22 @@ fn rewrite_expr(
             lhs: Box::new(rewrite_expr(
                 lhs,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
             rhs: Box::new(rewrite_expr(
                 rhs,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
@@ -1947,18 +2097,37 @@ fn rewrite_expr(
             lhs: Box::new(rewrite_expr(
                 lhs,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
             rhs: Box::new(rewrite_expr(
                 rhs,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
+            expr: Box::new(rewrite_expr(
+                expr,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
@@ -1992,9 +2161,11 @@ fn rewrite_expr(
                             expr: rewrite_expr(
                                 &field.expr,
                                 visible_functions,
+                                visible_consts,
                                 visible_structs,
                                 visible_types,
                                 private_imported,
+                                private_imported_consts,
                                 private_imported_types,
                                 module_path,
                             )?,
@@ -2016,9 +2187,11 @@ fn rewrite_expr(
             base: Box::new(rewrite_expr(
                 base,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
@@ -2037,9 +2210,11 @@ fn rewrite_expr(
                     rewrite_expr(
                         element,
                         visible_functions,
+                        visible_consts,
                         visible_structs,
                         visible_types,
                         private_imported,
+                        private_imported_consts,
                         private_imported_types,
                         module_path,
                     )
@@ -2057,9 +2232,11 @@ fn rewrite_expr(
             base: Box::new(rewrite_expr(
                 base,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
@@ -2079,18 +2256,22 @@ fn rewrite_expr(
                         key: rewrite_expr(
                             &entry.key,
                             visible_functions,
+                            visible_consts,
                             visible_structs,
                             visible_types,
                             private_imported,
+                            private_imported_consts,
                             private_imported_types,
                             module_path,
                         )?,
                         value: rewrite_expr(
                             &entry.value,
                             visible_functions,
+                            visible_consts,
                             visible_structs,
                             visible_types,
                             private_imported,
+                            private_imported_consts,
                             private_imported_types,
                             module_path,
                         )?,
@@ -2113,9 +2294,11 @@ fn rewrite_expr(
                     rewrite_expr(
                         element,
                         visible_functions,
+                        visible_consts,
                         visible_structs,
                         visible_types,
                         private_imported,
+                        private_imported_consts,
                         private_imported_types,
                         module_path,
                     )
@@ -2134,9 +2317,11 @@ fn rewrite_expr(
             base: Box::new(rewrite_expr(
                 base,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
@@ -2146,9 +2331,11 @@ fn rewrite_expr(
                     rewrite_expr(
                         expr,
                         visible_functions,
+                        visible_consts,
                         visible_structs,
                         visible_types,
                         private_imported,
+                        private_imported_consts,
                         private_imported_types,
                         module_path,
                     )
@@ -2161,9 +2348,11 @@ fn rewrite_expr(
                     rewrite_expr(
                         expr,
                         visible_functions,
+                        visible_consts,
                         visible_structs,
                         visible_types,
                         private_imported,
+                        private_imported_consts,
                         private_imported_types,
                         module_path,
                     )
@@ -2182,18 +2371,22 @@ fn rewrite_expr(
             base: Box::new(rewrite_expr(
                 base,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
             index: Box::new(rewrite_expr(
                 index,
                 visible_functions,
+                visible_consts,
                 visible_structs,
                 visible_types,
                 private_imported,
+                private_imported_consts,
                 private_imported_types,
                 module_path,
             )?),
@@ -2318,6 +2511,244 @@ fn rewrite_type_name(
             line,
             column,
         )?))),
+    }
+}
+
+fn resolve_const_decl(
+    const_decl: &syntax::ConstDecl,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
+    visible_functions: &HashMap<String, String>,
+    visible_structs: &HashMap<String, String>,
+    visible_types: &HashMap<String, String>,
+    private_imported: &HashSet<String>,
+    private_imported_consts: &HashSet<String>,
+    private_imported_types: &HashSet<String>,
+    module_path: &Path,
+    resolving: &mut HashSet<String>,
+) -> Result<syntax::Expr, Diagnostic> {
+    if !resolving.insert(const_decl.name.clone()) {
+        return Err(Diagnostic::new(
+            "type",
+            format!("recursive const {:?}", const_decl.name),
+        )
+        .with_path(module_path.display().to_string())
+        .with_span(const_decl.line, const_decl.column));
+    }
+    let rewritten = resolve_const_expr(
+        &const_decl.expr,
+        visible_consts,
+        visible_functions,
+        visible_structs,
+        visible_types,
+        private_imported,
+        private_imported_consts,
+        private_imported_types,
+        module_path,
+        resolving,
+    )?;
+    resolving.remove(&const_decl.name);
+    let actual = const_expr_type(&rewritten).ok_or_else(|| {
+        Diagnostic::new(
+            "type",
+            format!(
+                "const {:?} requires a compile-time scalar expression",
+                const_decl.name
+            ),
+        )
+        .with_path(module_path.display().to_string())
+        .with_span(const_decl.line, const_decl.column)
+    })?;
+    let expected = const_type_name(&const_decl.ty).ok_or_else(|| {
+        Diagnostic::new(
+            "type",
+            format!("const {:?} must use int, bool, or string", const_decl.name),
+        )
+        .with_path(module_path.display().to_string())
+        .with_span(const_decl.line, const_decl.column)
+    })?;
+    if actual != expected {
+        return Err(Diagnostic::new(
+            "type",
+            format!(
+                "const {:?} expects {}, got {}",
+                const_decl.name,
+                const_type_label(&expected),
+                const_type_label(&actual)
+            ),
+        )
+        .with_path(module_path.display().to_string())
+        .with_span(const_decl.line, const_decl.column));
+    }
+    Ok(rewritten)
+}
+
+fn resolve_const_expr(
+    expr: &syntax::Expr,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
+    visible_functions: &HashMap<String, String>,
+    visible_structs: &HashMap<String, String>,
+    visible_types: &HashMap<String, String>,
+    private_imported: &HashSet<String>,
+    private_imported_consts: &HashSet<String>,
+    private_imported_types: &HashSet<String>,
+    module_path: &Path,
+    resolving: &mut HashSet<String>,
+) -> Result<syntax::Expr, Diagnostic> {
+    match expr {
+        syntax::Expr::VarRef { name, line, column } => {
+            if let Some(const_decl) = visible_consts.get(name) {
+                return resolve_const_decl(
+                    const_decl,
+                    visible_consts,
+                    visible_functions,
+                    visible_structs,
+                    visible_types,
+                    private_imported,
+                    private_imported_consts,
+                    private_imported_types,
+                    module_path,
+                    resolving,
+                );
+            }
+            if private_imported_consts.contains(name) {
+                return Err(Diagnostic::new(
+                    "import",
+                    format!("const {name:?} is not exported by an imported module"),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(*line, *column));
+            }
+            Ok(expr.clone())
+        }
+        syntax::Expr::Literal(_) => Ok(expr.clone()),
+        syntax::Expr::BinaryAdd {
+            lhs,
+            rhs,
+            line,
+            column,
+        } => Ok(syntax::Expr::BinaryAdd {
+            lhs: Box::new(resolve_const_expr(
+                lhs,
+                visible_consts,
+                visible_functions,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+                resolving,
+            )?),
+            rhs: Box::new(resolve_const_expr(
+                rhs,
+                visible_consts,
+                visible_functions,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+                resolving,
+            )?),
+            line: *line,
+            column: *column,
+        }),
+        syntax::Expr::BinaryCompare {
+            op,
+            lhs,
+            rhs,
+            line,
+            column,
+        } => Ok(syntax::Expr::BinaryCompare {
+            op: *op,
+            lhs: Box::new(resolve_const_expr(
+                lhs,
+                visible_consts,
+                visible_functions,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+                resolving,
+            )?),
+            rhs: Box::new(resolve_const_expr(
+                rhs,
+                visible_consts,
+                visible_functions,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+                resolving,
+            )?),
+            line: *line,
+            column: *column,
+        }),
+        _ => rewrite_expr(
+            expr,
+            visible_functions,
+            visible_consts,
+            visible_structs,
+            visible_types,
+            private_imported,
+            private_imported_consts,
+            private_imported_types,
+            module_path,
+        ),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConstValueType {
+    Int,
+    Bool,
+    String,
+}
+
+fn const_expr_type(expr: &syntax::Expr) -> Option<ConstValueType> {
+    match expr {
+        syntax::Expr::Literal(syntax::Literal::Int(_)) => Some(ConstValueType::Int),
+        syntax::Expr::Literal(syntax::Literal::Bool(_)) => Some(ConstValueType::Bool),
+        syntax::Expr::Literal(syntax::Literal::String(_)) => Some(ConstValueType::String),
+        syntax::Expr::BinaryAdd { lhs, rhs, .. } => {
+            let lhs = const_expr_type(lhs)?;
+            let rhs = const_expr_type(rhs)?;
+            if lhs == rhs && matches!(lhs, ConstValueType::Int | ConstValueType::String) {
+                Some(lhs)
+            } else {
+                None
+            }
+        }
+        syntax::Expr::BinaryCompare { lhs, rhs, .. } => {
+            if const_expr_type(lhs)? == const_expr_type(rhs)? {
+                Some(ConstValueType::Bool)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn const_type_name(ty: &syntax::TypeName) -> Option<ConstValueType> {
+    match ty {
+        syntax::TypeName::Int => Some(ConstValueType::Int),
+        syntax::TypeName::Bool => Some(ConstValueType::Bool),
+        syntax::TypeName::String => Some(ConstValueType::String),
+        _ => None,
+    }
+}
+
+fn const_type_label(ty: &ConstValueType) -> &'static str {
+    match ty {
+        ConstValueType::Int => "int",
+        ConstValueType::Bool => "bool",
+        ConstValueType::String => "string",
     }
 }
 

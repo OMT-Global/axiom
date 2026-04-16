@@ -12,8 +12,8 @@ This repo now has two tracks:
 The Rust compiler is intentionally small in this bootstrap slice:
 
 - `axiom.toml` and `axiom.lock` are the new manifest and lockfile pair.
-- Supported source subset is top-level `import`, `pub type`, `type`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, transparent type aliases, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
-- Stage1 now ships a synthetic standard library surface under the `std/` import prefix with eight landed modules. Six are thin wrappers over single-intrinsic capability-gated surfaces, one per capability class: `std/time.ax` exposes `now_ms(): int` on top of `clock_now_ms`, `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve`, `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. Each of those six requires the importing package to declare the matching capability flag (`clock`, `env`, `fs`, `net`, `process`, or `crypto`). The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client over raw TCP (http:// only, HTTPS/TLS land in a follow-on slice). The eighth module, `std/io.ax`, is the first stdlib surface not tied to a capability flag: it exposes `eprintln(text: string): int` on top of a new ungated `io_eprintln` intrinsic that writes a line to stderr and returns the number of bytes written (`-1` on error), matching the ambient status of the `print` statement.
+- Supported source subset is top-level `import`, `pub const`, `const`, `pub type`, `type`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, postfix `?` error propagation on `Option<T>` / `Result<T, E>`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, transparent type aliases, scalar `const` declarations with compile-time evaluation, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
+- Stage1 now ships a synthetic standard library surface under the `std/` import prefix with nine landed modules. Six are thin wrappers over single-intrinsic capability-gated surfaces, one per capability class: `std/time.ax` exposes `now_ms(): int` on top of `clock_now_ms`, `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve`, `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. Each of those six requires the importing package to declare the matching capability flag (`clock`, `env`, `fs`, `net`, `process`, or `crypto`). The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client over raw TCP (http:// only, HTTPS/TLS land in a follow-on slice). The eighth module, `std/io.ax`, is the first stdlib surface not tied to a capability flag: it exposes `eprintln(text: string): int` on top of a new ungated `io_eprintln` intrinsic that writes a line to stderr and returns the number of bytes written (`-1` on error), matching the ambient status of the `print` statement. The ninth module, `std/json.ax`, is also ungated and exposes a string-based scalar JSON floor: `parse_int`, `parse_bool`, `parse_string`, `stringify_int`, `stringify_bool`, and `stringify_string`.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
 - A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` field access, non-`Copy` tuple indexing, non-`Copy` map indexing, and non-`Copy` array indexing conservatively move the owning variable, branch-local moves conservatively propagate after `if` and `match`, statically false `if` / `while` branches are now ignored instead of poisoning later ownership state, moving an outer non-`Copy` value inside a `while` body is rejected because the value would not be available on subsequent iterations, post-loop ownership state preserves the pre-loop state since the loop body may execute zero times, and live borrowed slices now block moving their owned collection roots until the borrow scope ends, including when those borrows are wrapped in local tuples, named structs, enum payloads, `Option` / `Result` values, passed through sibling expression evaluation, or introduced by temporary `match` expressions.
@@ -41,11 +41,17 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
 as a native artifact, executes it, and compares stdout against a sibling
-`*.stdout` golden file when present. Projects that need explicit naming or inline
-expectations can still declare `[[tests]]` entries in `axiom.toml`. The command
-now also accepts `--filter <pattern>` to run a subset of discovered tests by
-test name or entry path. Workspace-only roots are now supported as long as
-build/run commands select a concrete member package with `-p/--package`.
+`*.stdout` golden file when present. Tests can also use the built-in assertion
+helpers `assert_eq`, `assert_ne`, `assert_true`, and `assert_contains`; they
+return `0` on success so they fit in the current statement-only bootstrap
+surface via ordinary `let` bindings, and they abort the test with a source
+location plus expected/actual detail on failure. Projects that need explicit
+naming or inline expectations can still declare `[[tests]]` entries in
+`axiom.toml`. The command now also accepts `--filter <pattern>` to run a subset
+of discovered tests by test name or entry path, and the default CLI summary now
+prints `passed` / `failed` / `skipped` counts. Workspace-only roots are now
+supported as long as build/run commands select a concrete member package with
+`-p/--package`.
 
 ## JSON contract
 
@@ -53,8 +59,8 @@ build/run commands select a concrete member package with `-p/--package`.
 emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
 Successful payloads always include `ok`, `command`, and `project`, while
 `axiomc test --json` additionally reports `filter` and per-run/per-case
-`duration_ms`. Build payloads report the requested Rust target triple when
-`--target <triple>` is used.
+`duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
+requested Rust target triple when `--target <triple>` is used.
 
 ## Current gaps
 
@@ -117,12 +123,13 @@ Current proof points:
 - `stage1/examples/stdlib_process` extends AG4.1 with `import "std/process.ax"`, bringing `run_status(command)` into scope and staying subject to the importing package's `[capabilities] process` flag.
 - `stage1/examples/stdlib_crypto_hash` extends AG4.1 with `import "std/crypto_hash.ax"`, bringing `sha256(input)` into scope and staying subject to the importing package's `[capabilities] crypto` flag.
 - `stage1/examples/stdlib_io` extends AG4.1 with `import "std/io.ax"`, bringing `eprintln(text)` into scope without any capability opt-in — `std/io.ax` is the first stdlib module not tied to a capability flag, matching the ambient status of the `print` statement.
+- `stage1/examples/stdlib_json` extends AG4.1 with `import "std/json.ax"`, bringing ungated scalar/string JSON parsing and serialization helpers into scope without waiting for AG2 generics or a first-class JSON value type.
 - `stage1/examples/stdlib_http` extends AG4.1 with `import "std/http.ax"`, bringing `get(url)` into scope on top of a new blocking HTTP/1.0 client; it shares the importing package's `[capabilities] net` flag with `std/net.ax` and keeps its smoke deterministic by pointing at a closed local port so the `None` branch always fires.
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
-- `make stage1-test stage1-smoke` now covers all twenty-one checked-in stage1 examples.
+- `make stage1-test stage1-smoke` now covers all twenty-two checked-in stage1 examples.
 
 Agent-grade compiler milestone summary:
 

@@ -121,6 +121,10 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    Try {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -1510,6 +1514,103 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
+            if name == "assert_true" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_true expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Bool), env, ctx)?;
+                if lowered.ty() != &Type::Bool {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_true expects a bool argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![lowered], *line, *column),
+                    ty: Type::Int,
+                });
+            }
+            if name == "assert_contains" {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_contains expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let haystack =
+                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if haystack.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "assert_contains expects a string haystack, got {}",
+                            haystack.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let needle = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if needle.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "assert_contains expects a string needle, got {}",
+                            needle.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&haystack, env)?;
+                move_lowered_value(&needle, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![haystack, needle], *line, *column),
+                    ty: Type::Int,
+                });
+            }
+            if name == "assert_eq" || name == "assert_ne" {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lhs = lower_expr(&args[0], env, ctx)?;
+                if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects int, bool, or string arguments, got {}",
+                            lhs.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let rhs = lower_expr_with_expected(&args[1], Some(lhs.ty()), env, ctx)?;
+                if rhs.ty() != lhs.ty() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} requires both arguments to share one type"),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&lhs, env)?;
+                move_lowered_value(&rhs, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![lhs, rhs], *line, *column),
+                    ty: Type::Int,
+                });
+            }
             if name == "len" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
@@ -1561,6 +1662,162 @@ fn lower_expr_with_expected(
                     name: name.clone(),
                     args: vec![lowered],
                     ty: Type::Int,
+                });
+            }
+            if name == "json_parse_int" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("json_parse_int expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_parse_int expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::Int)),
+                });
+            }
+            if name == "json_parse_bool" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("json_parse_bool expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_parse_bool expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::Bool)),
+                });
+            }
+            if name == "json_parse_string" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("json_parse_string expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_parse_string expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if name == "json_stringify_int" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("json_stringify_int expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                if lowered.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_stringify_int expects an int argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::String,
+                });
+            }
+            if name == "json_stringify_bool" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("json_stringify_bool expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Bool), env, ctx)?;
+                if lowered.ty() != &Type::Bool {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_stringify_bool expects a bool argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::String,
+                });
+            }
+            if name == "json_stringify_string" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("json_stringify_string expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_stringify_string expects a string argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::String,
                 });
             }
             if name == "fs_read" {
@@ -2028,6 +2285,73 @@ fn lower_expr_with_expected(
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 ty: Type::Bool,
+            })
+        }
+        syntax::Expr::Try { expr, line, column } => {
+            let Some(current_return) = ctx.current_return.as_ref() else {
+                return Err(
+                    Diagnostic::new("control", "`?` is only valid inside a function")
+                        .with_span(*line, *column),
+                );
+            };
+            let wrapped_expected = expected.and_then(|inner| match current_return {
+                Type::Option(_) => Some(Type::Option(Box::new(inner.clone()))),
+                Type::Result(_, err) => {
+                    Some(Type::Result(Box::new(inner.clone()), Box::new((**err).clone())))
+                }
+                _ => None,
+            });
+            let lowered = if let Some(wrapped_expected) = wrapped_expected.as_ref() {
+                lower_expr_with_expected(expr, Some(wrapped_expected), env, ctx)?
+            } else {
+                lower_expr(expr, env, ctx)?
+            };
+            let result_ty = match (lowered.ty(), current_return) {
+                (Type::Option(inner), Type::Option(_)) => (**inner).clone(),
+                (Type::Result(ok, err), Type::Result(_, return_err)) => {
+                    if err.as_ref() != return_err.as_ref() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "`?` cannot propagate Result error type {err} from a function returning Result<_, {return_err}>"
+                            ),
+                        )
+                        .with_span(*line, *column));
+                    }
+                    (**ok).clone()
+                }
+                (Type::Option(_), other) => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "`?` on Option<T> requires the enclosing function to return Option<_>, got {other}"
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                (Type::Result(_, _), other) => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "`?` on Result<T, E> requires the enclosing function to return Result<_, E>, got {other}"
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                (other, _) => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("`?` expects an Option<T> or Result<T, E> expression, got {other}"),
+                    )
+                    .with_span(*line, *column));
+                }
+            };
+            if !lowered.ty().is_copy() {
+                move_lowered_owner_value(&lowered, env)?;
+            }
+            Ok(Expr::Try {
+                expr: Box::new(lowered),
+                ty: result_ty,
             })
         }
         syntax::Expr::StructLiteral {
@@ -2694,6 +3018,7 @@ fn move_lowered_owner_value(
 ) -> Result<(), Diagnostic> {
     match expr {
         Expr::VarRef { .. } => move_lowered_value(expr, env),
+        Expr::Try { expr, .. } => move_lowered_owner_value(expr, env),
         Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
         Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
         Expr::Index { base, .. } => move_lowered_owner_value(base, env),
@@ -2784,6 +3109,7 @@ fn expr_borrow_origin(
                 .iter()
                 .map(|element| expr_borrow_origin(element, env, ctx)),
         ),
+        Expr::Try { expr, .. } => expr_borrow_origin(expr, env, ctx),
         Expr::TupleIndex { base, .. } => expr_borrow_origin(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             merge_borrow_origins(entries.iter().flat_map(|entry| {
@@ -2926,6 +3252,7 @@ fn expr_borrowed_owners(
             })
             .unwrap_or_default(),
         Expr::TupleLiteral { elements, .. } => collect_expr_borrowed_owners(elements, env, ctx),
+        Expr::Try { expr, .. } => expr_borrowed_owners(expr, env, ctx),
         Expr::TupleIndex { base, .. } => expr_borrowed_owners(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             let mut owners = HashSet::new();
@@ -3512,6 +3839,19 @@ fn lower_compare_op(op: syntax::CompareOp) -> CompareOp {
     }
 }
 
+fn with_assert_location(args: Vec<Expr>, line: usize, column: usize) -> Vec<Expr> {
+    let mut args = args;
+    args.push(Expr::Literal {
+        ty: Type::Int,
+        value: LiteralValue::Int(line as i64),
+    });
+    args.push(Expr::Literal {
+        ty: Type::Int,
+        value: LiteralValue::Int(column as i64),
+    });
+    args
+}
+
 fn static_bool_value(expr: &Expr) -> Option<bool> {
     match expr {
         Expr::Literal {
@@ -3562,6 +3902,7 @@ impl Expr {
             Expr::Call { ty, .. } => ty,
             Expr::BinaryAdd { ty, .. } => ty,
             Expr::BinaryCompare { ty, .. } => ty,
+            Expr::Try { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
             Expr::FieldAccess { ty, .. } => ty,
             Expr::TupleLiteral { ty, .. } => ty,
@@ -3638,6 +3979,7 @@ impl syntax::Expr {
             | syntax::Expr::Call { line, .. }
             | syntax::Expr::BinaryAdd { line, .. }
             | syntax::Expr::BinaryCompare { line, .. }
+            | syntax::Expr::Try { line, .. }
             | syntax::Expr::StructLiteral { line, .. }
             | syntax::Expr::FieldAccess { line, .. }
             | syntax::Expr::TupleLiteral { line, .. }
@@ -3656,6 +3998,7 @@ impl syntax::Expr {
             | syntax::Expr::Call { column, .. }
             | syntax::Expr::BinaryAdd { column, .. }
             | syntax::Expr::BinaryCompare { column, .. }
+            | syntax::Expr::Try { column, .. }
             | syntax::Expr::StructLiteral { column, .. }
             | syntax::Expr::FieldAccess { column, .. }
             | syntax::Expr::TupleLiteral { column, .. }
