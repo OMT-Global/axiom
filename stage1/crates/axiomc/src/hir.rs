@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
+    pub path: String,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
     pub functions: Vec<Function>,
@@ -40,9 +41,13 @@ pub struct EnumVariantDef {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    pub source_name: String,
+    pub path: String,
     pub params: Vec<Param>,
     pub return_ty: Type,
     pub body: Vec<Stmt>,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -306,6 +311,7 @@ pub fn lower_with_capabilities(
     let mut env = HashMap::new();
     let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
     Ok(Program {
+        path: program.path.clone(),
         structs: lowered_structs,
         enums: lowered_enums,
         functions: lowered_functions,
@@ -753,9 +759,13 @@ fn lower_function(
     }
     Ok(Function {
         name: function.name.clone(),
+        source_name: function.source_name.clone(),
+        path: function.path.clone(),
         params,
         return_ty,
         body,
+        line: function.line,
+        column: function.column,
     })
 }
 

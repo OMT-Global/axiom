@@ -4,6 +4,7 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
+    pub path: String,
     pub imports: Vec<Import>,
     pub consts: Vec<ConstDecl>,
     pub type_aliases: Vec<TypeAliasDecl>,
@@ -23,6 +24,8 @@ pub struct Import {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    pub source_name: String,
+    pub path: String,
     pub params: Vec<Param>,
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
@@ -342,6 +345,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
         stmts.push(parse_stmt(&lines, &mut index, path, false)?);
     }
     Ok(Program {
+        path: path.display().to_string(),
         imports,
         consts,
         type_aliases,
@@ -570,6 +574,8 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
     let body = parse_stmt_list(lines, index, path)?;
     Ok(Function {
         name: name.to_string(),
+        source_name: name.to_string(),
+        path: path.display().to_string(),
         params,
         return_ty,
         body,
