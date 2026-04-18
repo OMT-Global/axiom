@@ -18,6 +18,7 @@ DEFAULT_NAME = "axiom-app"
 DEFAULT_VERSION = "0.1.0"
 DEFAULT_MAIN = "src/main.ax"
 DEFAULT_OUT_DIR = "dist"
+MAX_MANIFEST_BYTES = 1 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,12 @@ def load_manifest(project_root: Path) -> PackageManifest:
     path = manifest_path(project_root)
     if not path.exists():
         raise AxiomCompileError(f"missing package manifest at {path}")
+    manifest_size = path.stat().st_size
+    if manifest_size > MAX_MANIFEST_BYTES:
+        raise AxiomCompileError(
+            f"package manifest {path} is too large "
+            f"({manifest_size} bytes, max {MAX_MANIFEST_BYTES})"
+        )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
