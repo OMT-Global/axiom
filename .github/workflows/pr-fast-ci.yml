@@ -43,6 +43,11 @@ jobs:
               - 'docs/bootstrap/**'
               - 'README.md'
               - 'docs/**'
+              - 'axiom/**'
+              - 'tests/**'
+              - 'stage1/**'
+              - 'pyproject.toml'
+              - 'Makefile'
             ci:
               - 'project.bootstrap.yaml'
               - 'AGENTS.md'
@@ -54,6 +59,9 @@ jobs:
               - 'docs/bootstrap/**'
               - '.env.example'
               - 'CODEOWNERS'
+              - 'pyproject.toml'
+              - 'Makefile'
+              - '.github/dependabot.yml'
 
   fast-checks:
     name: Fast Checks
