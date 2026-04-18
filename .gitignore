@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.axb
+.axiom-build/
 .DS_Store
 stage1/target/
 stage1/examples/**/dist/
