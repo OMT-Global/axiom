@@ -12,7 +12,10 @@ license = {file = "LICENSE"}
 authors = [{name = "JT"}]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.11,<1"]
+dev = [
+    # Keep dev tooling pinned; Dependabot opens update PRs via .github/dependabot.yml.
+    "ruff==0.15.11",
+]
 
 [project.scripts]
 axiom = "axiom.__main__:main"
