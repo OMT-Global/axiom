@@ -123,6 +123,25 @@ mod tests {
     }
 
     #[test]
+    fn render_rust_includes_axiom_panic_stack_frames() {
+        let source = "fn crash(values: [int]): int {\nreturn values[1]\n}\n\nprint crash([7])\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_install_panic_hook() {"));
+        assert!(
+            rendered
+                .contains("let _axiom_frame = AxiomFrameGuard::new(\"crash\", \"main.ax\", 1, 1);")
+        );
+        assert!(
+            rendered.contains(
+                "let _axiom_frame = AxiomFrameGuard::new(\"<main>\", \"main.ax\", 1, 1);"
+            )
+        );
+    }
+
+    #[test]
     fn parser_lowers_struct_literals_and_field_access() {
         let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2100,6 +2119,85 @@ mod tests {
             err.message.contains("requires [capabilities].net = true"),
             "unexpected diagnostic: {err:?}",
         );
+    }
+
+    #[test]
+    fn stage1_runtime_panics_render_axiom_stack_trace_for_index_errors() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-stack-index");
+        create_project(&project, Some("panic-stack-index")).expect("create project");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn explode(values: [int]): int {\nreturn values[1]\n}\n",
+        )
+        .expect("write module");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"math.ax\"\nprint explode([7])\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+
+        assert!(!output.status.success(), "program should panic");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("panic:"), "unexpected stderr: {stderr}");
+        assert!(
+            stderr.contains("Axiom stack trace (most recent call last):"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(stderr.contains("explode"), "unexpected stderr: {stderr}");
+        assert!(
+            stderr.contains(&project.join("src/math.ax").display().to_string()),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(stderr.contains("<main>"), "unexpected stderr: {stderr}");
+        assert!(
+            stderr.contains(&project.join("src/main.ax").display().to_string()),
+            "unexpected stderr: {stderr}"
+        );
+    }
+
+    #[test]
+    fn stage1_runtime_panics_render_axiom_stack_trace_for_assert_failures() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-stack-assert");
+        create_project(&project, Some("panic-stack-assert")).expect("create project");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn window(values: &[int]): &[int] {\nreturn values[0:2]\n}\n",
+        )
+        .expect("write module");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"math.ax\"\nlet values: [int] = [7]\nlet tail: &[int] = window(values[:])\nprint len(tail)\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = Command::new(&built.binary)
+            .output()
+            .expect("run compiled binary");
+
+        assert!(!output.status.success(), "program should panic");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("array slice end out of bounds"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains("Axiom stack trace (most recent call last):"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(stderr.contains("window"), "unexpected stderr: {stderr}");
+        assert!(
+            stderr.contains(&project.join("src/math.ax").display().to_string()),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(stderr.contains("<main>"), "unexpected stderr: {stderr}");
     }
 
     #[test]
