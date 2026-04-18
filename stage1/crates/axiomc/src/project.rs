@@ -1420,6 +1420,11 @@ fn flatten_modules(
     }
 
     Ok(syntax::Program {
+        path: modules
+            .iter()
+            .find(|module| module.is_entry)
+            .map(|module| module.path.display().to_string())
+            .unwrap_or_default(),
         imports: Vec::new(),
         consts: Vec::new(),
         type_aliases: flattened_type_aliases,
