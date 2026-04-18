@@ -62,10 +62,10 @@ source .venv/bin/activate
 python -m axiom interp examples/arith.ax
 
 # Compile to bytecode
-python -m axiom compile examples/arith.ax -o /tmp/arith.axb
+python -m axiom compile examples/arith.ax -o arith.axb
 
 # Run bytecode on the VM
-python -m axiom vm /tmp/arith.axb
+python -m axiom vm arith.axb
 
 # Run the package example
 python -m axiom pkg run examples/typed_package
@@ -143,8 +143,8 @@ python -m ruff check .
 # Typecheck / compile a source file
 python -m axiom check examples/arith.ax
 python -m axiom check examples/arith.ax --json
-python -m axiom compile examples/compile_demo.ax -o /tmp/compile_demo.axb --json
-python -m axiom vm /tmp/compile_demo.axb
+python -m axiom compile examples/compile_demo.ax -o compile_demo.axb --json
+python -m axiom vm compile_demo.axb
 
 # Build and run a package
 python -m axiom pkg build examples/typed_package

@@ -1,3 +1,7 @@
+PYTHON ?= python
+AXIOM_BUILD_DIR ?= .axiom-build
+ARITH_BYTECODE ?= $(AXIOM_BUILD_DIR)/arith.axb
+
 .PHONY: test lint smoke interp compile vm stage1-test stage1-smoke stage1-run
 
 test:
@@ -16,10 +20,11 @@ interp:
 	python -m axiom interp examples/arith.ax
 
 compile:
-	python -m axiom compile examples/arith.ax -o /tmp/arith.axb
+	mkdir -p "$(AXIOM_BUILD_DIR)"
+	$(PYTHON) -m axiom compile examples/arith.ax -o "$(ARITH_BYTECODE)"
 
-vm:
-	python -m axiom vm /tmp/arith.axb
+vm: compile
+	$(PYTHON) -m axiom vm "$(ARITH_BYTECODE)"
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
