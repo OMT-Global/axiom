@@ -6,7 +6,9 @@ import shutil
 import tempfile
 import unittest
 
+from axiom.errors import AxiomCompileError
 from axiom.host import host_contract_metadata
+from axiom.packaging import MAX_MANIFEST_BYTES, load_manifest
 from tests.helpers import ROOT, init_temp_package, read_json, run_cli, write_json
 
 
@@ -41,6 +43,30 @@ class CliPackageTests(unittest.TestCase):
             proc = run_cli(self, ["pkg", "manifest", str(project)], cwd=ROOT)
             payload = json.loads(proc.stdout)
             self.assertEqual(payload["name"], "demo")
+
+    def test_load_manifest_allows_small_valid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            init_temp_package(self, project)
+
+            manifest = load_manifest(project)
+
+            self.assertEqual(manifest.name, "demo")
+
+    def test_load_manifest_rejects_manifest_above_size_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            project.mkdir(parents=True, exist_ok=True)
+            manifest = project / "axiom.pkg"
+            manifest.write_text("x" * (MAX_MANIFEST_BYTES + 1), encoding="utf-8")
+
+            with self.assertRaises(AxiomCompileError) as cm:
+                load_manifest(project)
+
+            message = str(cm.exception)
+            self.assertIn("too large", message)
+            self.assertIn(str(MAX_MANIFEST_BYTES + 1), message)
+            self.assertIn(str(MAX_MANIFEST_BYTES), message)
 
     def test_package_run_executes_main(self) -> None:
         with tempfile.TemporaryDirectory() as td:
