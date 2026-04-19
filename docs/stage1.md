@@ -26,6 +26,7 @@ stage0/stage1 split that can build a native hello-world and carry the 1.0 packag
 ```bash
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --debug
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target "$(rustc -vV | sed -n 's/^host: //p')"
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
@@ -60,7 +61,11 @@ emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
 Successful payloads always include `ok`, `command`, and `project`, while
 `axiomc test --json` additionally reports `filter` and per-run/per-case
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
-requested Rust target triple when `--target <triple>` is used.
+requested Rust target triple when `--target <triple>` is used and report
+`debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
+with generated source-position markers. Debug builds also report `debug_map`,
+a JSON sidecar that maps generated Rust statement lines back to Axiom
+file/line/column positions.
 
 ## Current gaps
 
@@ -98,6 +103,10 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Backend and tooling gaps
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
+- `axiomc build --debug` now asks `rustc` for debuginfo, disables optimization,
+  emits generated Rust source markers, and writes a JSON source-map sidecar for
+  Axiom file/line/column positions; full Axiom-native debugger stepping remains
+  a direct-backend follow-on.
 - There is no stage1 formatter, benchmark harness, doc generator, publisher, or LSP server yet.
 - Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
 - There are no performance targets or regression gates yet.

@@ -1,4 +1,4 @@
-use crate::codegen::{compile_native, render_rust};
+use crate::codegen::{compile_native, render_rust_with_debug};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
@@ -47,8 +47,10 @@ pub struct BuiltPackage {
     pub entry: String,
     pub binary: String,
     pub generated_rust: String,
+    pub debug_map: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
+    pub debug: bool,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
 }
@@ -59,8 +61,10 @@ pub struct BuildOutput {
     pub entry: String,
     pub binary: String,
     pub generated_rust: String,
+    pub debug_map: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
+    pub debug: bool,
     pub cache_hits: usize,
     pub cache_misses: usize,
     pub duration_ms: u64,
@@ -110,6 +114,7 @@ pub struct CheckOptions {
 pub struct BuildOptions {
     pub target: Option<String>,
     pub package: Option<String>,
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -196,8 +201,12 @@ pub fn build_project_with_options(
             entry: analyzed.entry_path.display().to_string(),
             binary: binary.display().to_string(),
             generated_rust: generated_rust.display().to_string(),
+            debug_map: options
+                .debug
+                .then(|| debug_source_map_path(&generated_rust).display().to_string()),
             statement_count: analyzed.mir.statement_count(),
             target: options.target.clone(),
+            debug: options.debug,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
         });
@@ -221,8 +230,10 @@ pub fn build_project_with_options(
         entry: root.entry,
         binary: root.binary,
         generated_rust: root.generated_rust,
+        debug_map: root.debug_map,
         statement_count: root.statement_count,
         target: root.target,
+        debug: root.debug,
         cache_hits,
         cache_misses,
         duration_ms: started.elapsed().as_millis() as u64,
@@ -252,6 +263,7 @@ pub fn run_project_with_options(
         &BuildOptions {
             target: None,
             package: options.package.clone(),
+            debug: false,
         },
     )?;
     let build_output_dir = Path::new(&built.generated_rust).parent().ok_or_else(|| {
@@ -725,6 +737,7 @@ struct BuildCacheFile {
     version: u32,
     compiler: String,
     target: Option<String>,
+    debug: bool,
     manifest_hash: String,
     lockfile_hash: String,
     rust_hash: String,
@@ -763,19 +776,23 @@ fn build_artifacts(
             )
         })?;
     }
-    let rust_source = render_rust(&analyzed.mir);
+    let rust_source = render_rust_with_debug(&analyzed.mir, options.debug);
     let cache = build_cache_file(
         graph,
         package_root,
         analyzed,
         &rust_source,
         options.target.clone(),
+        options.debug,
     )?;
     let cache_path = build_cache_path(generated_rust);
     if read_build_cache(&cache_path)
         .as_ref()
         .is_some_and(|stored| cache_matches(stored, &cache, generated_rust, binary))
     {
+        if options.debug {
+            write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
+        }
         return Ok(BuildArtifactReport {
             cache_status: BuildCacheStatus::Hit,
             compile_ms: 0,
@@ -787,8 +804,16 @@ fn build_artifacts(
             format!("failed to write {}: {err}", generated_rust.display()),
         )
     })?;
+    if options.debug {
+        write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
+    }
     let started = Instant::now();
-    compile_native(generated_rust, binary, options.target.as_deref())?;
+    compile_native(
+        generated_rust,
+        binary,
+        options.target.as_deref(),
+        options.debug,
+    )?;
     let compile_ms = started.elapsed().as_millis() as u64;
     let mut cache = cache;
     cache.binary_hash = Some(hash_file_bytes(binary)?);
@@ -801,6 +826,74 @@ fn build_artifacts(
 
 fn build_cache_path(generated_rust: &Path) -> PathBuf {
     generated_rust.with_extension("build-cache.toml")
+}
+
+fn debug_source_map_path(generated_rust: &Path) -> PathBuf {
+    generated_rust.with_extension("debug-map.json")
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSourceMap<'a> {
+    schema_version: &'static str,
+    generated_rust: &'a str,
+    mappings: Vec<DebugSourceMapping>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSourceMapping {
+    generated_line: usize,
+    source: String,
+    line: usize,
+    column: usize,
+}
+
+fn write_debug_source_map(generated_rust: &Path, debug_map: &Path) -> Result<(), Diagnostic> {
+    let generated_source = fs::read_to_string(generated_rust).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to read {}: {err}", generated_rust.display()),
+        )
+    })?;
+    let generated_rust_path = generated_rust.display().to_string();
+    let map = DebugSourceMap {
+        schema_version: "axiom.stage1.debug_map.v1",
+        generated_rust: &generated_rust_path,
+        mappings: debug_source_mappings(&generated_source),
+    };
+    let content = serde_json::to_string_pretty(&map).map_err(|err| {
+        Diagnostic::new("build", format!("failed to render debug source map: {err}"))
+    })?;
+    fs::write(debug_map, format!("{content}\n")).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to write {}: {err}", debug_map.display()),
+        )
+    })
+}
+
+fn debug_source_mappings(generated_source: &str) -> Vec<DebugSourceMapping> {
+    generated_source
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let marker = line.trim_start().strip_prefix("// axiom-source: ")?;
+            let (source, source_line, source_column) = parse_debug_source_marker(marker)?;
+            Some(DebugSourceMapping {
+                generated_line: index + 2,
+                source,
+                line: source_line,
+                column: source_column,
+            })
+        })
+        .collect()
+}
+
+fn parse_debug_source_marker(marker: &str) -> Option<(String, usize, usize)> {
+    let mut parts = marker.rsplitn(3, ':');
+    let column = parts.next()?.parse().ok()?;
+    let line = parts.next()?.parse().ok()?;
+    let source = parts.next()?.to_string();
+    Some((source, line, column))
 }
 
 fn read_build_cache(path: &Path) -> Option<BuildCacheFile> {
@@ -853,11 +946,13 @@ fn build_cache_file(
     analyzed: &AnalyzedProject,
     rust_source: &str,
     target: Option<String>,
+    debug: bool,
 ) -> Result<BuildCacheFile, Diagnostic> {
     Ok(BuildCacheFile {
         version: BUILD_CACHE_VERSION,
         compiler: BUILD_CACHE_COMPILER.to_string(),
         target,
+        debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
         lockfile_hash: hash_file(&crate::manifest::lockfile_path(package_root))?,
         rust_hash: hash_text(rust_source),
