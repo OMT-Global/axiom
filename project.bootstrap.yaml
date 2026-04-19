@@ -31,10 +31,38 @@ github:
   createRepo: false
   reviewers:
     - jmcte
+    - pheidon
+    - scrappedcode
   codeowners:
     - pattern: "*"
       owners:
         - "@jmcte"
+        - "@pheidon"
+    - pattern: "/.github/workflows/"
+      owners:
+        - "@jmcte"
+        - "@pheidon"
+        - "@scrappedcode"
+    - pattern: "/.githooks/"
+      owners:
+        - "@jmcte"
+        - "@pheidon"
+        - "@scrappedcode"
+    - pattern: "/scripts/"
+      owners:
+        - "@jmcte"
+        - "@pheidon"
+        - "@scrappedcode"
+    - pattern: "/project.bootstrap.yaml"
+      owners:
+        - "@jmcte"
+        - "@pheidon"
+        - "@scrappedcode"
+    - pattern: "/stage1/crates/axiomc/src/"
+      owners:
+        - "@jmcte"
+        - "@pheidon"
+        - "@scrappedcode"
   autoMerge: true
   deleteBranchOnMerge: true
   requiredApprovals: 1
