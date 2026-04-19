@@ -39,7 +39,7 @@ jobs:
       # No id-token permission: this workflow uses ANTHROPIC_API_KEY and does not use OIDC.
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6 pinned 2026-04-19
         with:
           fetch-depth: 1
 
@@ -53,7 +53,7 @@ jobs:
           fi
 
       - name: Run Claude Code
-        uses: anthropics/claude-code-action@8a953dedac4f533f912f13656070914693ed0575
+        uses: anthropics/claude-code-action@8a953dedac4f533f912f13656070914693ed0575 # v1 pinned 2026-04-19
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           track_progress: true
