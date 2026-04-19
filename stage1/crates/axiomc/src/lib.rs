@@ -20,7 +20,7 @@ mod tests {
     use crate::mir;
     use crate::new_project::create_project;
     use crate::project::{
-        BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
+        BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
         project_capabilities, run_project_tests, run_project_tests_with_options,
         run_project_with_options,
@@ -343,7 +343,10 @@ mod tests {
         let output = Command::new(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\nnone\nok\nboom\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "ready\nnone\nok\nboom\n"
+        );
     }
 
     #[test]
@@ -2017,7 +2020,8 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected json type error");
         assert!(
-            err.message.contains("expects argument type string, got bool"),
+            err.message
+                .contains("expects argument type string, got bool"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -2698,7 +2702,11 @@ mod tests {
         .expect("write source");
         let error = check_project(&project).expect_err("type error");
         assert_eq!(error.kind, "type");
-        assert!(error.message.contains("`?` cannot propagate Result error type string"));
+        assert!(
+            error
+                .message
+                .contains("`?` cannot propagate Result error type string")
+        );
     }
 
     #[test]
@@ -2799,7 +2807,10 @@ mod tests {
         let output = Command::new(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\nstage1\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\ntrue\nstage1\n"
+        );
     }
 
     #[test]
@@ -2821,7 +2832,10 @@ mod tests {
         let output = Command::new(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\nstage1\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\ntrue\nstage1\n"
+        );
     }
 
     #[test]
@@ -4090,6 +4104,81 @@ mod tests {
     }
 
     #[test]
+    fn build_project_reuses_incremental_cache_until_module_changes() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("cached-build");
+        create_project(&project, Some("cached-build-app")).expect("create project");
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 41\n}\n",
+        )
+        .expect("write module");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"math.ax\"\nprint answer()\n",
+        )
+        .expect("write source");
+
+        let first = build_project(&project).expect("initial build");
+        assert_eq!(first.cache_hits, 0);
+        assert_eq!(first.cache_misses, 1);
+        assert_eq!(first.packages[0].cache_status, BuildCacheStatus::Miss);
+        let generated = fs::read_to_string(&first.generated_rust).expect("read generated rust");
+
+        let second = build_project(&project).expect("cached build");
+        assert_eq!(second.cache_hits, 1);
+        assert_eq!(second.cache_misses, 0);
+        assert_eq!(second.packages[0].cache_status, BuildCacheStatus::Hit);
+        assert_eq!(
+            fs::read_to_string(&second.generated_rust).expect("read cached generated rust"),
+            generated
+        );
+
+        fs::write(&second.generated_rust, "// stale generated rust\n")
+            .expect("corrupt generated rust");
+        let repaired_rust = build_project(&project).expect("repair generated rust");
+        assert_eq!(repaired_rust.cache_hits, 0);
+        assert_eq!(repaired_rust.cache_misses, 1);
+        assert_eq!(
+            repaired_rust.packages[0].cache_status,
+            BuildCacheStatus::Miss
+        );
+        assert_eq!(
+            fs::read_to_string(&repaired_rust.generated_rust).expect("read repaired rust"),
+            generated
+        );
+
+        fs::write(&repaired_rust.binary, "not a compiled binary").expect("corrupt binary");
+        let repaired_binary = build_project(&project).expect("repair binary");
+        assert_eq!(repaired_binary.cache_hits, 0);
+        assert_eq!(repaired_binary.cache_misses, 1);
+        assert_eq!(
+            repaired_binary.packages[0].cache_status,
+            BuildCacheStatus::Miss
+        );
+        let output = Command::new(&repaired_binary.binary)
+            .output()
+            .expect("run repaired binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "41\n");
+
+        fs::write(
+            project.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("update module");
+        let third = build_project(&project).expect("rebuild after module change");
+        assert_eq!(third.cache_hits, 0);
+        assert_eq!(third.cache_misses, 1);
+        assert_eq!(third.packages[0].cache_status, BuildCacheStatus::Miss);
+        let output = Command::new(&third.binary)
+            .output()
+            .expect("run rebuilt binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    }
+
+    #[test]
     fn run_project_tests_supports_name_filtering() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("filtered-tests");
@@ -4151,6 +4240,9 @@ mod tests {
         );
         assert_eq!(payload["command"], "build");
         assert!(payload["target"].is_string());
+        assert!(payload["cache_hits"].is_u64());
+        assert!(payload["cache_misses"].is_u64());
+        assert!(payload["duration_ms"].is_u64());
     }
 
     #[test]

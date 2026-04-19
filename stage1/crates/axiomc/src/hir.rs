@@ -1545,8 +1545,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let haystack =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let haystack = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if haystack.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -1798,7 +1797,10 @@ fn lower_expr_with_expected(
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("json_stringify_string expects 1 argument, got {}", args.len()),
+                        format!(
+                            "json_stringify_string expects 1 argument, got {}",
+                            args.len()
+                        ),
                     )
                     .with_span(*line, *column));
                 }
@@ -2296,9 +2298,10 @@ fn lower_expr_with_expected(
             };
             let wrapped_expected = expected.and_then(|inner| match current_return {
                 Type::Option(_) => Some(Type::Option(Box::new(inner.clone()))),
-                Type::Result(_, err) => {
-                    Some(Type::Result(Box::new(inner.clone()), Box::new((**err).clone())))
-                }
+                Type::Result(_, err) => Some(Type::Result(
+                    Box::new(inner.clone()),
+                    Box::new((**err).clone()),
+                )),
                 _ => None,
             });
             let lowered = if let Some(wrapped_expected) = wrapped_expected.as_ref() {
