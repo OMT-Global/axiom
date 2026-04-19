@@ -3093,6 +3093,96 @@ mod tests {
     }
 
     #[test]
+    fn check_project_allows_non_copy_struct_field_move_then_sibling_use() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-partial-move-sibling");
+        create_project(&project, Some("struct-partial-move-sibling-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct BuildInfo {\nlabel: string\nsummary: string\ncount: int\n}\n\nlet info: BuildInfo = BuildInfo { label: \"deploy\", summary: \"ready\", count: 7 }\nprint info.label\nprint info.count\nprint info.summary\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("moving one struct field should leave siblings available");
+    }
+
+    #[test]
+    fn check_project_allows_non_copy_struct_field_move_through_call_then_sibling_use() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-call-partial-move-sibling");
+        create_project(&project, Some("struct-call-partial-move-sibling-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct BuildInfo {\nlabel: string\nsummary: string\ncount: int\n}\n\nfn consume(label: string): string {\nreturn label\n}\n\nlet info: BuildInfo = BuildInfo { label: \"deploy\", summary: \"ready\", count: 7 }\nprint consume(info.label)\nprint info.count\nprint info.summary\n",
+        )
+        .expect("write source");
+        check_project(&project)
+            .expect("call lowering should move only the projected struct field argument");
+    }
+
+    #[test]
+    fn check_project_allows_nested_non_copy_struct_field_move_then_sibling_use() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("nested-struct-partial-move-sibling");
+        create_project(&project, Some("nested-struct-partial-move-sibling-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Details {\nlabel: string\nsummary: string\n}\n\nstruct BuildInfo {\ndetails: Details\ncount: int\n}\n\nlet info: BuildInfo = BuildInfo { details: Details { label: \"deploy\", summary: \"ready\" }, count: 7 }\nprint info.details.label\nprint info.details.summary\nprint info.count\n",
+        )
+        .expect("write source");
+        check_project(&project)
+            .expect("moving a nested struct field should leave nested siblings available");
+    }
+
+    #[test]
+    fn check_project_rejects_whole_struct_use_after_field_move() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-partial-move-whole-use");
+        create_project(&project, Some("struct-partial-move-whole-use-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct BuildInfo {\nlabel: string\nsummary: string\ncount: int\n}\n\nfn consume(info: BuildInfo): string {\nreturn info.summary\n}\n\nlet info: BuildInfo = BuildInfo { label: \"deploy\", summary: \"ready\", count: 7 }\nprint info.label\nprint consume(info)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("partially moved aggregate should not be usable as a whole value");
+        assert!(error.message.contains("use of partially moved value"));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_reusing_moved_struct_field() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-partial-move-field-reuse");
+        create_project(&project, Some("struct-partial-move-field-reuse-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct BuildInfo {\nlabel: string\nsummary: string\ncount: int\n}\n\nlet info: BuildInfo = BuildInfo { label: \"deploy\", summary: \"ready\", count: 7 }\nprint info.label\nprint info.label\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("moved field should not be reusable");
+        assert!(error.message.contains("use of moved value"));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_allows_non_copy_enum_payload_binding_then_sibling_payload_use() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("enum-payload-sibling-move");
+        create_project(&project, Some("enum-payload-sibling-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Message {\nJob { label: string, detail: string }\n}\n\nfn consume(value: string): string {\nreturn value\n}\n\nlet message: Message = Job { label: \"deploy\", detail: \"ready\" }\nmatch message {\nJob { label, detail } {\nprint consume(label)\nprint consume(detail)\n}\n}\n",
+        )
+        .expect("write source");
+        check_project(&project)
+            .expect("moving one enum payload binding should leave sibling payloads available");
+    }
+
+    #[test]
     fn check_project_rejects_missing_struct_field() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-field");
@@ -3759,17 +3849,31 @@ mod tests {
     }
 
     #[test]
-    fn check_project_rejects_use_after_non_copy_tuple_index() {
+    fn check_project_allows_non_copy_tuple_index_then_sibling_use() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("tuple-move");
-        create_project(&project, Some("tuple-move-app")).expect("create project");
+        let project = dir.path().join("tuple-partial-move-sibling");
+        create_project(&project, Some("tuple-partial-move-sibling-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "let pair: (int, string) = (7, \"label\")\nprint pair.1\nprint pair.0\n",
         )
         .expect("write source");
-        let error = check_project(&project).expect_err("non-copy tuple index should consume owner");
-        assert!(error.message.contains("use of moved value"));
+        check_project(&project).expect("moving one tuple slot should leave siblings available");
+    }
+
+    #[test]
+    fn check_project_rejects_whole_tuple_use_after_non_copy_tuple_index() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("tuple-partial-move-whole-use");
+        create_project(&project, Some("tuple-partial-move-whole-use-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn consume(pair: (int, string)): string {\nreturn pair.1\n}\n\nlet pair: (int, string) = (7, \"label\")\nprint pair.1\nprint consume(pair)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("partially moved tuple should not be usable as a whole value");
+        assert!(error.message.contains("use of partially moved value"));
         assert_eq!(error.kind, "ownership");
     }
 
