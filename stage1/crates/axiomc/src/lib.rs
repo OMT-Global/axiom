@@ -22,13 +22,13 @@ mod tests {
     use crate::project::{
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        project_capabilities, run_project_tests, run_project_tests_with_options,
-        run_project_with_options,
+        command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
+        run_project_tests_with_options, run_project_with_options,
     };
     use crate::syntax::parse_program;
     use serde::Serialize;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use tempfile::tempdir;
 
@@ -69,10 +69,7 @@ mod tests {
     }
 
     fn rust_host_target() -> String {
-        let output = Command::new("rustc")
-            .arg("-vV")
-            .output()
-            .expect("run rustc -vV");
+        let output = rustc_command().arg("-vV").output().expect("run rustc -vV");
         assert!(output.status.success(), "rustc -vV failed");
         let stdout = String::from_utf8_lossy(&output.stdout);
         stdout
@@ -82,11 +79,56 @@ mod tests {
             .expect("host target")
     }
 
+    fn rustc_command() -> Command {
+        let rustc = trusted_rustc_path();
+        // The test harness resolves rustc to a full path before execution; PATH is trusted only
+        // for this one resolution step in the developer or CI environment running the tests.
+        Command::new(rustc)
+    }
+
+    fn trusted_rustc_path() -> PathBuf {
+        which::which("rustc").expect("resolve rustc from trusted PATH before executing")
+    }
+
     fn ownership_failure_fixture(case: &str) -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
             .join("ownership_failures")
             .join(case)
+    }
+
+    fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
+        command_for_executable(path).expect("prepare compiled binary command")
+    }
+
+    #[test]
+    fn executable_command_resolves_relative_names_against_current_dir() {
+        let command =
+            command_for_executable("compiled-output").expect("prepare relative executable command");
+        let program = Path::new(command.get_program());
+        assert!(program.is_absolute());
+        assert!(program.ends_with("compiled-output"));
+    }
+
+    #[test]
+    fn build_output_command_rejects_paths_outside_output_dir() {
+        let dir = tempdir().expect("tempdir");
+        let output_dir = dir.path().join("dist");
+        let outside = dir.path().join("outside");
+        let error = match command_for_build_output(&outside, &output_dir) {
+            Ok(_) => panic!("outside binary path should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn build_output_command_accepts_paths_inside_output_dir() {
+        let dir = tempdir().expect("tempdir");
+        let output_dir = dir.path().join("dist");
+        let command = command_for_build_output(output_dir.join("compiled-output"), &output_dir)
+            .expect("prepare build output command");
+        assert!(Path::new(command.get_program()).starts_with(&output_dir));
     }
 
     #[test]
@@ -339,7 +381,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -462,7 +504,7 @@ mod tests {
         .expect("write source");
         let built = build_project(&project).expect("build project");
         assert!(Path::new(&built.binary).exists());
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -482,7 +524,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -502,7 +544,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
@@ -519,7 +561,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -539,7 +581,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n11\n4\n");
@@ -556,7 +598,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n3\n");
@@ -574,7 +616,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\n");
@@ -591,7 +633,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "0\nalpha\n");
@@ -608,7 +650,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "alpha\n");
@@ -625,7 +667,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n3\n40\n");
@@ -642,7 +684,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n7\n11\n");
@@ -659,7 +701,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\n");
@@ -676,7 +718,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\n");
@@ -693,7 +735,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -713,7 +755,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "9\n");
@@ -735,7 +777,7 @@ mod tests {
         )
         .expect("write models");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -755,7 +797,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\n");
@@ -772,7 +814,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "7\nrunning\n");
@@ -789,7 +831,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\n");
@@ -806,7 +848,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -826,7 +868,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -882,7 +924,7 @@ mod tests {
 
         check_project(&project).expect("check project");
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
@@ -956,7 +998,7 @@ mod tests {
         assert_eq!(checked.packages.len(), 3);
         let built = build_project(&project).expect("build workspace root");
         assert_eq!(built.packages.len(), 3);
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
@@ -1050,7 +1092,7 @@ mod tests {
         )
         .expect("build selected workspace package");
         assert_eq!(built.packages.len(), 1);
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run selected workspace binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
@@ -1394,7 +1436,7 @@ mod tests {
         .expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -1444,7 +1486,7 @@ mod tests {
         fs::write(project.join("src/main_test.stdout"), "true\n").expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "true\n");
@@ -1521,7 +1563,7 @@ mod tests {
         fs::write(project.join("src/main_test.stdout"), "none\n").expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .env_remove("__AXIOM_STAGE1_MISSING__")
             .output()
             .expect("run compiled binary");
@@ -1605,7 +1647,7 @@ mod tests {
             .expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -1685,7 +1727,7 @@ mod tests {
         fs::write(project.join("src/main_test.stdout"), "-1\n").expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "-1\n");
@@ -1767,7 +1809,7 @@ mod tests {
         .expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -1846,7 +1888,7 @@ mod tests {
         fs::write(project.join("src/main.ax"), source).expect("write source");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1927,7 +1969,7 @@ mod tests {
         fs::write(project.join("src/main_test.stdout"), "true\n").expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "true\n");
@@ -1974,7 +2016,7 @@ mod tests {
         .expect("write golden");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -2080,7 +2122,7 @@ mod tests {
         fs::write(project.join("src/main.ax"), &source).expect("write source");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         server.join().expect("server thread");
@@ -2141,7 +2183,7 @@ mod tests {
         .expect("write source");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
 
@@ -2180,7 +2222,7 @@ mod tests {
         .expect("write source");
 
         let built = build_project(&project).expect("build project");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
 
@@ -2743,7 +2785,7 @@ mod tests {
         )
         .expect("write math");
         let built = build_project(&project).expect("build imported modules");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -2763,7 +2805,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project with local type aliases");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n2\n");
@@ -2785,7 +2827,7 @@ mod tests {
         )
         .expect("write types");
         let built = build_project(&project).expect("build project with imported type aliases");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n2\n");
@@ -2802,7 +2844,7 @@ mod tests {
         )
         .expect("write source");
         let built = build_project(&project).expect("build project with local consts");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -2827,7 +2869,7 @@ mod tests {
         )
         .expect("write values");
         let built = build_project(&project).expect("build project with imported consts");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -3080,7 +3122,7 @@ mod tests {
         )
         .expect("write model");
         let built = build_project(&project).expect("build imported structs");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(
@@ -4048,7 +4090,7 @@ mod tests {
         )
         .expect("write status");
         let built = build_project(&project).expect("build imported enums");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\n");
@@ -4070,7 +4112,7 @@ mod tests {
         )
         .expect("write status");
         let built = build_project(&project).expect("build imported payload enums");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "from import\n");
@@ -4092,7 +4134,7 @@ mod tests {
         )
         .expect("write status");
         let built = build_project(&project).expect("build imported named payload enums");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "from import\n");
@@ -4114,7 +4156,7 @@ mod tests {
         )
         .expect("write module");
         let built = build_project(&project).expect("build imported multi payload enums");
-        let output = Command::new(&built.binary)
+        let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "7\nfrom import\n");
@@ -4258,7 +4300,7 @@ mod tests {
             repaired_binary.packages[0].cache_status,
             BuildCacheStatus::Miss
         );
-        let output = Command::new(&repaired_binary.binary)
+        let output = compiled_binary_command(&repaired_binary.binary)
             .output()
             .expect("run repaired binary");
         assert!(output.status.success());
@@ -4273,7 +4315,7 @@ mod tests {
         assert_eq!(third.cache_hits, 0);
         assert_eq!(third.cache_misses, 1);
         assert_eq!(third.packages[0].cache_status, BuildCacheStatus::Miss);
-        let output = Command::new(&third.binary)
+        let output = compiled_binary_command(&third.binary)
             .output()
             .expect("run rebuilt binary");
         assert!(output.status.success());

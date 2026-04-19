@@ -12,7 +12,9 @@ use crate::stdlib;
 use crate::syntax;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::env;
 use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -252,9 +254,20 @@ pub fn run_project_with_options(
             package: options.package.clone(),
         },
     )?;
-    let status = Command::new(&built.binary).status().map_err(|err| {
-        Diagnostic::new("run", format!("failed to execute {}: {err}", built.binary))
+    let build_output_dir = Path::new(&built.generated_rust).parent().ok_or_else(|| {
+        Diagnostic::new(
+            "run",
+            format!(
+                "failed to determine build output directory for {}",
+                built.binary
+            ),
+        )
     })?;
+    let status = command_for_build_output(&built.binary, build_output_dir)
+        .and_then(|mut command| command.status())
+        .map_err(|err| {
+            Diagnostic::new("run", format!("failed to execute {}: {err}", built.binary))
+        })?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -990,7 +1003,10 @@ fn run_test_case(
         };
     }
 
-    match Command::new(&binary).output() {
+    let build_output_dir = out_dir_path(project_root, manifest);
+    match command_for_build_output(&binary, &build_output_dir)
+        .and_then(|mut command| command.output())
+    {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1071,6 +1087,41 @@ fn run_test_case(
             ),
         },
     }
+}
+
+#[cfg(test)]
+pub(crate) fn command_for_executable(path: impl AsRef<Path>) -> io::Result<Command> {
+    // Relative executable names are expanded to absolute paths before Command creation, avoiding
+    // ambient PATH lookup for generated binaries.
+    Ok(Command::new(executable_path(path)?))
+}
+
+pub(crate) fn command_for_build_output(
+    path: impl AsRef<Path>,
+    build_output_dir: impl AsRef<Path>,
+) -> io::Result<Command> {
+    let executable = executable_path(path)?;
+    let build_output_dir = executable_path(build_output_dir)?;
+    if !executable.starts_with(&build_output_dir) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "refusing to execute binary outside build output directory: {}",
+                executable.display()
+            ),
+        ));
+    }
+    // The binary path is compiler-generated and constrained to the package build output directory
+    // before it reaches Command, so execution does not depend on ambient PATH lookup.
+    Ok(Command::new(executable))
+}
+
+fn executable_path(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let path = path.as_ref();
+    if path.is_absolute() {
+        return Ok(normalize_path(path));
+    }
+    Ok(normalize_path(env::current_dir()?.join(path)))
 }
 
 fn failed_test_case_result(
