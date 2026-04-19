@@ -1,7 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::mir::{
-    EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, Stmt, StructDef, StructField,
-    Type,
+    EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, Stmt, StructDef,
+    StructField, Type,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -419,7 +419,7 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    axiom_install_panic_hook();\n");
     out.push_str("    let result = panic::catch_unwind(|| {\n");
     for stmt in &program.stmts {
-        render_stmt(stmt, &type_context, &mut out, 2);
+        render_stmt(stmt, &type_context, &mut out, 2, &program.path);
     }
     out.push_str("    });\n");
     out.push_str("    match result {\n");
@@ -626,7 +626,7 @@ fn render_function(function: &Function, type_context: &TypeContext<'_>, out: &mu
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
     for stmt in &function.body {
-        render_stmt(stmt, type_context, out, 1);
+        render_stmt(stmt, type_context, out, 1, &function.path);
     }
     out.push_str("}\n");
 }
@@ -643,52 +643,76 @@ fn render_param(
     )
 }
 
-fn render_stmt(stmt: &Stmt, type_context: &TypeContext<'_>, out: &mut String, indent: usize) {
+fn render_stmt(
+    stmt: &Stmt,
+    type_context: &TypeContext<'_>,
+    out: &mut String,
+    indent: usize,
+    source_path: &str,
+) {
     let pad = "    ".repeat(indent);
     match stmt {
-        Stmt::Let { name, ty, expr } => out.push_str(&format!(
-            "{pad}let {name}: {} = {};\n",
-            rust_type(ty, type_context),
-            render_expr(expr)
-        )),
-        Stmt::Print(expr) => out.push_str(&format!(
-            "{pad}println!(\"{{}}\", {});\n",
-            render_expr(expr)
-        )),
+        Stmt::Let {
+            name,
+            ty,
+            expr,
+            span,
+        } => {
+            render_source_marker(source_path, *span, out, indent);
+            out.push_str(&format!(
+                "{pad}let {name}: {} = {};\n",
+                rust_type(ty, type_context),
+                render_expr(expr)
+            ));
+        }
+        Stmt::Print { expr, span } => {
+            render_source_marker(source_path, *span, out, indent);
+            out.push_str(&format!(
+                "{pad}println!(\"{{}}\", {});\n",
+                render_expr(expr)
+            ));
+        }
         Stmt::If {
             cond,
             then_block,
             else_block,
+            span,
         } => {
+            render_source_marker(source_path, *span, out, indent);
             out.push_str(&format!("{pad}if {} {{\n", render_expr(cond)));
             for stmt in then_block {
-                render_stmt(stmt, type_context, out, indent + 1);
+                render_stmt(stmt, type_context, out, indent + 1, source_path);
             }
             if let Some(else_block) = else_block {
                 out.push_str(&format!("{pad}}} else {{\n"));
                 for stmt in else_block {
-                    render_stmt(stmt, type_context, out, indent + 1);
+                    render_stmt(stmt, type_context, out, indent + 1, source_path);
                 }
                 out.push_str(&format!("{pad}}}\n"));
             } else {
                 out.push_str(&format!("{pad}}}\n"));
             }
         }
-        Stmt::While { cond, body } => {
+        Stmt::While { cond, body, span } => {
+            render_source_marker(source_path, *span, out, indent);
             out.push_str(&format!("{pad}while {} {{\n", render_expr(cond)));
             for stmt in body {
-                render_stmt(stmt, type_context, out, indent + 1);
+                render_stmt(stmt, type_context, out, indent + 1, source_path);
             }
             out.push_str(&format!("{pad}}}\n"));
         }
-        Stmt::Match { expr, arms } => {
+        Stmt::Match { expr, arms, span } => {
+            render_source_marker(source_path, *span, out, indent);
             out.push_str(&format!("{pad}match {} {{\n", render_expr(expr)));
             for arm in arms {
-                render_match_arm(arm, type_context, out, indent + 1);
+                render_match_arm(arm, type_context, out, indent + 1, source_path);
             }
             out.push_str(&format!("{pad}}}\n"));
         }
-        Stmt::Return(expr) => out.push_str(&format!("{pad}return {};\n", render_expr(expr))),
+        Stmt::Return { expr, span } => {
+            render_source_marker(source_path, *span, out, indent);
+            out.push_str(&format!("{pad}return {};\n", render_expr(expr)));
+        }
     }
 }
 
@@ -697,6 +721,7 @@ fn render_match_arm(
     type_context: &TypeContext<'_>,
     out: &mut String,
     indent: usize,
+    source_path: &str,
 ) {
     let pad = "    ".repeat(indent);
     if arm.bindings.is_empty() {
@@ -717,9 +742,17 @@ fn render_match_arm(
         ));
     }
     for stmt in &arm.body {
-        render_stmt(stmt, type_context, out, indent + 1);
+        render_stmt(stmt, type_context, out, indent + 1, source_path);
     }
     out.push_str(&format!("{pad}}},\n"));
+}
+
+fn render_source_marker(source_path: &str, span: SourceSpan, out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    out.push_str(&format!(
+        "{pad}// axiom-source: {}:{}:{}\n",
+        source_path, span.line, span.column
+    ));
 }
 
 fn render_expr(expr: &Expr) -> String {
@@ -1123,13 +1156,22 @@ pub fn compile_native(
     generated_rust: &Path,
     binary_path: &Path,
     target: Option<&str>,
+    debug: bool,
 ) -> Result<(), Diagnostic> {
     let mut command = Command::new("rustc");
     command
         .arg("--crate-name")
         .arg("axiom_stage1_bootstrap")
-        .arg("--edition=2024")
-        .arg("-O");
+        .arg("--edition=2024");
+    if debug {
+        command
+            .arg("-C")
+            .arg("debuginfo=2")
+            .arg("-C")
+            .arg("opt-level=0");
+    } else {
+        command.arg("-O");
+    }
     if let Some(target) = target {
         command.arg("--target").arg(target);
     }

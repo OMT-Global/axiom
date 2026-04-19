@@ -1088,6 +1088,7 @@ mod tests {
             &BuildOptions {
                 target: None,
                 package: Some(String::from("workspace-app")),
+                debug: false,
             },
         )
         .expect("build selected workspace package");
@@ -4239,12 +4240,60 @@ mod tests {
             &BuildOptions {
                 target: Some(target.clone()),
                 package: None,
+                debug: false,
             },
         )
         .expect("build project with explicit target");
 
         assert_eq!(output.target.as_deref(), Some(target.as_str()));
         assert!(project.join("dist/targeted-build-app").exists());
+    }
+
+    #[test]
+    fn build_project_debug_mode_emits_source_markers_and_uses_separate_cache_key() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("debug-build");
+        create_project(&project, Some("debug-build-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint answer\n",
+        )
+        .expect("write source");
+
+        let release = build_project(&project).expect("release build");
+        assert_eq!(release.cache_misses, 1);
+        assert!(!release.debug);
+
+        let debug = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: None,
+                package: None,
+                debug: true,
+            },
+        )
+        .expect("debug build");
+        assert!(debug.debug);
+        assert!(debug.packages[0].debug);
+        assert_eq!(debug.cache_hits, 0);
+        assert_eq!(debug.cache_misses, 1);
+
+        let generated = fs::read_to_string(&debug.generated_rust).expect("read generated rust");
+        let source = project.join("src/main.ax").display().to_string();
+        assert!(generated.contains(&format!("// axiom-source: {source}:1:1")));
+        assert!(generated.contains(&format!("// axiom-source: {source}:2:1")));
+
+        let cached_debug = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: None,
+                package: None,
+                debug: true,
+            },
+        )
+        .expect("cached debug build");
+        assert_eq!(cached_debug.cache_hits, 1);
+        assert_eq!(cached_debug.cache_misses, 0);
     }
 
     #[test]
@@ -4373,6 +4422,7 @@ mod tests {
             &BuildOptions {
                 target: Some(rust_host_target()),
                 package: None,
+                debug: true,
             },
         )
         .expect("build project");
@@ -4384,6 +4434,7 @@ mod tests {
         );
         assert_eq!(payload["command"], "build");
         assert!(payload["target"].is_string());
+        assert_eq!(payload["debug"], true);
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());

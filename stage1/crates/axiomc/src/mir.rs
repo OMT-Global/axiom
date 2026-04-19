@@ -53,28 +53,44 @@ pub struct Param {
     pub ty: Type,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct SourceSpan {
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Stmt {
     Let {
         name: String,
         ty: Type,
         expr: Expr,
+        span: SourceSpan,
     },
-    Print(Expr),
+    Print {
+        expr: Expr,
+        span: SourceSpan,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
         else_block: Option<Vec<Stmt>>,
+        span: SourceSpan,
     },
     While {
         cond: Expr,
         body: Vec<Stmt>,
+        span: SourceSpan,
     },
     Match {
         expr: Expr,
         arms: Vec<MatchArm>,
+        span: SourceSpan,
     },
-    Return(Expr),
+    Return {
+        expr: Expr,
+        span: SourceSpan,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -266,7 +282,7 @@ impl Expr {
 
 fn count_stmt(stmt: &Stmt) -> usize {
     match stmt {
-        Stmt::Let { .. } | Stmt::Print(_) | Stmt::Return(_) => 1,
+        Stmt::Let { .. } | Stmt::Print { .. } | Stmt::Return { .. } => 1,
         Stmt::If {
             then_block,
             else_block,
@@ -339,28 +355,40 @@ fn lower_param(param: &hir::Param) -> Param {
 
 fn lower_stmt(stmt: &hir::Stmt) -> Stmt {
     match stmt {
-        hir::Stmt::Let { name, ty, expr } => Stmt::Let {
+        hir::Stmt::Let {
+            name,
+            ty,
+            expr,
+            span,
+        } => Stmt::Let {
             name: name.clone(),
             ty: lower_type(ty),
             expr: lower_expr(expr),
+            span: lower_source_span(span),
         },
-        hir::Stmt::Print(expr) => Stmt::Print(lower_expr(expr)),
+        hir::Stmt::Print { expr, span } => Stmt::Print {
+            expr: lower_expr(expr),
+            span: lower_source_span(span),
+        },
         hir::Stmt::If {
             cond,
             then_block,
             else_block,
+            span,
         } => Stmt::If {
             cond: lower_expr(cond),
             then_block: then_block.iter().map(lower_stmt).collect(),
             else_block: else_block
                 .as_ref()
                 .map(|block| block.iter().map(lower_stmt).collect()),
+            span: lower_source_span(span),
         },
-        hir::Stmt::While { cond, body } => Stmt::While {
+        hir::Stmt::While { cond, body, span } => Stmt::While {
             cond: lower_expr(cond),
             body: body.iter().map(lower_stmt).collect(),
+            span: lower_source_span(span),
         },
-        hir::Stmt::Match { expr, arms } => Stmt::Match {
+        hir::Stmt::Match { expr, arms, span } => Stmt::Match {
             expr: lower_expr(expr),
             arms: arms
                 .iter()
@@ -372,8 +400,19 @@ fn lower_stmt(stmt: &hir::Stmt) -> Stmt {
                     body: arm.body.iter().map(lower_stmt).collect(),
                 })
                 .collect(),
+            span: lower_source_span(span),
         },
-        hir::Stmt::Return(expr) => Stmt::Return(lower_expr(expr)),
+        hir::Stmt::Return { expr, span } => Stmt::Return {
+            expr: lower_expr(expr),
+            span: lower_source_span(span),
+        },
+    }
+}
+
+fn lower_source_span(span: &hir::SourceSpan) -> SourceSpan {
+    SourceSpan {
+        line: span.line,
+        column: span.column,
     }
 }
 

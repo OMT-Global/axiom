@@ -35,6 +35,8 @@ enum Command {
         #[arg(long)]
         json: bool,
         #[arg(long)]
+        debug: bool,
+        #[arg(long)]
         target: Option<String>,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
@@ -93,6 +95,7 @@ fn main() {
         Command::Build {
             path,
             json,
+            debug,
             target,
             package,
         } => {
@@ -101,6 +104,7 @@ fn main() {
                 &BuildOptions {
                     target,
                     package: package.clone(),
+                    debug,
                 },
             ) {
                 Ok(output) => {

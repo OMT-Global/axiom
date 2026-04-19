@@ -49,6 +49,7 @@ pub struct BuiltPackage {
     pub generated_rust: String,
     pub statement_count: usize,
     pub target: Option<String>,
+    pub debug: bool,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
 }
@@ -61,6 +62,7 @@ pub struct BuildOutput {
     pub generated_rust: String,
     pub statement_count: usize,
     pub target: Option<String>,
+    pub debug: bool,
     pub cache_hits: usize,
     pub cache_misses: usize,
     pub duration_ms: u64,
@@ -110,6 +112,7 @@ pub struct CheckOptions {
 pub struct BuildOptions {
     pub target: Option<String>,
     pub package: Option<String>,
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,6 +201,7 @@ pub fn build_project_with_options(
             generated_rust: generated_rust.display().to_string(),
             statement_count: analyzed.mir.statement_count(),
             target: options.target.clone(),
+            debug: options.debug,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
         });
@@ -223,6 +227,7 @@ pub fn build_project_with_options(
         generated_rust: root.generated_rust,
         statement_count: root.statement_count,
         target: root.target,
+        debug: root.debug,
         cache_hits,
         cache_misses,
         duration_ms: started.elapsed().as_millis() as u64,
@@ -252,6 +257,7 @@ pub fn run_project_with_options(
         &BuildOptions {
             target: None,
             package: options.package.clone(),
+            debug: false,
         },
     )?;
     let build_output_dir = Path::new(&built.generated_rust).parent().ok_or_else(|| {
@@ -725,6 +731,7 @@ struct BuildCacheFile {
     version: u32,
     compiler: String,
     target: Option<String>,
+    debug: bool,
     manifest_hash: String,
     lockfile_hash: String,
     rust_hash: String,
@@ -770,6 +777,7 @@ fn build_artifacts(
         analyzed,
         &rust_source,
         options.target.clone(),
+        options.debug,
     )?;
     let cache_path = build_cache_path(generated_rust);
     if read_build_cache(&cache_path)
@@ -788,7 +796,12 @@ fn build_artifacts(
         )
     })?;
     let started = Instant::now();
-    compile_native(generated_rust, binary, options.target.as_deref())?;
+    compile_native(
+        generated_rust,
+        binary,
+        options.target.as_deref(),
+        options.debug,
+    )?;
     let compile_ms = started.elapsed().as_millis() as u64;
     let mut cache = cache;
     cache.binary_hash = Some(hash_file_bytes(binary)?);
@@ -853,11 +866,13 @@ fn build_cache_file(
     analyzed: &AnalyzedProject,
     rust_source: &str,
     target: Option<String>,
+    debug: bool,
 ) -> Result<BuildCacheFile, Diagnostic> {
     Ok(BuildCacheFile {
         version: BUILD_CACHE_VERSION,
         compiler: BUILD_CACHE_COMPILER.to_string(),
         target,
+        debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
         lockfile_hash: hash_file(&crate::manifest::lockfile_path(package_root))?,
         rust_hash: hash_text(rust_source),

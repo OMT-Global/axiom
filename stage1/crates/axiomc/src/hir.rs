@@ -56,28 +56,44 @@ pub struct Param {
     pub ty: Type,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct SourceSpan {
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Stmt {
     Let {
         name: String,
         ty: Type,
         expr: Expr,
+        span: SourceSpan,
     },
-    Print(Expr),
+    Print {
+        expr: Expr,
+        span: SourceSpan,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
         else_block: Option<Vec<Stmt>>,
+        span: SourceSpan,
     },
     While {
         cond: Expr,
         body: Vec<Stmt>,
+        span: SourceSpan,
     },
     Match {
         expr: Expr,
         arms: Vec<MatchArm>,
+        span: SourceSpan,
     },
-    Return(Expr),
+    Return {
+        expr: Expr,
+        span: SourceSpan,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -871,6 +887,10 @@ fn lower_stmt(
                 name: name.clone(),
                 ty: expected,
                 expr: lowered_expr,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
             })
         }
         syntax::Stmt::Print { expr, line, column } => {
@@ -882,7 +902,13 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            Ok(Stmt::Print(lowered))
+            Ok(Stmt::Print {
+                expr: lowered,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
+            })
         }
         syntax::Stmt::If {
             cond,
@@ -908,6 +934,10 @@ fn lower_stmt(
                         cond: lowered_cond,
                         then_block,
                         else_block: else_block.as_ref().map(|_| Vec::new()),
+                        span: SourceSpan {
+                            line: *line,
+                            column: *column,
+                        },
                     });
                 }
                 if let Some(else_block) = else_block {
@@ -918,12 +948,20 @@ fn lower_stmt(
                         cond: lowered_cond,
                         then_block: Vec::new(),
                         else_block: Some(block),
+                        span: SourceSpan {
+                            line: *line,
+                            column: *column,
+                        },
                     });
                 }
                 return Ok(Stmt::If {
                     cond: lowered_cond,
                     then_block: Vec::new(),
                     else_block: None,
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
                 });
             }
             let before = env.clone();
@@ -949,6 +987,10 @@ fn lower_stmt(
                 cond: lowered_cond,
                 then_block,
                 else_block,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
             })
         }
         syntax::Stmt::While {
@@ -969,6 +1011,10 @@ fn lower_stmt(
                 return Ok(Stmt::While {
                     cond: lowered_cond,
                     body: Vec::new(),
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
                 });
             }
             let before = env.clone();
@@ -1004,6 +1050,10 @@ fn lower_stmt(
             Ok(Stmt::While {
                 cond: lowered_cond,
                 body,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
             })
         }
         syntax::Stmt::Match {
@@ -1221,6 +1271,10 @@ fn lower_stmt(
             Ok(Stmt::Match {
                 expr: lowered_expr,
                 arms: lowered_arms,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
             })
         }
         syntax::Stmt::Return { expr, line, column } => {
@@ -1256,7 +1310,13 @@ fn lower_stmt(
                     }
                 }
             }
-            Ok(Stmt::Return(lowered_expr))
+            Ok(Stmt::Return {
+                expr: lowered_expr,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
+            })
         }
     }
 }
@@ -4207,11 +4267,12 @@ impl Expr {
 impl Stmt {
     fn always_returns(&self) -> bool {
         match self {
-            Stmt::Return(_) => true,
+            Stmt::Return { .. } => true,
             Stmt::If {
                 cond,
                 then_block,
                 else_block: Some(else_block),
+                ..
             } => match static_bool_value(cond) {
                 Some(true) => block_always_returns(then_block),
                 Some(false) => block_always_returns(else_block),
@@ -4221,6 +4282,7 @@ impl Stmt {
                 cond,
                 then_block,
                 else_block: None,
+                ..
             } => {
                 static_bool_value(cond).is_some_and(|value| value)
                     && block_always_returns(then_block)
