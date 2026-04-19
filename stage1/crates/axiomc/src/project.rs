@@ -941,25 +941,29 @@ fn run_test_case(
 ) -> TestCaseResult {
     let started = Instant::now();
     let entry_path = project_root.join(&test.entry);
-    let generated_rust = test_generated_rust_path(project_root, manifest, &test.name);
-    let binary = test_binary_path(project_root, manifest, &test.name);
+    let generated_rust = match test_generated_rust_path(project_root, manifest, &test.name) {
+        Ok(path) => path,
+        Err(error) => {
+            return failed_test_case_result(project_root, test, &started, error, None, None);
+        }
+    };
+    let binary = match test_binary_path(project_root, manifest, &test.name) {
+        Ok(path) => path,
+        Err(error) => {
+            return failed_test_case_result(
+                project_root,
+                test,
+                &started,
+                error,
+                Some(generated_rust.display().to_string()),
+                None,
+            );
+        }
+    };
     let analyzed = match analyze_entry(graph, project_root, manifest.clone(), entry_path.clone()) {
         Ok(analyzed) => analyzed,
         Err(error) => {
-            return TestCaseResult {
-                package_root: project_root.display().to_string(),
-                name: test.name.clone(),
-                entry: test.entry.clone(),
-                ok: false,
-                binary: None,
-                generated_rust: None,
-                exit_code: None,
-                stdout: String::new(),
-                stderr: String::new(),
-                expected_stdout: test.stdout.clone(),
-                duration_ms: started.elapsed().as_millis() as u64,
-                error: Some(error),
-            };
+            return failed_test_case_result(project_root, test, &started, error, None, None);
         }
     };
     if let Err(error) = build_artifacts(
@@ -1069,6 +1073,30 @@ fn run_test_case(
     }
 }
 
+fn failed_test_case_result(
+    project_root: &Path,
+    test: &crate::manifest::TestTarget,
+    started: &Instant,
+    error: Diagnostic,
+    generated_rust: Option<String>,
+    binary: Option<String>,
+) -> TestCaseResult {
+    TestCaseResult {
+        package_root: project_root.display().to_string(),
+        name: test.name.clone(),
+        entry: test.entry.clone(),
+        ok: false,
+        binary,
+        generated_rust,
+        exit_code: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        expected_stdout: test.stdout.clone(),
+        duration_ms: started.elapsed().as_millis() as u64,
+        error: Some(error),
+    }
+}
+
 fn workspace_package_roots(
     graph: &PackageGraph,
     project_root: &Path,
@@ -1128,32 +1156,45 @@ fn collect_workspace_package_roots(
     Ok(())
 }
 
-fn test_generated_rust_path(project_root: &Path, manifest: &Manifest, test_name: &str) -> PathBuf {
-    out_dir_path(project_root, manifest)
+fn test_generated_rust_path(
+    project_root: &Path,
+    manifest: &Manifest,
+    test_name: &str,
+) -> Result<PathBuf, Diagnostic> {
+    Ok(out_dir_path(project_root, manifest)
         .join("tests")
         .join(format!(
             "{}.generated.rs",
-            test_artifact_name(manifest, test_name)
-        ))
+            test_artifact_name(project_root, manifest, test_name)?
+        )))
 }
 
-fn test_binary_path(project_root: &Path, manifest: &Manifest, test_name: &str) -> PathBuf {
+fn test_binary_path(
+    project_root: &Path,
+    manifest: &Manifest,
+    test_name: &str,
+) -> Result<PathBuf, Diagnostic> {
     let suffix = if cfg!(windows) { ".exe" } else { "" };
-    out_dir_path(project_root, manifest)
+    Ok(out_dir_path(project_root, manifest)
         .join("tests")
         .join(format!(
             "{}{}",
-            test_artifact_name(manifest, test_name),
+            test_artifact_name(project_root, manifest, test_name)?,
             suffix
-        ))
+        )))
 }
 
-fn test_artifact_name(manifest: &Manifest, test_name: &str) -> String {
-    let package = manifest
-        .package
-        .as_ref()
-        .expect("test artifacts require a package manifest");
-    format!("{}-{}", package.name, slugify_test_name(test_name))
+fn test_artifact_name(
+    project_root: &Path,
+    manifest: &Manifest,
+    test_name: &str,
+) -> Result<String, Diagnostic> {
+    let package = package_section(
+        manifest,
+        "test artifacts require a package manifest",
+        &manifest_path(project_root),
+    )?;
+    Ok(format!("{}-{}", package.name, slugify_test_name(test_name)))
 }
 
 fn slugify_test_name(value: &str) -> String {
@@ -1272,13 +1313,13 @@ fn load_module_recursive(
     visiting.pop();
 
     loaded.insert(module_path.clone(), ());
-    let package_name = package
-        .manifest
-        .package
-        .as_ref()
-        .expect("loaded modules require a package manifest")
-        .name
-        .clone();
+    let package_name = package_section(
+        &package.manifest,
+        "loaded modules require a package manifest",
+        &manifest_path(&package.root),
+    )?
+    .name
+    .clone();
     ordered.push(LoadedModule {
         path: module_path,
         program,
@@ -1288,6 +1329,16 @@ fn load_module_recursive(
         package_name,
     });
     Ok(())
+}
+
+fn package_section<'a>(
+    manifest: &'a Manifest,
+    message: &'static str,
+    manifest_file: &Path,
+) -> Result<&'a PackageSection, Diagnostic> {
+    manifest.package.as_ref().ok_or_else(|| {
+        Diagnostic::new("manifest", message).with_path(manifest_file.display().to_string())
+    })
 }
 
 fn validate_module_capabilities(
@@ -3198,5 +3249,81 @@ fn stmt_column(stmt: &syntax::Stmt) -> usize {
         | syntax::Stmt::While { column, .. }
         | syntax::Stmt::Match { column, .. }
         | syntax::Stmt::Return { column, .. } => *column,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, HashMap};
+    use tempfile::tempdir;
+
+    fn workspace_only_manifest() -> Manifest {
+        Manifest {
+            package: None,
+            dependencies: BTreeMap::new(),
+            workspace: None,
+            build: BuildSection {
+                entry: "src/main.ax".to_string(),
+                out_dir: "dist".to_string(),
+            },
+            tests: Vec::new(),
+            capabilities: CapabilityConfig::default(),
+        }
+    }
+
+    #[test]
+    fn test_artifact_name_reports_missing_package_manifest() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let error = match test_artifact_name(dir.path(), &workspace_only_manifest(), "main_test") {
+            Ok(name) => panic!("workspace-only manifest returned test artifact {name}"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "manifest");
+        assert_eq!(error.message, "test artifacts require a package manifest");
+        assert_eq!(
+            error.path,
+            Some(manifest_path(dir.path()).display().to_string())
+        );
+    }
+
+    #[test]
+    fn load_module_reports_missing_package_manifest() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = normalize_path(dir.path());
+        let source_root = root.join("src");
+        fs::create_dir_all(&source_root).unwrap_or_else(|err| panic!("create src: {err}"));
+        let entry = source_root.join("main.ax");
+        fs::write(&entry, "").unwrap_or_else(|err| panic!("write entry: {err}"));
+
+        let mut graph = PackageGraph::default();
+        graph.packages.insert(
+            root.clone(),
+            PackageContext {
+                root: root.clone(),
+                manifest: workspace_only_manifest(),
+                source_root,
+                dependencies: BTreeMap::new(),
+                workspace_members: Vec::new(),
+            },
+        );
+
+        let error = match load_module_recursive(
+            &graph,
+            &root,
+            &entry,
+            true,
+            &mut Vec::new(),
+            &mut HashMap::new(),
+            &mut Vec::new(),
+        ) {
+            Ok(()) => panic!("workspace-only manifest loaded a module"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "manifest");
+        assert_eq!(error.message, "loaded modules require a package manifest");
+        assert_eq!(error.path, Some(manifest_path(&root).display().to_string()));
     }
 }
