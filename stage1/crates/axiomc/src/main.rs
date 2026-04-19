@@ -2,7 +2,7 @@ use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::new_project::create_project;
 use axiomc::project::{
-    BuildOptions, CheckOptions, RunOptions, TestOptions, build_project_with_options,
+    BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
     check_project_with_options, project_capabilities, run_project_tests_with_options,
     run_project_with_options,
 };
@@ -111,7 +111,9 @@ fn main() {
                     if json {
                         println!("{}", json_contract::build_success(&path, &output));
                     } else {
-                        eprintln!("wrote {}", output.binary);
+                        for line in build_summary_lines(&output) {
+                            eprintln!("{line}");
+                        }
                     }
                     0
                 }
@@ -189,6 +191,14 @@ fn main() {
     std::process::exit(code);
 }
 
+fn build_summary_lines(output: &BuildOutput) -> Vec<String> {
+    let mut lines = vec![format!("wrote {}", output.binary)];
+    if let Some(debug_map) = &output.debug_map {
+        lines.push(format!("wrote debug map {debug_map}"));
+    }
+    lines
+}
+
 fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
     if json {
         println!("{}", json_contract::error(command, &error));
@@ -196,4 +206,47 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
         eprintln!("{error}");
     }
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_output(debug_map: Option<String>) -> BuildOutput {
+        BuildOutput {
+            manifest: String::from("axiom.toml"),
+            entry: String::from("src/main.ax"),
+            binary: String::from("dist/app"),
+            generated_rust: String::from("target/main.rs"),
+            debug_map,
+            statement_count: 1,
+            target: None,
+            debug: true,
+            cache_hits: 0,
+            cache_misses: 1,
+            duration_ms: 1,
+            packages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn build_summary_mentions_debug_map_when_available() {
+        assert_eq!(
+            build_summary_lines(&build_output(Some(String::from(
+                "target/main.debug-map.json"
+            )))),
+            vec![
+                String::from("wrote dist/app"),
+                String::from("wrote debug map target/main.debug-map.json"),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_summary_omits_debug_map_for_release_builds() {
+        assert_eq!(
+            build_summary_lines(&build_output(None)),
+            vec![String::from("wrote dist/app")]
+        );
+    }
 }
