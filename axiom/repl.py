@@ -13,6 +13,7 @@ from .values import render_value
 
 
 INTRO = "Axiom REPL. Type :quit or :exit to leave."
+HELP = "Commands: :help, :quit, :exit"
 PRIMARY_PROMPT = "axiom> "
 CONTINUATION_PROMPT = "... "
 
@@ -178,6 +179,9 @@ def run_repl(
         stripped = line.strip()
         if not buffer and stripped in {":quit", ":exit"}:
             return 0
+        if not buffer and stripped == ":help":
+            print(HELP, file=stdout)
+            continue
         if not buffer and stripped == "":
             continue
 

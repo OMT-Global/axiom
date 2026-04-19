@@ -157,6 +157,16 @@ class CliRuntimeTests(unittest.TestCase):
         self.assertEqual(proc.stdout, "5\n")
         self.assertEqual(proc.stderr, "")
 
+    def test_repl_help_lists_available_commands(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text=":help\n:quit\n",
+        )
+        self.assertEqual(proc.stdout, "Commands: :help, :quit, :exit\n")
+        self.assertEqual(proc.stderr, "")
+
     def test_repl_recovers_after_errors_without_losing_prior_state(self) -> None:
         proc = run_cli(
             self,

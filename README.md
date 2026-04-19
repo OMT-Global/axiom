@@ -63,6 +63,7 @@ python -m axiom interp examples/arith.ax
 
 # Explore Axiom interactively
 python -m axiom repl
+# Inside the REPL, use :help for commands and :quit or :exit to leave.
 
 # Compile to bytecode
 python -m axiom compile examples/arith.ax -o arith.axb
