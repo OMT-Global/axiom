@@ -1,15 +1,44 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
+from axiom.repl import run_repl
+
 from tests.helpers import PROGRAMS_DIR, ROOT, run_cli, run_cli_json
 
 
 class CliRuntimeTests(unittest.TestCase):
+    def test_repl_recovers_from_keyboard_interrupt(self) -> None:
+        class InterruptingInput(io.StringIO):
+            def __init__(self) -> None:
+                super().__init__("1 + 1\n:quit\n")
+                self.interrupted = False
+
+            def isatty(self) -> bool:
+                return True
+
+            def readline(self, *args: object, **kwargs: object) -> str:
+                if not self.interrupted:
+                    self.interrupted = True
+                    raise KeyboardInterrupt
+                return super().readline(*args, **kwargs)
+
+        stdin = InterruptingInput()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        self.assertEqual(run_repl(stdin=stdin, stdout=stdout, stderr=stderr), 0)
+        self.assertEqual(stdout.getvalue(), "2 : int\n")
+        self.assertEqual(
+            stderr.getvalue(),
+            "Axiom REPL. Type :quit or :exit to leave.\n^C\n",
+        )
+
     def test_compile_demo_example_json_and_vm(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             bc = Path(td) / "compile_demo.axb"

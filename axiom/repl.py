@@ -170,6 +170,13 @@ def run_repl(
         prompt = PRIMARY_PROMPT if not buffer else CONTINUATION_PROMPT
         try:
             line = _read_repl_line(stdin, prompt=prompt, interactive=interactive)
+        except KeyboardInterrupt:
+            buffer = []
+            if interactive:
+                print("^C", file=stderr)
+                continue
+            print("error: interrupted", file=stderr)
+            return 130
         except EOFError:
             if buffer:
                 print("error: incomplete input before EOF", file=stderr)
