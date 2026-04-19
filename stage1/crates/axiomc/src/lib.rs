@@ -4278,6 +4278,8 @@ mod tests {
         .expect("debug build");
         assert!(debug.debug);
         assert!(debug.packages[0].debug);
+        let debug_map = PathBuf::from(debug.debug_map.as_ref().expect("debug map path"));
+        assert!(debug_map.exists());
         assert_eq!(debug.cache_hits, 0);
         assert_eq!(debug.cache_misses, 1);
 
@@ -4285,7 +4287,17 @@ mod tests {
         let source = project.join("src/main.ax").display().to_string();
         assert!(generated.contains(&format!("// axiom-source: {source}:1:1")));
         assert!(generated.contains(&format!("// axiom-source: {source}:2:1")));
+        let map: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&debug_map).expect("read debug map"))
+                .expect("parse debug map");
+        assert_eq!(map["schema_version"], "axiom.stage1.debug_map.v1");
+        assert_eq!(map["generated_rust"], debug.generated_rust);
+        assert_eq!(map["mappings"][0]["source"], source);
+        assert_eq!(map["mappings"][0]["line"], 1);
+        assert_eq!(map["mappings"][0]["column"], 1);
+        assert!(map["mappings"][0]["generated_line"].is_u64());
 
+        fs::remove_file(&debug_map).expect("remove debug map");
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
@@ -4297,6 +4309,7 @@ mod tests {
         .expect("cached debug build");
         assert_eq!(cached_debug.cache_hits, 1);
         assert_eq!(cached_debug.cache_misses, 0);
+        assert!(debug_map.exists());
     }
 
     #[test]
@@ -4438,6 +4451,7 @@ mod tests {
         assert_eq!(payload["command"], "build");
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
+        assert!(payload["debug_map"].is_string());
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());

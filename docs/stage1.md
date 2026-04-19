@@ -63,7 +63,9 @@ Successful payloads always include `ok`, `command`, and `project`, while
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
 requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
-with generated source-position markers.
+with generated source-position markers. Debug builds also report `debug_map`,
+a JSON sidecar that maps generated Rust statement lines back to Axiom
+file/line/column positions.
 
 ## Current gaps
 
@@ -102,8 +104,9 @@ still far from the stated 1.0 target for service and agent workloads.
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
 - `axiomc build --debug` now asks `rustc` for debuginfo, disables optimization,
-  and emits generated Rust source markers for Axiom file/line/column positions;
-  full Axiom-native debugger stepping remains a direct-backend follow-on.
+  emits generated Rust source markers, and writes a JSON source-map sidecar for
+  Axiom file/line/column positions; full Axiom-native debugger stepping remains
+  a direct-backend follow-on.
 - There is no stage1 formatter, benchmark harness, doc generator, publisher, or LSP server yet.
 - Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
 - There are no performance targets or regression gates yet.
