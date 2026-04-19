@@ -19,6 +19,7 @@ from .packaging import (
     manifest_to_dict,
     run_package,
 )
+from .repl import run_repl
 from .vm import Vm
 
 
@@ -261,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--allow-host-side-effects", action="store_true")
     sp.add_argument("--module-path", action="append", default=None)
 
+    sp = sub.add_parser("repl", help="Start an interactive Axiom REPL")
+    sp.add_argument("--allow-host-side-effects", action="store_true")
+
     sp = sub.add_parser("compile", help="Compile Axiom source to bytecode (.axb)")
     sp.add_argument("file", type=Path)
     sp.add_argument("-o", "--output", required=True, type=Path)
@@ -358,6 +362,8 @@ def run_cli(args: argparse.Namespace) -> int:
             allow_host_side_effects=args.allow_host_side_effects,
             module_paths=_module_search_paths(args.module_path),
         )
+    if args.cmd == "repl":
+        return run_repl(allow_host_side_effects=args.allow_host_side_effects)
     if args.cmd == "compile":
         return cmd_compile(
             args.file,
