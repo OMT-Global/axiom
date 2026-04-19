@@ -658,15 +658,19 @@ fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstD
     validate_ident(name, path, line_no, column)?;
     let ty_text = header[colon + 1..equals].trim();
     if ty_text.is_empty() {
-        return Err(Diagnostic::new("parse", "const declaration is missing a type")
-            .with_path(path.display().to_string())
-            .with_span(line_no, column + colon + 1));
+        return Err(
+            Diagnostic::new("parse", "const declaration is missing a type")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column + colon + 1),
+        );
     }
     let expr_text = header[equals + 1..].trim();
     if expr_text.is_empty() {
-        return Err(Diagnostic::new("parse", "const declaration is missing an initializer")
-            .with_path(path.display().to_string())
-            .with_span(line_no, column + equals + 1));
+        return Err(
+            Diagnostic::new("parse", "const declaration is missing an initializer")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column + equals + 1),
+        );
     }
     Ok(ConstDecl {
         name: name.to_string(),
@@ -1317,9 +1321,11 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
     if raw.ends_with('?') {
         let inner = raw[..raw.len() - 1].trim_end();
         if inner.is_empty() {
-            return Err(Diagnostic::new("parse", "try expression is missing an operand")
-                .with_path(path.display().to_string())
-                .with_span(line_no, column));
+            return Err(
+                Diagnostic::new("parse", "try expression is missing an operand")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column),
+            );
         }
         return Ok(Expr::Try {
             expr: Box::new(parse_term(inner, path, line_no, column)?),

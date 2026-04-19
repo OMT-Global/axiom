@@ -10,12 +10,15 @@ use crate::manifest::{
 use crate::mir;
 use crate::stdlib;
 use crate::syntax;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
+
+const BUILD_CACHE_VERSION: u32 = 1;
+const BUILD_CACHE_COMPILER: &str = concat!("axiomc-stage1-", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckedPackage {
@@ -44,6 +47,8 @@ pub struct BuiltPackage {
     pub generated_rust: String,
     pub statement_count: usize,
     pub target: Option<String>,
+    pub cache_status: BuildCacheStatus,
+    pub compile_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,7 +59,17 @@ pub struct BuildOutput {
     pub generated_rust: String,
     pub statement_count: usize,
     pub target: Option<String>,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub duration_ms: u64,
     pub packages: Vec<BuiltPackage>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildCacheStatus {
+    Hit,
+    Miss,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,13 +173,21 @@ pub fn build_project_with_options(
     let project_root = normalize_path(project_root);
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
+    let started = Instant::now();
     let mut packages = Vec::new();
     for package_root in workspace_package_roots(&graph, &project_root, options.package.as_deref())?
     {
         let analyzed = analyze_package(&graph, &package_root)?;
         let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
         let binary = binary_path(&package_root, &analyzed.manifest);
-        build_artifacts(&analyzed, &generated_rust, &binary, options)?;
+        let report = build_artifacts(
+            &graph,
+            &package_root,
+            &analyzed,
+            &generated_rust,
+            &binary,
+            options,
+        )?;
         packages.push(BuiltPackage {
             package_root: package_root.display().to_string(),
             manifest: manifest_path(&package_root).display().to_string(),
@@ -173,6 +196,8 @@ pub fn build_project_with_options(
             generated_rust: generated_rust.display().to_string(),
             statement_count: analyzed.mir.statement_count(),
             target: options.target.clone(),
+            cache_status: report.cache_status,
+            compile_ms: report.compile_ms,
         });
     }
     let root = packages.first().cloned().ok_or_else(|| {
@@ -184,6 +209,11 @@ pub fn build_project_with_options(
             ),
         )
     })?;
+    let cache_hits = packages
+        .iter()
+        .filter(|package| package.cache_status == BuildCacheStatus::Hit)
+        .count();
+    let cache_misses = packages.len().saturating_sub(cache_hits);
     Ok(BuildOutput {
         manifest: root.manifest,
         entry: root.entry,
@@ -191,6 +221,9 @@ pub fn build_project_with_options(
         generated_rust: root.generated_rust,
         statement_count: root.statement_count,
         target: root.target,
+        cache_hits,
+        cache_misses,
+        duration_ms: started.elapsed().as_millis() as u64,
         packages,
     })
 }
@@ -395,6 +428,7 @@ struct AnalyzedProject {
     manifest: Manifest,
     entry_path: PathBuf,
     mir: mir::Program,
+    modules: Vec<LoadedModule>,
 }
 
 #[derive(Debug, Clone)]
@@ -463,6 +497,7 @@ fn analyze_entry(
         manifest,
         entry_path: entry,
         mir,
+        modules,
     })
 }
 
@@ -666,12 +701,39 @@ fn resolve_workspace_members(
     Ok(members)
 }
 
+#[derive(Debug, Clone)]
+struct BuildArtifactReport {
+    cache_status: BuildCacheStatus,
+    compile_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct BuildCacheFile {
+    version: u32,
+    compiler: String,
+    target: Option<String>,
+    manifest_hash: String,
+    lockfile_hash: String,
+    rust_hash: String,
+    binary_hash: Option<String>,
+    modules: Vec<CachedModule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct CachedModule {
+    path: String,
+    source_hash: String,
+    imports: Vec<String>,
+}
+
 fn build_artifacts(
+    graph: &PackageGraph,
+    package_root: &Path,
     analyzed: &AnalyzedProject,
     generated_rust: &Path,
     binary: &Path,
     options: &BuildOptions,
-) -> Result<(), Diagnostic> {
+) -> Result<BuildArtifactReport, Diagnostic> {
     if let Some(parent) = generated_rust.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             Diagnostic::new(
@@ -689,13 +751,186 @@ fn build_artifacts(
         })?;
     }
     let rust_source = render_rust(&analyzed.mir);
+    let cache = build_cache_file(
+        graph,
+        package_root,
+        analyzed,
+        &rust_source,
+        options.target.clone(),
+    )?;
+    let cache_path = build_cache_path(generated_rust);
+    if read_build_cache(&cache_path)
+        .as_ref()
+        .is_some_and(|stored| cache_matches(stored, &cache, generated_rust, binary))
+    {
+        return Ok(BuildArtifactReport {
+            cache_status: BuildCacheStatus::Hit,
+            compile_ms: 0,
+        });
+    }
     fs::write(generated_rust, rust_source).map_err(|err| {
         Diagnostic::new(
             "build",
             format!("failed to write {}: {err}", generated_rust.display()),
         )
     })?;
-    compile_native(generated_rust, binary, options.target.as_deref())
+    let started = Instant::now();
+    compile_native(generated_rust, binary, options.target.as_deref())?;
+    let compile_ms = started.elapsed().as_millis() as u64;
+    let mut cache = cache;
+    cache.binary_hash = Some(hash_file_bytes(binary)?);
+    write_build_cache(&cache_path, &cache)?;
+    Ok(BuildArtifactReport {
+        cache_status: BuildCacheStatus::Miss,
+        compile_ms,
+    })
+}
+
+fn build_cache_path(generated_rust: &Path) -> PathBuf {
+    generated_rust.with_extension("build-cache.toml")
+}
+
+fn read_build_cache(path: &Path) -> Option<BuildCacheFile> {
+    let content = fs::read_to_string(path).ok()?;
+    toml::from_str(&content).ok()
+}
+
+fn cache_matches(
+    stored: &BuildCacheFile,
+    expected: &BuildCacheFile,
+    generated_rust: &Path,
+    binary: &Path,
+) -> bool {
+    let Some(binary_hash) = stored.binary_hash.as_ref() else {
+        return false;
+    };
+    let Ok(generated_rust_source) = fs::read_to_string(generated_rust) else {
+        return false;
+    };
+    let Ok(actual_binary_hash) = hash_file_bytes(binary) else {
+        return false;
+    };
+    let mut stored_key = stored.clone();
+    let mut expected_key = expected.clone();
+    stored_key.binary_hash = None;
+    expected_key.binary_hash = None;
+    stored_key == expected_key
+        && hash_text(&generated_rust_source) == expected.rust_hash
+        && actual_binary_hash == *binary_hash
+}
+
+fn write_build_cache(path: &Path, cache: &BuildCacheFile) -> Result<(), Diagnostic> {
+    let content = toml::to_string_pretty(cache).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to render build cache metadata: {err}"),
+        )
+    })?;
+    fs::write(path, content).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to write {}: {err}", path.display()),
+        )
+    })
+}
+
+fn build_cache_file(
+    graph: &PackageGraph,
+    package_root: &Path,
+    analyzed: &AnalyzedProject,
+    rust_source: &str,
+    target: Option<String>,
+) -> Result<BuildCacheFile, Diagnostic> {
+    Ok(BuildCacheFile {
+        version: BUILD_CACHE_VERSION,
+        compiler: BUILD_CACHE_COMPILER.to_string(),
+        target,
+        manifest_hash: hash_file(&manifest_path(package_root))?,
+        lockfile_hash: hash_file(&crate::manifest::lockfile_path(package_root))?,
+        rust_hash: hash_text(rust_source),
+        binary_hash: None,
+        modules: cached_modules(graph, &analyzed.modules)?,
+    })
+}
+
+fn cached_modules(
+    graph: &PackageGraph,
+    modules: &[LoadedModule],
+) -> Result<Vec<CachedModule>, Diagnostic> {
+    modules
+        .iter()
+        .map(|module| {
+            let source = module_source(&module.path)?;
+            let mut imports = module
+                .program
+                .imports
+                .iter()
+                .map(|import| {
+                    resolve_import_path(graph, &module.package_root, &module.path, import)
+                        .map(|(_, path)| path.display().to_string())
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            imports.sort();
+            Ok(CachedModule {
+                path: module.path.display().to_string(),
+                source_hash: hash_text(&source),
+                imports,
+            })
+        })
+        .collect()
+}
+
+fn module_source(module_path: &Path) -> Result<String, Diagnostic> {
+    if stdlib::is_stdlib_path(module_path) {
+        return stdlib::stdlib_source_for(module_path)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    "source",
+                    format!(
+                        "internal error: missing stdlib source for {}",
+                        module_path.display()
+                    ),
+                )
+                .with_path(module_path.display().to_string())
+            });
+    }
+    fs::read_to_string(module_path).map_err(|err| {
+        Diagnostic::new(
+            "source",
+            format!("failed to read {}: {err}", module_path.display()),
+        )
+        .with_path(module_path.display().to_string())
+    })
+}
+
+fn hash_file(path: &Path) -> Result<String, Diagnostic> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        Diagnostic::new("build", format!("failed to read {}: {err}", path.display()))
+            .with_path(path.display().to_string())
+    })?;
+    Ok(hash_text(&content))
+}
+
+fn hash_file_bytes(path: &Path) -> Result<String, Diagnostic> {
+    let content = fs::read(path).map_err(|err| {
+        Diagnostic::new("build", format!("failed to read {}: {err}", path.display()))
+            .with_path(path.display().to_string())
+    })?;
+    Ok(hash_bytes(&content))
+}
+
+fn hash_text(value: &str) -> String {
+    hash_bytes(value.as_bytes())
+}
+
+fn hash_bytes(value: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn run_test_case(
@@ -728,6 +963,8 @@ fn run_test_case(
         }
     };
     if let Err(error) = build_artifacts(
+        graph,
+        project_root,
         &analyzed,
         &generated_rust,
         &binary,
@@ -1520,23 +1757,21 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
             || structs.contains_key(&const_decl.name)
             || enums.contains_key(&const_decl.name)
         {
-            return Err(Diagnostic::new(
-                "type",
-                format!("duplicate const {:?}", const_decl.name),
-            )
-            .with_path(module.path.display().to_string())
-            .with_span(const_decl.line, const_decl.column));
+            return Err(
+                Diagnostic::new("type", format!("duplicate const {:?}", const_decl.name))
+                    .with_path(module.path.display().to_string())
+                    .with_span(const_decl.line, const_decl.column),
+            );
         }
         if consts
             .insert(const_decl.name.clone(), const_decl.clone())
             .is_some()
         {
-            return Err(Diagnostic::new(
-                "type",
-                format!("duplicate const {:?}", const_decl.name),
-            )
-            .with_path(module.path.display().to_string())
-            .with_span(const_decl.line, const_decl.column));
+            return Err(
+                Diagnostic::new("type", format!("duplicate const {:?}", const_decl.name))
+                    .with_path(module.path.display().to_string())
+                    .with_span(const_decl.line, const_decl.column),
+            );
         }
         if const_decl.is_public {
             public_consts.insert(const_decl.name.clone(), const_decl.clone());
@@ -2527,12 +2762,11 @@ fn resolve_const_decl(
     resolving: &mut HashSet<String>,
 ) -> Result<syntax::Expr, Diagnostic> {
     if !resolving.insert(const_decl.name.clone()) {
-        return Err(Diagnostic::new(
-            "type",
-            format!("recursive const {:?}", const_decl.name),
-        )
-        .with_path(module_path.display().to_string())
-        .with_span(const_decl.line, const_decl.column));
+        return Err(
+            Diagnostic::new("type", format!("recursive const {:?}", const_decl.name))
+                .with_path(module_path.display().to_string())
+                .with_span(const_decl.line, const_decl.column),
+        );
     }
     let rewritten = resolve_const_expr(
         &const_decl.expr,
