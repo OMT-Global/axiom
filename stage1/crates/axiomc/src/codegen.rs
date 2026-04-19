@@ -11,90 +11,54 @@ pub fn render_rust(program: &Program) -> String {
     let type_context = TypeContext::new(program);
     let mut out = String::new();
     out.push_str("#[allow(unused_imports)]\n");
-    out.push_str("use std::cell::RefCell;\n");
     out.push_str("use std::collections::HashMap;\n");
-    out.push_str("use std::panic::{self, PanicHookInfo};\n");
+    out.push_str("use std::panic;\n");
     out.push_str("use std::sync::Once;\n\n");
-    out.push_str("thread_local! {\n");
-    out.push_str(
-        "    static AXIOM_STACK: RefCell<Vec<AxiomStackFrame>> = const { RefCell::new(Vec::new()) };\n",
-    );
-    out.push_str("}\n\n");
-    out.push_str("#[derive(Clone)]\n");
-    out.push_str("struct AxiomStackFrame {\n");
-    out.push_str("    function: &'static str,\n");
-    out.push_str("    file: &'static str,\n");
-    out.push_str("    line: usize,\n");
-    out.push_str("    column: usize,\n");
-    out.push_str("}\n\n");
-    out.push_str("struct AxiomFrameGuard;\n\n");
-    out.push_str("impl AxiomFrameGuard {\n");
-    out.push_str(
-        "    fn new(function: &'static str, file: &'static str, line: usize, column: usize) -> Self {\n",
-    );
-    out.push_str("        AXIOM_STACK.with(|stack| {\n");
-    out.push_str("            stack.borrow_mut().push(AxiomStackFrame {\n");
-    out.push_str("                function,\n");
-    out.push_str("                file,\n");
-    out.push_str("                line,\n");
-    out.push_str("                column,\n");
-    out.push_str("            });\n");
-    out.push_str("        });\n");
-    out.push_str("        Self\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
-    out.push_str("impl Drop for AxiomFrameGuard {\n");
-    out.push_str("    fn drop(&mut self) {\n");
-    out.push_str("        AXIOM_STACK.with(|stack| {\n");
-    out.push_str("            stack.borrow_mut().pop();\n");
-    out.push_str("        });\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
-    out.push_str("fn axiom_panic_message(info: &PanicHookInfo<'_>) -> String {\n");
-    out.push_str("    if let Some(message) = info.payload().downcast_ref::<&str>() {\n");
-    out.push_str("        (*message).to_string()\n");
-    out.push_str("    } else if let Some(message) = info.payload().downcast_ref::<String>() {\n");
-    out.push_str("        message.clone()\n");
-    out.push_str("    } else {\n");
-    out.push_str("        String::from(\"panic\")\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
+    out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("fn axiom_install_panic_hook() {\n");
     out.push_str("    static AXIOM_PANIC_HOOK: Once = Once::new();\n");
     out.push_str("    AXIOM_PANIC_HOOK.call_once(|| {\n");
-    out.push_str("        panic::set_hook(Box::new(|info| {\n");
-    out.push_str("            eprintln!(\"panic: {}\", axiom_panic_message(info));\n");
-    out.push_str("            let frames = AXIOM_STACK.with(|stack| stack.borrow().clone());\n");
-    out.push_str("            if frames.is_empty() {\n");
-    out.push_str("                eprintln!(\"Axiom stack trace: <empty>\");\n");
-    out.push_str("                return;\n");
-    out.push_str("            }\n");
-    out.push_str("            eprintln!(\"Axiom stack trace (most recent call last):\");\n");
-    out.push_str("            for frame in frames.iter().rev() {\n");
-    out.push_str("                eprintln!(\n");
-    out.push_str("                    \"  at {} ({}:{}:{})\",\n");
-    out.push_str("                    frame.function,\n");
-    out.push_str("                    frame.file,\n");
-    out.push_str("                    frame.line,\n");
-    out.push_str("                    frame.column\n");
-    out.push_str("                );\n");
-    out.push_str("            }\n");
-    out.push_str("        }));\n");
+    out.push_str("        panic::set_hook(Box::new(|_| {}));\n");
     out.push_str("    });\n");
+    out.push_str("}\n\n");
+    out.push_str("fn axiom_runtime_report(kind: &str, message: &str) {\n");
+    out.push_str("    eprintln!(\n");
+    out.push_str("        \"{{\\\"kind\\\":\\\"{}\\\",\\\"message\\\":{}}}\",\n");
+    out.push_str("        kind,\n");
+    out.push_str("        axiom_json_escape_string(message)\n");
+    out.push_str("    );\n");
+    out.push_str("}\n\n");
+    out.push_str("fn axiom_runtime_error(kind: &str, message: &str) -> ! {\n");
+    out.push_str("    axiom_runtime_report(kind, message);\n");
+    out.push_str("    panic::panic_any(AxiomRuntimeAbort)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_array_get<T: Copy>(values: &[T], index: i64) -> T {\n");
+    out.push_str("    if index < 0 {\n");
     out.push_str(
-        "    let index = usize::try_from(index).expect(\"array index must be non-negative\");\n",
+        "        axiom_runtime_error(\"runtime\", \"array index must be non-negative\");\n",
     );
-    out.push_str("    values[index]\n");
+    out.push_str("    }\n");
+    out.push_str("    match values.get(index as usize) {\n");
+    out.push_str("        Some(value) => *value,\n");
+    out.push_str(
+        "        None => axiom_runtime_error(\"runtime\", \"array index out of bounds\"),\n",
+    );
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_array_take<T>(values: Vec<T>, index: i64) -> T {\n");
+    out.push_str("    if index < 0 {\n");
     out.push_str(
-        "    let index = usize::try_from(index).expect(\"array index must be non-negative\");\n",
+        "        axiom_runtime_error(\"runtime\", \"array index must be non-negative\");\n",
     );
-    out.push_str("    values.into_iter().nth(index).expect(\"array index out of bounds\")\n");
+    out.push_str("    }\n");
+    out.push_str("    match values.into_iter().nth(index as usize) {\n");
+    out.push_str("        Some(value) => value,\n");
+    out.push_str(
+        "        None => axiom_runtime_error(\"runtime\", \"array index out of bounds\"),\n",
+    );
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str(
@@ -102,14 +66,26 @@ pub fn render_rust(program: &Program) -> String {
     );
     out.push_str("    let start = start.unwrap_or(0);\n");
     out.push_str("    let end = end.unwrap_or(len as i64);\n");
+    out.push_str("    if start < 0 {\n");
     out.push_str(
-        "    let start = usize::try_from(start).expect(\"array slice start must be non-negative\");\n",
+        "        axiom_runtime_error(\"runtime\", \"array slice start must be non-negative\");\n",
     );
+    out.push_str("    }\n");
+    out.push_str("    if end < 0 {\n");
     out.push_str(
-        "    let end = usize::try_from(end).expect(\"array slice end must be non-negative\");\n",
+        "        axiom_runtime_error(\"runtime\", \"array slice end must be non-negative\");\n",
     );
-    out.push_str("    assert!(start <= end, \"array slice start must be <= end\");\n");
-    out.push_str("    assert!(end <= len, \"array slice end out of bounds\");\n");
+    out.push_str("    }\n");
+    out.push_str("    let start = start as usize;\n");
+    out.push_str("    let end = end as usize;\n");
+    out.push_str("    if start > end {\n");
+    out.push_str(
+        "        axiom_runtime_error(\"runtime\", \"array slice start must be <= end\");\n",
+    );
+    out.push_str("    }\n");
+    out.push_str("    if end > len {\n");
+    out.push_str("        axiom_runtime_error(\"runtime\", \"array slice end out of bounds\");\n");
+    out.push_str("    }\n");
     out.push_str("    (start, end)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
@@ -124,7 +100,9 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_last_index(len: usize) -> i64 {\n");
-    out.push_str("    assert!(len > 0, \"collection must not be empty\");\n");
+    out.push_str("    if len == 0 {\n");
+    out.push_str("        axiom_runtime_error(\"runtime\", \"collection must not be empty\");\n");
+    out.push_str("    }\n");
     out.push_str("    (len - 1) as i64\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
@@ -140,9 +118,8 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_assert_fail(message: String, line: i64, column: i64) -> i64 {\n");
-    out.push_str("    eprintln!(\"assertion failed at {}:{}: {}\", line, column, message);\n");
-    out.push_str("    std::process::exit(1)\n");
+    out.push_str("fn axiom_assert_fail(message: String, _line: i64, _column: i64) -> i64 {\n");
+    out.push_str("    axiom_runtime_error(\"assertion\", &message)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_json_parse_int(text: String) -> Option<i64> {\n");
@@ -297,9 +274,10 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_clock_now_ms() -> i64 {\n");
     out.push_str("    use std::time::{SystemTime, UNIX_EPOCH};\n");
-    out.push_str("    let now = SystemTime::now()\n");
-    out.push_str("        .duration_since(UNIX_EPOCH)\n");
-    out.push_str("        .expect(\"system clock must be after unix epoch\");\n");
+    out.push_str("    let now = match SystemTime::now().duration_since(UNIX_EPOCH) {\n");
+    out.push_str("        Ok(now) => now,\n");
+    out.push_str("        Err(_) => axiom_runtime_error(\"runtime\", \"system clock must be after unix epoch\"),\n");
+    out.push_str("    };\n");
     out.push_str("    now.as_millis() as i64\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
@@ -411,13 +389,19 @@ pub fn render_rust(program: &Program) -> String {
     out.push_str(
         "fn axiom_map_get<K: Eq + std::hash::Hash, V: Copy>(values: &HashMap<K, V>, key: &K) -> V {\n",
     );
-    out.push_str("    *values.get(key).expect(\"map key not found\")\n");
+    out.push_str("    match values.get(key) {\n");
+    out.push_str("        Some(value) => *value,\n");
+    out.push_str("        None => axiom_runtime_error(\"runtime\", \"map key not found\"),\n");
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str(
         "fn axiom_map_take<K: Eq + std::hash::Hash, V>(mut values: HashMap<K, V>, key: &K) -> V {\n",
     );
-    out.push_str("    values.remove(key).expect(\"map key not found\")\n");
+    out.push_str("    match values.remove(key) {\n");
+    out.push_str("        Some(value) => value,\n");
+    out.push_str("        None => axiom_runtime_error(\"runtime\", \"map key not found\"),\n");
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     for enum_def in &program.enums {
         render_enum(enum_def, &type_context, &mut out);
@@ -431,15 +415,21 @@ pub fn render_rust(program: &Program) -> String {
         render_function(function, &type_context, &mut out);
         out.push('\n');
     }
-    out.push_str("fn main() {\n");
+    out.push_str("fn main() -> std::process::ExitCode {\n");
     out.push_str("    axiom_install_panic_hook();\n");
-    out.push_str(&format!(
-        "    let _axiom_frame = AxiomFrameGuard::new(\"<main>\", {:?}, 1, 1);\n",
-        program.path
-    ));
+    out.push_str("    let result = panic::catch_unwind(|| {\n");
     for stmt in &program.stmts {
-        render_stmt(stmt, &type_context, &mut out, 1);
+        render_stmt(stmt, &type_context, &mut out, 2);
     }
+    out.push_str("    });\n");
+    out.push_str("    match result {\n");
+    out.push_str("        Ok(()) => std::process::ExitCode::SUCCESS,\n");
+    out.push_str("        Err(payload) if payload.is::<AxiomRuntimeAbort>() => std::process::ExitCode::from(1),\n");
+    out.push_str("        Err(_) => {\n");
+    out.push_str("            axiom_runtime_report(\"panic\", \"runtime panic\");\n");
+    out.push_str("            std::process::ExitCode::from(1)\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
     out.push_str("}\n");
     out
 }
@@ -634,10 +624,6 @@ fn render_function(function: &Function, type_context: &TypeContext<'_>, out: &mu
         lifetime,
         params,
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
-    ));
-    out.push_str(&format!(
-        "    let _axiom_frame = AxiomFrameGuard::new({:?}, {:?}, {}, {});\n",
-        function.source_name, function.path, function.line, function.column
     ));
     for stmt in &function.body {
         render_stmt(stmt, type_context, out, 1);
