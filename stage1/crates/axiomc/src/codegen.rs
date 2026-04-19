@@ -8,6 +8,10 @@ use std::path::Path;
 use std::process::Command;
 
 pub fn render_rust(program: &Program) -> String {
+    render_rust_with_debug(program, false)
+}
+
+pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     let type_context = TypeContext::new(program);
     let mut out = String::new();
     out.push_str("#[allow(unused_imports)]\n");
@@ -412,14 +416,14 @@ pub fn render_rust(program: &Program) -> String {
         out.push('\n');
     }
     for function in &program.functions {
-        render_function(function, &type_context, &mut out);
+        render_function(function, &type_context, &mut out, debug);
         out.push('\n');
     }
     out.push_str("fn main() -> std::process::ExitCode {\n");
     out.push_str("    axiom_install_panic_hook();\n");
     out.push_str("    let result = panic::catch_unwind(|| {\n");
     for stmt in &program.stmts {
-        render_stmt(stmt, &type_context, &mut out, 2, &program.path);
+        render_stmt(stmt, &type_context, &mut out, 2, &program.path, debug);
     }
     out.push_str("    });\n");
     out.push_str("    match result {\n");
@@ -609,7 +613,12 @@ fn render_struct_field(
     ));
 }
 
-fn render_function(function: &Function, type_context: &TypeContext<'_>, out: &mut String) {
+fn render_function(
+    function: &Function,
+    type_context: &TypeContext<'_>,
+    out: &mut String,
+    debug: bool,
+) {
     let uses_slice_lifetime = function_signature_uses_borrowed_slice(function, type_context);
     let params = function
         .params
@@ -626,7 +635,7 @@ fn render_function(function: &Function, type_context: &TypeContext<'_>, out: &mu
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
     for stmt in &function.body {
-        render_stmt(stmt, type_context, out, 1, &function.path);
+        render_stmt(stmt, type_context, out, 1, &function.path, debug);
     }
     out.push_str("}\n");
 }
@@ -649,6 +658,7 @@ fn render_stmt(
     out: &mut String,
     indent: usize,
     source_path: &str,
+    debug: bool,
 ) {
     let pad = "    ".repeat(indent);
     match stmt {
@@ -658,7 +668,7 @@ fn render_stmt(
             expr,
             span,
         } => {
-            render_source_marker(source_path, *span, out, indent);
+            render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!(
                 "{pad}let {name}: {} = {};\n",
                 rust_type(ty, type_context),
@@ -666,7 +676,7 @@ fn render_stmt(
             ));
         }
         Stmt::Print { expr, span } => {
-            render_source_marker(source_path, *span, out, indent);
+            render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!(
                 "{pad}println!(\"{{}}\", {});\n",
                 render_expr(expr)
@@ -678,15 +688,15 @@ fn render_stmt(
             else_block,
             span,
         } => {
-            render_source_marker(source_path, *span, out, indent);
+            render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}if {} {{\n", render_expr(cond)));
             for stmt in then_block {
-                render_stmt(stmt, type_context, out, indent + 1, source_path);
+                render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
             }
             if let Some(else_block) = else_block {
                 out.push_str(&format!("{pad}}} else {{\n"));
                 for stmt in else_block {
-                    render_stmt(stmt, type_context, out, indent + 1, source_path);
+                    render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
                 }
                 out.push_str(&format!("{pad}}}\n"));
             } else {
@@ -694,23 +704,23 @@ fn render_stmt(
             }
         }
         Stmt::While { cond, body, span } => {
-            render_source_marker(source_path, *span, out, indent);
+            render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}while {} {{\n", render_expr(cond)));
             for stmt in body {
-                render_stmt(stmt, type_context, out, indent + 1, source_path);
+                render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
             }
             out.push_str(&format!("{pad}}}\n"));
         }
         Stmt::Match { expr, arms, span } => {
-            render_source_marker(source_path, *span, out, indent);
+            render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}match {} {{\n", render_expr(expr)));
             for arm in arms {
-                render_match_arm(arm, type_context, out, indent + 1, source_path);
+                render_match_arm(arm, type_context, out, indent + 1, source_path, debug);
             }
             out.push_str(&format!("{pad}}}\n"));
         }
         Stmt::Return { expr, span } => {
-            render_source_marker(source_path, *span, out, indent);
+            render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}return {};\n", render_expr(expr)));
         }
     }
@@ -722,6 +732,7 @@ fn render_match_arm(
     out: &mut String,
     indent: usize,
     source_path: &str,
+    debug: bool,
 ) {
     let pad = "    ".repeat(indent);
     if arm.bindings.is_empty() {
@@ -742,12 +753,21 @@ fn render_match_arm(
         ));
     }
     for stmt in &arm.body {
-        render_stmt(stmt, type_context, out, indent + 1, source_path);
+        render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
     }
     out.push_str(&format!("{pad}}},\n"));
 }
 
-fn render_source_marker(source_path: &str, span: SourceSpan, out: &mut String, indent: usize) {
+fn render_source_marker(
+    source_path: &str,
+    span: SourceSpan,
+    out: &mut String,
+    indent: usize,
+    debug: bool,
+) {
+    if !debug {
+        return;
+    }
     let pad = "    ".repeat(indent);
     out.push_str(&format!(
         "{pad}// axiom-source: {}:{}:{}\n",

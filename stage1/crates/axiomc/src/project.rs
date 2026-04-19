@@ -1,4 +1,4 @@
-use crate::codegen::{compile_native, render_rust};
+use crate::codegen::{compile_native, render_rust_with_debug};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
@@ -770,7 +770,7 @@ fn build_artifacts(
             )
         })?;
     }
-    let rust_source = render_rust(&analyzed.mir);
+    let rust_source = render_rust_with_debug(&analyzed.mir, options.debug);
     let cache = build_cache_file(
         graph,
         package_root,

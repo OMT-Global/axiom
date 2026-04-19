@@ -4263,6 +4263,9 @@ mod tests {
         let release = build_project(&project).expect("release build");
         assert_eq!(release.cache_misses, 1);
         assert!(!release.debug);
+        let release_generated =
+            fs::read_to_string(&release.generated_rust).expect("read release generated rust");
+        assert!(!release_generated.contains("// axiom-source:"));
 
         let debug = build_project_with_options(
             &project,
