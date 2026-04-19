@@ -2131,6 +2131,63 @@ mod tests {
     }
 
     #[test]
+    fn stage1_stdlib_http_rejects_oversized_response_body() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let body = vec![b'a'; 1024 * 1024 + 1];
+            let response_head = format!(
+                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(response_head.as_bytes());
+            let _ = stream.write_all(&body);
+        });
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-http-oversized-body");
+        create_project(&project, Some("stdlib-http-oversized-body")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-http-oversized-body",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = format!(
+            "import \"std/http.ax\"\nmatch get(\"http://{}/\") {{\nSome(_body) {{\nprint \"body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
+            addr
+        );
+        fs::write(project.join("src/main.ax"), &source).expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        server.join().expect("server thread");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "none\n");
+    }
+
+    #[test]
     fn stage1_project_rejects_stdlib_http_without_net_capability() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-http-denied");
