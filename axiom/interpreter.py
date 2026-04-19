@@ -53,6 +53,7 @@ from .values import (
     require_condition_bool,
     sub_values,
 )
+from .checker import CheckedProgram
 
 
 @dataclass
@@ -75,22 +76,40 @@ class Interpreter:
     semantic_plan: Optional[SemanticPlan] = None
 
     def run(self, program: Program, out: TextIO) -> None:
-        self.semantic_plan = build_semantic_plan(
-            program,
-            error_factory=lambda message, span: AxiomRuntimeError(message, span),
-        )
         self.global_scope = {}
         self.scopes = [self.global_scope]
         self.call_stack = []
         self.function_depth = 0
-        self.functions = dict(self.semantic_plan.function_defs)
-        self.function_scopes = dict(self.semantic_plan.function_scopes)
-        self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
+        self.load_program(program)
 
         for stmt in program.stmts:
             if isinstance(stmt, FunctionDefStmt):
                 continue
-            self._exec_stmt(stmt, out)
+            self.exec_stmt(stmt, out)
+
+    def load_program(self, program: Program) -> None:
+        self.semantic_plan = build_semantic_plan(
+            program,
+            error_factory=lambda message, span: AxiomRuntimeError(message, span),
+        )
+        self.functions = dict(self.semantic_plan.function_defs)
+        self.function_scopes = dict(self.semantic_plan.function_scopes)
+        self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
+
+    def load_checked_program(self, checked: CheckedProgram) -> None:
+        self.semantic_plan = build_semantic_plan(
+            checked.program,
+            error_factory=lambda message, span: AxiomRuntimeError(message, span),
+        )
+        self.functions = dict(self.semantic_plan.function_defs)
+        self.function_scopes = dict(self.semantic_plan.function_scopes)
+        self.function_scope_stack = [dict(self.semantic_plan.global_scope)]
+
+    def exec_stmt(self, stmt, out: TextIO) -> None:
+        self._exec_stmt(stmt, out)
+
+    def eval_expr(self, expr: Expr, out: TextIO) -> Value:
+        return self._eval(expr, out)
 
     def _resolve_function(self, name: str) -> str:
         if self.semantic_plan is not None:
@@ -218,7 +237,9 @@ class Interpreter:
                 f"function {fn_name!r} expects {len(fn.params)} args, got {len(args)}"
             )
 
-        self.call_stack.append((self.scopes, self.function_depth, self.function_scope_stack))
+        self.call_stack.append(
+            (list(self.scopes), self.function_depth, list(self.function_scope_stack))
+        )
 
         param_scope: Dict[str, Value] = {}
         for index, param in enumerate(fn.params):
