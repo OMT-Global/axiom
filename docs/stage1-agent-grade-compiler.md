@@ -98,9 +98,10 @@ Work packages:
 - `AG1.2`: mutable borrows
   - Start with borrowed locals and borrowed slices.
   - Reject double mutable borrow and mutable-plus-shared aliasing.
-- `AG1.3`: projection-sensitive ownership
-  - Stop conservatively consuming whole aggregates when a field or payload move can be represented safely.
-  - Recheck call lowering, destructuring, and `match` lowering against that model.
+- `AG1.3`: projection-sensitive ownership — **landed**
+  - Non-`Copy` struct field access and static tuple indexing now move only the named projection and leave sibling projections available.
+  - Whole-value use after a partial move remains rejected, and call lowering respects projected non-`Copy` arguments.
+  - Match payload bindings continue to lower as independent owned bindings so moving one non-`Copy` payload binding does not invalidate sibling payload bindings.
 - `AG1.4`: diagnostics and failure corpus
   - Add stable ownership error kinds in JSON diagnostics.
   - Lock a compile-fail suite for move-after-use, invalid returned borrows,
