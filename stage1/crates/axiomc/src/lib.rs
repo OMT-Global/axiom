@@ -101,6 +101,19 @@ mod tests {
         command_for_executable(path).expect("prepare compiled binary command")
     }
 
+    fn elf_section_headers(path: impl AsRef<Path>) -> Option<String> {
+        let readelf = which::which("readelf").ok()?;
+        let output = Command::new(readelf)
+            .arg("-S")
+            .arg(path.as_ref())
+            .output()
+            .expect("inspect ELF section headers");
+        if !output.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
     #[test]
     fn executable_command_resolves_relative_names_against_current_dir() {
         let command =
@@ -4282,6 +4295,10 @@ mod tests {
         assert!(debug_map.exists());
         assert_eq!(debug.cache_hits, 0);
         assert_eq!(debug.cache_misses, 1);
+        if let Some(sections) = elf_section_headers(&debug.binary) {
+            assert!(sections.contains(".debug_info"));
+            assert!(sections.contains(".debug_line"));
+        }
 
         let generated = fs::read_to_string(&debug.generated_rust).expect("read generated rust");
         let source = project.join("src/main.ax").display().to_string();
