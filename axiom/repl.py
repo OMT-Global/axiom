@@ -14,6 +14,7 @@ from .values import render_value
 
 INTRO = "Axiom REPL. Type :quit or :exit to leave."
 HELP = "Commands: :help, :quit, :exit"
+UNKNOWN_COMMAND = "unknown REPL command"
 PRIMARY_PROMPT = "axiom> "
 CONTINUATION_PROMPT = "... "
 
@@ -188,6 +189,9 @@ def run_repl(
             return 0
         if not buffer and stripped == ":help":
             print(HELP, file=stdout)
+            continue
+        if not buffer and stripped.startswith(":"):
+            print(f"error: {UNKNOWN_COMMAND} {stripped!r} (try :help)", file=stderr)
             continue
         if not buffer and stripped == "":
             continue

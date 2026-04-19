@@ -196,6 +196,19 @@ class CliRuntimeTests(unittest.TestCase):
         self.assertEqual(proc.stdout, "Commands: :help, :quit, :exit\n")
         self.assertEqual(proc.stderr, "")
 
+    def test_repl_reports_unknown_commands_without_losing_session(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text=":wat\n1 + 1\n:quit\n",
+        )
+        self.assertEqual(proc.stdout, "2 : int\n")
+        self.assertEqual(
+            proc.stderr,
+            "error: unknown REPL command ':wat' (try :help)\n",
+        )
+
     def test_repl_recovers_after_errors_without_losing_prior_state(self) -> None:
         proc = run_cli(
             self,
