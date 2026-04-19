@@ -1,15 +1,44 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
+from axiom.repl import run_repl
+
 from tests.helpers import PROGRAMS_DIR, ROOT, run_cli, run_cli_json
 
 
 class CliRuntimeTests(unittest.TestCase):
+    def test_repl_recovers_from_keyboard_interrupt(self) -> None:
+        class InterruptingInput(io.StringIO):
+            def __init__(self) -> None:
+                super().__init__("1 + 1\n:quit\n")
+                self.interrupted = False
+
+            def isatty(self) -> bool:
+                return True
+
+            def readline(self, *args: object, **kwargs: object) -> str:
+                if not self.interrupted:
+                    self.interrupted = True
+                    raise KeyboardInterrupt
+                return super().readline(*args, **kwargs)
+
+        stdin = InterruptingInput()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        self.assertEqual(run_repl(stdin=stdin, stdout=stdout, stderr=stderr), 0)
+        self.assertEqual(stdout.getvalue(), "2 : int\n")
+        self.assertEqual(
+            stderr.getvalue(),
+            "Axiom REPL. Type :quit or :exit to leave.\n^C\n",
+        )
+
     def test_compile_demo_example_json_and_vm(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             bc = Path(td) / "compile_demo.axb"
@@ -109,6 +138,105 @@ class CliRuntimeTests(unittest.TestCase):
                 cwd=ROOT,
             )
             self.assertIn("OK", proc.stderr)
+
+    def test_repl_evaluates_expressions_with_type_information(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text="1 + 2\nlet name = \"axiom\"\nname + \"!\"\n:quit\n",
+        )
+        self.assertEqual(
+            proc.stdout,
+            "3 : int\n"
+            "name : string = axiom\n"
+            "axiom! : string\n",
+        )
+        self.assertEqual(proc.stderr, "")
+
+    def test_repl_supports_multiline_functions_and_persistent_state(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text=(
+                "fn add(a: int, b: int): int {\n"
+                "return a + b\n"
+                "}\n"
+                "let total: int = add(20, 22)\n"
+                "total\n"
+                ":quit\n"
+            ),
+        )
+        self.assertEqual(
+            proc.stdout,
+            "defined add : fn(int,int):int\n"
+            "total : int = 42\n"
+            "42 : int\n",
+        )
+        self.assertEqual(proc.stderr, "")
+
+    def test_repl_supports_multiline_blocks(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text="if true {\nprint 5\n}\n:quit\n",
+        )
+        self.assertEqual(proc.stdout, "5\n")
+        self.assertEqual(proc.stderr, "")
+
+    def test_repl_help_lists_available_commands(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text=":help\n:quit\n",
+        )
+        self.assertEqual(proc.stdout, "Commands: :help, :quit, :exit\n")
+        self.assertEqual(proc.stderr, "")
+
+    def test_repl_reports_unknown_commands_without_losing_session(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text=":wat\n1 + 1\n:quit\n",
+        )
+        self.assertEqual(proc.stdout, "2 : int\n")
+        self.assertEqual(
+            proc.stderr,
+            "error: unknown REPL command ':wat' (try :help)\n",
+        )
+
+    def test_repl_recovers_after_errors_without_losing_prior_state(self) -> None:
+        proc = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text="let x: int = 7\nx + \"bad\"\nx + 1\n:quit\n",
+        )
+        self.assertEqual(proc.stdout, "x : int = 7\n8 : int\n")
+        self.assertIn("operator '+' expects matching int or string operands", proc.stderr)
+
+    def test_repl_host_side_effects_follow_flag(self) -> None:
+        blocked = run_cli(
+            self,
+            ["repl"],
+            cwd=ROOT,
+            input_text="host.print(9)\n:quit\n",
+        )
+        self.assertEqual(blocked.stdout, "")
+        self.assertIn("side-effecting", blocked.stderr)
+
+        allowed = run_cli(
+            self,
+            ["repl", "--allow-host-side-effects"],
+            cwd=ROOT,
+            input_text="host.print(9)\n:quit\n",
+        )
+        self.assertEqual(allowed.stdout, "9\n0 : int\n")
+        self.assertEqual(allowed.stderr, "")
 
     def test_host_bridge_side_effects_require_flag(self) -> None:
         with tempfile.TemporaryDirectory() as td:
