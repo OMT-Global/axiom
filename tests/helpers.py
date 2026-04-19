@@ -23,12 +23,14 @@ def run_cli(
     *,
     cwd: Path = ROOT,
     expect_code: int = 0,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         [sys.executable, "-m", "axiom", *args],
         capture_output=True,
         text=True,
         cwd=str(cwd),
+        input=input_text,
     )
     testcase.assertEqual(
         proc.returncode,
