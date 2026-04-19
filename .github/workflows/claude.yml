@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
-  pull-requests: read
+  contents: read # Default read access for repository metadata and source checkout.
+  pull-requests: read # Default read access for PR-triggered Claude requests.
 
 jobs:
   claude:
@@ -32,11 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
-      actions: read
+      contents: read # Required to check out and inspect source; this workflow must not push commits.
+      pull-requests: write # Required to post and update Claude responses on PR review threads.
+      issues: write # Required to respond to @claude issue comments and maintain sticky comments.
+      actions: read # Required by additional_permissions so Claude can inspect CI status and logs.
+      # No id-token permission: this workflow uses ANTHROPIC_API_KEY and does not use OIDC.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
