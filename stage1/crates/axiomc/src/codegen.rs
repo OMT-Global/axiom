@@ -220,10 +220,14 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("    use std::io::{Read, Write};\n");
     out.push_str("    use std::net::TcpStream;\n");
     out.push_str("    use std::time::Duration;\n");
+    out.push_str("    const MAX_HEADER_BYTES: usize = 64 * 1024;\n");
+    out.push_str("    const MAX_BODY_BYTES: usize = 1024 * 1024;\n");
     out.push_str("    // Stage1 HTTP client: http:// only, HTTP/1.0 with\n");
     out.push_str("    // Connection: close so we can read the body to EOF\n");
     out.push_str("    // without parsing Content-Length or chunked transfer\n");
-    out.push_str("    // encoding. Returns the response body on 2xx, None on\n");
+    out.push_str("    // encoding. The response header and body are capped so\n");
+    out.push_str("    // a peer cannot force unbounded memory growth. Returns\n");
+    out.push_str("    // the response body on 2xx, None on\n");
     out.push_str("    // any parse / connect / non-2xx error. HTTPS and TLS\n");
     out.push_str("    // are deliberately out of scope at this slice.\n");
     out.push_str("    let rest = url.strip_prefix(\"http://\")?;\n");
@@ -250,10 +254,36 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("    );\n");
     out.push_str("    stream.write_all(request.as_bytes()).ok()?;\n");
     out.push_str("    let mut raw = Vec::new();\n");
-    out.push_str("    stream.read_to_end(&mut raw).ok()?;\n");
-    out.push_str("    let sep = raw.windows(4).position(|w| w == b\"\\r\\n\\r\\n\")?;\n");
+    out.push_str("    let mut body_start = None;\n");
+    out.push_str("    let mut buf = [0u8; 8192];\n");
+    out.push_str("    loop {\n");
+    out.push_str("        let n = stream.read(&mut buf).ok()?;\n");
+    out.push_str("        if n == 0 {\n");
+    out.push_str("            break;\n");
+    out.push_str("        }\n");
+    out.push_str("        raw.extend_from_slice(&buf[..n]);\n");
+    out.push_str("        if body_start.is_none() {\n");
+    out.push_str(
+        "            if let Some(sep) = raw.windows(4).position(|w| w == b\"\\r\\n\\r\\n\") {\n",
+    );
+    out.push_str("                if sep > MAX_HEADER_BYTES {\n");
+    out.push_str("                    return None;\n");
+    out.push_str("                }\n");
+    out.push_str("                body_start = Some(sep + 4);\n");
+    out.push_str("            } else if raw.len() > MAX_HEADER_BYTES {\n");
+    out.push_str("                return None;\n");
+    out.push_str("            }\n");
+    out.push_str("        }\n");
+    out.push_str("        if let Some(start) = body_start {\n");
+    out.push_str("            if raw.len().saturating_sub(start) > MAX_BODY_BYTES {\n");
+    out.push_str("                return None;\n");
+    out.push_str("            }\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    let body_start = body_start?;\n");
+    out.push_str("    let sep = body_start - 4;\n");
     out.push_str("    let head = &raw[..sep];\n");
-    out.push_str("    let body = &raw[sep + 4..];\n");
+    out.push_str("    let body = &raw[body_start..];\n");
     out.push_str(
         "    let status_line_end = head.iter().position(|b| *b == b'\\r').unwrap_or(head.len());\n",
     );
