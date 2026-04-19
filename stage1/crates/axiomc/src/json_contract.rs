@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::manifest::CapabilityDescriptor;
 use crate::project::{BuildOutput, CheckOutput, TestOutput};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -73,4 +74,9 @@ pub fn error(command: &str, error: &Diagnostic) -> Value {
         "command": command,
         "error": error,
     })
+}
+
+pub fn to_pretty_string<T: Serialize>(payload: &T) -> Result<String, Diagnostic> {
+    serde_json::to_string_pretty(payload)
+        .map_err(|err| Diagnostic::new("json", format!("failed to serialize JSON output: {err}")))
 }

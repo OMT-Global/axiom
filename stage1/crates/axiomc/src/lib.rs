@@ -26,6 +26,7 @@ mod tests {
         run_project_with_options,
     };
     use crate::syntax::parse_program;
+    use serde::Serialize;
     use std::fs;
     use std::path::Path;
     use std::process::Command;
@@ -4298,5 +4299,26 @@ mod tests {
         assert_eq!(error_payload["error"]["kind"], "ownership");
         assert_eq!(error_payload["error"]["code"], "use_after_move");
         assert_eq!(error_payload["error"]["message"], "boom");
+    }
+
+    #[test]
+    fn json_contract_pretty_serializer_failure_is_diagnostic() {
+        struct FailingPayload;
+
+        impl Serialize for FailingPayload {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("forced serializer failure"))
+            }
+        }
+
+        let error = json_contract::to_pretty_string(&FailingPayload)
+            .expect_err("serializer errors should return diagnostics");
+
+        assert_eq!(error.kind, "json");
+        assert!(error.message.contains("failed to serialize JSON output"));
+        assert!(error.message.contains("forced serializer failure"));
     }
 }
