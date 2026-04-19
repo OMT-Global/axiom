@@ -166,11 +166,17 @@ fn main() {
                 Ok(capabilities) => {
                     if json {
                         println!("{}", json_contract::caps_success(&project, &capabilities));
+                        0
                     } else {
                         let payload = json_contract::caps_success(&project, &capabilities);
-                        println!("{}", serde_json::to_string_pretty(&payload).expect("json"));
+                        match json_contract::to_pretty_string(&payload) {
+                            Ok(output) => {
+                                println!("{output}");
+                                0
+                            }
+                            Err(error) => print_error("caps", error, false),
+                        }
                     }
-                    0
                 }
                 Err(error) => print_error("caps", error, json),
             }
