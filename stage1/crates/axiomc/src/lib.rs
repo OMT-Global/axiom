@@ -3120,6 +3120,21 @@ mod tests {
     }
 
     #[test]
+    fn check_project_allows_nested_non_copy_struct_field_move_then_sibling_use() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("nested-struct-partial-move-sibling");
+        create_project(&project, Some("nested-struct-partial-move-sibling-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Details {\nlabel: string\nsummary: string\n}\n\nstruct BuildInfo {\ndetails: Details\ncount: int\n}\n\nlet info: BuildInfo = BuildInfo { details: Details { label: \"deploy\", summary: \"ready\" }, count: 7 }\nprint info.details.label\nprint info.details.summary\nprint info.count\n",
+        )
+        .expect("write source");
+        check_project(&project)
+            .expect("moving a nested struct field should leave nested siblings available");
+    }
+
+    #[test]
     fn check_project_rejects_whole_struct_use_after_field_move() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("struct-partial-move-whole-use");

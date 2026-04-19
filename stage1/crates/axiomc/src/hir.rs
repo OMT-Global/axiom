@@ -2977,7 +2977,7 @@ fn lower_projection_base_expr(
                 field: field.clone(),
                 ty: field_ty,
             };
-            ensure_lowered_value_available(&projected, env)?;
+            ensure_lowered_projection_traversable(&projected, env)?;
             Ok(projected)
         }
         syntax::Expr::TupleIndex {
@@ -3013,7 +3013,7 @@ fn lower_projection_base_expr(
                 index: *index,
                 ty: element_ty,
             };
-            ensure_lowered_value_available(&projected, env)?;
+            ensure_lowered_projection_traversable(&projected, env)?;
             Ok(projected)
         }
         _ => lower_expr(expr, env, ctx),
@@ -3228,7 +3228,7 @@ fn mark_projection_moved(
     Ok(())
 }
 
-fn ensure_lowered_value_available(
+fn ensure_lowered_projection_traversable(
     expr: &Expr,
     env: &HashMap<String, Binding>,
 ) -> Result<(), Diagnostic> {
@@ -3238,7 +3238,7 @@ fn ensure_lowered_value_available(
     let Some(binding) = env.get(name) else {
         return Ok(());
     };
-    if projection_is_unavailable(binding, &projection) {
+    if projection_has_moved_ancestor(binding, &projection) {
         return Err(ownership_error(
             OWNERSHIP_USE_AFTER_MOVE,
             format!(
@@ -3275,6 +3275,14 @@ fn projection_is_unavailable(binding: &Binding, projection: &[ProjectionSegment]
             .moved_projections
             .iter()
             .any(|moved| projection_conflicts(moved, projection))
+}
+
+fn projection_has_moved_ancestor(binding: &Binding, projection: &[ProjectionSegment]) -> bool {
+    binding.moved
+        || binding
+            .moved_projections
+            .iter()
+            .any(|moved| is_projection_prefix(moved, projection))
 }
 
 fn projection_conflicts(left: &[ProjectionSegment], right: &[ProjectionSegment]) -> bool {
