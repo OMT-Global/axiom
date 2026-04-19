@@ -215,11 +215,20 @@ pub struct StructFieldValue {
 struct Binding {
     ty: Type,
     moved: bool,
+    moved_projections: HashSet<ProjectionPath>,
     borrow_kind: Option<BorrowKind>,
     borrow_origin: Option<BorrowOrigin>,
     borrowed_owners: HashSet<String>,
     active_borrow_count: usize,
     active_mut_borrow_count: usize,
+}
+
+type ProjectionPath = Vec<ProjectionSegment>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ProjectionSegment {
+    Field(String),
+    TupleIndex(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -734,6 +743,7 @@ fn lower_function(
             Binding {
                 ty: ty.clone(),
                 moved: false,
+                moved_projections: HashSet::new(),
                 borrow_kind: borrow_kind_for_type(&ty, structs, enums),
                 borrow_origin: binding_borrow_origin(&ty, Some(&param.name), structs, enums),
                 borrowed_owners: HashSet::new(),
@@ -844,6 +854,7 @@ fn lower_stmt(
                 Binding {
                     ty: expected.clone(),
                     moved: false,
+                    moved_projections: HashSet::new(),
                     borrow_kind: borrow_kind_for_type(&expected, ctx.structs, ctx.enums),
                     borrow_origin: binding_borrow_origin_from_expr(
                         &expected,
@@ -971,7 +982,11 @@ fn lower_stmt(
                         continue;
                     }
                     if let Some(post_binding) = body_after.get(name) {
-                        if post_binding.moved {
+                        let moved_projection_in_body = post_binding
+                            .moved_projections
+                            .iter()
+                            .any(|projection| !pre_binding.moved_projections.contains(projection));
+                        if post_binding.moved || moved_projection_in_body {
                             return Err(ownership_error(
                                 OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY,
                                 format!(
@@ -1146,6 +1161,7 @@ fn lower_stmt(
                         Binding {
                             ty: payload_ty.clone(),
                             moved: false,
+                            moved_projections: HashSet::new(),
                             borrow_kind: borrow_kind_for_type(payload_ty, ctx.structs, ctx.enums),
                             borrow_origin: match_binding_borrow_origin(
                                 &lowered_expr,
@@ -1275,6 +1291,13 @@ fn merge_branch_state(
             Binding {
                 ty: binding.ty.clone(),
                 moved: then_moved || else_moved,
+                moved_projections: merge_projection_sets(
+                    binding,
+                    then_after.get(name),
+                    then_returns,
+                    else_after.and_then(|branch| branch.get(name)),
+                    else_returns,
+                ),
                 borrow_kind: binding.borrow_kind,
                 borrow_origin: binding.borrow_origin.clone(),
                 borrowed_owners: binding.borrowed_owners.clone(),
@@ -1302,6 +1325,27 @@ fn merge_branch_state(
     }
 }
 
+fn merge_projection_sets(
+    before: &Binding,
+    then_after: Option<&Binding>,
+    then_returns: bool,
+    else_after: Option<&Binding>,
+    else_returns: bool,
+) -> HashSet<ProjectionPath> {
+    let mut moved = before.moved_projections.clone();
+    if !then_returns {
+        if let Some(binding) = then_after {
+            moved.extend(binding.moved_projections.iter().cloned());
+        }
+    }
+    if !else_returns {
+        if let Some(binding) = else_after {
+            moved.extend(binding.moved_projections.iter().cloned());
+        }
+    }
+    moved
+}
+
 fn merge_loop_state(
     env: &mut HashMap<String, Binding>,
     before: &HashMap<String, Binding>,
@@ -1321,6 +1365,7 @@ fn merge_loop_state(
             Binding {
                 ty: binding.ty.clone(),
                 moved: binding.moved,
+                moved_projections: binding.moved_projections.clone(),
                 borrow_kind: binding.borrow_kind,
                 borrow_origin: binding.borrow_origin.clone(),
                 borrowed_owners: binding.borrowed_owners.clone(),
@@ -1369,6 +1414,7 @@ fn merge_match_state(
             Binding {
                 ty: binding.ty.clone(),
                 moved,
+                moved_projections: merge_match_projection_sets(binding, name, arm_states),
                 borrow_kind: binding.borrow_kind,
                 borrow_origin: binding.borrow_origin.clone(),
                 borrowed_owners: binding.borrowed_owners.clone(),
@@ -1397,6 +1443,23 @@ fn merge_match_state(
             },
         );
     }
+}
+
+fn merge_match_projection_sets(
+    before: &Binding,
+    name: &str,
+    arm_states: &[(HashMap<String, Binding>, bool)],
+) -> HashSet<ProjectionPath> {
+    let mut moved = before.moved_projections.clone();
+    for (after, returns) in arm_states {
+        if *returns {
+            continue;
+        }
+        if let Some(binding) = after.get(name) {
+            moved.extend(binding.moved_projections.iter().cloned());
+        }
+    }
+    moved
 }
 
 fn match_variants(ty: &Type, ctx: &LowerContext<'_>) -> Option<(String, Vec<EnumVariantDef>)> {
@@ -1461,6 +1524,13 @@ fn lower_expr_with_expected(
                     return Err(ownership_error(
                         OWNERSHIP_USE_AFTER_MOVE,
                         format!("use of moved value {name:?}"),
+                    )
+                    .with_span(*line, *column));
+                }
+                if !binding.moved_projections.is_empty() {
+                    return Err(ownership_error(
+                        OWNERSHIP_USE_AFTER_MOVE,
+                        format!("use of partially moved value {name:?}"),
                     )
                     .with_span(*line, *column));
                 }
@@ -2486,7 +2556,7 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
-            let lowered_base = lower_expr(base, env, ctx)?;
+            let lowered_base = lower_projection_base_expr(base, env, ctx)?;
             let Type::Struct(struct_name) = lowered_base.ty() else {
                 return Err(Diagnostic::new(
                     "type",
@@ -2517,7 +2587,13 @@ fn lower_expr_with_expected(
                     .with_span(*line, *column)
                 })?;
             if !field_ty.is_copy() {
-                move_lowered_owner_value(&lowered_base, env)?;
+                let projected = Expr::FieldAccess {
+                    base: Box::new(lowered_base),
+                    field: field.clone(),
+                    ty: field_ty.clone(),
+                };
+                move_lowered_owner_value(&projected, env)?;
+                return Ok(projected);
             }
             Ok(Expr::FieldAccess {
                 base: Box::new(lowered_base),
@@ -2531,7 +2607,7 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
-            let lowered_base = lower_expr(base, env, ctx)?;
+            let lowered_base = lower_projection_base_expr(base, env, ctx)?;
             let Type::Tuple(element_tys) = lowered_base.ty() else {
                 return Err(Diagnostic::new(
                     "type",
@@ -2554,7 +2630,13 @@ fn lower_expr_with_expected(
                 .with_span(*line, *column)
             })?;
             if !element_ty.is_copy() {
-                move_lowered_owner_value(&lowered_base, env)?;
+                let projected = Expr::TupleIndex {
+                    base: Box::new(lowered_base),
+                    index: *index,
+                    ty: element_ty.clone(),
+                };
+                move_lowered_owner_value(&projected, env)?;
+                return Ok(projected);
             }
             Ok(Expr::TupleIndex {
                 base: Box::new(lowered_base),
@@ -2688,7 +2770,7 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
-            let lowered_base = lower_expr(base, env, ctx)?;
+            let lowered_base = lower_projection_base_expr(base, env, ctx)?;
             let element_ty = match lowered_base.ty() {
                 Type::Array(element_ty) | Type::Slice(element_ty) | Type::MutSlice(element_ty) => {
                     (*element_ty.clone()).clone()
@@ -2757,7 +2839,7 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
-            let lowered_base = lower_expr(base, env, ctx)?;
+            let lowered_base = lower_projection_base_expr(base, env, ctx)?;
             let lowered_index = lower_expr(index, env, ctx)?;
             let result_ty = match lowered_base.ty() {
                 Type::Array(element_ty) => {
@@ -2829,6 +2911,112 @@ fn lower_expr_with_expected(
                 ty: result_ty,
             })
         }
+    }
+}
+
+fn lower_projection_base_expr(
+    expr: &syntax::Expr,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Expr, Diagnostic> {
+    match expr {
+        syntax::Expr::VarRef { name, line, column } => {
+            let Some(binding) = env.get(name) else {
+                return lower_expr(expr, env, ctx);
+            };
+            if binding.moved {
+                return Err(ownership_error(
+                    OWNERSHIP_USE_AFTER_MOVE,
+                    format!("use of moved value {name:?}"),
+                )
+                .with_span(*line, *column));
+            }
+            Ok(Expr::VarRef {
+                name: name.clone(),
+                ty: binding.ty.clone(),
+            })
+        }
+        syntax::Expr::FieldAccess {
+            base,
+            field,
+            line,
+            column,
+        } => {
+            let lowered_base = lower_projection_base_expr(base, env, ctx)?;
+            let Type::Struct(struct_name) = lowered_base.ty() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "field access expects a struct value, got {}",
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            };
+            let struct_def = ctx.structs.get(struct_name).ok_or_else(|| {
+                Diagnostic::new(
+                    "type",
+                    format!("internal error: missing struct definition {struct_name:?}"),
+                )
+                .with_span(*line, *column)
+            })?;
+            let field_ty = struct_def
+                .fields
+                .iter()
+                .find(|entry| entry.name == *field)
+                .map(|entry| entry.ty.clone())
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        "type",
+                        format!("struct {struct_name:?} has no field {field:?}"),
+                    )
+                    .with_span(*line, *column)
+                })?;
+            let projected = Expr::FieldAccess {
+                base: Box::new(lowered_base),
+                field: field.clone(),
+                ty: field_ty,
+            };
+            ensure_lowered_value_available(&projected, env)?;
+            Ok(projected)
+        }
+        syntax::Expr::TupleIndex {
+            base,
+            index,
+            line,
+            column,
+        } => {
+            let lowered_base = lower_projection_base_expr(base, env, ctx)?;
+            let Type::Tuple(element_tys) = lowered_base.ty() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "tuple index expects a tuple value, got {}",
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            };
+            let element_ty = element_tys.get(*index).cloned().ok_or_else(|| {
+                Diagnostic::new(
+                    "type",
+                    format!(
+                        "tuple index {} is out of bounds for {}",
+                        index,
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(*line, *column)
+            })?;
+            let projected = Expr::TupleIndex {
+                base: Box::new(lowered_base),
+                index: *index,
+                ty: element_ty,
+            };
+            ensure_lowered_value_available(&projected, env)?;
+            Ok(projected)
+        }
+        _ => lower_expr(expr, env, ctx),
     }
 }
 
@@ -2993,6 +3181,24 @@ fn move_lowered_value(expr: &Expr, env: &mut HashMap<String, Binding>) -> Result
     let Expr::VarRef { name, .. } = expr else {
         return Ok(());
     };
+    mark_projection_moved(name, Vec::new(), env)
+}
+
+fn move_lowered_owner_value(
+    expr: &Expr,
+    env: &mut HashMap<String, Binding>,
+) -> Result<(), Diagnostic> {
+    let Some((name, projection)) = ownership_projection(expr) else {
+        return Ok(());
+    };
+    mark_projection_moved(name, projection, env)
+}
+
+fn mark_projection_moved(
+    name: &str,
+    projection: ProjectionPath,
+    env: &mut HashMap<String, Binding>,
+) -> Result<(), Diagnostic> {
     let binding = env.get_mut(name).ok_or_else(|| {
         Diagnostic::new(
             "type",
@@ -3005,28 +3211,99 @@ fn move_lowered_value(expr: &Expr, env: &mut HashMap<String, Binding>) -> Result
             format!("cannot move value {name:?} while borrowed slices are still live"),
         ));
     }
-    if binding.moved {
+    if projection_is_unavailable(binding, &projection) {
         return Err(ownership_error(
             OWNERSHIP_USE_AFTER_MOVE,
-            format!("use of moved value {name:?}"),
+            format!(
+                "use of moved value {:?}",
+                format_projected_name(name, &projection)
+            ),
         ));
     }
-    binding.moved = true;
+    if projection.is_empty() {
+        binding.moved = true;
+    } else {
+        binding.moved_projections.insert(projection);
+    }
     Ok(())
 }
 
-fn move_lowered_owner_value(
+fn ensure_lowered_value_available(
     expr: &Expr,
-    env: &mut HashMap<String, Binding>,
+    env: &HashMap<String, Binding>,
 ) -> Result<(), Diagnostic> {
-    match expr {
-        Expr::VarRef { .. } => move_lowered_value(expr, env),
-        Expr::Try { expr, .. } => move_lowered_owner_value(expr, env),
-        Expr::FieldAccess { base, .. } => move_lowered_owner_value(base, env),
-        Expr::TupleIndex { base, .. } => move_lowered_owner_value(base, env),
-        Expr::Index { base, .. } => move_lowered_owner_value(base, env),
-        _ => Ok(()),
+    let Some((name, projection)) = ownership_projection(expr) else {
+        return Ok(());
+    };
+    let Some(binding) = env.get(name) else {
+        return Ok(());
+    };
+    if projection_is_unavailable(binding, &projection) {
+        return Err(ownership_error(
+            OWNERSHIP_USE_AFTER_MOVE,
+            format!(
+                "use of moved value {:?}",
+                format_projected_name(name, &projection)
+            ),
+        ));
     }
+    Ok(())
+}
+
+fn ownership_projection(expr: &Expr) -> Option<(&str, ProjectionPath)> {
+    match expr {
+        Expr::VarRef { name, .. } => Some((name, Vec::new())),
+        Expr::Try { expr, .. } => ownership_projection(expr),
+        Expr::FieldAccess { base, field, .. } => {
+            let (name, mut path) = ownership_projection(base)?;
+            path.push(ProjectionSegment::Field(field.clone()));
+            Some((name, path))
+        }
+        Expr::TupleIndex { base, index, .. } => {
+            let (name, mut path) = ownership_projection(base)?;
+            path.push(ProjectionSegment::TupleIndex(*index));
+            Some((name, path))
+        }
+        Expr::Index { base, .. } => ownership_projection(base),
+        _ => None,
+    }
+}
+
+fn projection_is_unavailable(binding: &Binding, projection: &[ProjectionSegment]) -> bool {
+    binding.moved
+        || binding
+            .moved_projections
+            .iter()
+            .any(|moved| projection_conflicts(moved, projection))
+}
+
+fn projection_conflicts(left: &[ProjectionSegment], right: &[ProjectionSegment]) -> bool {
+    is_projection_prefix(left, right) || is_projection_prefix(right, left)
+}
+
+fn is_projection_prefix(prefix: &[ProjectionSegment], projection: &[ProjectionSegment]) -> bool {
+    prefix.len() <= projection.len()
+        && prefix
+            .iter()
+            .zip(projection.iter())
+            .all(|(left, right)| left == right)
+}
+
+fn format_projected_name(name: &str, projection: &[ProjectionSegment]) -> String {
+    let mut out = name.to_string();
+    for segment in projection {
+        match segment {
+            ProjectionSegment::Field(field) => {
+                out.push('.');
+                out.push_str(field);
+            }
+            ProjectionSegment::TupleIndex(index) => {
+                out.push('.');
+                out.push_str(&index.to_string());
+            }
+        }
+    }
+    out
 }
 
 fn is_borrowable_slice_base(expr: &Expr) -> bool {
