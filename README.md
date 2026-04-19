@@ -61,6 +61,9 @@ source .venv/bin/activate
 # Run a program through the interpreter
 python -m axiom interp examples/arith.ax
 
+# Explore Axiom interactively
+python -m axiom repl
+
 # Compile to bytecode
 python -m axiom compile examples/arith.ax -o arith.axb
 
@@ -145,6 +148,7 @@ python -m axiom check examples/arith.ax
 python -m axiom check examples/arith.ax --json
 python -m axiom compile examples/compile_demo.ax -o compile_demo.axb --json
 python -m axiom vm compile_demo.axb
+python -m axiom repl
 
 # Build and run a package
 python -m axiom pkg build examples/typed_package
