@@ -3,7 +3,13 @@ from pathlib import Path
 import unittest
 
 from axiom.api import compile_to_bytecode, parse_program
-from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError, MultiAxiomError
+from axiom.errors import (
+    AxiomCompileError,
+    AxiomParseError,
+    AxiomRuntimeError,
+    MultiAxiomError,
+    Span,
+)
 from axiom.host import register_host_builtin, reset_host_builtins, unregister_host_builtin
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
@@ -48,6 +54,30 @@ print x
         self.assertIn("bad-program.ax:2:1", msg)
         self.assertIn("return outside function", msg)
         self.assertIn("return 1", msg)
+        self.assertIn("^", msg)
+
+    def test_rendered_error_redacts_github_token_source_snippet(self) -> None:
+        token = "gh" + "p_" + ("A" * 36)
+        src = f'let token: string = "{token}"\n'
+        err = AxiomParseError("bad token", Span(20, 25), src, "secrets.ax")
+
+        msg = str(err)
+        payload = err.to_dict()
+
+        self.assertNotIn(token, msg)
+        self.assertNotIn(token, str(payload))
+        self.assertIn("[REDACTED_SECRET]", msg)
+        self.assertIn("[REDACTED_SECRET]", str(payload))
+        self.assertIn("secrets.ax:1:21", msg)
+
+    def test_rendered_error_preserves_normal_source_snippet(self) -> None:
+        src = "let count: int = true\n"
+        err = AxiomParseError("expected int", Span(17, 21), src, "normal.ax")
+
+        msg = str(err)
+
+        self.assertIn("let count: int = true", msg)
+        self.assertIn("normal.ax:1:18", msg)
         self.assertIn("^", msg)
 
     def test_compile_undefined_function(self) -> None:
