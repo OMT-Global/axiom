@@ -1,4 +1,4 @@
-use crate::codegen::{compile_native, render_rust_for_package};
+use crate::codegen::{compile_native, render_rust_for_package_with_capabilities};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
@@ -29,6 +29,7 @@ pub struct CheckedPackage {
     pub entry: String,
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -37,6 +38,7 @@ pub struct CheckOutput {
     pub entry: String,
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
+    pub warnings: Vec<String>,
     pub packages: Vec<CheckedPackage>,
 }
 
@@ -149,6 +151,7 @@ pub fn check_project_with_options(
             entry: analyzed.entry_path.display().to_string(),
             statement_count: analyzed.mir.statement_count(),
             capabilities: capability_descriptors(&analyzed.manifest.capabilities),
+            warnings: analyzed.manifest.capabilities.warnings(),
         });
     }
     let root = packages.first().cloned().ok_or_else(|| {
@@ -165,6 +168,7 @@ pub fn check_project_with_options(
         entry: root.entry,
         statement_count: root.statement_count,
         capabilities: root.capabilities,
+        warnings: root.warnings,
         packages,
     })
 }
@@ -583,6 +587,9 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             net: true,
             process: true,
             env: true,
+            env_vars: Vec::new(),
+            env_unrestricted: true,
+            env_legacy_unrestricted: false,
             clock: true,
             crypto: true,
         },
@@ -807,7 +814,13 @@ fn build_artifacts(
         })?;
     }
     let fs_root = fs_root_path_for_package(package_root, &analyzed.manifest)?;
-    let rust_source = render_rust_for_package(&analyzed.mir, options.debug, package_root, &fs_root);
+    let rust_source = render_rust_for_package_with_capabilities(
+        &analyzed.mir,
+        options.debug,
+        package_root,
+        &fs_root,
+        &analyzed.manifest.capabilities,
+    );
     let cache = build_cache_file(
         graph,
         package_root,
@@ -1611,12 +1624,14 @@ fn validate_expr_capabilities(
             if let Some(kind) = intrinsic_capability(name)
                 && !capabilities.enabled(kind)
             {
+                let requirement = if kind == CapabilityKind::Env {
+                    String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true")
+                } else {
+                    format!("[capabilities].{} = true", kind.name())
+                };
                 return Err(Diagnostic::new(
                     "capability",
-                    format!(
-                        "call to {name:?} requires [capabilities].{} = true",
-                        kind.name()
-                    ),
+                    format!("call to {name:?} requires {requirement}"),
                 )
                 .with_path(module_path.display().to_string())
                 .with_span(*line, *column));

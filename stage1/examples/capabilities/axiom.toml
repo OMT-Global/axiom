@@ -10,6 +10,6 @@ out_dir = "dist"
 fs = true
 net = true
 process = false
-env = true
+env = ["__AXIOM_STAGE1_MISSING__"]
 clock = true
 crypto = true

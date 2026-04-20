@@ -60,6 +60,10 @@ pub struct CapabilityConfig {
     pub net: bool,
     pub process: bool,
     pub env: bool,
+    pub env_vars: Vec<String>,
+    pub env_unrestricted: bool,
+    #[serde(skip_serializing)]
+    pub env_legacy_unrestricted: bool,
     pub clock: bool,
     pub crypto: bool,
 }
@@ -80,6 +84,10 @@ pub struct CapabilityDescriptor {
     pub name: String,
     pub enabled: bool,
     pub description: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allowed: Vec<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub unsafe_unrestricted: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,9 +142,21 @@ struct RawCapabilityConfig {
     fs_root: Option<String>,
     net: Option<bool>,
     process: Option<bool>,
-    env: Option<bool>,
+    env: Option<RawEnvCapability>,
+    env_unrestricted: Option<bool>,
     clock: Option<bool>,
     crypto: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawEnvCapability {
+    LegacyBool(bool),
+    AllowList(Vec<String>),
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub fn load_manifest(project_root: &Path) -> Result<Manifest, Diagnostic> {
@@ -195,6 +215,12 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             name: kind.name().to_string(),
             enabled: config.enabled(*kind),
             description: kind.description(),
+            allowed: if *kind == CapabilityKind::Env {
+                config.env_vars.clone()
+            } else {
+                Vec::new()
+            },
+            unsafe_unrestricted: *kind == CapabilityKind::Env && config.env_unrestricted,
         })
         .collect()
 }
@@ -214,6 +240,20 @@ impl CapabilityConfig {
             CapabilityKind::Env => self.env,
             CapabilityKind::Clock => self.clock,
             CapabilityKind::Crypto => self.crypto,
+        }
+    }
+
+    pub fn warnings(&self) -> Vec<String> {
+        if self.env_legacy_unrestricted {
+            vec![String::from(
+                "warning: [capabilities].env = true is deprecated and grants unrestricted environment access; prefer env = [\"NAME\"] or use env_unrestricted = true only during migration",
+            )]
+        } else if self.env_unrestricted {
+            vec![String::from(
+                "warning: [capabilities].env_unrestricted = true grants unrestricted environment access and bypasses the env allowlist",
+            )]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -271,6 +311,11 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     let capabilities = raw.capabilities.unwrap_or_default();
     let fs_root =
         normalize_optional_relative_path(path, "capabilities.fs_root", capabilities.fs_root)?;
+    let (env, env_vars, env_unrestricted, env_legacy_unrestricted) = normalize_env_capability(
+        path,
+        capabilities.env,
+        capabilities.env_unrestricted.unwrap_or(false),
+    )?;
     Ok(Manifest {
         package,
         dependencies,
@@ -282,11 +327,63 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             fs_root,
             net: capabilities.net.unwrap_or(false),
             process: capabilities.process.unwrap_or(false),
-            env: capabilities.env.unwrap_or(false),
+            env,
+            env_vars,
+            env_unrestricted,
+            env_legacy_unrestricted,
             clock: capabilities.clock.unwrap_or(false),
             crypto: capabilities.crypto.unwrap_or(false),
         },
     })
+}
+
+fn normalize_env_capability(
+    path: &Path,
+    raw_env: Option<RawEnvCapability>,
+    env_unrestricted: bool,
+) -> Result<(bool, Vec<String>, bool, bool), Diagnostic> {
+    match raw_env {
+        Some(RawEnvCapability::LegacyBool(enabled)) => Ok((
+            enabled || env_unrestricted,
+            Vec::new(),
+            enabled || env_unrestricted,
+            enabled,
+        )),
+        Some(RawEnvCapability::AllowList(values)) => {
+            let vars = normalize_env_allowlist(path, values)?;
+            Ok((true, vars, env_unrestricted, false))
+        }
+        None => Ok((env_unrestricted, Vec::new(), env_unrestricted, false)),
+    }
+}
+
+fn normalize_env_allowlist(path: &Path, values: Vec<String>) -> Result<Vec<String>, Diagnostic> {
+    let mut vars = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, value) in values.into_iter().enumerate() {
+        let field_name = format!("capabilities.env[{index}]");
+        if value.trim().is_empty() {
+            return Err(
+                Diagnostic::new("manifest", format!("{field_name} must not be empty"))
+                    .with_path(path.display().to_string()),
+            );
+        }
+        if value.contains('=') {
+            return Err(
+                Diagnostic::new("manifest", format!("{field_name} must not contain '='"))
+                    .with_path(path.display().to_string()),
+            );
+        }
+        if !seen.insert(value.clone()) {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("duplicate environment variable {value:?}"),
+            )
+            .with_path(path.display().to_string()));
+        }
+        vars.push(value);
+    }
+    Ok(vars)
 }
 
 fn normalize_package(
