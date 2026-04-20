@@ -1934,6 +1934,7 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
     let mut paren_depth = 0usize;
     let mut brace_depth = 0usize;
     let mut bracket_depth = 0usize;
+    let mut angle_depth = 0usize;
     for (index, ch) in raw.char_indices() {
         if escaped {
             escaped = false;
@@ -1948,6 +1949,14 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
             continue;
         }
         if in_string {
+            continue;
+        }
+        if angle_depth > 0 {
+            match ch {
+                '<' => angle_depth += 1,
+                '>' => angle_depth = angle_depth.saturating_sub(1),
+                _ => {}
+            }
             continue;
         }
         match ch {
@@ -1976,18 +1985,45 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
                 brace_depth = brace_depth.saturating_sub(1);
             }
             '[' => {
-                if target == '[' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
+                if target == '['
+                    && paren_depth == 0
+                    && brace_depth == 0
+                    && bracket_depth == 0
+                    && angle_depth == 0
+                {
                     return Some(index);
                 }
                 bracket_depth += 1;
             }
             ']' => {
-                if target == ']' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 1 {
+                if target == ']'
+                    && paren_depth == 0
+                    && brace_depth == 0
+                    && bracket_depth == 1
+                    && angle_depth == 0
+                {
                     return Some(index);
                 }
                 bracket_depth = bracket_depth.saturating_sub(1);
             }
-            _ if ch == target && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+            '<' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if target == '<' {
+                    return Some(index);
+                }
+                angle_depth += 1;
+            }
+            '>' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if target == '>' {
+                    return Some(index);
+                }
+                angle_depth = angle_depth.saturating_sub(1);
+            }
+            _ if ch == target
+                && paren_depth == 0
+                && brace_depth == 0
+                && bracket_depth == 0
+                && angle_depth == 0 =>
+            {
                 return Some(index);
             }
             _ => {}

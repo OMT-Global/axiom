@@ -199,6 +199,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_tuple_generic_type_arguments() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nlet pair: (int, int) = identity<(int, int)>((1, 2))\nprint pair.1\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn identity__tuple_int_int(value: (i64, i64)) -> (i64, i64) {"));
+        assert!(rendered.contains("let pair: (i64, i64) = identity__tuple_int_int((1, 2));"));
+    }
+
+    #[test]
     fn render_rust_uses_structured_runtime_error_reporting() {
         let source = "fn crash(values: [int]): int {\nreturn values[1]\n}\n\nprint crash([7])\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
