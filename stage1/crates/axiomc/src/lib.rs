@@ -32,6 +32,9 @@ mod tests {
     use std::process::Command;
     use tempfile::tempdir;
 
+    #[cfg(unix)]
+    const PROCESS_FIXTURE_EXECUTABLE_MODE: u32 = 0o700;
+
     fn render_manifest_with_capabilities(
         name: &str,
         fs: bool,
@@ -62,7 +65,9 @@ mod tests {
             let mut permissions = fs::metadata(&path)
                 .expect("read process fixture metadata")
                 .permissions();
-            permissions.set_mode(0o755);
+            // This is test-only fixture setup for a tempdir-owned shell script. Keep the
+            // executable bit scoped to the current user; no group/world access is needed.
+            permissions.set_mode(PROCESS_FIXTURE_EXECUTABLE_MODE);
             fs::set_permissions(&path, permissions).expect("chmod process fixture");
             path.to_string_lossy().into_owned()
         }
@@ -99,6 +104,22 @@ mod tests {
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
         command_for_executable(path).expect("prepare compiled binary command")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_fixture_is_executable_only_by_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("tempdir");
+        let fixture = write_process_fixture(dir.path());
+        let mode = fs::metadata(fixture)
+            .expect("read process fixture metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(mode, PROCESS_FIXTURE_EXECUTABLE_MODE);
     }
 
     #[test]
