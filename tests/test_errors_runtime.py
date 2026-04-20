@@ -18,7 +18,13 @@ from axiom.ast import (
 )
 from axiom.bytecode import Bytecode, Instr, Op, VERSION_MINOR
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
-from axiom.host import host_contract_metadata, register_host_builtin, reset_host_builtins
+from axiom.host import (
+    MAX_POW_BASE,
+    MAX_POW_EXPONENT,
+    host_contract_metadata,
+    register_host_builtin,
+    reset_host_builtins,
+)
 from axiom.interpreter import Interpreter
 from axiom.vm import Vm
 
@@ -34,6 +40,31 @@ class RuntimeErrorTests(unittest.TestCase):
         Interpreter().run(parse_program("print host.abs(-12)\n"), out)
         self.assertEqual(out.getvalue(), "12\n")
 
+    def test_runtime_host_math_pow_allows_capped_exponent(self) -> None:
+        out = io.StringIO()
+        Interpreter().run(parse_program(f"print host.math.pow(2, {MAX_POW_EXPONENT})\n"), out)
+        self.assertEqual(out.getvalue(), f"{2 ** MAX_POW_EXPONENT}\n")
+
+    def test_runtime_host_math_pow_rejects_exponent_above_limit(self) -> None:
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Interpreter().run(
+                parse_program(f"print host.math.pow(2, {MAX_POW_EXPONENT + 1})\n"),
+                io.StringIO(),
+            )
+        self.assertIn(
+            f"exponent {MAX_POW_EXPONENT + 1} exceeds limit {MAX_POW_EXPONENT}",
+            str(cm.exception),
+        )
+
+    def test_runtime_host_math_pow_rejects_base_above_limit(self) -> None:
+        base = MAX_POW_BASE + 1
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Interpreter().run(parse_program(f"print host.math.pow({base}, 2)\n"), io.StringIO())
+        self.assertIn(
+            f"base {base} exceeds absolute limit {MAX_POW_BASE}",
+            str(cm.exception),
+        )
+
     def test_vm_host_version(self) -> None:
         bc = compile_to_bytecode("print host.version()\n")
         out = io.StringIO()
@@ -45,6 +76,25 @@ class RuntimeErrorTests(unittest.TestCase):
         out = io.StringIO()
         Vm(locals_count=bc.locals_count).run(bc, out)
         self.assertEqual(out.getvalue(), "12\n")
+
+    def test_vm_host_math_pow_rejects_exponent_above_limit(self) -> None:
+        bc = compile_to_bytecode(f"print host.math.pow(2, {MAX_POW_EXPONENT + 1})\n")
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+        self.assertIn(
+            f"exponent {MAX_POW_EXPONENT + 1} exceeds limit {MAX_POW_EXPONENT}",
+            str(cm.exception),
+        )
+
+    def test_vm_host_math_pow_rejects_base_above_limit(self) -> None:
+        base = MAX_POW_BASE + 1
+        bc = compile_to_bytecode(f"print host.math.pow({base}, 2)\n")
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+        self.assertIn(
+            f"base {base} exceeds absolute limit {MAX_POW_BASE}",
+            str(cm.exception),
+        )
 
     def test_vm_host_call_by_name(self) -> None:
         bc = compile_to_bytecode("print host.abs(-12)\n")
