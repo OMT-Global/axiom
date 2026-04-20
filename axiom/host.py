@@ -20,6 +20,9 @@ from .values import (
 
 Handler = Callable[[List[Value], TextIO], Value]
 
+MAX_POW_EXPONENT = 1024
+MAX_POW_BASE = 2**63
+
 
 @dataclass(frozen=True)
 class HostBuiltin:
@@ -193,6 +196,14 @@ def _builtin_math_pow(args: List[Value], _out: TextIO) -> int:
     exp = require_int(args[1], context="host.math.pow")
     if exp < 0:
         raise ValueError(f"host.math.pow: negative exponent {exp}")
+    if exp > MAX_POW_EXPONENT:
+        raise ValueError(
+            f"host.math.pow: exponent {exp} exceeds limit {MAX_POW_EXPONENT}"
+        )
+    if abs(base) > MAX_POW_BASE:
+        raise ValueError(
+            f"host.math.pow: base {base} exceeds absolute limit {MAX_POW_BASE}"
+        )
     return base ** exp
 
 
