@@ -278,6 +278,11 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     if uses_http_get {
         out.push_str(
             r#"#[allow(dead_code)]
+fn axiom_http_strip_crlf(value: &str) -> String {
+    value.chars().filter(|ch| *ch != '\r' && *ch != '\n').collect()
+}
+
+#[allow(dead_code)]
 fn axiom_http_split_url(url: &str) -> Option<(&str, &str, u16, &str)> {
     let (scheme, rest, default_port) = if let Some(rest) = url.strip_prefix("http://") {
         ("http", rest, 80u16)
@@ -643,9 +648,14 @@ fn axiom_http_get(url: String) -> Option<String> {
     use std::time::Duration;
 
     let (scheme, host, port, path) = axiom_http_split_url(&url)?;
-    let request = axiom_http_request(host, path);
+    let clean_host = axiom_http_strip_crlf(host);
+    let clean_path = axiom_http_strip_crlf(path);
+    if clean_host.is_empty() || clean_path.is_empty() {
+        return None;
+    }
+    let request = axiom_http_request(clean_host.as_str(), clean_path.as_str());
     if scheme == "https" {
-        let response = match axiom_https_get_native_tls(host, port, &request) {
+        let response = match axiom_https_get_native_tls(clean_host.as_str(), port, &request) {
             Ok(response) => response,
             Err(err) => {
                 axiom_runtime_report("net", &err);
@@ -655,7 +665,7 @@ fn axiom_http_get(url: String) -> Option<String> {
         return axiom_http_read_response(&mut response.as_slice());
     }
 
-    let addrs = axiom_resolve_public_socket_addrs(host, port)?;
+    let addrs = axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?;
     let mut stream = None;
     for addr in addrs {
         if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
