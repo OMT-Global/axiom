@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -41,6 +42,29 @@ class LoaderTests(unittest.TestCase):
             self.assertEqual(len(error.notes), 1)
             self.assertEqual(error.notes[0].message, "imported from here")
             self.assertTrue(str(error.notes[0].path).endswith("main.ax"))
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlink support is required")
+    def test_loader_rejects_symlinked_import_outside_search_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            app = root / "app"
+            app.mkdir()
+            outside = root / "outside.ax"
+            outside.write_text(
+                "fn leaked(): int { return 7 }\n",
+                encoding="utf-8",
+            )
+            os.symlink(outside, app / "escape.ax")
+            main = app / "main.ax"
+            main.write_text('import "escape"\n', encoding="utf-8")
+
+            with self.assertRaises(AxiomCompileError) as cm:
+                ModuleLoader().load_file(main)
+
+            self.assertIn(
+                "import path resolves outside module search root",
+                cm.exception.message,
+            )
 
 
 if __name__ == "__main__":

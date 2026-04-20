@@ -504,6 +504,12 @@ fn analyze_package(
     }
     validate_lockfile(&package_root, &manifest)?;
     let entry = entry_path(&package_root, &manifest);
+    let entry = canonicalize_package_path(
+        &entry,
+        &package_root,
+        "manifest",
+        "build.entry resolves outside the package",
+    )?;
     analyze_entry(graph, &package_root, manifest, entry)
 }
 
@@ -597,6 +603,7 @@ fn load_package_graph_recursive(
     visiting: &mut Vec<PathBuf>,
 ) -> Result<(), Diagnostic> {
     let project_root = normalize_path(project_root);
+    let project_root = canonicalize_existing_path(&project_root, "project root")?;
     if graph.packages.contains_key(&project_root) {
         return Ok(());
     }
@@ -622,6 +629,16 @@ fn load_package_graph_recursive(
             project_root.clone()
         }
     };
+    let source_root = if source_root.exists() {
+        canonicalize_package_path(
+            &source_root,
+            &project_root,
+            "manifest",
+            "build.entry source root resolves outside the package",
+        )?
+    } else {
+        source_root
+    };
     visiting.push(project_root.clone());
     let mut dependencies = BTreeMap::new();
     for (name, spec) in &manifest.dependencies {
@@ -636,6 +653,7 @@ fn load_package_graph_recursive(
             )
             .with_path(manifest_path(&project_root).display().to_string()));
         }
+        let dependency_root = canonicalize_existing_path(&dependency_root, "dependency path")?;
         load_package_graph_recursive(&dependency_root, graph, visiting)?;
         dependencies.insert(name.clone(), dependency_root);
     }
@@ -711,6 +729,14 @@ fn resolve_workspace_members(
             )
             .with_path(manifest_path(project_root).display().to_string()));
         }
+        let member_root = canonicalize_existing_path(&member_root, "workspace member path")?;
+        if !member_root.starts_with(project_root) {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("workspace member {member:?} resolves outside the workspace root"),
+            )
+            .with_path(manifest_path(project_root).display().to_string()));
+        }
         let member_manifest = manifest_path(&member_root);
         if !member_manifest.exists() {
             return Err(Diagnostic::new(
@@ -760,6 +786,8 @@ fn build_artifacts(
     binary: &Path,
     options: &BuildOptions,
 ) -> Result<BuildArtifactReport, Diagnostic> {
+    ensure_output_path_stays_inside_package(package_root, generated_rust, "generated Rust output")?;
+    ensure_output_path_stays_inside_package(package_root, binary, "binary output")?;
     if let Some(parent) = generated_rust.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             Diagnostic::new(
@@ -3300,6 +3328,15 @@ fn resolve_import_path(
                 .with_path(module_path.display().to_string())
                 .with_span(import.line, import.column));
             }
+            let candidate = canonicalize_existing_path(&candidate, "import path")?;
+            if !candidate.starts_with(&dependency.source_root) {
+                return Err(Diagnostic::new(
+                    "import",
+                    "dependency imports must stay inside the package",
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column));
+            }
             return Ok((dependency.root.clone(), candidate));
         }
     }
@@ -3319,7 +3356,60 @@ fn resolve_import_path(
                 .with_span(import.line, import.column),
         );
     }
+    let candidate = canonicalize_existing_path(&candidate, "import path")?;
+    if !candidate.starts_with(&package.root) {
+        return Err(
+            Diagnostic::new("import", "stage1 imports must stay inside the package")
+                .with_path(module_path.display().to_string())
+                .with_span(import.line, import.column),
+        );
+    }
     Ok((package.root.clone(), candidate))
+}
+
+fn canonicalize_existing_path(path: &Path, label: &str) -> Result<PathBuf, Diagnostic> {
+    fs::canonicalize(path).map_err(|err| {
+        Diagnostic::new(
+            "path",
+            format!("failed to resolve {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })
+}
+
+fn canonicalize_package_path(
+    path: &Path,
+    package_root: &Path,
+    kind: &'static str,
+    outside_message: &'static str,
+) -> Result<PathBuf, Diagnostic> {
+    let canonical = canonicalize_existing_path(path, "package path")?;
+    if !canonical.starts_with(package_root) {
+        return Err(Diagnostic::new(kind, outside_message).with_path(path.display().to_string()));
+    }
+    Ok(canonical)
+}
+
+fn ensure_output_path_stays_inside_package(
+    package_root: &Path,
+    path: &Path,
+    label: &str,
+) -> Result<(), Diagnostic> {
+    let canonical_package_root = canonicalize_existing_path(package_root, "package root")?;
+    let mut ancestor = path.parent().unwrap_or(package_root).to_path_buf();
+    while !ancestor.exists() {
+        if !ancestor.pop() {
+            break;
+        }
+    }
+    let canonical_ancestor = canonicalize_existing_path(&ancestor, label)?;
+    if !canonical_ancestor.starts_with(&canonical_package_root) {
+        return Err(
+            Diagnostic::new("build", format!("{label} resolves outside the package"))
+                .with_path(path.display().to_string()),
+        );
+    }
+    Ok(())
 }
 
 fn normalize_path(path: impl AsRef<Path>) -> PathBuf {
@@ -3418,6 +3508,23 @@ mod tests {
         }
     }
 
+    fn package_manifest() -> Manifest {
+        Manifest {
+            package: Some(PackageSection {
+                name: "demo".to_string(),
+                version: "0.1.0".to_string(),
+            }),
+            dependencies: BTreeMap::new(),
+            workspace: None,
+            build: BuildSection {
+                entry: "src/main.ax".to_string(),
+                out_dir: "dist".to_string(),
+            },
+            tests: Vec::new(),
+            capabilities: CapabilityConfig::default(),
+        }
+    }
+
     #[test]
     fn test_artifact_name_reports_missing_package_manifest() {
         let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
@@ -3471,5 +3578,84 @@ mod tests {
         assert_eq!(error.kind, "manifest");
         assert_eq!(error.message, "loaded modules require a package manifest");
         assert_eq!(error.path, Some(manifest_path(&root).display().to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_module_rejects_symlinked_import_outside_package() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let package_dir = dir.path().join("package");
+        fs::create_dir_all(&package_dir).unwrap_or_else(|err| panic!("create package: {err}"));
+        let root =
+            fs::canonicalize(&package_dir).unwrap_or_else(|err| panic!("canonical root: {err}"));
+        let source_root = root.join("src");
+        fs::create_dir_all(&source_root).unwrap_or_else(|err| panic!("create src: {err}"));
+        let entry = source_root.join("main.ax");
+        let outside = dir.path().join("outside.ax");
+        fs::write(&entry, "import \"escape.ax\"\n")
+            .unwrap_or_else(|err| panic!("write entry: {err}"));
+        fs::write(&outside, "fn leaked(): int {\nreturn 7\n}\n")
+            .unwrap_or_else(|err| panic!("write outside module: {err}"));
+        std::os::unix::fs::symlink(&outside, source_root.join("escape.ax"))
+            .unwrap_or_else(|err| panic!("symlink import: {err}"));
+
+        let mut graph = PackageGraph::default();
+        graph.packages.insert(
+            root.clone(),
+            PackageContext {
+                root: root.clone(),
+                manifest: package_manifest(),
+                source_root: fs::canonicalize(&source_root)
+                    .unwrap_or_else(|err| panic!("canonical source root: {err}")),
+                dependencies: BTreeMap::new(),
+                workspace_members: Vec::new(),
+            },
+        );
+
+        let error = match load_module_recursive(
+            &graph,
+            &root,
+            &entry,
+            true,
+            &mut Vec::new(),
+            &mut HashMap::new(),
+            &mut Vec::new(),
+        ) {
+            Ok(()) => panic!("symlinked import outside package was loaded"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "import");
+        assert_eq!(error.message, "stage1 imports must stay inside the package");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_path_rejects_symlinked_out_dir_outside_package() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let package_dir = dir.path().join("package");
+        fs::create_dir_all(&package_dir).unwrap_or_else(|err| panic!("create package: {err}"));
+        let root =
+            fs::canonicalize(&package_dir).unwrap_or_else(|err| panic!("canonical root: {err}"));
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&outside).unwrap_or_else(|err| panic!("create outside: {err}"));
+        std::os::unix::fs::symlink(&outside, root.join("dist"))
+            .unwrap_or_else(|err| panic!("symlink dist: {err}"));
+
+        let output = root.join("dist").join("demo.generated.rs");
+        let error = match ensure_output_path_stays_inside_package(
+            &root,
+            &output,
+            "generated Rust output",
+        ) {
+            Ok(()) => panic!("symlinked output dir outside package was accepted"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "build");
+        assert_eq!(
+            error.message,
+            "generated Rust output resolves outside the package"
+        );
     }
 }
