@@ -26,6 +26,7 @@ pub struct Function {
     pub name: String,
     pub source_name: String,
     pub path: String,
+    pub type_params: Vec<String>,
     pub params: Vec<Param>,
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
@@ -146,7 +147,7 @@ pub struct MatchArm {
     pub column: usize,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum TypeName {
     Int,
     Bool,
@@ -171,6 +172,7 @@ pub enum Expr {
     },
     Call {
         name: String,
+        type_args: Vec<TypeName>,
         args: Vec<Expr>,
         line: usize,
         column: usize,
@@ -549,8 +551,9 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_path(path.display().to_string())
             .with_span(line_no, 1)
     })?;
-    let name = header[..open_paren].trim();
-    validate_ident(name, path, line_no, if is_public { 8 } else { 4 })?;
+    let name_text = header[..open_paren].trim();
+    let (name, type_params) =
+        parse_function_name(name_text, path, line_no, if is_public { 8 } else { 4 })?;
     let params = parse_params(&header[open_paren + 1..close_paren], path, line_no)?;
     let after_paren = header[close_paren + 1..].trim();
     let after_colon = after_paren.strip_prefix(':').ok_or_else(|| {
@@ -576,6 +579,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         name: name.to_string(),
         source_name: name.to_string(),
         path: path.display().to_string(),
+        type_params,
         params,
         return_ty,
         body,
@@ -1499,12 +1503,14 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
     if raw.ends_with(')')
         && let Some(open_paren) = find_top_level_char(raw, '(')
     {
-        let name = raw[..open_paren].trim();
-        if !name.is_empty() {
+        let name_text = raw[..open_paren].trim();
+        if !name_text.is_empty() {
+            let (name, type_args) = parse_call_name(name_text, path, line_no, column)?;
             validate_ident(name, path, line_no, column)?;
             let args = parse_call_args(&raw[open_paren + 1..raw.len() - 1], path, line_no, column)?;
             return Ok(Expr::Call {
                 name: name.to_string(),
+                type_args,
                 args,
                 line: line_no,
                 column,
@@ -1517,6 +1523,94 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
         line: line_no,
         column,
     })
+}
+
+fn parse_function_name<'a>(
+    raw: &'a str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<(&'a str, Vec<String>), Diagnostic> {
+    if let Some(open_angle) = find_top_level_char(raw, '<') {
+        if !raw.ends_with('>')
+            || !matches!(find_matching_angle(raw, open_angle), Some(close) if close == raw.len() - 1)
+        {
+            return Err(Diagnostic::new(
+                "parse",
+                "generic function declarations must use `fn name<T>(args): type {` syntax",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + open_angle));
+        }
+        let name = raw[..open_angle].trim();
+        validate_ident(name, path, line_no, column)?;
+        let params_raw = raw[open_angle + 1..raw.len() - 1].trim();
+        if params_raw.is_empty() {
+            return Err(
+                Diagnostic::new("parse", "generic function is missing type parameters")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + open_angle + 1),
+            );
+        }
+        let mut params = Vec::new();
+        for param in split_top_level_type(params_raw, ',') {
+            let param = param.trim();
+            validate_ident(param, path, line_no, column + open_angle + 1)?;
+            if params.iter().any(|existing| existing == param) {
+                return Err(Diagnostic::new(
+                    "parse",
+                    format!("duplicate type parameter {param:?}"),
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, column + open_angle + 1));
+            }
+            params.push(param.to_string());
+        }
+        return Ok((name, params));
+    }
+    validate_ident(raw, path, line_no, column)?;
+    Ok((raw, Vec::new()))
+}
+
+fn parse_call_name<'a>(
+    raw: &'a str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<(&'a str, Vec<TypeName>), Diagnostic> {
+    if let Some(open_angle) = find_top_level_char(raw, '<') {
+        if !raw.ends_with('>')
+            || !matches!(find_matching_angle(raw, open_angle), Some(close) if close == raw.len() - 1)
+        {
+            return Err(Diagnostic::new(
+                "parse",
+                "generic calls must use `name<type>(args)` syntax",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + open_angle));
+        }
+        let name = raw[..open_angle].trim();
+        validate_ident(name, path, line_no, column)?;
+        let args_raw = raw[open_angle + 1..raw.len() - 1].trim();
+        if args_raw.is_empty() {
+            return Err(
+                Diagnostic::new("parse", "generic call is missing type arguments")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + open_angle + 1),
+            );
+        }
+        let mut type_args = Vec::new();
+        for arg in split_top_level_type(args_raw, ',') {
+            type_args.push(parse_type_name(
+                arg.trim(),
+                path,
+                line_no,
+                column + open_angle + 1,
+            )?);
+        }
+        return Ok((name, type_args));
+    }
+    Ok((raw, Vec::new()))
 }
 
 fn parse_array_literal_elements(
@@ -1840,6 +1934,7 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
     let mut paren_depth = 0usize;
     let mut brace_depth = 0usize;
     let mut bracket_depth = 0usize;
+    let mut angle_depth = 0usize;
     for (index, ch) in raw.char_indices() {
         if escaped {
             escaped = false;
@@ -1854,6 +1949,14 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
             continue;
         }
         if in_string {
+            continue;
+        }
+        if angle_depth > 0 {
+            match ch {
+                '<' => angle_depth += 1,
+                '>' => angle_depth = angle_depth.saturating_sub(1),
+                _ => {}
+            }
             continue;
         }
         match ch {
@@ -1882,18 +1985,45 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
                 brace_depth = brace_depth.saturating_sub(1);
             }
             '[' => {
-                if target == '[' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
+                if target == '['
+                    && paren_depth == 0
+                    && brace_depth == 0
+                    && bracket_depth == 0
+                    && angle_depth == 0
+                {
                     return Some(index);
                 }
                 bracket_depth += 1;
             }
             ']' => {
-                if target == ']' && paren_depth == 0 && brace_depth == 0 && bracket_depth == 1 {
+                if target == ']'
+                    && paren_depth == 0
+                    && brace_depth == 0
+                    && bracket_depth == 1
+                    && angle_depth == 0
+                {
                     return Some(index);
                 }
                 bracket_depth = bracket_depth.saturating_sub(1);
             }
-            _ if ch == target && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+            '<' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if target == '<' {
+                    return Some(index);
+                }
+                angle_depth += 1;
+            }
+            '>' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if target == '>' {
+                    return Some(index);
+                }
+                angle_depth = angle_depth.saturating_sub(1);
+            }
+            _ if ch == target
+                && paren_depth == 0
+                && brace_depth == 0
+                && bracket_depth == 0
+                && angle_depth == 0 =>
+            {
                 return Some(index);
             }
             _ => {}
@@ -2172,6 +2302,16 @@ fn find_compare_operator(raw: &str) -> Option<(CompareOp, usize)> {
             _ => {}
         }
         if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 {
+            if ch == '<'
+                && let Some(close_angle) = find_matching_angle(raw, index)
+                && raw[close_angle + 1..].trim_start().starts_with('(')
+            {
+                cursor += 1;
+                while cursor < chars.len() && chars[cursor].0 <= close_angle {
+                    cursor += 1;
+                }
+                continue;
+            }
             if let Some((_, next)) = chars.get(cursor + 1) {
                 match (ch, *next) {
                     ('=', '=') => return Some((CompareOp::Eq, index)),
