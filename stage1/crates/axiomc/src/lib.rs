@@ -16,7 +16,9 @@ mod tests {
     use crate::hir;
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
-    use crate::manifest::{TestTarget, capability_descriptors, load_manifest, render_manifest};
+    use crate::manifest::{
+        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, render_manifest,
+    };
     use crate::mir;
     use crate::new_project::create_project;
     use crate::project::{
@@ -285,6 +287,57 @@ mod tests {
         assert!(!rendered.contains("&mut values[start..end]"));
         assert!(!rendered.contains("assert!("));
         assert!(!rendered.contains("debug_assert!("));
+    }
+
+    #[test]
+    fn render_rust_documents_network_address_filtering() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_resolve_public_socket_addrs("));
+        assert!(rendered.contains("Network intrinsics reject private, loopback, link-local,"));
+        assert!(rendered.contains("addr.to_ipv4_mapped()"));
+    }
+
+    #[test]
+    fn render_rust_keeps_http_response_size_guards() {
+        let source = "match http_get(\"http://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower_with_capabilities(
+            &parsed,
+            &CapabilityConfig {
+                net: true,
+                ..CapabilityConfig::default()
+            },
+        )
+        .expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("const MAX_HEADER_BYTES: usize = 64 * 1024;"));
+        assert!(rendered.contains("const MAX_BODY_BYTES: usize = 1024 * 1024;"));
+        assert!(rendered.contains("axiom_resolve_public_socket_addrs(host, port)?"));
+        assert!(rendered.contains("TcpStream::connect_timeout(&addr, Duration::from_secs(5))"));
+    }
+
+    #[test]
+    fn render_rust_gates_https_tls_runtime_to_linux() {
+        let source = "match http_get(\"https://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower_with_capabilities(
+            &parsed,
+            &CapabilityConfig {
+                net: true,
+                ..CapabilityConfig::default()
+            },
+        )
+        .expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_https_get_native_tls("));
+        assert!(rendered.contains("#[cfg(target_os = \"linux\")]"));
+        assert!(rendered.contains("https TLS is not supported on this platform in stage1"));
     }
 
     #[test]
@@ -1537,7 +1590,7 @@ mod tests {
         .expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "fs ok\n\ntrue\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n",
+            "fs ok\n\nfalse\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n",
         )
         .expect("write golden");
 
@@ -1547,7 +1600,7 @@ mod tests {
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "fs ok\n\ntrue\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n"
+            "fs ok\n\nfalse\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -2273,115 +2326,14 @@ mod tests {
     }
 
     #[test]
-    fn stage1_project_imports_synthetic_stdlib_http_module() {
-        // `std/http.ax` wraps a new `http_get` intrinsic that shares the
-        // existing `net` capability. The test spins up a local TCP listener
-        // that serves a canned HTTP/1.0 200 response so the success path
-        // (response body parsing) is exercised deterministically without
-        // touching the network.
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::thread;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("local addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let body = "stage1-http-ok";
-            let response = format!(
-                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes());
-        });
-
+    fn stage1_stdlib_http_rejects_loopback_address() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stdlib-http-app");
-        create_project(&project, Some("stdlib-http-app")).expect("create project");
+        let project = dir.path().join("stdlib-http-loopback-denied");
+        create_project(&project, Some("stdlib-http-loopback-denied")).expect("create project");
         fs::write(
             project.join("axiom.toml"),
             render_manifest_with_capabilities(
-                "stdlib-http-app",
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-            ),
-        )
-        .expect("write manifest");
-        let manifest = load_manifest(&project).expect("load manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
-        )
-        .expect("write lockfile");
-        let source = format!(
-            "import \"std/http.ax\"\nmatch get(\"http://{}/\") {{\nSome(body) {{\nprint body\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
-            addr
-        );
-        fs::write(project.join("src/main.ax"), &source).expect("write source");
-
-        let built = build_project(&project).expect("build project");
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        server.join().expect("server thread");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "stage1-http-ok\n");
-    }
-
-    #[test]
-    fn stage1_stdlib_http_get_supports_https_urls() {
-        use std::net::TcpListener;
-        use std::process::{Command, Stdio};
-        use std::thread;
-        use std::time::Duration;
-
-        let Some(openssl) = which::which("openssl").ok() else {
-            return;
-        };
-
-        let dir = tempdir().expect("tempdir");
-        let cert = dir.path().join("cert.pem");
-        let key = dir.path().join("key.pem");
-        let cert_status = Command::new(&openssl)
-            .arg("req")
-            .arg("-x509")
-            .arg("-newkey")
-            .arg("rsa:2048")
-            .arg("-nodes")
-            .arg("-keyout")
-            .arg(&key)
-            .arg("-out")
-            .arg(&cert)
-            .arg("-subj")
-            .arg("/CN=127.0.0.1")
-            .arg("-days")
-            .arg("1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .expect("run openssl req");
-        if !cert_status.success() {
-            return;
-        }
-
-        let port = {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-            listener.local_addr().expect("local addr").port()
-        };
-
-        let project = dir.path().join("stdlib-https-app");
-        create_project(&project, Some("stdlib-https-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            render_manifest_with_capabilities(
-                "stdlib-https-app",
+                "stdlib-http-loopback-denied",
                 false,
                 true,
                 false,
@@ -2399,86 +2351,7 @@ mod tests {
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            format!(
-                "import \"std/http.ax\"\nmatch get(\"https://127.0.0.1:{}/\") {{\nSome(_body) {{\nprint \"https-body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
-                port
-            ),
-        )
-        .expect("write source");
-
-        let built = build_project(&project).expect("build project");
-        let mut server = Command::new(&openssl)
-            .arg("s_server")
-            .arg("-quiet")
-            .arg("-www")
-            .arg("-accept")
-            .arg(port.to_string())
-            .arg("-cert")
-            .arg(&cert)
-            .arg("-key")
-            .arg(&key)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn openssl s_server");
-        thread::sleep(Duration::from_millis(200));
-
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        let _ = server.kill();
-        let _ = server.wait();
-
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "https-body\n");
-    }
-
-    #[test]
-    fn stage1_stdlib_http_reports_tls_diagnostics() {
-        use std::io::Read;
-        use std::net::TcpListener;
-        use std::thread;
-
-        if which::which("openssl").is_err() {
-            return;
-        }
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("local addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut buf = [0u8; 128];
-            let _ = stream.read(&mut buf);
-        });
-
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stdlib-https-diagnostic");
-        create_project(&project, Some("stdlib-https-diagnostic")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            render_manifest_with_capabilities(
-                "stdlib-https-diagnostic",
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-            ),
-        )
-        .expect("write manifest");
-        let manifest = load_manifest(&project).expect("load manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
-        )
-        .expect("write lockfile");
-        fs::write(
-            project.join("src/main.ax"),
-            format!(
-                "import \"std/http.ax\"\nmatch get(\"https://{}/\") {{\nSome(_body) {{\nprint \"body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
-                addr
-            ),
+            "import \"std/http.ax\"\nmatch get(\"http://127.0.0.1:1/\") {\nSome(_body) {\nprint \"body\"\n}\nNone {\nprint \"none\"\n}\n}\n",
         )
         .expect("write source");
 
@@ -2486,44 +2359,18 @@ mod tests {
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        server.join().expect("server thread");
-
         assert_eq!(String::from_utf8_lossy(&output.stdout), "none\n");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("\"kind\":\"net\"") && stderr.contains("https TLS"),
-            "unexpected stderr: {stderr}"
-        );
     }
 
     #[test]
-    fn stage1_stdlib_http_rejects_oversized_response_body() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::thread;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("local addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let body = vec![b'a'; 1024 * 1024 + 1];
-            let response_head = format!(
-                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(response_head.as_bytes());
-            let _ = stream.write_all(&body);
-        });
-
+    fn stage1_stdlib_http_rejects_metadata_address() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stdlib-http-oversized-body");
-        create_project(&project, Some("stdlib-http-oversized-body")).expect("create project");
+        let project = dir.path().join("stdlib-http-metadata-denied");
+        create_project(&project, Some("stdlib-http-metadata-denied")).expect("create project");
         fs::write(
             project.join("axiom.toml"),
             render_manifest_with_capabilities(
-                "stdlib-http-oversized-body",
+                "stdlib-http-metadata-denied",
                 false,
                 true,
                 false,
@@ -2539,17 +2386,16 @@ mod tests {
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = format!(
-            "import \"std/http.ax\"\nmatch get(\"http://{}/\") {{\nSome(_body) {{\nprint \"body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
-            addr
-        );
-        fs::write(project.join("src/main.ax"), &source).expect("write source");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/http.ax\"\nmatch get(\"http://169.254.169.254/latest/meta-data/\") {\nSome(_body) {\nprint \"body\"\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        server.join().expect("server thread");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "none\n");
     }
 

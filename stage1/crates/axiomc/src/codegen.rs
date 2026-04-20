@@ -218,11 +218,60 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("    std::fs::read_to_string(path).ok()\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_net_resolve(host: String) -> Option<String> {\n");
+    out.push_str("fn axiom_is_blocked_network_ip(ip: std::net::IpAddr) -> bool {\n");
+    out.push_str("    match ip {\n");
+    out.push_str("        std::net::IpAddr::V4(addr) => {\n");
+    out.push_str("            let octets = addr.octets();\n");
+    out.push_str("            addr.is_private()\n");
+    out.push_str("                || addr.is_loopback()\n");
+    out.push_str("                || addr.is_link_local()\n");
+    out.push_str("                || addr.is_unspecified()\n");
+    out.push_str("                || addr.is_broadcast()\n");
+    out.push_str("                || addr.is_multicast()\n");
+    out.push_str("                || octets[0] == 0\n");
+    out.push_str("                || (octets[0] == 100 && (64..=127).contains(&octets[1]))\n");
+    out.push_str("                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)\n");
+    out.push_str("                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)\n");
+    out.push_str("                || (octets[0] == 198 && (18..=19).contains(&octets[1]))\n");
+    out.push_str("                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)\n");
+    out.push_str("                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)\n");
+    out.push_str("        }\n");
+    out.push_str("        std::net::IpAddr::V6(addr) => {\n");
+    out.push_str("            if let Some(mapped) = addr.to_ipv4_mapped() {\n");
+    out.push_str(
+        "                return axiom_is_blocked_network_ip(std::net::IpAddr::V4(mapped));\n",
+    );
+    out.push_str("            }\n");
+    out.push_str("            let segments = addr.segments();\n");
+    out.push_str("            addr.is_loopback()\n");
+    out.push_str("                || addr.is_unspecified()\n");
+    out.push_str("                || addr.is_multicast()\n");
+    out.push_str("                || (segments[0] & 0xfe00) == 0xfc00\n");
+    out.push_str("                || (segments[0] & 0xffc0) == 0xfe80\n");
+    out.push_str("                || (segments[0] == 0x2001 && segments[1] == 0x0db8)\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
+        "fn axiom_resolve_public_socket_addrs(host: &str, port: u16) -> Option<Vec<std::net::SocketAddr>> {\n",
+    );
     out.push_str("    use std::net::ToSocketAddrs;\n");
-    out.push_str("    (host.as_str(), 0)\n");
-    out.push_str("        .to_socket_addrs()\n");
-    out.push_str("        .ok()?\n");
+    out.push_str("    let addrs: Vec<std::net::SocketAddr> = (host, port).to_socket_addrs().ok()?.collect();\n");
+    out.push_str("    if addrs.is_empty() {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    // Network intrinsics reject private, loopback, link-local,\n");
+    out.push_str("    // multicast, documentation, and metadata-style addresses.\n");
+    out.push_str("    if addrs.iter().any(|addr| axiom_is_blocked_network_ip(addr.ip())) {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    Some(addrs)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_net_resolve(host: String) -> Option<String> {\n");
+    out.push_str("    axiom_resolve_public_socket_addrs(host.as_str(), 0)?\n");
+    out.push_str("        .into_iter()\n");
     out.push_str("        .next()\n");
     out.push_str("        .map(|addr| addr.ip().to_string())\n");
     out.push_str("}\n\n");
@@ -492,8 +541,16 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
         }
     }
 
-    let stream = TcpStream::connect((host, port))
-        .map_err(|err| format!("https TCP connect failed: {err}"))?;
+    let addrs = axiom_resolve_public_socket_addrs(host, port)
+        .ok_or_else(|| String::from("https target address is not public"))?;
+    let mut stream = None;
+    for addr in addrs {
+        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
+            stream = Some(candidate);
+            break;
+        }
+    }
+    let stream = stream.ok_or_else(|| String::from("https TCP connect failed"))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|err| format!("https TCP read timeout setup failed: {err}"))?;
@@ -598,7 +655,15 @@ fn axiom_http_get(url: String) -> Option<String> {
         return axiom_http_read_response(&mut response.as_slice());
     }
 
-    let mut stream = TcpStream::connect((host, port)).ok()?;
+    let addrs = axiom_resolve_public_socket_addrs(host, port)?;
+    let mut stream = None;
+    for addr in addrs {
+        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
+            stream = Some(candidate);
+            break;
+        }
+    }
+    let mut stream = stream?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;
     stream.write_all(request.as_bytes()).ok()?;

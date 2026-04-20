@@ -4,5 +4,6 @@ __pycache__/
 *.axb
 .axiom-build/
 .DS_Store
+.hephaestus-*-task.txt
 stage1/target/
 stage1/examples/**/dist/
