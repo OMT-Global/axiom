@@ -1,0 +1,3 @@
+[package]
+name = "ownership-generic-borrow-return"
+version = "0.1.0"

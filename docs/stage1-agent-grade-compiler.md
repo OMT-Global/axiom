@@ -125,7 +125,7 @@ Work packages:
 - `AG2.2`: generic structs and enums
   - Support generic wrappers over arrays, maps, slices, `Option<T>`, and `Result<T, E>`.
   - Keep codegen monomorphized.
-- `AG2.3`: borrow-generic interaction rules
+- `AG2.3`: borrow-generic interaction rules (**landed**)
   - Make borrowed data legal inside generic signatures and generic wrappers.
   - Add compile-fail coverage for mismatched instantiations, unconstrained type
     parameters, and borrowed generic return misuse.

@@ -20,9 +20,19 @@ Filled(T)
 Empty
 }
 
+fn tail<T>(values: &[T]): &[T] {
+return values[1:]
+}
+
+fn make_window<T>(values: &[T]): Window<T> {
+return Window { view: tail<T>(values) }
+}
+
 let values: [int] = [4, 5, 6]
 let window: Window<int> = Window { view: values[:] }
 print len(window.view)
+let tail_window: Window<int> = make_window<int>(values[:])
+print len(tail_window.view)
 
 let maybe: MaybeBox<int> = MaybeBox { item: Some(8) }
 match maybe.item {
