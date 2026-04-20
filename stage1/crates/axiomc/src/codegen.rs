@@ -95,12 +95,22 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_slice_view<'a, T>(values: &'a [T], start: Option<i64>, end: Option<i64>) -> &'a [T] {\n");
     out.push_str("    let (start, end) = axiom_array_slice_bounds(values.len(), start, end);\n");
-    out.push_str("    &values[start..end]\n");
+    out.push_str("    match values.get(start..end) {\n");
+    out.push_str("        Some(slice) => slice,\n");
+    out.push_str(
+        "        None => axiom_runtime_error(\"runtime\", \"array slice out of bounds\"),\n",
+    );
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_slice_view_mut<'a, T>(values: &'a mut [T], start: Option<i64>, end: Option<i64>) -> &'a mut [T] {\n");
     out.push_str("    let (start, end) = axiom_array_slice_bounds(values.len(), start, end);\n");
-    out.push_str("    &mut values[start..end]\n");
+    out.push_str("    match values.get_mut(start..end) {\n");
+    out.push_str("        Some(slice) => slice,\n");
+    out.push_str(
+        "        None => axiom_runtime_error(\"runtime\", \"array slice out of bounds\"),\n",
+    );
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_last_index(len: usize) -> i64 {\n");
