@@ -57,6 +57,7 @@ pub struct TypeAliasDecl {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct StructDecl {
     pub name: String,
+    pub type_params: Vec<String>,
     pub fields: Vec<StructField>,
     pub is_public: bool,
     pub line: usize,
@@ -74,6 +75,7 @@ pub struct StructField {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct EnumDecl {
     pub name: String,
+    pub type_params: Vec<String>,
     pub variants: Vec<EnumVariantDecl>,
     pub is_public: bool,
     pub line: usize,
@@ -152,7 +154,7 @@ pub enum TypeName {
     Int,
     Bool,
     String,
-    Named(String),
+    Named(String, Vec<TypeName>),
     Slice(Box<TypeName>),
     MutSlice(Box<TypeName>),
     Option(Box<TypeName>),
@@ -699,7 +701,7 @@ fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<Struct
         })?;
         (false, rest)
     };
-    let name = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
+    let name_text = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
         Diagnostic::new(
             "parse",
             "struct declaration must use `struct Name {` syntax",
@@ -707,11 +709,18 @@ fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<Struct
         .with_path(path.display().to_string())
         .with_span(line_no, 1)
     })?;
-    validate_ident(name, path, line_no, if is_public { 12 } else { 8 })?;
+    let (name, type_params) = parse_decl_name(
+        name_text,
+        "struct",
+        path,
+        line_no,
+        if is_public { 12 } else { 8 },
+    )?;
     *index += 1;
     let fields = parse_struct_fields(lines, index, path)?;
     Ok(StructDecl {
         name: name.to_string(),
+        type_params,
         fields,
         is_public,
         line: line_no,
@@ -770,16 +779,23 @@ fn parse_enum(lines: &[&str], index: &mut usize, path: &Path) -> Result<EnumDecl
         })?;
         (false, rest)
     };
-    let name = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
+    let name_text = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
         Diagnostic::new("parse", "enum declaration must use `enum Name {` syntax")
             .with_path(path.display().to_string())
             .with_span(line_no, 1)
     })?;
-    validate_ident(name, path, line_no, if is_public { 10 } else { 6 })?;
+    let (name, type_params) = parse_decl_name(
+        name_text,
+        "enum",
+        path,
+        line_no,
+        if is_public { 10 } else { 6 },
+    )?;
     *index += 1;
     let variants = parse_enum_variants(lines, index, path)?;
     Ok(EnumDecl {
         name: name.to_string(),
+        type_params,
         variants,
         is_public,
         line: line_no,
@@ -1263,13 +1279,44 @@ fn parse_type_name(
             column + 1,
         )?)));
     }
+    if let Some(open_angle) = find_top_level_char(raw, '<') {
+        if !raw.ends_with('>')
+            || !matches!(find_matching_angle(raw, open_angle), Some(close) if close == raw.len() - 1)
+        {
+            return Err(
+                Diagnostic::new("parse", "generic types must use `Name<type>` syntax")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + open_angle),
+            );
+        }
+        let name = raw[..open_angle].trim();
+        validate_ident(name, path, line_no, column)?;
+        let args_raw = raw[open_angle + 1..raw.len() - 1].trim();
+        if args_raw.is_empty() {
+            return Err(
+                Diagnostic::new("parse", "generic type is missing type arguments")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + open_angle + 1),
+            );
+        }
+        let mut type_args = Vec::new();
+        for arg in split_top_level_type(args_raw, ',') {
+            type_args.push(parse_type_name(
+                arg.trim(),
+                path,
+                line_no,
+                column + open_angle + 1,
+            )?);
+        }
+        return Ok(TypeName::Named(name.to_string(), type_args));
+    }
     match raw {
         "int" => Ok(TypeName::Int),
         "bool" => Ok(TypeName::Bool),
         "string" => Ok(TypeName::String),
         _ => {
             validate_ident(raw, path, line_no, column)?;
-            Ok(TypeName::Named(raw.to_string()))
+            Ok(TypeName::Named(raw.to_string(), Vec::new()))
         }
     }
 }
@@ -1531,13 +1578,23 @@ fn parse_function_name<'a>(
     line_no: usize,
     column: usize,
 ) -> Result<(&'a str, Vec<String>), Diagnostic> {
+    parse_decl_name(raw, "function", path, line_no, column)
+}
+
+fn parse_decl_name<'a>(
+    raw: &'a str,
+    kind: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<(&'a str, Vec<String>), Diagnostic> {
     if let Some(open_angle) = find_top_level_char(raw, '<') {
         if !raw.ends_with('>')
             || !matches!(find_matching_angle(raw, open_angle), Some(close) if close == raw.len() - 1)
         {
             return Err(Diagnostic::new(
                 "parse",
-                "generic function declarations must use `fn name<T>(args): type {` syntax",
+                format!("generic {kind} declarations must use `name<T>` syntax"),
             )
             .with_path(path.display().to_string())
             .with_span(line_no, column + open_angle));
@@ -1546,11 +1603,12 @@ fn parse_function_name<'a>(
         validate_ident(name, path, line_no, column)?;
         let params_raw = raw[open_angle + 1..raw.len() - 1].trim();
         if params_raw.is_empty() {
-            return Err(
-                Diagnostic::new("parse", "generic function is missing type parameters")
-                    .with_path(path.display().to_string())
-                    .with_span(line_no, column + open_angle + 1),
-            );
+            return Err(Diagnostic::new(
+                "parse",
+                format!("generic {kind} is missing type parameters"),
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + open_angle + 1));
         }
         let mut params = Vec::new();
         for param in split_top_level_type(params_raw, ',') {
