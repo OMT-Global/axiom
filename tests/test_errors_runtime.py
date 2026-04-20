@@ -77,6 +77,12 @@ class RuntimeErrorTests(unittest.TestCase):
         Vm(locals_count=bc.locals_count).run(bc, out)
         self.assertEqual(out.getvalue(), "12\n")
 
+    def test_vm_host_math_pow_allows_capped_exponent(self) -> None:
+        bc = compile_to_bytecode(f"print host.math.pow(2, {MAX_POW_EXPONENT})\n")
+        out = io.StringIO()
+        Vm(locals_count=bc.locals_count).run(bc, out)
+        self.assertEqual(out.getvalue(), f"{2 ** MAX_POW_EXPONENT}\n")
+
     def test_vm_host_math_pow_rejects_exponent_above_limit(self) -> None:
         bc = compile_to_bytecode(f"print host.math.pow(2, {MAX_POW_EXPONENT + 1})\n")
         with self.assertRaises(AxiomRuntimeError) as cm:
