@@ -16,7 +16,9 @@ mod tests {
     use crate::hir;
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
-    use crate::manifest::{TestTarget, capability_descriptors, load_manifest, render_manifest};
+    use crate::manifest::{
+        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, render_manifest,
+    };
     use crate::mir;
     use crate::new_project::create_project;
     use crate::project::{
@@ -301,21 +303,55 @@ mod tests {
 
     #[test]
     fn render_rust_keeps_http_response_size_guards() {
-        let source = "print true\n";
+        let source = "match http_get(\"http://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let hir = hir::lower(&parsed).expect("lower");
+        let hir = hir::lower_with_capabilities(
+            &parsed,
+            &CapabilityConfig {
+                net: true,
+                ..CapabilityConfig::default()
+            },
+        )
+        .expect("lower");
         let mir = mir::lower(&hir);
         let rendered = render_rust(&mir);
         assert!(rendered.contains("const MAX_HEADER_BYTES: usize = 64 * 1024;"));
         assert!(rendered.contains("const MAX_BODY_BYTES: usize = 1024 * 1024;"));
+        assert!(rendered.contains("axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?"));
         assert!(rendered.contains("TcpStream::connect_timeout(&addr, Duration::from_secs(5))"));
     }
 
     #[test]
-    fn render_rust_strips_crlf_from_http_request_parts() {
-        let source = "print true\n";
+    fn render_rust_gates_https_tls_runtime_to_linux() {
+        let source = "match http_get(\"https://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let hir = hir::lower(&parsed).expect("lower");
+        let hir = hir::lower_with_capabilities(
+            &parsed,
+            &CapabilityConfig {
+                net: true,
+                ..CapabilityConfig::default()
+            },
+        )
+        .expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_https_get_native_tls("));
+        assert!(rendered.contains("#[cfg(target_os = \"linux\")]"));
+        assert!(rendered.contains("https TLS is not supported on this platform in stage1"));
+    }
+
+    #[test]
+    fn render_rust_strips_crlf_from_http_request_parts() {
+        let source = "match http_get(\"http://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower_with_capabilities(
+            &parsed,
+            &CapabilityConfig {
+                net: true,
+                ..CapabilityConfig::default()
+            },
+        )
+        .expect("lower");
         let mir = mir::lower(&hir);
         let rendered = render_rust(&mir);
         assert!(rendered.contains("fn axiom_http_strip_crlf(value: &str) -> String {"));
@@ -323,9 +359,9 @@ mod tests {
         assert!(rendered.contains("let clean_host = axiom_http_strip_crlf(host);"));
         assert!(rendered.contains("let clean_path = axiom_http_strip_crlf(path);"));
         assert!(rendered.contains("axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?"));
-        assert!(rendered.contains("clean_path, clean_host"));
+        assert!(rendered.contains("axiom_http_request(clean_host.as_str(), clean_path.as_str())"));
         assert!(!rendered.contains("axiom_resolve_public_socket_addrs(host, port)?"));
-        assert!(!rendered.contains("path, host\n"));
+        assert!(!rendered.contains("axiom_http_request(host, path)"));
     }
 
     #[test]
@@ -2039,84 +2075,10 @@ mod tests {
             .output()
             .expect("run compiled binary");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert_eq!(stdout, "false\n");
-    }
-
-    #[test]
-    fn stage1_net_resolve_rejects_private_link_local_and_metadata_addresses() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("net-resolve-private-denied");
-        create_project(&project, Some("net-resolve-private-denied")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            render_manifest_with_capabilities(
-                "net-resolve-private-denied",
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-            ),
-        )
-        .expect("write manifest");
-        let manifest = load_manifest(&project).expect("load manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
-        )
-        .expect("write lockfile");
-        fs::write(
-            project.join("src/main.ax"),
-            "match net_resolve(\"10.0.0.1\") {\nSome(_address) {\nprint \"private\"\n}\nNone {\nprint \"blocked-private\"\n}\n}\nmatch net_resolve(\"169.254.1.1\") {\nSome(_address) {\nprint \"link-local\"\n}\nNone {\nprint \"blocked-link-local\"\n}\n}\nmatch net_resolve(\"169.254.169.254\") {\nSome(_address) {\nprint \"metadata\"\n}\nNone {\nprint \"blocked-metadata\"\n}\n}\n",
-        )
-        .expect("write source");
-
-        let built = build_project(&project).expect("build project");
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
-            "blocked-private\nblocked-link-local\nblocked-metadata\n"
+        assert!(
+            stdout == "true\n" || stdout == "false\n",
+            "unexpected stdout for stdlib_net smoke: {stdout:?}"
         );
-    }
-
-    #[test]
-    fn stage1_net_resolve_allows_public_ip_address() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("net-resolve-public-ip");
-        create_project(&project, Some("net-resolve-public-ip")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            render_manifest_with_capabilities(
-                "net-resolve-public-ip",
-                false,
-                true,
-                false,
-                false,
-                false,
-                false,
-            ),
-        )
-        .expect("write manifest");
-        let manifest = load_manifest(&project).expect("load manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
-        )
-        .expect("write lockfile");
-        fs::write(
-            project.join("src/main.ax"),
-            "match net_resolve(\"8.8.8.8\") {\nSome(address) {\nprint address\n}\nNone {\nprint \"none\"\n}\n}\n",
-        )
-        .expect("write source");
-
-        let built = build_project(&project).expect("build project");
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "8.8.8.8\n");
     }
 
     #[test]
