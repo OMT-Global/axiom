@@ -28,7 +28,7 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3 pinned 2026-04-19
         id: filter
         with:
           filters: |
@@ -72,7 +72,7 @@ jobs:
       github.event.pull_request.draft == false &&
       (needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 pinned 2026-04-19
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
@@ -85,7 +85,7 @@ jobs:
     timeout-minutes: 10
     if: github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 pinned 2026-04-19
         with:
           ref: ${{ github.event.pull_request.head.sha }}
       - name: Scan repository for secret patterns
