@@ -187,9 +187,10 @@ demonstrates that the `std.*` surface is not limited to one wrapper per
 capability (HTTPS/TLS land in a follow-on slice). It also includes
 `std/io.ax`, the first stdlib module not tied to a capability flag, which
 wraps a new ungated `io_eprintln` intrinsic and establishes the "ambient
-stdio" precedent alongside the existing `print` statement. The remaining
-AG4.1 modules (`std.json`, `std.collections`, `std.sync`) require new
-stdlib intrinsics, the AG4.2 async runtime, or AG2 generics. AG4.4
+stdio" precedent alongside the existing `print` statement. `std/json.ax`
+adds ungated scalar/string JSON helpers, and `std/collections.ax` adds generic
+borrowed-slice helpers on top of AG2 generic functions. The remaining
+AG4.1 module (`std.sync`) requires the AG4.2 async runtime. AG4.4
 capability-aware integration for the currently landed stdlib/runtime surface is
 now complete; AG4.2 async runtime and AG4.3 HTTP *server* support remain open.
 
@@ -246,7 +247,11 @@ Work packages:
     `stage1/examples/stdlib_io` and one Rust test
     (`stage1_project_imports_synthetic_stdlib_io_module`). There is no
     companion denial test because `std.io` has no capability to withhold.
-  - `std.json` — blocked on a JSON parser/serialiser in the runtime.
+  - `std.json` — **landed** as `std/json.ax` exposing scalar/string JSON
+    parsing and serialisation helpers on top of the ungated `json_parse_*` and
+    `json_stringify_*` intrinsics. Covered by `stage1/examples/stdlib_json`
+    and two Rust tests (`stage1_project_imports_synthetic_stdlib_json_module`,
+    `stage1_project_rejects_stdlib_json_with_wrong_argument_type`).
   - `std.http` — **landed (client only)** as `std/http.ax` exposing
     `get(url: string): Option<string>` on top of a new `http_get` intrinsic
     that implements a blocking HTTP/1.0 client over raw TCP in the generated
@@ -259,8 +264,11 @@ Work packages:
     which spins up a local `TcpListener` serving a canned HTTP/1.0 response
     to exercise the success path, and
     `stage1_project_rejects_stdlib_http_without_net_capability`).
-  - `std.collections` — blocked on AG2 generics (len/first/last are already
-    polymorphic builtins; anything richer needs user-facing generics).
+  - `std.collections` — **landed** as `std/collections.ax` exposing generic
+    borrowed-slice helpers (`count`, `is_empty`, `has_items`, `skip`, `take`,
+    and `window`) on top of AG2 generic functions plus existing collection
+    primitives. Covered by `stage1/examples/stdlib_collections` and one Rust
+    test (`stage1_project_imports_synthetic_stdlib_collections_module`).
   - `std.sync` — blocked on the AG4.2 async runtime.
 - `AG4.2`: async runtime
   - `async fn`
