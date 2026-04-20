@@ -5,19 +5,19 @@ ARITH_BYTECODE ?= $(AXIOM_BUILD_DIR)/arith.axb
 .PHONY: test lint smoke interp compile vm stage1-test stage1-smoke stage1-run
 
 test:
-	python -m unittest discover -v
+	$(PYTHON) -m unittest discover -v
 
 lint:
-	python -m ruff check .
+	$(PYTHON) -m ruff check .
 
 smoke:
-	python -m axiom check examples/arith.ax
-	python -m axiom check tests/programs/bool_values.ax
-	python -m axiom pkg check examples/typed_package
-	python -m axiom pkg run examples/typed_package
+	$(PYTHON) -m axiom check examples/arith.ax
+	$(PYTHON) -m axiom check tests/programs/bool_values.ax
+	$(PYTHON) -m axiom pkg check examples/typed_package
+	$(PYTHON) -m axiom pkg run examples/typed_package
 
 interp:
-	python -m axiom interp examples/arith.ax
+	$(PYTHON) -m axiom interp examples/arith.ax
 
 compile:
 	mkdir -p "$(AXIOM_BUILD_DIR)"
