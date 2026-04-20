@@ -22,6 +22,7 @@ pub fn render_rust_for_package(
     fs_root: &Path,
 ) -> String {
     let type_context = TypeContext::new(program);
+    let uses_http_get = program_uses_call(program, "http_get");
     let mut out = String::new();
     out.push_str("#[allow(unused_imports)]\n");
     out.push_str("use std::collections::HashMap;\n");
@@ -319,106 +320,414 @@ pub fn render_rust_for_package(
     out.push_str("        .next()\n");
     out.push_str("        .map(|addr| addr.ip().to_string())\n");
     out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_http_strip_crlf(value: &str) -> String {\n");
-    out.push_str("    value.chars().filter(|ch| *ch != '\\r' && *ch != '\\n').collect()\n");
-    out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_http_get(url: String) -> Option<String> {\n");
-    out.push_str("    use std::io::{Read, Write};\n");
-    out.push_str("    use std::net::TcpStream;\n");
-    out.push_str("    use std::time::Duration;\n");
-    out.push_str("    const MAX_HEADER_BYTES: usize = 64 * 1024;\n");
-    out.push_str("    const MAX_BODY_BYTES: usize = 1024 * 1024;\n");
-    out.push_str("    // Stage1 HTTP client: http:// only, HTTP/1.0 with\n");
-    out.push_str("    // Connection: close so we can read the body to EOF\n");
-    out.push_str("    // without parsing Content-Length or chunked transfer\n");
-    out.push_str("    // encoding. The response header and body are capped so\n");
-    out.push_str("    // a peer cannot force unbounded memory growth. Returns\n");
-    out.push_str("    // the response body on 2xx, None on\n");
-    out.push_str("    // any parse / connect / non-2xx error. HTTPS and TLS\n");
-    out.push_str("    // are deliberately out of scope at this slice.\n");
-    out.push_str("    let rest = url.strip_prefix(\"http://\")?;\n");
-    out.push_str("    let (host_port, path) = match rest.find('/') {\n");
-    out.push_str("        Some(idx) => (&rest[..idx], &rest[idx..]),\n");
-    out.push_str("        None => (rest, \"/\"),\n");
-    out.push_str("    };\n");
-    out.push_str("    if host_port.is_empty() {\n");
-    out.push_str("        return None;\n");
-    out.push_str("    }\n");
-    out.push_str("    let (host, port) = match host_port.rfind(':') {\n");
-    out.push_str("        Some(idx) => {\n");
-    out.push_str("            let parsed: u16 = host_port[idx + 1..].parse().ok()?;\n");
-    out.push_str("            (&host_port[..idx], parsed)\n");
-    out.push_str("        }\n");
-    out.push_str("        None => (host_port, 80u16),\n");
-    out.push_str("    };\n");
-    out.push_str("    let clean_host = axiom_http_strip_crlf(host);\n");
-    out.push_str("    let clean_path = axiom_http_strip_crlf(path);\n");
-    out.push_str("    if clean_host.is_empty() || clean_path.is_empty() {\n");
-    out.push_str("        return None;\n");
-    out.push_str("    }\n");
-    out.push_str(
-        "    let addrs = axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?;\n",
+    if uses_http_get {
+        out.push_str(
+            r#"#[allow(dead_code)]
+fn axiom_http_strip_crlf(value: &str) -> String {
+    value.chars().filter(|ch| *ch != '\r' && *ch != '\n').collect()
+}
+
+#[allow(dead_code)]
+fn axiom_http_split_url(url: &str) -> Option<(&str, &str, u16, &str)> {
+    let (scheme, rest, default_port) = if let Some(rest) = url.strip_prefix("http://") {
+        ("http", rest, 80u16)
+    } else if let Some(rest) = url.strip_prefix("https://") {
+        ("https", rest, 443u16)
+    } else {
+        return None;
+    };
+    let (host_port, path) = match rest.find('/') {
+        Some(idx) => (&rest[..idx], &rest[idx..]),
+        None => (rest, "/"),
+    };
+    if host_port.is_empty() {
+        return None;
+    }
+    let (host, port) = match host_port.rfind(':') {
+        Some(idx) => {
+            let parsed: u16 = host_port[idx + 1..].parse().ok()?;
+            (&host_port[..idx], parsed)
+        }
+        None => (host_port, default_port),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some((scheme, host, port, path))
+}
+
+#[allow(dead_code)]
+fn axiom_http_request(host: &str, path: &str) -> String {
+    format!(
+        "GET {} HTTP/1.0\r\nHost: {}\r\nUser-Agent: axiom-stage1/0.1\r\nConnection: close\r\n\r\n",
+        path, host
+    )
+}
+
+#[allow(dead_code)]
+fn axiom_http_read_response<R: std::io::Read>(reader: &mut R) -> Option<String> {
+    const MAX_HEADER_BYTES: usize = 64 * 1024;
+    const MAX_BODY_BYTES: usize = 1024 * 1024;
+    let mut raw = Vec::new();
+    let mut body_start = None;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        raw.extend_from_slice(&buf[..n]);
+        if body_start.is_none() {
+            if let Some(sep) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                if sep > MAX_HEADER_BYTES {
+                    return None;
+                }
+                body_start = Some(sep + 4);
+            } else if raw.len() > MAX_HEADER_BYTES {
+                return None;
+            }
+        }
+        if let Some(start) = body_start {
+            if raw.len().saturating_sub(start) > MAX_BODY_BYTES {
+                return None;
+            }
+        }
+    }
+    let body_start = body_start?;
+    let sep = body_start - 4;
+    let head = &raw[..sep];
+    let body = &raw[body_start..];
+    let status_line_end = head.iter().position(|b| *b == b'\r').unwrap_or(head.len());
+    let status_line = std::str::from_utf8(&head[..status_line_end]).ok()?;
+    let mut parts = status_line.splitn(3, ' ');
+    let _version = parts.next()?;
+    let status_code: u16 = parts.next()?.parse().ok()?;
+    if !(200..300).contains(&status_code) {
+        return None;
+    }
+    String::from_utf8(body.to_vec()).ok()
+}
+
+#[allow(dead_code)]
+fn axiom_https_get_native_tls(host: &str, port: u16, request: &str) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        axiom_openssl_tls_get(host, port, request)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (host, port, request);
+        Err(String::from("https TLS is not supported on this platform in stage1"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>, String> {
+    use std::ffi::{CStr, CString};
+    use std::net::TcpStream;
+    use std::os::raw::{c_char, c_int, c_long, c_ulong, c_void};
+    use std::os::unix::io::AsRawFd;
+    use std::time::Duration;
+
+    #[repr(C)]
+    struct SslCtx {
+        _private: [u8; 0],
+    }
+    #[repr(C)]
+    struct SslMethod {
+        _private: [u8; 0],
+    }
+    #[repr(C)]
+    struct Ssl {
+        _private: [u8; 0],
+    }
+
+    type TlsClientMethod = unsafe extern "C" fn() -> *const SslMethod;
+    type SslCtxNew = unsafe extern "C" fn(*const SslMethod) -> *mut SslCtx;
+    type SslCtxFree = unsafe extern "C" fn(*mut SslCtx);
+    type SslCtxSetVerify = unsafe extern "C" fn(
+        *mut SslCtx,
+        c_int,
+        Option<unsafe extern "C" fn(c_int, *mut c_void) -> c_int>,
     );
-    out.push_str("    let mut stream = None;\n");
-    out.push_str("    for addr in addrs {\n");
-    out.push_str("        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {\n");
-    out.push_str("            stream = Some(candidate);\n");
-    out.push_str("            break;\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("    let mut stream = stream?;\n");
-    out.push_str("    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;\n");
-    out.push_str("    stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;\n");
-    out.push_str("    let request = format!(\n");
-    out.push_str("        \"GET {} HTTP/1.0\\r\\nHost: {}\\r\\nUser-Agent: axiom-stage1/0.1\\r\\nConnection: close\\r\\n\\r\\n\",\n");
-    out.push_str("        clean_path, clean_host\n");
-    out.push_str("    );\n");
-    out.push_str("    stream.write_all(request.as_bytes()).ok()?;\n");
-    out.push_str("    let mut raw = Vec::new();\n");
-    out.push_str("    let mut body_start = None;\n");
-    out.push_str("    let mut buf = [0u8; 8192];\n");
-    out.push_str("    loop {\n");
-    out.push_str("        let n = stream.read(&mut buf).ok()?;\n");
-    out.push_str("        if n == 0 {\n");
-    out.push_str("            break;\n");
-    out.push_str("        }\n");
-    out.push_str("        raw.extend_from_slice(&buf[..n]);\n");
-    out.push_str("        if body_start.is_none() {\n");
-    out.push_str(
-        "            if let Some(sep) = raw.windows(4).position(|w| w == b\"\\r\\n\\r\\n\") {\n",
-    );
-    out.push_str("                if sep > MAX_HEADER_BYTES {\n");
-    out.push_str("                    return None;\n");
-    out.push_str("                }\n");
-    out.push_str("                body_start = Some(sep + 4);\n");
-    out.push_str("            } else if raw.len() > MAX_HEADER_BYTES {\n");
-    out.push_str("                return None;\n");
-    out.push_str("            }\n");
-    out.push_str("        }\n");
-    out.push_str("        if let Some(start) = body_start {\n");
-    out.push_str("            if raw.len().saturating_sub(start) > MAX_BODY_BYTES {\n");
-    out.push_str("                return None;\n");
-    out.push_str("            }\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("    let body_start = body_start?;\n");
-    out.push_str("    let sep = body_start - 4;\n");
-    out.push_str("    let head = &raw[..sep];\n");
-    out.push_str("    let body = &raw[body_start..];\n");
-    out.push_str(
-        "    let status_line_end = head.iter().position(|b| *b == b'\\r').unwrap_or(head.len());\n",
-    );
-    out.push_str("    let status_line = std::str::from_utf8(&head[..status_line_end]).ok()?;\n");
-    out.push_str("    let mut parts = status_line.splitn(3, ' ');\n");
-    out.push_str("    let _version = parts.next()?;\n");
-    out.push_str("    let status_code: u16 = parts.next()?.parse().ok()?;\n");
-    out.push_str("    if !(200..300).contains(&status_code) {\n");
-    out.push_str("        return None;\n");
-    out.push_str("    }\n");
-    out.push_str("    String::from_utf8(body.to_vec()).ok()\n");
-    out.push_str("}\n\n");
+    type SslNew = unsafe extern "C" fn(*mut SslCtx) -> *mut Ssl;
+    type SslFree = unsafe extern "C" fn(*mut Ssl);
+    type SslSetFd = unsafe extern "C" fn(*mut Ssl, c_int) -> c_int;
+    type SslCtrl = unsafe extern "C" fn(*mut Ssl, c_int, c_long, *mut c_void) -> c_long;
+    type SslConnect = unsafe extern "C" fn(*mut Ssl) -> c_int;
+    type SslWrite = unsafe extern "C" fn(*mut Ssl, *const c_void, c_int) -> c_int;
+    type SslRead = unsafe extern "C" fn(*mut Ssl, *mut c_void, c_int) -> c_int;
+    type SslShutdown = unsafe extern "C" fn(*mut Ssl) -> c_int;
+    type ErrGetError = unsafe extern "C" fn() -> c_ulong;
+    type ErrErrorStringN = unsafe extern "C" fn(c_ulong, *mut c_char, usize);
+
+    #[link(name = "dl")]
+    unsafe extern "C" {
+        fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        fn dlclose(handle: *mut c_void) -> c_int;
+    }
+
+    const RTLD_NOW: c_int = 2;
+
+    struct OpenSsl {
+        ssl_handle: *mut c_void,
+        crypto_handle: *mut c_void,
+        tls_client_method: TlsClientMethod,
+        ssl_ctx_new: SslCtxNew,
+        ssl_ctx_free: SslCtxFree,
+        ssl_ctx_set_verify: SslCtxSetVerify,
+        ssl_new: SslNew,
+        ssl_free: SslFree,
+        ssl_set_fd: SslSetFd,
+        ssl_ctrl: SslCtrl,
+        ssl_connect: SslConnect,
+        ssl_write: SslWrite,
+        ssl_read: SslRead,
+        ssl_shutdown: SslShutdown,
+        err_get_error: ErrGetError,
+        err_error_string_n: ErrErrorStringN,
+    }
+
+    impl OpenSsl {
+        fn load() -> Result<Self, String> {
+            let ssl_handle = open_library(&["libssl.so.3", "libssl.so.1.1", "libssl.so"])?;
+            let crypto_handle =
+                match open_library(&["libcrypto.so.3", "libcrypto.so.1.1", "libcrypto.so"]) {
+                    Ok(handle) => handle,
+                    Err(err) => {
+                        unsafe {
+                            let _ = dlclose(ssl_handle);
+                        }
+                        return Err(err);
+                    }
+                };
+            Ok(Self {
+                ssl_handle,
+                crypto_handle,
+                tls_client_method: load_symbol(ssl_handle, "TLS_client_method")?,
+                ssl_ctx_new: load_symbol(ssl_handle, "SSL_CTX_new")?,
+                ssl_ctx_free: load_symbol(ssl_handle, "SSL_CTX_free")?,
+                ssl_ctx_set_verify: load_symbol(ssl_handle, "SSL_CTX_set_verify")?,
+                ssl_new: load_symbol(ssl_handle, "SSL_new")?,
+                ssl_free: load_symbol(ssl_handle, "SSL_free")?,
+                ssl_set_fd: load_symbol(ssl_handle, "SSL_set_fd")?,
+                ssl_ctrl: load_symbol(ssl_handle, "SSL_ctrl")?,
+                ssl_connect: load_symbol(ssl_handle, "SSL_connect")?,
+                ssl_write: load_symbol(ssl_handle, "SSL_write")?,
+                ssl_read: load_symbol(ssl_handle, "SSL_read")?,
+                ssl_shutdown: load_symbol(ssl_handle, "SSL_shutdown")?,
+                err_get_error: load_symbol(crypto_handle, "ERR_get_error")?,
+                err_error_string_n: load_symbol(crypto_handle, "ERR_error_string_n")?,
+            })
+        }
+    }
+
+    impl Drop for OpenSsl {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = dlclose(self.ssl_handle);
+                let _ = dlclose(self.crypto_handle);
+            }
+        }
+    }
+
+    fn open_library(candidates: &[&str]) -> Result<*mut c_void, String> {
+        for candidate in candidates {
+            let name = CString::new(*candidate).map_err(|_| String::from("invalid library name"))?;
+            let handle = unsafe { dlopen(name.as_ptr(), RTLD_NOW) };
+            if !handle.is_null() {
+                return Ok(handle);
+            }
+        }
+        Err(format!(
+            "https TLS support requires one of {}",
+            candidates.join(", ")
+        ))
+    }
+
+    fn load_symbol<T: Copy>(handle: *mut c_void, symbol: &str) -> Result<T, String> {
+        let name = CString::new(symbol).map_err(|_| String::from("invalid symbol name"))?;
+        let value = unsafe { dlsym(handle, name.as_ptr()) };
+        if value.is_null() {
+            return Err(format!("https TLS support missing OpenSSL symbol {symbol}"));
+        }
+        Ok(unsafe { std::mem::transmute_copy(&value) })
+    }
+
+    struct SslCtxGuard<'a> {
+        ctx: *mut SslCtx,
+        openssl: &'a OpenSsl,
+    }
+    impl Drop for SslCtxGuard<'_> {
+        fn drop(&mut self) {
+            unsafe { (self.openssl.ssl_ctx_free)(self.ctx) };
+        }
+    }
+
+    struct SslGuard<'a> {
+        ssl: *mut Ssl,
+        openssl: &'a OpenSsl,
+    }
+    impl Drop for SslGuard<'_> {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = (self.openssl.ssl_shutdown)(self.ssl);
+                (self.openssl.ssl_free)(self.ssl);
+            }
+        }
+    }
+
+    fn openssl_error(openssl: &OpenSsl) -> String {
+        let error = unsafe { (openssl.err_get_error)() };
+        if error == 0 {
+            return String::from("unknown OpenSSL error");
+        }
+        let mut buf = [0 as c_char; 256];
+        unsafe {
+            (openssl.err_error_string_n)(error, buf.as_mut_ptr(), buf.len());
+            CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
+        }
+    }
+
+    let addrs = axiom_resolve_public_socket_addrs(host, port)
+        .ok_or_else(|| String::from("https target address is not public"))?;
+    let mut stream = None;
+    for addr in addrs {
+        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
+            stream = Some(candidate);
+            break;
+        }
+    }
+    let stream = stream.ok_or_else(|| String::from("https TCP connect failed"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|err| format!("https TCP read timeout setup failed: {err}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .map_err(|err| format!("https TCP write timeout setup failed: {err}"))?;
+    let server_name = CString::new(host).map_err(|_| String::from("https host contains NUL"))?;
+    unsafe {
+        let openssl = OpenSsl::load()?;
+        let method = (openssl.tls_client_method)();
+        if method.is_null() {
+            return Err(format!(
+                "https TLS method unavailable: {}",
+                openssl_error(&openssl)
+            ));
+        }
+        let ctx = (openssl.ssl_ctx_new)(method);
+        if ctx.is_null() {
+            return Err(format!(
+                "https TLS context setup failed: {}",
+                openssl_error(&openssl)
+            ));
+        }
+        let ctx = SslCtxGuard {
+            ctx,
+            openssl: &openssl,
+        };
+        (openssl.ssl_ctx_set_verify)(ctx.ctx, 0, None);
+
+        let ssl = (openssl.ssl_new)(ctx.ctx);
+        if ssl.is_null() {
+            return Err(format!(
+                "https TLS session setup failed: {}",
+                openssl_error(&openssl)
+            ));
+        }
+        let ssl = SslGuard {
+            ssl,
+            openssl: &openssl,
+        };
+        if (openssl.ssl_set_fd)(ssl.ssl, stream.as_raw_fd()) != 1 {
+            return Err(format!(
+                "https TLS socket setup failed: {}",
+                openssl_error(&openssl)
+            ));
+        }
+        let _ = (openssl.ssl_ctrl)(ssl.ssl, 55, 0, server_name.as_ptr() as *mut c_void);
+        if (openssl.ssl_connect)(ssl.ssl) != 1 {
+            return Err(format!(
+                "https TLS handshake failed: {}",
+                openssl_error(&openssl)
+            ));
+        }
+
+        let request_bytes = request.as_bytes();
+        let mut written = 0usize;
+        while written < request_bytes.len() {
+            let remaining = &request_bytes[written..];
+            let chunk_len = remaining.len().min(c_int::MAX as usize) as c_int;
+            let n = (openssl.ssl_write)(ssl.ssl, remaining.as_ptr().cast(), chunk_len);
+            if n <= 0 {
+                return Err(format!(
+                    "https TLS request write failed: {}",
+                    openssl_error(&openssl)
+                ));
+            }
+            written += n as usize;
+        }
+
+        let mut response = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = (openssl.ssl_read)(ssl.ssl, buf.as_mut_ptr().cast(), buf.len() as c_int);
+            if n <= 0 {
+                break;
+            }
+            response.extend_from_slice(&buf[..n as usize]);
+            if response.len() > 64 * 1024 + 1024 * 1024 + 4 {
+                return Err(String::from("https TLS response exceeded size limit"));
+            }
+        }
+        Ok(response)
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_http_get(url: String) -> Option<String> {
+    use std::io::Write;
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let (scheme, host, port, path) = axiom_http_split_url(&url)?;
+    let clean_host = axiom_http_strip_crlf(host);
+    let clean_path = axiom_http_strip_crlf(path);
+    if clean_host.is_empty() || clean_path.is_empty() {
+        return None;
+    }
+    let request = axiom_http_request(clean_host.as_str(), clean_path.as_str());
+    if scheme == "https" {
+        let response = match axiom_https_get_native_tls(clean_host.as_str(), port, &request) {
+            Ok(response) => response,
+            Err(err) => {
+                axiom_runtime_report("net", &err);
+                return None;
+            }
+        };
+        return axiom_http_read_response(&mut response.as_slice());
+    }
+
+    let addrs = axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?;
+    let mut stream = None;
+    for addr in addrs {
+        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
+            stream = Some(candidate);
+            break;
+        }
+    }
+    let mut stream = stream?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    axiom_http_read_response(&mut stream)
+}
+
+"#,
+        );
+    }
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_process_status(program: String) -> i64 {\n");
     out.push_str("    std::process::Command::new(program)\n");
@@ -593,6 +902,81 @@ pub fn render_rust_for_package(
 
 fn rust_path_literal(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn program_uses_call(program: &Program, name: &str) -> bool {
+    program.stmts.iter().any(|stmt| stmt_uses_call(stmt, name))
+        || program
+            .functions
+            .iter()
+            .any(|function| function.body.iter().any(|stmt| stmt_uses_call(stmt, name)))
+}
+
+fn stmt_uses_call(stmt: &Stmt, name: &str) -> bool {
+    match stmt {
+        Stmt::Let { expr, .. } | Stmt::Print { expr, .. } | Stmt::Return { expr, .. } => {
+            expr_uses_call(expr, name)
+        }
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            expr_uses_call(cond, name)
+                || then_block.iter().any(|stmt| stmt_uses_call(stmt, name))
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block.iter().any(|stmt| stmt_uses_call(stmt, name)))
+        }
+        Stmt::While { cond, body, .. } => {
+            expr_uses_call(cond, name) || body.iter().any(|stmt| stmt_uses_call(stmt, name))
+        }
+        Stmt::Match { expr, arms, .. } => {
+            expr_uses_call(expr, name)
+                || arms
+                    .iter()
+                    .any(|arm| arm.body.iter().any(|stmt| stmt_uses_call(stmt, name)))
+        }
+    }
+}
+
+fn expr_uses_call(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Call {
+            name: call_name,
+            args,
+            ..
+        } => call_name == name || args.iter().any(|arg| expr_uses_call(arg, name)),
+        Expr::BinaryAdd { lhs, rhs, .. } | Expr::BinaryCompare { lhs, rhs, .. } => {
+            expr_uses_call(lhs, name) || expr_uses_call(rhs, name)
+        }
+        Expr::Try { expr, .. } | Expr::FieldAccess { base: expr, .. } => expr_uses_call(expr, name),
+        Expr::StructLiteral { fields, .. } => {
+            fields.iter().any(|field| expr_uses_call(&field.expr, name))
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            elements.iter().any(|element| expr_uses_call(element, name))
+        }
+        Expr::TupleIndex { base, .. } => expr_uses_call(base, name),
+        Expr::MapLiteral { entries, .. } => entries
+            .iter()
+            .any(|entry| expr_uses_call(&entry.key, name) || expr_uses_call(&entry.value, name)),
+        Expr::EnumVariant { payloads, .. } => payloads.iter().any(|arg| expr_uses_call(arg, name)),
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            expr_uses_call(base, name)
+                || start
+                    .as_ref()
+                    .is_some_and(|start| expr_uses_call(start, name))
+                || end.as_ref().is_some_and(|end| expr_uses_call(end, name))
+        }
+        Expr::Index { base, index, .. } => {
+            expr_uses_call(base, name) || expr_uses_call(index, name)
+        }
+        Expr::Literal(_) | Expr::VarRef { .. } => false,
+    }
 }
 
 struct TypeContext<'a> {
