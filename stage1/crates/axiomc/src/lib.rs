@@ -251,6 +251,22 @@ mod tests {
     }
 
     #[test]
+    fn render_rust_uses_checked_slice_access() {
+        let source =
+            "let values: [int] = [1]\nlet window: &[int] = values[0:1]\nprint len(window)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("match values.get(start..end) {"));
+        assert!(rendered.contains("match values.get_mut(start..end) {"));
+        assert!(!rendered.contains("&values[start..end]"));
+        assert!(!rendered.contains("&mut values[start..end]"));
+        assert!(!rendered.contains("assert!("));
+        assert!(!rendered.contains("debug_assert!("));
+    }
+
+    #[test]
     fn parser_lowers_struct_literals_and_field_access() {
         let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2368,6 +2384,52 @@ mod tests {
             !stderr.contains("src/math.ax"),
             "unexpected stderr: {stderr}"
         );
+    }
+
+    #[test]
+    fn stage1_runtime_reports_structured_slice_error_in_debug_and_release() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runtime-error-slice-modes");
+        create_project(&project, Some("runtime-error-slice-modes")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int] = [7]\nlet window: &[int] = values[0:2]\nprint len(window)\n",
+        )
+        .expect("write source");
+
+        for debug in [true, false] {
+            let built = build_project_with_options(
+                &project,
+                &BuildOptions {
+                    debug,
+                    ..BuildOptions::default()
+                },
+            )
+            .expect("build project");
+            let output = compiled_binary_command(&built.binary)
+                .output()
+                .expect("run compiled binary");
+
+            assert!(
+                !output.status.success(),
+                "program should fail for debug={debug}"
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains(
+                    "{\"kind\":\"runtime\",\"message\":\"array slice end out of bounds\"}"
+                ),
+                "unexpected stderr for debug={debug}: {stderr}"
+            );
+            assert!(
+                !stderr.contains("panic:"),
+                "unexpected stderr for debug={debug}: {stderr}"
+            );
+            assert!(
+                !stderr.contains("Axiom stack trace"),
+                "unexpected stderr for debug={debug}: {stderr}"
+            );
+        }
     }
 
     #[test]
