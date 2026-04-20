@@ -2284,6 +2284,56 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_sync_module() {
+        // `std/sync.ax` is ungated in stage1 because it is implemented in
+        // Axiom using ownership tokens rather than host threads or blocking
+        // runtime services. Async-aware channels and wakeups stay AG4.2 work.
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-sync-app");
+        create_project(&project, Some("stdlib-sync-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-sync-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/sync.ax\"\nlet counter: Mutex<int> = mutex<int>(1)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 2)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nprint into_inner<int>(final_guard)\nlet ready: Once<string> = once_with<string>(\"configured\")\nprint once_is_set<string>(ready)\nlet empty: Once<int> = once<int>(None)\nmatch once_take<int>(empty) {\nSome(value) {\nprint value\n}\nNone {\nprint \"empty\"\n}\n}\nlet channel: Channel<string> = channel<string>(None)\nlet sent: Channel<string> = send<string>(channel, \"message\")\nmatch try_recv<string>(sent) {\nSome(message) {\nprint message\n}\nNone {\nprint \"missing\"\n}\n}\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "2\ntrue\nempty\nmessage\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "2\ntrue\nempty\nmessage\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
     fn stage1_project_rejects_stdlib_json_with_wrong_argument_type() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-json-bad-arg");
