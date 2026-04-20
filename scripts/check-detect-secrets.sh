@@ -51,11 +51,14 @@
       'sk-live-'
       'sk-proj-'
       'AKIA[0-9A-Z]{16}'
-      'BEGIN (RSA|OPENSSH|EC) PRIVATE KEY'
-      'ANTHROPIC_API_KEY='
-      'OPENAI_API_KEY='
-      'SUDO_PASS='
-      'BW_SESSION='
+      'ASIA[0-9A-Z]{16}'
+      'Bearer [A-Za-z0-9._-]{20,}'
+      'BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY'
+      '^ANTHROPIC_API_KEY='
+      '^OPENAI_API_KEY='
+      '^SUDO_PASS='
+      '^BW_SESSION='
+      'password[[:space:]]*=[[:space:]]*["'\''][^"'\'']{8,}'
     )
 
     tmp_file="$(mktemp)"
