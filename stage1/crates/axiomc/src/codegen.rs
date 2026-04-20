@@ -595,6 +595,10 @@ fn rust_path_literal(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn rust_path_literal(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 struct TypeContext<'a> {
     structs: HashMap<&'a str, &'a StructDef>,
     enums: HashMap<&'a str, &'a EnumDef>,
