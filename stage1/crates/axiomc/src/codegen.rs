@@ -311,18 +311,18 @@ fn axiom_http_read_response<R: std::io::Read>(reader: &mut R) -> Option<String> 
 
 #[allow(dead_code)]
 fn axiom_https_get_native_tls(host: &str, port: u16, request: &str) -> Result<Vec<u8>, String> {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
         axiom_openssl_tls_get(host, port, request)
     }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     {
         let _ = (host, port, request);
         Err(String::from("https TLS is not supported on this platform in stage1"))
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>, String> {
     use std::ffi::{CStr, CString};
