@@ -2734,7 +2734,7 @@ mod tests {
         create_project(&project, Some("generic-aggregates-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
-            "struct Window<T> {\nview: &[T]\n}\n\nstruct MaybeBox<T> {\nitem: Option<T>\n}\n\nstruct ResultBox<T, E> {\nitem: Result<T, E>\n}\n\nenum Slot<T> {\nFilled(T)\nEmpty\n}\n\nlet values: [int] = [4, 5, 6]\nlet window: Window<int> = Window { view: values[:] }\nprint len(window.view)\nlet maybe: MaybeBox<int> = MaybeBox { item: Some(8) }\nmatch maybe.item {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\nlet result: ResultBox<string, string> = ResultBox { item: Ok(\"ready\") }\nmatch result.item {\nOk(value) {\nprint value\n}\nErr(error) {\nprint error\n}\n}\nlet number: Slot<int> = Filled(42)\nmatch number {\nFilled(value) {\nprint value\n}\nEmpty {\nprint 0\n}\n}\nlet text: Slot<string> = Filled(\"done\")\nmatch text {\nFilled(value) {\nprint value\n}\nEmpty {\nprint \"empty\"\n}\n}\n",
+            "struct Window<T> {\nview: &[T]\n}\n\nstruct MaybeBox<T> {\nitem: Option<T>\n}\n\nstruct ResultBox<T, E> {\nitem: Result<T, E>\n}\n\nstruct Buckets<T> {\nitems: [T]\nby_name: {string: T}\n}\n\nenum Slot<T> {\nFilled(T)\nEmpty\n}\n\nlet values: [int] = [4, 5, 6]\nlet window: Window<int> = Window { view: values[:] }\nprint len(window.view)\nlet maybe: MaybeBox<int> = MaybeBox { item: Some(8) }\nmatch maybe.item {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\nlet result: ResultBox<string, string> = ResultBox { item: Ok(\"ready\") }\nmatch result.item {\nOk(value) {\nprint value\n}\nErr(error) {\nprint error\n}\n}\nlet bucket_values: [int] = [10, 20]\nlet bucket_lookup: {string: int} = {\"answer\": 42}\nlet buckets: Buckets<int> = Buckets { items: bucket_values, by_name: bucket_lookup }\nprint len(buckets.items)\nlet answers: {string: int} = buckets.by_name\nprint answers[\"answer\"]\nlet number: Slot<int> = Filled(42)\nmatch number {\nFilled(value) {\nprint value\n}\nEmpty {\nprint 0\n}\n}\nlet text: Slot<string> = Filled(\"done\")\nmatch text {\nFilled(value) {\nprint value\n}\nEmpty {\nprint \"empty\"\n}\n}\n",
         )
         .expect("write source");
 
@@ -2744,7 +2744,7 @@ mod tests {
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "3\n8\nready\n42\ndone\n"
+            "3\n8\nready\n2\n42\n42\ndone\n"
         );
     }
 

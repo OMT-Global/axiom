@@ -138,7 +138,7 @@ Current proof points:
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
-- `stage1/examples/generic_aggregates` covers monomorphized generic wrappers over slices, `Option<T>`, `Result<T, E>`, and user-defined enum payloads.
+- `stage1/examples/generic_aggregates` covers monomorphized generic wrappers over arrays, maps, slices, `Option<T>`, `Result<T, E>`, and user-defined enum payloads.
 - `make stage1-test stage1-smoke` now covers all twenty-three checked-in stage1 examples.
 
 Agent-grade compiler milestone summary:

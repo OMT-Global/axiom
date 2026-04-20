@@ -10,6 +10,11 @@ struct ResultBox<T, E> {
 item: Result<T, E>
 }
 
+struct Buckets<T> {
+items: [T]
+by_name: {string: T}
+}
+
 enum Slot<T> {
 Filled(T)
 Empty
@@ -38,6 +43,13 @@ Err(error) {
 print error
 }
 }
+
+let bucket_values: [int] = [10, 20]
+let bucket_lookup: {string: int} = {"answer": 42}
+let buckets: Buckets<int> = Buckets { items: bucket_values, by_name: bucket_lookup }
+print len(buckets.items)
+let answers: {string: int} = buckets.by_name
+print answers["answer"]
 
 let number: Slot<int> = Filled(42)
 match number {
