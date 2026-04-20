@@ -260,6 +260,8 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("    if addrs.is_empty() {\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
+    out.push_str("    // Network intrinsics reject private, loopback, link-local,\n");
+    out.push_str("    // multicast, documentation, and metadata-style addresses.\n");
     out.push_str("    if addrs.iter().any(|addr| axiom_is_blocked_network_ip(addr.ip())) {\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");

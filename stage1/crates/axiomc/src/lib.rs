@@ -288,6 +288,18 @@ mod tests {
     }
 
     #[test]
+    fn render_rust_documents_network_address_filtering() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_resolve_public_socket_addrs("));
+        assert!(rendered.contains("Network intrinsics reject private, loopback, link-local,"));
+        assert!(rendered.contains("addr.to_ipv4_mapped()"));
+    }
+
+    #[test]
     fn parser_lowers_struct_literals_and_field_access() {
         let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2039,6 +2051,43 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             "blocked-private\nblocked-link-local\nblocked-metadata\n"
         );
+    }
+
+    #[test]
+    fn stage1_net_resolve_allows_public_ip_address() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-resolve-public-ip");
+        create_project(&project, Some("net-resolve-public-ip")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "net-resolve-public-ip",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match net_resolve(\"8.8.8.8\") {\nSome(address) {\nprint address\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "8.8.8.8\n");
     }
 
     #[test]
