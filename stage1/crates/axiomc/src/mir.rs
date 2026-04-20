@@ -43,6 +43,7 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_ty: Type,
     pub body: Vec<Stmt>,
+    pub is_async: bool,
     pub line: usize,
     pub column: usize,
 }
@@ -135,6 +136,10 @@ pub enum Expr {
         expr: Box<Expr>,
         ty: Type,
     },
+    Await {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -213,6 +218,10 @@ pub enum Type {
     Tuple(Vec<Type>),
     Map(Box<Type>, Box<Type>),
     Array(Box<Type>),
+    Task(Box<Type>),
+    JoinHandle(Box<Type>),
+    AsyncChannel(Box<Type>),
+    SelectResult(Box<Type>),
 }
 
 impl Type {
@@ -223,9 +232,15 @@ impl Type {
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
             Type::Tuple(elements) => elements.iter().all(Type::is_copy),
-            Type::String | Type::Struct(_) | Type::Enum(_) | Type::Map(_, _) | Type::Array(_) => {
-                false
-            }
+            Type::String
+            | Type::Struct(_)
+            | Type::Enum(_)
+            | Type::Map(_, _)
+            | Type::Array(_)
+            | Type::Task(_)
+            | Type::JoinHandle(_)
+            | Type::AsyncChannel(_)
+            | Type::SelectResult(_) => false,
         }
     }
 }
@@ -267,6 +282,7 @@ impl Expr {
             Expr::BinaryAdd { ty, .. } => ty.clone(),
             Expr::BinaryCompare { ty, .. } => ty.clone(),
             Expr::Try { ty, .. } => ty.clone(),
+            Expr::Await { ty, .. } => ty.clone(),
             Expr::StructLiteral { ty, .. } => ty.clone(),
             Expr::FieldAccess { ty, .. } => ty.clone(),
             Expr::TupleLiteral { ty, .. } => ty.clone(),
@@ -312,6 +328,7 @@ fn lower_function(function: &hir::Function) -> Function {
         params: function.params.iter().map(lower_param).collect(),
         return_ty: lower_type(&function.return_ty),
         body: function.body.iter().map(lower_stmt).collect(),
+        is_async: function.is_async,
         line: function.line,
         column: function.column,
     }
@@ -447,6 +464,10 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             expr: Box::new(lower_expr(expr)),
             ty: lower_type(ty),
         },
+        hir::Expr::Await { expr, ty } => Expr::Await {
+            expr: Box::new(lower_expr(expr)),
+            ty: lower_type(ty),
+        },
         hir::Expr::StructLiteral { name, fields, ty } => Expr::StructLiteral {
             name: name.clone(),
             fields: fields
@@ -536,6 +557,10 @@ fn lower_type(ty: &hir::Type) -> Type {
             Type::Map(Box::new(lower_type(key)), Box::new(lower_type(value)))
         }
         hir::Type::Array(inner) => Type::Array(Box::new(lower_type(inner))),
+        hir::Type::Task(inner) => Type::Task(Box::new(lower_type(inner))),
+        hir::Type::JoinHandle(inner) => Type::JoinHandle(Box::new(lower_type(inner))),
+        hir::Type::AsyncChannel(inner) => Type::AsyncChannel(Box::new(lower_type(inner))),
+        hir::Type::SelectResult(inner) => Type::SelectResult(Box::new(lower_type(inner))),
     }
 }
 

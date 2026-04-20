@@ -30,6 +30,7 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
+    pub is_async: bool,
     pub is_public: bool,
     pub line: usize,
     pub column: usize,
@@ -197,6 +198,11 @@ pub enum Expr {
         line: usize,
         column: usize,
     },
+    Await {
+        expr: Box<Expr>,
+        line: usize,
+        column: usize,
+    },
     StructLiteral {
         name: String,
         fields: Vec<StructFieldValue>,
@@ -324,7 +330,11 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             .with_path(path.display().to_string())
             .with_span(line_no, 1));
         }
-        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
+        if trimmed.starts_with("fn ")
+            || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub async fn ")
+        {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
@@ -433,7 +443,11 @@ fn parse_stmt_list(
             .with_path(path.display().to_string())
             .with_span(line_no, 1));
         }
-        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
+        if trimmed.starts_with("fn ")
+            || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub async fn ")
+        {
             return Err(Diagnostic::new(
                 "parse",
                 "stage1 bootstrap only supports top-level function declarations",
@@ -533,15 +547,19 @@ fn parse_stmt(
 fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Function, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub fn ") {
-        (true, rest)
+    let (is_public, is_async, header) = if let Some(rest) = trimmed.strip_prefix("pub async fn ") {
+        (true, true, rest)
+    } else if let Some(rest) = trimmed.strip_prefix("pub fn ") {
+        (true, false, rest)
+    } else if let Some(rest) = trimmed.strip_prefix("async fn ") {
+        (false, true, rest)
     } else {
         let rest = trimmed.strip_prefix("fn ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid function declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        (false, false, rest)
     };
     let open_paren = find_top_level_char(header, '(').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration is missing '('")
@@ -585,6 +603,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         params,
         return_ty,
         body,
+        is_async,
         is_public,
         line: line_no,
         column: 1,
@@ -1382,6 +1401,21 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             expr: Box::new(parse_term(inner, path, line_no, column)?),
             line: line_no,
             column: column + inner.len(),
+        });
+    }
+    if let Some(inner) = raw.strip_prefix("await ") {
+        let inner = inner.trim();
+        if inner.is_empty() {
+            return Err(
+                Diagnostic::new("parse", "await expression is missing an operand")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column),
+            );
+        }
+        return Ok(Expr::Await {
+            expr: Box::new(parse_term(inner, path, line_no, column + 6)?),
+            line: line_no,
+            column,
         });
     }
     if let Some(dot) = find_last_top_level_char(raw, '.') {

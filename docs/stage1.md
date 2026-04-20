@@ -77,7 +77,7 @@ still far from the stated 1.0 target for service and agent workloads.
 - Modules are now limited to package-local path imports plus direct `pub type`, `pub struct`, `pub enum`, and `pub fn` exports only.
 - Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, borrowed slice types, borrowed array slice expressions, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, field access, tuple indexing, map indexing, array indexing, exhaustive statement-level `match`, monomorphized generic functions, generic structs, generic enums, and the built-in collection helpers `len(...)`, `first(...)`, and `last(...)` now exist, but there is still no general borrow system.
 - No inferred generic function, struct, or enum type arguments.
-- No methods, trait-style interfaces, closures, or async/await.
+- No methods, trait-style interfaces, or closures. `async fn` and `await` exist for stage1 `Task<T>` values, but the runtime is deterministic and does not yet provide host-thread scheduling.
 - Rebinding and shadowing are intentionally rejected today to keep the bootstrap scope small.
 
 ### Type and ownership gaps
@@ -96,9 +96,9 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Runtime and standard library gaps
 
-- The AG4.1 stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface), `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic), `std/json.ax` (ungated scalar/string JSON helpers), `std/collections.ax` (generic borrowed-slice helpers built on AG2 generic functions), and `std/sync.ax` (ownership-shaped mutex guards, one-shot cells, and single-slot nonblocking channels). The `fs` capability is scoped: `fs_read` resolves relative paths from the package root, bounds them to the package root by default or `[capabilities] fs_root = "<relative package path>"`, canonicalizes targets to reject traversal and symlink escapes, and refuses files larger than 64 MiB. Blocking, task wakeups, and async-aware channels remain AG4.2 runtime work.
+- The stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface), `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic), `std/json.ax` (ungated scalar/string JSON helpers), `std/collections.ax` (generic borrowed-slice helpers built on AG2 generic functions), `std/sync.ax` (ownership-shaped mutex guards, one-shot cells, and single-slot nonblocking channels), and `std/async.ax` (deterministic task, join, channel, cancellation, timeout, and select wrappers). The `fs` capability is scoped: `fs_read` resolves relative paths from the package root, bounds them to the package root by default or `[capabilities] fs_root = "<relative package path>"`, canonicalizes targets to reject traversal and symlink escapes, and refuses files larger than 64 MiB.
 - Capability-aware integration is now in place for the current stage1 runtime surface: compiler-known intrinsics enforce all six manifest flags, stdlib wrappers preserve that enforcement against the importing package's manifest, capability-denied programs fail before native execution, and the Rust suite covers cross-package capability interactions (`dependency_package_must_enable_its_own_capabilities`) plus per-wrapper denial paths.
-- No async runtime, blocking channels, cancellation, timers, or service-grade I/O surface exists.
+- No host-thread scheduler, blocking channel wakeups, real timers, or service-grade I/O surface exists.
 
 ### Backend and tooling gaps
 

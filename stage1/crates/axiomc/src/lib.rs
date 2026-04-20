@@ -2367,6 +2367,53 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_supports_async_runtime_surface() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-async-app");
+        create_project(&project, Some("stdlib-async-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-async-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/async.ax\"\nasync fn compute(value: int): int {\nreturn value + 1\n}\nlet direct: Task<int> = compute(40)\nprint await direct\nlet handle: JoinHandle<int> = spawn<int>(compute(6))\nprint await join<int>(handle)\nlet canceled: Task<int> = cancel<int>(compute(1))\nprint is_canceled<int>(canceled)\nlet maybe: Option<int> = await timeout<int>(compute(5), 100)\nmatch maybe {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\nlet messages: AsyncChannel<string> = channel<string>()\nlet sent: AsyncChannel<string> = await send<string>(messages, \"message\")\nlet received: Option<string> = await recv<string>(sent)\nmatch received {\nSome(message) {\nprint message\n}\nNone {\nprint \"missing\"\n}\n}\nlet left_index: Task<Option<string>> = ready<Option<string>>(None)\nlet right_index: Task<Option<string>> = ready<Option<string>>(Some(\"right\"))\nlet picked_index: SelectResult<string> = await select<string>(left_index, right_index)\nprint selected<string>(picked_index)\nlet left_value: Task<Option<string>> = ready<Option<string>>(None)\nlet right_value: Task<Option<string>> = ready<Option<string>>(Some(\"right\"))\nlet picked_value: SelectResult<string> = await select<string>(left_value, right_value)\nmatch selected_value<string>(picked_value) {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "41\n7\ntrue\n6\nmessage\n1\nright\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "41\n7\ntrue\n6\nmessage\n1\nright\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
     fn stage1_project_rejects_stdlib_json_with_wrong_argument_type() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-json-bad-arg");

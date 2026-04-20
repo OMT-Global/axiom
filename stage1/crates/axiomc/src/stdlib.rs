@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides eleven stdlib modules. Six are thin wrappers over
+//! Today this provides twelve stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
@@ -32,7 +32,7 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth, ninth, tenth, and eleventh modules are stdlib surfaces not tied to a
+//! The eighth, ninth, tenth, eleventh, and twelfth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -43,8 +43,9 @@
 //!   existing polymorphic collection primitives and AG2 generic functions.
 //! * `std/sync.ax` — ownership-shaped synchronization primitives implemented
 //!   in Axiom: move-only mutex guards, one-shot cells, and single-slot
-//!   nonblocking channels. Blocking, task wakeups, and async-aware channels
-//!   remain AG4.2 runtime work.
+//!   nonblocking channels.
+//! * `std/async.ax` — deterministic task, join, channel, timeout,
+//!   cancellation, and select wrappers over the stage1 async runtime values.
 
 use std::path::{Path, PathBuf};
 
@@ -127,6 +128,21 @@ pub fn once_take<T>(cell: Once<T>): Option<T> {\nreturn cell.value\n}\n\
 pub fn channel<T>(slot: Option<T>): Channel<T> {\nreturn Channel { slot: slot }\n}\n\
 pub fn send<T>(_channel: Channel<T>, value: T): Channel<T> {\nreturn Channel { slot: Some(value) }\n}\n\
 pub fn try_recv<T>(channel: Channel<T>): Option<T> {\nreturn channel.slot\n}\n",
+    ),
+    (
+        "async.ax",
+        "pub fn ready<T>(value: T): Task<T> {\nreturn async_ready<T>(value)\n}\n\
+pub fn spawn<T>(task: Task<T>): JoinHandle<T> {\nreturn async_spawn<T>(task)\n}\n\
+pub fn join<T>(handle: JoinHandle<T>): Task<T> {\nreturn async_join<T>(handle)\n}\n\
+pub fn cancel<T>(task: Task<T>): Task<T> {\nreturn async_cancel<T>(task)\n}\n\
+pub fn is_canceled<T>(task: Task<T>): bool {\nreturn async_is_canceled<T>(task)\n}\n\
+pub fn timeout<T>(task: Task<T>, milliseconds: int): Task<Option<T>> {\nreturn async_timeout<T>(task, milliseconds)\n}\n\
+pub fn channel<T>(): AsyncChannel<T> {\nreturn async_channel<T>()\n}\n\
+pub fn send<T>(channel: AsyncChannel<T>, value: T): Task<AsyncChannel<T>> {\nreturn async_send<T>(channel, value)\n}\n\
+pub fn recv<T>(channel: AsyncChannel<T>): Task<Option<T>> {\nreturn async_recv<T>(channel)\n}\n\
+pub fn select<T>(left: Task<Option<T>>, right: Task<Option<T>>): Task<SelectResult<T>> {\nreturn async_select<T>(left, right)\n}\n\
+pub fn selected<T>(result: SelectResult<T>): int {\nreturn async_selected<T>(result)\n}\n\
+pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_selected_value<T>(result)\n}\n",
     ),
     (
         "http.ax",

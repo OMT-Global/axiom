@@ -36,6 +36,29 @@ pub fn render_rust_for_package(
     out.push_str(&format!("const AXIOM_FS_ROOT: &str = {fs_root:?};\n"));
     out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("#[derive(Debug, PartialEq)]\n");
+    out.push_str("struct AxiomTask<T> {\n");
+    out.push_str("    value: T,\n");
+    out.push_str("    canceled: bool,\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("#[derive(Debug, PartialEq)]\n");
+    out.push_str("struct AxiomJoinHandle<T> {\n");
+    out.push_str("    task: AxiomTask<T>,\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("#[derive(Debug, PartialEq)]\n");
+    out.push_str("struct AxiomChannel<T> {\n");
+    out.push_str("    slot: Option<T>,\n");
+    out.push_str("    closed: bool,\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("#[derive(Debug, PartialEq)]\n");
+    out.push_str("struct AxiomSelectResult<T> {\n");
+    out.push_str("    selected: i64,\n");
+    out.push_str("    value: Option<T>,\n");
+    out.push_str("}\n\n");
     out.push_str("fn axiom_install_panic_hook() {\n");
     out.push_str("    static AXIOM_PANIC_HOOK: Once = Once::new();\n");
     out.push_str("    AXIOM_PANIC_HOOK.call_once(|| {\n");
@@ -52,6 +75,17 @@ pub fn render_rust_for_package(
     out.push_str("fn axiom_runtime_error(kind: &str, message: &str) -> ! {\n");
     out.push_str("    axiom_runtime_report(kind, message);\n");
     out.push_str("    panic::panic_any(AxiomRuntimeAbort)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_task_ready<T>(value: T) -> AxiomTask<T> {\n");
+    out.push_str("    AxiomTask { value, canceled: false }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_await<T>(task: AxiomTask<T>) -> T {\n");
+    out.push_str("    if task.canceled {\n");
+    out.push_str("        axiom_runtime_error(\"async\", \"awaited task was canceled\");\n");
+    out.push_str("    }\n");
+    out.push_str("    task.value\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_array_get<T: Copy>(values: &[T], index: i64) -> T {\n");
@@ -885,7 +919,15 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("    axiom_install_panic_hook();\n");
     out.push_str("    let result = panic::catch_unwind(|| {\n");
     for stmt in &program.stmts {
-        render_stmt(stmt, &type_context, &mut out, 2, &program.path, debug);
+        render_stmt(
+            stmt,
+            &type_context,
+            &mut out,
+            2,
+            &program.path,
+            false,
+            debug,
+        );
     }
     out.push_str("    });\n");
     out.push_str("    match result {\n");
@@ -951,7 +993,9 @@ fn expr_uses_call(expr: &Expr, name: &str) -> bool {
         Expr::BinaryAdd { lhs, rhs, .. } | Expr::BinaryCompare { lhs, rhs, .. } => {
             expr_uses_call(lhs, name) || expr_uses_call(rhs, name)
         }
-        Expr::Try { expr, .. } | Expr::FieldAccess { base: expr, .. } => expr_uses_call(expr, name),
+        Expr::Try { expr, .. }
+        | Expr::Await { expr, .. }
+        | Expr::FieldAccess { base: expr, .. } => expr_uses_call(expr, name),
         Expr::StructLiteral { fields, .. } => {
             fields.iter().any(|field| expr_uses_call(&field.expr, name))
         }
@@ -1077,7 +1121,11 @@ impl<'a> TypeContext<'a> {
                         visiting_enums,
                     )
             }
-            Type::Array(inner) => {
+            Type::Array(inner)
+            | Type::Task(inner)
+            | Type::JoinHandle(inner)
+            | Type::AsyncChannel(inner)
+            | Type::SelectResult(inner) => {
                 self.type_contains_borrowed_slice_inner(inner, visiting_structs, visiting_enums)
             }
         }
@@ -1168,6 +1216,7 @@ fn render_function(
         .collect::<Vec<_>>()
         .join(", ");
     let lifetime = if uses_slice_lifetime { "<'a>" } else { "" };
+    out.push_str("#[allow(non_snake_case)]\n");
     out.push_str(&format!(
         "fn {}{}({}) -> {} {{\n",
         function.name,
@@ -1176,7 +1225,15 @@ fn render_function(
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
     for stmt in &function.body {
-        render_stmt(stmt, type_context, out, 1, &function.path, debug);
+        render_stmt(
+            stmt,
+            type_context,
+            out,
+            1,
+            &function.path,
+            function.is_async,
+            debug,
+        );
     }
     out.push_str("}\n");
 }
@@ -1199,6 +1256,7 @@ fn render_stmt(
     out: &mut String,
     indent: usize,
     source_path: &str,
+    in_async_function: bool,
     debug: bool,
 ) {
     let pad = "    ".repeat(indent);
@@ -1232,12 +1290,28 @@ fn render_stmt(
             render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}if {} {{\n", render_expr(cond)));
             for stmt in then_block {
-                render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
+                render_stmt(
+                    stmt,
+                    type_context,
+                    out,
+                    indent + 1,
+                    source_path,
+                    in_async_function,
+                    debug,
+                );
             }
             if let Some(else_block) = else_block {
                 out.push_str(&format!("{pad}}} else {{\n"));
                 for stmt in else_block {
-                    render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
+                    render_stmt(
+                        stmt,
+                        type_context,
+                        out,
+                        indent + 1,
+                        source_path,
+                        in_async_function,
+                        debug,
+                    );
                 }
                 out.push_str(&format!("{pad}}}\n"));
             } else {
@@ -1248,7 +1322,15 @@ fn render_stmt(
             render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}while {} {{\n", render_expr(cond)));
             for stmt in body {
-                render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
+                render_stmt(
+                    stmt,
+                    type_context,
+                    out,
+                    indent + 1,
+                    source_path,
+                    in_async_function,
+                    debug,
+                );
             }
             out.push_str(&format!("{pad}}}\n"));
         }
@@ -1256,13 +1338,28 @@ fn render_stmt(
             render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!("{pad}match {} {{\n", render_expr(expr)));
             for arm in arms {
-                render_match_arm(arm, type_context, out, indent + 1, source_path, debug);
+                render_match_arm(
+                    arm,
+                    type_context,
+                    out,
+                    indent + 1,
+                    source_path,
+                    in_async_function,
+                    debug,
+                );
             }
             out.push_str(&format!("{pad}}}\n"));
         }
         Stmt::Return { expr, span } => {
             render_source_marker(source_path, *span, out, indent, debug);
-            out.push_str(&format!("{pad}return {};\n", render_expr(expr)));
+            if in_async_function {
+                out.push_str(&format!(
+                    "{pad}return axiom_task_ready({});\n",
+                    render_expr(expr)
+                ));
+            } else {
+                out.push_str(&format!("{pad}return {};\n", render_expr(expr)));
+            }
         }
     }
 }
@@ -1273,6 +1370,7 @@ fn render_match_arm(
     out: &mut String,
     indent: usize,
     source_path: &str,
+    in_async_function: bool,
     debug: bool,
 ) {
     let pad = "    ".repeat(indent);
@@ -1294,7 +1392,15 @@ fn render_match_arm(
         ));
     }
     for stmt in &arm.body {
-        render_stmt(stmt, type_context, out, indent + 1, source_path, debug);
+        render_stmt(
+            stmt,
+            type_context,
+            out,
+            indent + 1,
+            source_path,
+            in_async_function,
+            debug,
+        );
     }
     out.push_str(&format!("{pad}}},\n"));
 }
@@ -1400,6 +1506,60 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Call { name, args, .. } if name == "crypto_sha256" => {
             format!("axiom_crypto_sha256({})", render_expr(&args[0]))
         }
+        Expr::Call { name, args, .. } if name == "async_ready" => {
+            format!("axiom_task_ready({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "async_spawn" => {
+            format!("AxiomJoinHandle {{ task: {} }}", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "async_join" => {
+            format!("({}).task", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "async_cancel" => {
+            format!(
+                "{{ let task = {}; AxiomTask {{ value: task.value, canceled: true }} }}",
+                render_expr(&args[0])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "async_is_canceled" => {
+            format!("({}).canceled", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "async_timeout" => {
+            format!(
+                "{{ let task = {}; let _timeout_ms = {}; AxiomTask {{ value: if task.canceled {{ None }} else {{ Some(task.value) }}, canceled: false }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, .. } if name == "async_channel" => {
+            String::from("AxiomChannel { slot: None, closed: false }")
+        }
+        Expr::Call { name, args, .. } if name == "async_send" => {
+            format!(
+                "{{ let _channel = {}; axiom_task_ready(AxiomChannel {{ slot: Some({}), closed: false }}) }}",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "async_recv" => {
+            format!(
+                "{{ let channel = {}; axiom_task_ready(channel.slot) }}",
+                render_expr(&args[0])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "async_select" => {
+            format!(
+                "{{ let left = axiom_await({}); if left.is_some() {{ axiom_task_ready(AxiomSelectResult {{ selected: 0, value: left }}) }} else {{ let right = axiom_await({}); axiom_task_ready(AxiomSelectResult {{ selected: 1, value: right }}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "async_selected" => {
+            format!("({}).selected", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "async_selected_value" => {
+            format!("({}).value", render_expr(&args[0]))
+        }
         Expr::Call { name, args, ty } if name == "first" => {
             render_collection_edge(&args[0], ty, false)
         }
@@ -1428,11 +1588,16 @@ fn render_expr(expr: &Expr) -> String {
             Type::Tuple(_) => unreachable!("type checker rejects tuple addition"),
             Type::Map(_, _) => unreachable!("type checker rejects map addition"),
             Type::Array(_) => unreachable!("type checker rejects array addition"),
+            Type::Task(_) => unreachable!("type checker rejects task addition"),
+            Type::JoinHandle(_) => unreachable!("type checker rejects join handle addition"),
+            Type::AsyncChannel(_) => unreachable!("type checker rejects async channel addition"),
+            Type::SelectResult(_) => unreachable!("type checker rejects select result addition"),
         },
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
         }
         Expr::Try { expr, .. } => format!("({})?", render_expr(expr)),
+        Expr::Await { expr, .. } => format!("axiom_await({})", render_expr(expr)),
         Expr::StructLiteral { name, fields, .. } => {
             let rendered_fields = fields
                 .iter()
@@ -1662,6 +1827,28 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
             rust_type_inner(value, lifetime, type_context)
         ),
         Type::Array(inner) => format!("Vec<{}>", rust_type_inner(inner, lifetime, type_context)),
+        Type::Task(inner) => format!(
+            "AxiomTask<{}>",
+            rust_type_inner(inner, lifetime, type_context)
+        ),
+        Type::JoinHandle(inner) => {
+            format!(
+                "AxiomJoinHandle<{}>",
+                rust_type_inner(inner, lifetime, type_context)
+            )
+        }
+        Type::AsyncChannel(inner) => {
+            format!(
+                "AxiomChannel<{}>",
+                rust_type_inner(inner, lifetime, type_context)
+            )
+        }
+        Type::SelectResult(inner) => {
+            format!(
+                "AxiomSelectResult<{}>",
+                rust_type_inner(inner, lifetime, type_context)
+            )
+        }
     }
 }
 

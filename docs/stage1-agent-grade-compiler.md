@@ -188,11 +188,12 @@ limited to one wrapper per capability. It also includes
 `std/io.ax`, the first stdlib module not tied to a capability flag, which
 wraps a new ungated `io_eprintln` intrinsic and establishes the "ambient
 stdio" precedent alongside the existing `print` statement. `std/json.ax`
-adds ungated scalar/string JSON helpers, and `std/collections.ax` adds generic
-borrowed-slice helpers on top of AG2 generic functions. The remaining
-AG4.1 module (`std.sync`) requires the AG4.2 async runtime. AG4.4
-capability-aware integration for the currently landed stdlib/runtime surface is
-now complete; AG4.2 async runtime and AG4.3 HTTP *server* support remain open.
+adds ungated scalar/string JSON helpers, `std/collections.ax` adds generic
+borrowed-slice helpers on top of AG2 generic functions, `std/sync.ax` provides
+ownership-shaped synchronization values, and `std/async.ax` exposes the
+deterministic AG4.2 task/channel runtime. AG4.4 capability-aware integration
+for the currently landed stdlib/runtime surface is now complete; AG4.3 HTTP
+*server* support remains open.
 
 Work packages:
 
@@ -278,17 +279,14 @@ Work packages:
   - `std.sync` — **landed** as `std/sync.ax` exposing ownership-shaped
     primitives (`Mutex`, `MutexGuard`, `Once`, and `Channel`) implemented in
     Axiom without host-thread capabilities. The stage1 channel is single-slot
-    and nonblocking; blocking, wakeups, and async-aware channels remain AG4.2
-    runtime work. Covered by `stage1/examples/stdlib_sync` and one Rust test
+    and nonblocking. Covered by `stage1/examples/stdlib_sync` and one Rust test
     (`stage1_project_imports_synthetic_stdlib_sync_module`).
-- `AG4.2`: async runtime
-  - `async fn`
-  - `await`
-  - task spawning
-  - channels
-  - cancellation
-  - timeouts
-  - `select`
+- `AG4.2`: async runtime — **landed for deterministic stage1 execution** with
+  `async fn`, `await`, `Task<T>`, `JoinHandle<T>`, `AsyncChannel<T>`,
+  cancellation, timeouts, and `select` exposed by `std/async.ax`. Stage1 still
+  does not provide host-thread scheduling, blocking wakeups, or real timers.
+  Covered by `stage1/examples/stdlib_async` and one Rust integration test
+  (`stage1_project_supports_async_runtime_surface`).
 - `AG4.3`: HTTP service support
   - HTTP server support is required at this milestone, not just client support.
 - `AG4.4`: capability-aware integration
