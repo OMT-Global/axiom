@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Optional
 
 
@@ -37,6 +38,30 @@ def _line_text(source: str, offset: int) -> tuple[int, str]:
     if end == -1:
         end = len(source)
     return line, source[start:end].rstrip("\n")
+
+
+_SECRET_REDACTIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile("gh" + r"p_[A-Za-z0-9]{36}"), "[REDACTED_SECRET]"),
+    (re.compile("github" + r"_pat_[A-Za-z0-9_]+"), "[REDACTED_SECRET]"),
+    (re.compile("sk" + r"-live-[A-Za-z0-9_-]+"), "[REDACTED_SECRET]"),
+    (re.compile("sk" + r"-proj-[A-Za-z0-9_-]+"), "[REDACTED_SECRET]"),
+    (re.compile("AK" + r"IA[0-9A-Z]{16}"), "[REDACTED_SECRET]"),
+    (
+        re.compile("BEGIN " + r"(RSA|OPENSSH|EC) PRIVATE KEY"),
+        "BEGIN [REDACTED_SECRET] PRIVATE KEY",
+    ),
+    (
+        re.compile(r"\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|SUDO_PASS|BW_SESSION)=[^\s'\"`]+"),
+        r"\1=[REDACTED_SECRET]",
+    ),
+)
+
+
+def _sanitize_source_line(line_text: str) -> str:
+    sanitized = line_text
+    for pattern, replacement in _SECRET_REDACTIONS:
+        sanitized = pattern.sub(replacement, sanitized)
+    return sanitized
 
 
 class AxiomError(Exception):
@@ -86,6 +111,7 @@ class AxiomError(Exception):
             else:
                 location = f"{line}:{col}"
             line_num, text = _line_text(source, span.start)
+            text = _sanitize_source_line(text)
             width = max(1, span.end - span.start)
             pointer = " " * (col - 1) + "^" * width
             return (
@@ -134,7 +160,7 @@ class AxiomError(Exception):
             _, line_text = _line_text(source, span.start)
             payload["line"] = line
             payload["column"] = column
-            payload["line_text"] = line_text
+            payload["line_text"] = _sanitize_source_line(line_text)
         return payload
 
     def to_dict(self) -> dict[str, object]:
