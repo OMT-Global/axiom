@@ -237,7 +237,7 @@ Axiom is not currently designed for:
 - host-bridge-heavy tools that need file mutation primitives such as write, copy, mkdir, or symlink
 - large application frameworks with async runtimes, generics-heavy APIs, FFI, or direct native backends
 
-Today the host bridge is intentionally constrained. Stage0 exposes a small registry of capability-aware host calls and stage1 mirrors that model with compiler-known capability-gated intrinsics plus thin `std/*` wrappers. Read-only filesystem access, outbound network resolution/HTTP, environment reads, clock access, hashing, and coarse process status checks are in scope. Full subprocess execution and filesystem mutation are not.
+Today the host bridge is intentionally constrained. Stage0 exposes a small registry of capability-aware host calls and stage1 mirrors that model with compiler-known capability-gated intrinsics plus thin `std/*` wrappers. Stage1 read-only filesystem access is scoped to the package root by default, or to `[capabilities] fs_root = "<relative package path>"` when configured; reads canonicalize the requested path and deny traversal, symlink escapes, and files larger than 64 MiB. Outbound network resolution/HTTP, environment reads, clock access, hashing, and coarse process status checks are also in scope. Full subprocess execution and filesystem mutation are not.
 
 ## 🛣 Roadmap
 

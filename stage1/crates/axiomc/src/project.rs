@@ -1,4 +1,4 @@
-use crate::codegen::{compile_native, render_rust_with_debug};
+use crate::codegen::{compile_native, render_rust_for_package};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
@@ -579,6 +579,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
         tests: Vec::new(),
         capabilities: CapabilityConfig {
             fs: true,
+            fs_root: None,
             net: true,
             process: true,
             env: true,
@@ -805,7 +806,8 @@ fn build_artifacts(
             )
         })?;
     }
-    let rust_source = render_rust_with_debug(&analyzed.mir, options.debug);
+    let fs_root = fs_root_path_for_package(package_root, &analyzed.manifest)?;
+    let rust_source = render_rust_for_package(&analyzed.mir, options.debug, package_root, &fs_root);
     let cache = build_cache_file(
         graph,
         package_root,
@@ -3417,6 +3419,28 @@ fn canonicalize_package_path(
         return Err(Diagnostic::new(kind, outside_message).with_path(path.display().to_string()));
     }
     Ok(canonical)
+}
+
+fn fs_root_path_for_package(
+    package_root: &Path,
+    manifest: &Manifest,
+) -> Result<PathBuf, Diagnostic> {
+    let configured = if manifest.capabilities.fs {
+        manifest.capabilities.fs_root.as_deref().unwrap_or(".")
+    } else {
+        "."
+    };
+    let root = normalize_path(package_root.join(configured));
+    let canonical_package_root = canonicalize_existing_path(package_root, "package root")?;
+    let canonical_root = canonicalize_existing_path(&root, "filesystem capability root")?;
+    if !canonical_root.starts_with(&canonical_package_root) {
+        return Err(Diagnostic::new(
+            "capability",
+            "capabilities.fs_root resolves outside the package",
+        )
+        .with_path(root.display().to_string()));
+    }
+    Ok(canonical_root)
 }
 
 fn ensure_output_path_stays_inside_package(

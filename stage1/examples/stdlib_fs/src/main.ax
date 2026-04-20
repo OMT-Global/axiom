@@ -1,6 +1,6 @@
 import "std/fs.ax"
 
-match read_file("stage1/examples/stdlib_fs/src/fixture.txt") {
+match read_file("src/fixture.txt") {
 Some(value) {
 print value
 }

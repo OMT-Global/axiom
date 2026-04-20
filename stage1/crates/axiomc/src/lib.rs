@@ -1596,6 +1596,61 @@ mod tests {
         assert_eq!(tests.failed, 0);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn build_project_scopes_fs_read_to_manifest_root() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("scoped-fs");
+        create_project(&project, Some("scoped-fs-app")).expect("create project");
+        let data = project.join("data");
+        fs::create_dir_all(&data).expect("create data dir");
+        fs::write(data.join("x.txt"), "inside ok").expect("write inside fixture");
+        let outside = dir.path().join("outside.txt");
+        fs::write(&outside, "outside secret").expect("write outside fixture");
+        symlink(&outside, data.join("evil")).expect("create escaping symlink");
+        let large = fs::File::create(data.join("large.txt")).expect("create large fixture");
+        large
+            .set_len(100 * 1024 * 1024)
+            .expect("size large fixture");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"scoped-fs-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = format!(
+            "match fs_read(\"data/x.txt\") {{\nSome(value) {{\nprint value\n}}\nNone {{\nprint \"inside denied\"\n}}\n}}\nmatch fs_read({outside:?}) {{\nSome(_value) {{\nprint \"absolute leak\"\n}}\nNone {{\nprint \"absolute denied\"\n}}\n}}\nmatch fs_read(\"data/../../outside.txt\") {{\nSome(_value) {{\nprint \"traversal leak\"\n}}\nNone {{\nprint \"traversal denied\"\n}}\n}}\nmatch fs_read(\"data/evil\") {{\nSome(_value) {{\nprint \"symlink leak\"\n}}\nNone {{\nprint \"symlink denied\"\n}}\n}}\nmatch fs_read(\"data/large.txt\") {{\nSome(_value) {{\nprint \"large leak\"\n}}\nNone {{\nprint \"large denied\"\n}}\n}}\n",
+            outside = outside.to_string_lossy(),
+        );
+        fs::write(project.join("src/main.ax"), &source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "inside ok\nabsolute denied\ntraversal denied\nsymlink denied\nlarge denied\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "inside ok\nabsolute denied\ntraversal denied\nsymlink denied\nlarge denied\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
     #[test]
     fn stage1_project_imports_synthetic_stdlib_time_module() {
         let dir = tempdir().expect("tempdir");
