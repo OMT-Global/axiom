@@ -2612,6 +2612,11 @@ mod tests {
                 "returning borrowed values requires data derived from one of the borrowed parameters",
             ),
             (
+                "generic_borrow_return_requires_param_origin",
+                "borrow_return_requires_param_origin",
+                "returning borrowed values requires data derived from one of the borrowed parameters",
+            ),
+            (
                 "mutable_borrow_while_shared_live",
                 "mutable_borrow_while_shared_live",
                 "cannot create mutable borrow of value",
@@ -2728,13 +2733,48 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_generic_wrapper_instantiation_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-wrapper-type-mismatch");
+        create_project(&project, Some("generic-wrapper-type-mismatch-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window<T> {\nview: &[T]\n}\n\nlet values: [int] = [1, 2, 3]\nlet window: Window<string> = Window { view: values[:] }\nprint len(window.view)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("borrowed generic wrapper instantiation should enforce type args");
+        assert!(error.message.contains("field \"view\" expects &[string]"));
+        assert!(error.message.contains("got &[int]"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_unconstrained_borrowed_generic_wrapper_type_param() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-borrow-wrapper-unconstrained");
+        create_project(&project, Some("generic-borrow-wrapper-unconstrained-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window<T> {\nview: &[int]\n}\n\nlet values: [int] = [1, 2, 3]\nlet window: Window<string> = Window { view: values[:] }\nprint len(window.view)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project)
+            .expect_err("borrowed generic wrappers should constrain their type params");
+        assert!(error.message.contains("unconstrained type parameter"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn build_project_emits_native_binary_from_generic_structs_and_enums() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("generic-aggregates");
         create_project(&project, Some("generic-aggregates-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
-            "struct Window<T> {\nview: &[T]\n}\n\nstruct MaybeBox<T> {\nitem: Option<T>\n}\n\nstruct ResultBox<T, E> {\nitem: Result<T, E>\n}\n\nstruct Buckets<T> {\nitems: [T]\nby_name: {string: T}\n}\n\nenum Slot<T> {\nFilled(T)\nEmpty\n}\n\nlet values: [int] = [4, 5, 6]\nlet window: Window<int> = Window { view: values[:] }\nprint len(window.view)\nlet maybe: MaybeBox<int> = MaybeBox { item: Some(8) }\nmatch maybe.item {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\nlet result: ResultBox<string, string> = ResultBox { item: Ok(\"ready\") }\nmatch result.item {\nOk(value) {\nprint value\n}\nErr(error) {\nprint error\n}\n}\nlet bucket_values: [int] = [10, 20]\nlet bucket_lookup: {string: int} = {\"answer\": 42}\nlet buckets: Buckets<int> = Buckets { items: bucket_values, by_name: bucket_lookup }\nprint len(buckets.items)\nlet answers: {string: int} = buckets.by_name\nprint answers[\"answer\"]\nlet number: Slot<int> = Filled(42)\nmatch number {\nFilled(value) {\nprint value\n}\nEmpty {\nprint 0\n}\n}\nlet text: Slot<string> = Filled(\"done\")\nmatch text {\nFilled(value) {\nprint value\n}\nEmpty {\nprint \"empty\"\n}\n}\n",
+            "struct Window<T> {\nview: &[T]\n}\n\nstruct MaybeBox<T> {\nitem: Option<T>\n}\n\nstruct ResultBox<T, E> {\nitem: Result<T, E>\n}\n\nstruct Buckets<T> {\nitems: [T]\nby_name: {string: T}\n}\n\nenum Slot<T> {\nFilled(T)\nEmpty\n}\n\nfn tail<T>(values: &[T]): &[T] {\nreturn values[1:]\n}\n\nfn make_window<T>(values: &[T]): Window<T> {\nreturn Window { view: tail<T>(values) }\n}\n\nlet values: [int] = [4, 5, 6]\nlet window: Window<int> = Window { view: values[:] }\nprint len(window.view)\nlet tail_window: Window<int> = make_window<int>(values[:])\nprint len(tail_window.view)\nlet maybe: MaybeBox<int> = MaybeBox { item: Some(8) }\nmatch maybe.item {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\nlet result: ResultBox<string, string> = ResultBox { item: Ok(\"ready\") }\nmatch result.item {\nOk(value) {\nprint value\n}\nErr(error) {\nprint error\n}\n}\nlet bucket_values: [int] = [10, 20]\nlet bucket_lookup: {string: int} = {\"answer\": 42}\nlet buckets: Buckets<int> = Buckets { items: bucket_values, by_name: bucket_lookup }\nprint len(buckets.items)\nlet answers: {string: int} = buckets.by_name\nprint answers[\"answer\"]\nlet number: Slot<int> = Filled(42)\nmatch number {\nFilled(value) {\nprint value\n}\nEmpty {\nprint 0\n}\n}\nlet text: Slot<string> = Filled(\"done\")\nmatch text {\nFilled(value) {\nprint value\n}\nEmpty {\nprint \"empty\"\n}\n}\n",
         )
         .expect("write source");
 
@@ -2744,7 +2784,7 @@ mod tests {
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "3\n8\nready\n2\n42\n42\ndone\n"
+            "3\n2\n8\nready\n2\n42\n42\ndone\n"
         );
     }
 

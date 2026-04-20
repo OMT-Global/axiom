@@ -1,0 +1,14 @@
+fn choose<T>(values: &[T], fallback: [T]): Option<&[T]> {
+return Some(fallback[:])
+}
+
+let values: [int] = [1, 2, 3]
+let fallback: [int] = [4, 5, 6]
+match choose<int>(values[:], fallback) {
+Some(window) {
+print first(window)
+}
+None {
+print 0
+}
+}
