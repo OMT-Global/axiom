@@ -275,6 +275,10 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("        .map(|addr| addr.ip().to_string())\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_http_strip_crlf(value: &str) -> String {\n");
+    out.push_str("    value.chars().filter(|ch| *ch != '\\r' && *ch != '\\n').collect()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_http_get(url: String) -> Option<String> {\n");
     out.push_str("    use std::io::{Read, Write};\n");
     out.push_str("    use std::net::TcpStream;\n");
@@ -304,7 +308,14 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("        }\n");
     out.push_str("        None => (host_port, 80u16),\n");
     out.push_str("    };\n");
-    out.push_str("    let addrs = axiom_resolve_public_socket_addrs(host, port)?;\n");
+    out.push_str("    let clean_host = axiom_http_strip_crlf(host);\n");
+    out.push_str("    let clean_path = axiom_http_strip_crlf(path);\n");
+    out.push_str("    if clean_host.is_empty() || clean_path.is_empty() {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str(
+        "    let addrs = axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?;\n",
+    );
     out.push_str("    let mut stream = None;\n");
     out.push_str("    for addr in addrs {\n");
     out.push_str("        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {\n");
@@ -317,7 +328,7 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("    stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;\n");
     out.push_str("    let request = format!(\n");
     out.push_str("        \"GET {} HTTP/1.0\\r\\nHost: {}\\r\\nUser-Agent: axiom-stage1/0.1\\r\\nConnection: close\\r\\n\\r\\n\",\n");
-    out.push_str("        path, host\n");
+    out.push_str("        clean_path, clean_host\n");
     out.push_str("    );\n");
     out.push_str("    stream.write_all(request.as_bytes()).ok()?;\n");
     out.push_str("    let mut raw = Vec::new();\n");

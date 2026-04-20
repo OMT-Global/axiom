@@ -308,8 +308,24 @@ mod tests {
         let rendered = render_rust(&mir);
         assert!(rendered.contains("const MAX_HEADER_BYTES: usize = 64 * 1024;"));
         assert!(rendered.contains("const MAX_BODY_BYTES: usize = 1024 * 1024;"));
-        assert!(rendered.contains("axiom_resolve_public_socket_addrs(host, port)?"));
         assert!(rendered.contains("TcpStream::connect_timeout(&addr, Duration::from_secs(5))"));
+    }
+
+    #[test]
+    fn render_rust_strips_crlf_from_http_request_parts() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_http_strip_crlf(value: &str) -> String {"));
+        assert!(rendered.contains("*ch != '\\r' && *ch != '\\n'"));
+        assert!(rendered.contains("let clean_host = axiom_http_strip_crlf(host);"));
+        assert!(rendered.contains("let clean_path = axiom_http_strip_crlf(path);"));
+        assert!(rendered.contains("axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?"));
+        assert!(rendered.contains("clean_path, clean_host"));
+        assert!(!rendered.contains("axiom_resolve_public_socket_addrs(host, port)?"));
+        assert!(!rendered.contains("path, host\n"));
     }
 
     #[test]
