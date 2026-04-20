@@ -96,7 +96,7 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Runtime and standard library gaps
 
-- The AG4.1 stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface) and `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic). The remaining AG4.1 modules (`std.json`, `std.collections`, `std.sync`) require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics and stay as follow-on work.
+- The AG4.1 stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface), `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic), `std/json.ax` (ungated scalar/string JSON helpers), and `std/collections.ax` (generic borrowed-slice helpers built on AG2 generic functions). The remaining AG4.1 module (`std.sync`) requires the AG4.2 async runtime and stays as follow-on work.
 - Capability-aware integration is now in place for the current stage1 runtime surface: compiler-known intrinsics enforce all six manifest flags, stdlib wrappers preserve that enforcement against the importing package's manifest, capability-denied programs fail before native execution, and the Rust suite covers cross-package capability interactions (`dependency_package_must_enable_its_own_capabilities`) plus per-wrapper denial paths.
 - No async runtime, channels, cancellation, timers, or service-grade I/O surface exists.
 
@@ -133,13 +133,14 @@ Current proof points:
 - `stage1/examples/stdlib_crypto_hash` extends AG4.1 with `import "std/crypto_hash.ax"`, bringing `sha256(input)` into scope and staying subject to the importing package's `[capabilities] crypto` flag.
 - `stage1/examples/stdlib_io` extends AG4.1 with `import "std/io.ax"`, bringing `eprintln(text)` into scope without any capability opt-in — `std/io.ax` is the first stdlib module not tied to a capability flag, matching the ambient status of the `print` statement.
 - `stage1/examples/stdlib_json` extends AG4.1 with `import "std/json.ax"`, bringing ungated scalar/string JSON parsing and serialization helpers into scope without waiting for AG2 generics or a first-class JSON value type.
+- `stage1/examples/stdlib_collections` extends AG4.1 with `import "std/collections.ax"`, bringing generic borrowed-slice helpers (`count`, `is_empty`, `has_items`, `skip`, `take`, and `window`) into scope without any capability opt-in.
 - `stage1/examples/stdlib_http` extends AG4.1 with `import "std/http.ax"`, bringing `get(url)` into scope on top of a new blocking HTTP/1.0 client; it shares the importing package's `[capabilities] net` flag with `std/net.ax` and keeps its smoke deterministic by pointing at a closed local port so the `None` branch always fires.
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
 - `stage1/examples/generic_aggregates` covers monomorphized generic wrappers and borrowed generic utility helpers over arrays, maps, slices, `Option<T>`, `Result<T, E>`, and user-defined enum payloads.
-- `make stage1-test stage1-smoke` now covers all twenty-three checked-in stage1 examples.
+- `make stage1-test stage1-smoke` now covers all twenty-four checked-in stage1 examples.
 
 Agent-grade compiler milestone summary:
 

@@ -2099,6 +2099,55 @@ mod tests {
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_collections_module() {
+        // `std/collections.ax` is ungated: it is implemented entirely in Axiom
+        // on top of AG2 generic functions and existing collection primitives.
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-collections-app");
+        create_project(&project, Some("stdlib-collections-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-collections-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/collections.ax\"\nlet numbers: [int] = [4, 5, 6, 7]\nprint count<int>(numbers[:])\nprint is_empty<int>(numbers[:])\nprint has_items<int>(numbers[:])\nlet middle: &[int] = window<int>(numbers[:], 1, 3)\nprint count<int>(middle)\nprint first(middle)\nprint last(middle)\nlet prefix: &[int] = take<int>(numbers[:], 2)\nprint last(prefix)\nlet suffix: &[int] = skip<int>(numbers[:], 2)\nprint first(suffix)\nlet words: [string] = [\"build\", \"test\", \"ship\"]\nprint count<string>(words[:])\nlet empty_words: &[string] = take<string>(words[:], 0)\nprint is_empty<string>(empty_words)\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
     fn stage1_project_rejects_stdlib_json_with_wrong_argument_type() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-json-bad-arg");

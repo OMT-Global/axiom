@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides nine stdlib modules. Six are thin wrappers over
+//! Today this provides ten stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
@@ -32,17 +32,18 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client is http:// only: HTTPS/TLS land in a follow-on slice.
 //!
-//! The eighth and ninth modules are stdlib surfaces not tied to a capability
-//! flag, matching the ambient status of the `print` statement:
+//! The eighth, ninth, and tenth modules are stdlib surfaces not tied to a
+//! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
 //!   intrinsic (writes a line to stderr and returns bytes written).
 //! * `std/json.ax` — scalar/string JSON parsing and serialization helpers on
 //!   top of new ungated `json_parse_*` / `json_stringify_*` intrinsics.
+//! * `std/collections.ax` — generic borrowed-slice helpers built on the
+//!   existing polymorphic collection primitives and AG2 generic functions.
 //!
-//! The remaining AG4.1 modules (`std.collections`, `std.sync`)
-//! require new stdlib intrinsics, the AG4.2 async runtime, or AG2 generics
-//! and land in follow-on slices.
+//! The remaining AG4.1 module (`std.sync`) requires the AG4.2 async runtime
+//! and lands in a follow-on slice.
 
 use std::path::{Path, PathBuf};
 
@@ -98,6 +99,15 @@ pub fn parse_string(text: string): Option<string> {\nreturn json_parse_string(te
 pub fn stringify_int(value: int): string {\nreturn json_stringify_int(value)\n}\n\
 pub fn stringify_bool(value: bool): string {\nreturn json_stringify_bool(value)\n}\n\
 pub fn stringify_string(value: string): string {\nreturn json_stringify_string(value)\n}\n",
+    ),
+    (
+        "collections.ax",
+        "pub fn count<T>(values: &[T]): int {\nreturn len(values)\n}\n\
+pub fn is_empty<T>(values: &[T]): bool {\nreturn len(values) == 0\n}\n\
+pub fn has_items<T>(values: &[T]): bool {\nreturn len(values) > 0\n}\n\
+pub fn skip<T>(values: &[T], count: int): &[T] {\nreturn values[count:]\n}\n\
+pub fn take<T>(values: &[T], count: int): &[T] {\nreturn values[:count]\n}\n\
+pub fn window<T>(values: &[T], start: int, end: int): &[T] {\nreturn values[start:end]\n}\n",
     ),
     (
         "http.ax",
