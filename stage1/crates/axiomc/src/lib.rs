@@ -2285,6 +2285,168 @@ mod tests {
     }
 
     #[test]
+    fn stage1_stdlib_http_get_supports_https_urls() {
+        use std::net::TcpListener;
+        use std::process::{Command, Stdio};
+        use std::thread;
+        use std::time::Duration;
+
+        let Some(openssl) = which::which("openssl").ok() else {
+            return;
+        };
+
+        let dir = tempdir().expect("tempdir");
+        let cert = dir.path().join("cert.pem");
+        let key = dir.path().join("key.pem");
+        let cert_status = Command::new(&openssl)
+            .arg("req")
+            .arg("-x509")
+            .arg("-newkey")
+            .arg("rsa:2048")
+            .arg("-nodes")
+            .arg("-keyout")
+            .arg(&key)
+            .arg("-out")
+            .arg(&cert)
+            .arg("-subj")
+            .arg("/CN=127.0.0.1")
+            .arg("-days")
+            .arg("1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run openssl req");
+        if !cert_status.success() {
+            return;
+        }
+
+        let port = {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+            listener.local_addr().expect("local addr").port()
+        };
+
+        let project = dir.path().join("stdlib-https-app");
+        create_project(&project, Some("stdlib-https-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-https-app",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            format!(
+                "import \"std/http.ax\"\nmatch get(\"https://127.0.0.1:{}/\") {{\nSome(_body) {{\nprint \"https-body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
+                port
+            ),
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let mut server = Command::new(&openssl)
+            .arg("s_server")
+            .arg("-quiet")
+            .arg("-www")
+            .arg("-accept")
+            .arg(port.to_string())
+            .arg("-cert")
+            .arg(&cert)
+            .arg("-key")
+            .arg(&key)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn openssl s_server");
+        thread::sleep(Duration::from_millis(200));
+
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        let _ = server.kill();
+        let _ = server.wait();
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "https-body\n");
+    }
+
+    #[test]
+    fn stage1_stdlib_http_reports_tls_diagnostics() {
+        use std::io::Read;
+        use std::net::TcpListener;
+        use std::thread;
+
+        if which::which("openssl").is_err() {
+            return;
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local addr");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 128];
+            let _ = stream.read(&mut buf);
+        });
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-https-diagnostic");
+        create_project(&project, Some("stdlib-https-diagnostic")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-https-diagnostic",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            format!(
+                "import \"std/http.ax\"\nmatch get(\"https://{}/\") {{\nSome(_body) {{\nprint \"body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
+                addr
+            ),
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        server.join().expect("server thread");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "none\n");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("\"kind\":\"net\"") && stderr.contains("https TLS"),
+            "unexpected stderr: {stderr}"
+        );
+    }
+
+    #[test]
     fn stage1_stdlib_http_rejects_oversized_response_body() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
