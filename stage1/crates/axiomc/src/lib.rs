@@ -288,6 +288,31 @@ mod tests {
     }
 
     #[test]
+    fn render_rust_documents_network_address_filtering() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_resolve_public_socket_addrs("));
+        assert!(rendered.contains("Network intrinsics reject private, loopback, link-local,"));
+        assert!(rendered.contains("addr.to_ipv4_mapped()"));
+    }
+
+    #[test]
+    fn render_rust_keeps_http_response_size_guards() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("const MAX_HEADER_BYTES: usize = 64 * 1024;"));
+        assert!(rendered.contains("const MAX_BODY_BYTES: usize = 1024 * 1024;"));
+        assert!(rendered.contains("axiom_resolve_public_socket_addrs(host, port)?"));
+        assert!(rendered.contains("TcpStream::connect_timeout(&addr, Duration::from_secs(5))"));
+    }
+
+    #[test]
     fn parser_lowers_struct_literals_and_field_access() {
         let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -1537,7 +1562,7 @@ mod tests {
         .expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "fs ok\n\ntrue\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n",
+            "fs ok\n\nfalse\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n",
         )
         .expect("write golden");
 
@@ -1547,7 +1572,7 @@ mod tests {
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "fs ok\n\ntrue\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n"
+            "fs ok\n\nfalse\n7\nba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\ntrue\nnone\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -1998,10 +2023,84 @@ mod tests {
             .output()
             .expect("run compiled binary");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout == "true\n" || stdout == "false\n",
-            "unexpected stdout for stdlib_net smoke: {stdout:?}"
+        assert_eq!(stdout, "false\n");
+    }
+
+    #[test]
+    fn stage1_net_resolve_rejects_private_link_local_and_metadata_addresses() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-resolve-private-denied");
+        create_project(&project, Some("net-resolve-private-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "net-resolve-private-denied",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match net_resolve(\"10.0.0.1\") {\nSome(_address) {\nprint \"private\"\n}\nNone {\nprint \"blocked-private\"\n}\n}\nmatch net_resolve(\"169.254.1.1\") {\nSome(_address) {\nprint \"link-local\"\n}\nNone {\nprint \"blocked-link-local\"\n}\n}\nmatch net_resolve(\"169.254.169.254\") {\nSome(_address) {\nprint \"metadata\"\n}\nNone {\nprint \"blocked-metadata\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "blocked-private\nblocked-link-local\nblocked-metadata\n"
         );
+    }
+
+    #[test]
+    fn stage1_net_resolve_allows_public_ip_address() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-resolve-public-ip");
+        create_project(&project, Some("net-resolve-public-ip")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "net-resolve-public-ip",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match net_resolve(\"8.8.8.8\") {\nSome(address) {\nprint address\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "8.8.8.8\n");
     }
 
     #[test]
@@ -2273,38 +2372,14 @@ mod tests {
     }
 
     #[test]
-    fn stage1_project_imports_synthetic_stdlib_http_module() {
-        // `std/http.ax` wraps a new `http_get` intrinsic that shares the
-        // existing `net` capability. The test spins up a local TCP listener
-        // that serves a canned HTTP/1.0 200 response so the success path
-        // (response body parsing) is exercised deterministically without
-        // touching the network.
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::thread;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("local addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let body = "stage1-http-ok";
-            let response = format!(
-                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes());
-        });
-
+    fn stage1_stdlib_http_rejects_loopback_address() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stdlib-http-app");
-        create_project(&project, Some("stdlib-http-app")).expect("create project");
+        let project = dir.path().join("stdlib-http-loopback-denied");
+        create_project(&project, Some("stdlib-http-loopback-denied")).expect("create project");
         fs::write(
             project.join("axiom.toml"),
             render_manifest_with_capabilities(
-                "stdlib-http-app",
+                "stdlib-http-loopback-denied",
                 false,
                 true,
                 false,
@@ -2320,48 +2395,28 @@ mod tests {
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = format!(
-            "import \"std/http.ax\"\nmatch get(\"http://{}/\") {{\nSome(body) {{\nprint body\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
-            addr
-        );
-        fs::write(project.join("src/main.ax"), &source).expect("write source");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/http.ax\"\nmatch get(\"http://127.0.0.1:1/\") {\nSome(_body) {\nprint \"body\"\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        server.join().expect("server thread");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "stage1-http-ok\n");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "none\n");
     }
 
     #[test]
-    fn stage1_stdlib_http_rejects_oversized_response_body() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::thread;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("local addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept");
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let body = vec![b'a'; 1024 * 1024 + 1];
-            let response_head = format!(
-                "HTTP/1.0 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(response_head.as_bytes());
-            let _ = stream.write_all(&body);
-        });
-
+    fn stage1_stdlib_http_rejects_metadata_address() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stdlib-http-oversized-body");
-        create_project(&project, Some("stdlib-http-oversized-body")).expect("create project");
+        let project = dir.path().join("stdlib-http-metadata-denied");
+        create_project(&project, Some("stdlib-http-metadata-denied")).expect("create project");
         fs::write(
             project.join("axiom.toml"),
             render_manifest_with_capabilities(
-                "stdlib-http-oversized-body",
+                "stdlib-http-metadata-denied",
                 false,
                 true,
                 false,
@@ -2377,17 +2432,16 @@ mod tests {
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = format!(
-            "import \"std/http.ax\"\nmatch get(\"http://{}/\") {{\nSome(_body) {{\nprint \"body\"\n}}\nNone {{\nprint \"none\"\n}}\n}}\n",
-            addr
-        );
-        fs::write(project.join("src/main.ax"), &source).expect("write source");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/http.ax\"\nmatch get(\"http://169.254.169.254/latest/meta-data/\") {\nSome(_body) {\nprint \"body\"\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        server.join().expect("server thread");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "none\n");
     }
 
