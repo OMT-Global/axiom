@@ -86,6 +86,9 @@ fn main() {
                 if json {
                     println!("{}", json_contract::check_success(&path, &output));
                 } else {
+                    for warning in &output.warnings {
+                        eprintln!("{warning}");
+                    }
                     eprintln!("OK");
                 }
                 0

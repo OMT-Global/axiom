@@ -4948,12 +4948,14 @@ fn require_capability(
     if capabilities.enabled(kind) {
         return Ok(());
     }
+    let requirement = if kind == CapabilityKind::Env {
+        String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true")
+    } else {
+        format!("[capabilities].{} = true", kind.name())
+    };
     Err(Diagnostic::new(
         "capability",
-        format!(
-            "call to {intrinsic_name:?} requires [capabilities].{} = true",
-            kind.name()
-        ),
+        format!("call to {intrinsic_name:?} requires {requirement}"),
     )
     .with_span(line, column))
 }

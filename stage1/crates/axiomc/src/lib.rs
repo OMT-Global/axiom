@@ -1464,6 +1464,33 @@ mod tests {
     }
 
     #[test]
+    fn capability_view_includes_env_allowlist_scope() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("caps-env");
+        create_project(&project, Some("caps-env-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"caps-env-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv = [\"FOO\", \"LOG_LEVEL\"]\n",
+        )
+        .expect("write manifest");
+
+        let caps = project_capabilities(&project).expect("project capabilities");
+        let env = caps
+            .iter()
+            .find(|cap| cap.name == "env")
+            .expect("env capability");
+        assert!(env.enabled);
+        assert_eq!(env.allowed, vec!["FOO", "LOG_LEVEL"]);
+        assert!(!env.unsafe_unrestricted);
+
+        let payload = json_contract::caps_success(&project, &caps);
+        assert_eq!(payload["capabilities"][3]["name"], "env");
+        assert_eq!(payload["capabilities"][3]["allowed"][0], "FOO");
+        assert_eq!(payload["capabilities"][3]["allowed"][1], "LOG_LEVEL");
+        assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
+    }
+
+    #[test]
     fn check_project_rejects_clock_intrinsic_without_capability() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("clock-denied");
@@ -1492,7 +1519,90 @@ mod tests {
 
         let error = check_project(&project).expect_err("env capability should be required");
         assert_eq!(error.kind, "capability");
-        assert!(error.message.contains("requires [capabilities].env = true"));
+        assert!(
+            error
+                .message
+                .contains("requires [capabilities].env = [\"NAME\"]")
+        );
+    }
+
+    #[test]
+    fn env_allowlist_scopes_generated_env_get() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("env-scoped");
+        create_project(&project, Some("env-scoped-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"env-scoped-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv = [\"FOO\"]\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match env_get(\"FOO\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing foo\"\n}\n}\nmatch env_get(\"BAR\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none bar\"\n}\n}\nmatch env_get(\"AWS_SECRET_ACCESS_KEY\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none secret\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .env("FOO", "allowed")
+            .env("BAR", "blocked")
+            .env("AWS_SECRET_ACCESS_KEY", "blocked-secret")
+            .output()
+            .expect("run compiled binary");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "allowed\nnone bar\nnone secret\n"
+        );
+    }
+
+    #[test]
+    fn legacy_env_bool_still_checks_with_deprecation_warning() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("legacy-env");
+        create_project(&project, Some("legacy-env-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "legacy-env-app",
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match env_get(\"FOO\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let checked = check_project(&project).expect("check project");
+        assert_eq!(checked.warnings.len(), 1);
+        assert!(checked.warnings[0].contains("[capabilities].env = true is deprecated"));
+        assert!(checked.warnings[0].contains("unrestricted environment access"));
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .env("FOO", "legacy")
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "legacy\n");
     }
 
     #[test]
@@ -1844,7 +1954,8 @@ mod tests {
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message.contains("requires [capabilities].env = true"),
+            err.message
+                .contains("requires [capabilities].env = [\"NAME\"]"),
             "unexpected diagnostic: {err:?}",
         );
     }

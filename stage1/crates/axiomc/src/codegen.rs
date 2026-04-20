@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::manifest::CapabilityConfig;
 use crate::mir::{
     EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, Stmt, StructDef,
     StructField, Type,
@@ -21,6 +22,22 @@ pub fn render_rust_for_package(
     package_root: &Path,
     fs_root: &Path,
 ) -> String {
+    render_rust_for_package_with_capabilities(
+        program,
+        debug,
+        package_root,
+        fs_root,
+        &CapabilityConfig::default(),
+    )
+}
+
+pub fn render_rust_for_package_with_capabilities(
+    program: &Program,
+    debug: bool,
+    package_root: &Path,
+    fs_root: &Path,
+    capabilities: &CapabilityConfig,
+) -> String {
     let type_context = TypeContext::new(program);
     let uses_http_get = program_uses_call(program, "http_get");
     let mut out = String::new();
@@ -34,6 +51,15 @@ pub fn render_rust_for_package(
         "const AXIOM_PACKAGE_ROOT: &str = {package_root:?};\n"
     ));
     out.push_str(&format!("const AXIOM_FS_ROOT: &str = {fs_root:?};\n"));
+    out.push_str(&format!(
+        "const AXIOM_ENV_UNRESTRICTED: bool = {};\n",
+        capabilities.env_unrestricted
+    ));
+    out.push_str("const AXIOM_ENV_ALLOWLIST: &[&str] = &[\n");
+    for name in &capabilities.env_vars {
+        out.push_str(&format!("    {name:?},\n"));
+    }
+    out.push_str("];\n");
     out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("fn axiom_install_panic_hook() {\n");
@@ -748,6 +774,11 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_env_get(name: String) -> Option<String> {\n");
+    out.push_str(
+        "    if !AXIOM_ENV_UNRESTRICTED && !AXIOM_ENV_ALLOWLIST.contains(&name.as_str()) {\n",
+    );
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
     out.push_str("    std::env::var(name).ok()\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");

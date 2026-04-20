@@ -237,7 +237,16 @@ Axiom is not currently designed for:
 - host-bridge-heavy tools that need file mutation primitives such as write, copy, mkdir, or symlink
 - large application frameworks with async runtimes, generics-heavy APIs, FFI, or direct native backends
 
-Today the host bridge is intentionally constrained. Stage0 exposes a small registry of capability-aware host calls and stage1 mirrors that model with compiler-known capability-gated intrinsics plus thin `std/*` wrappers. Stage1 read-only filesystem access is scoped to the package root by default, or to `[capabilities] fs_root = "<relative package path>"` when configured; reads canonicalize the requested path and deny traversal, symlink escapes, and files larger than 64 MiB. Outbound network resolution/HTTP, environment reads, clock access, hashing, and coarse process status checks are also in scope. Full subprocess execution and filesystem mutation are not.
+Today the host bridge is intentionally constrained. Stage0 exposes a small registry of capability-aware host calls and stage1 mirrors that model with compiler-known capability-gated intrinsics plus thin `std/*` wrappers. Stage1 read-only filesystem access is scoped to the package root by default, or to `[capabilities] fs_root = "<relative package path>"` when configured; reads canonicalize the requested path and deny traversal, symlink escapes, and files larger than 64 MiB. Outbound network resolution/HTTP, scoped environment reads, clock access, hashing, and coarse process status checks are also in scope. Full subprocess execution and filesystem mutation are not.
+
+Stage1 environment access must be scoped by variable name:
+
+```toml
+[capabilities]
+env = ["PORT", "LOG_LEVEL"]
+```
+
+The legacy `env = true` form is deprecated because it grants unrestricted process environment access and may expose host secrets. During migration, `env_unrestricted = true` temporarily opts back into the old behavior and is reported as unsafe in capability output.
 
 ## 🛣 Roadmap
 
