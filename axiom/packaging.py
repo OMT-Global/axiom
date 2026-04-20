@@ -44,18 +44,38 @@ def manifest_path(project_root: Path) -> Path:
     return project_root / MANIFEST_FILENAME
 
 
-def _validate_output(output: str, path: Path) -> str:
+def _ensure_within_resolved_root(
+    root: Path,
+    candidate: Path,
+    *,
+    message: str,
+) -> None:
+    resolved_root = root.resolve()
+    resolved = (root / candidate).resolve()
+    if resolved != resolved_root and not resolved.is_relative_to(resolved_root):
+        raise AxiomCompileError(message)
+
+
+def _validate_output(output: str, path: Path, *, root: Optional[Path] = None) -> str:
     if not output:
         raise AxiomCompileError(f"package manifest {path} has invalid output")
 
-    if Path(output).is_absolute():
+    candidate = Path(output)
+    if candidate.is_absolute():
         raise AxiomCompileError(
             f"package manifest {path} has invalid output path: absolute paths are not allowed"
         )
 
-    if any(part == ".." for part in Path(output).parts):
+    if any(part == ".." for part in candidate.parts):
         raise AxiomCompileError(
             f"package manifest {path} has invalid output path: parent traversal is not allowed"
+        )
+
+    if root is not None:
+        _ensure_within_resolved_root(
+            root,
+            candidate,
+            message=f"package manifest {path} has invalid output path: escapes the package root",
         )
 
     return output
@@ -75,6 +95,12 @@ def _validate_relative_path(value: str, path: Path, field_name: str) -> str:
         raise AxiomCompileError(
             f"package manifest {path} has invalid {field_name}: parent traversal is not allowed"
         )
+
+    _ensure_within_resolved_root(
+        path.parent,
+        candidate,
+        message=f"package manifest {path} has invalid {field_name}: escapes the package root",
+    )
 
     return value
 
@@ -137,7 +163,7 @@ def _as_manifest(data: dict[str, object], path: Path) -> PackageManifest:
     if output is not None:
         if not isinstance(output, str):
             raise AxiomCompileError(f"package manifest {path} has invalid output")
-        output = _validate_output(output, path)
+        output = _validate_output(output, path, root=path.parent / out_dir)
 
     return PackageManifest(
         name=str(data["name"]),
@@ -264,7 +290,11 @@ def init_package(
     if output is not None and not isinstance(output, str):
         raise AxiomCompileError("package output must be a non-empty string when provided")
     if output is not None:
-        output = _validate_output(output, project_root / MANIFEST_FILENAME)
+        output = _validate_output(
+            output,
+            project_root / MANIFEST_FILENAME,
+            root=project_root / out_dir,
+        )
     if host_contract_signature is None:
         host_contract_signature = str(host_contract_metadata()["capabilities_signature"])
     host_contract_signature = _validate_host_contract_signature(
@@ -310,14 +340,16 @@ def build_package(
         if output is not None
         else prepared.manifest.output or prepared.manifest.name
     )
-    validated_output = _validate_output(
-        selected_output, manifest_path(prepared.project_root)
-    )
-
-    if validated_output.endswith(".axb"):
-        output_name = validated_output
+    if selected_output.endswith(".axb"):
+        selected_output_name = selected_output
     else:
-        output_name = f"{validated_output}.axb"
+        selected_output_name = f"{selected_output}.axb"
+
+    output_name = _validate_output(
+        selected_output_name,
+        manifest_path(prepared.project_root),
+        root=out_dir,
+    )
 
     out_path = out_dir / output_name
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,12 @@ import unittest
 
 from axiom.errors import AxiomCompileError
 from axiom.host import host_contract_metadata
-from axiom.packaging import MAX_MANIFEST_BYTES, load_manifest
+from axiom.packaging import (
+    MAX_MANIFEST_BYTES,
+    _validate_output,
+    _validate_relative_path,
+    load_manifest,
+)
 from tests.helpers import ROOT, init_temp_package, read_json, run_cli, write_json
 
 
@@ -52,6 +57,74 @@ class CliPackageTests(unittest.TestCase):
             manifest = load_manifest(project)
 
             self.assertEqual(manifest.name, "demo")
+
+    def test_validate_relative_path_allows_legitimate_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            manifest_path = project / "axiom.pkg"
+
+            self.assertEqual(
+                _validate_relative_path("dist/output.axm", manifest_path, "main"),
+                "dist/output.axm",
+            )
+
+    def test_validate_relative_path_rejects_literal_parent_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            project = Path(td)
+            (project / "subdir").mkdir()
+            link = project / "link"
+            try:
+                link.symlink_to(project / "subdir", target_is_directory=True)
+            except OSError as e:
+                self.skipTest(f"symlinks unavailable: {e}")
+
+            with self.assertRaises(AxiomCompileError):
+                _validate_relative_path(
+                    "link/../../secret",
+                    project / "axiom.pkg",
+                    "main",
+                )
+
+    def test_validate_relative_path_rejects_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            project = base / "project"
+            outside = base / "outside"
+            project.mkdir()
+            outside.mkdir()
+            link = project / "link"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except OSError as e:
+                self.skipTest(f"symlinks unavailable: {e}")
+
+            with self.assertRaises(AxiomCompileError) as cm:
+                _validate_relative_path("link/secret.ax", project / "axiom.pkg", "main")
+
+            self.assertIn("escapes the package root", str(cm.exception))
+
+    def test_validate_output_rejects_symlink_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            project = base / "project"
+            out_dir = project / "dist"
+            outside = base / "outside"
+            out_dir.mkdir(parents=True)
+            outside.mkdir()
+            link = out_dir / "link"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except OSError as e:
+                self.skipTest(f"symlinks unavailable: {e}")
+
+            with self.assertRaises(AxiomCompileError) as cm:
+                _validate_output(
+                    "link/artifact.axb",
+                    project / "axiom.pkg",
+                    root=out_dir,
+                )
+
+            self.assertIn("escapes the package root", str(cm.exception))
 
     def test_load_manifest_rejects_manifest_above_size_limit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
