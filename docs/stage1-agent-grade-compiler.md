@@ -270,7 +270,12 @@ Work packages:
     and `window`) on top of AG2 generic functions plus existing collection
     primitives. Covered by `stage1/examples/stdlib_collections` and one Rust
     test (`stage1_project_imports_synthetic_stdlib_collections_module`).
-  - `std.sync` — blocked on the AG4.2 async runtime.
+  - `std.sync` — **landed** as `std/sync.ax` exposing ownership-shaped
+    primitives (`Mutex`, `MutexGuard`, `Once`, and `Channel`) implemented in
+    Axiom without host-thread capabilities. The stage1 channel is single-slot
+    and nonblocking; blocking, wakeups, and async-aware channels remain AG4.2
+    runtime work. Covered by `stage1/examples/stdlib_sync` and one Rust test
+    (`stage1_project_imports_synthetic_stdlib_sync_module`).
 - `AG4.2`: async runtime
   - `async fn`
   - `await`

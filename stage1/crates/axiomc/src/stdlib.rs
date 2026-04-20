@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides ten stdlib modules. Six are thin wrappers over
+//! Today this provides eleven stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
@@ -32,7 +32,7 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth, ninth, and tenth modules are stdlib surfaces not tied to a
+//! The eighth, ninth, tenth, and eleventh modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -41,9 +41,10 @@
 //!   top of new ungated `json_parse_*` / `json_stringify_*` intrinsics.
 //! * `std/collections.ax` — generic borrowed-slice helpers built on the
 //!   existing polymorphic collection primitives and AG2 generic functions.
-//!
-//! The remaining AG4.1 module (`std.sync`) requires the AG4.2 async runtime
-//! and lands in a follow-on slice.
+//! * `std/sync.ax` — ownership-shaped synchronization primitives implemented
+//!   in Axiom: move-only mutex guards, one-shot cells, and single-slot
+//!   nonblocking channels. Blocking, task wakeups, and async-aware channels
+//!   remain AG4.2 runtime work.
 
 use std::path::{Path, PathBuf};
 
@@ -108,6 +109,24 @@ pub fn has_items<T>(values: &[T]): bool {\nreturn len(values) > 0\n}\n\
 pub fn skip<T>(values: &[T], count: int): &[T] {\nreturn values[count:]\n}\n\
 pub fn take<T>(values: &[T], count: int): &[T] {\nreturn values[:count]\n}\n\
 pub fn window<T>(values: &[T], start: int, end: int): &[T] {\nreturn values[start:end]\n}\n",
+    ),
+    (
+        "sync.ax",
+        "pub struct Mutex<T> {\nvalue: T\n}\n\
+pub struct MutexGuard<T> {\nvalue: T\n}\n\
+pub struct Once<T> {\nvalue: Option<T>\n}\n\
+pub struct Channel<T> {\nslot: Option<T>\n}\n\
+pub fn mutex<T>(value: T): Mutex<T> {\nreturn Mutex { value: value }\n}\n\
+pub fn lock<T>(mutex: Mutex<T>): MutexGuard<T> {\nreturn MutexGuard { value: mutex.value }\n}\n\
+pub fn replace<T>(_guard: MutexGuard<T>, value: T): Mutex<T> {\nreturn Mutex { value: value }\n}\n\
+pub fn into_inner<T>(guard: MutexGuard<T>): T {\nreturn guard.value\n}\n\
+pub fn once<T>(value: Option<T>): Once<T> {\nreturn Once { value: value }\n}\n\
+pub fn once_with<T>(value: T): Once<T> {\nreturn Once { value: Some(value) }\n}\n\
+pub fn once_is_set<T>(cell: Once<T>): bool {\nmatch cell.value {\nSome(_value) {\nreturn true\n}\nNone {\nreturn false\n}\n}\n}\n\
+pub fn once_take<T>(cell: Once<T>): Option<T> {\nreturn cell.value\n}\n\
+pub fn channel<T>(slot: Option<T>): Channel<T> {\nreturn Channel { slot: slot }\n}\n\
+pub fn send<T>(_channel: Channel<T>, value: T): Channel<T> {\nreturn Channel { slot: Some(value) }\n}\n\
+pub fn try_recv<T>(channel: Channel<T>): Option<T> {\nreturn channel.slot\n}\n",
     ),
     (
         "http.ax",
