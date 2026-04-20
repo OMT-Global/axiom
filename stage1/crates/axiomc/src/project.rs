@@ -136,7 +136,7 @@ pub fn check_project_with_options(
     project_root: &Path,
     options: &CheckOptions,
 ) -> Result<CheckOutput, Diagnostic> {
-    let project_root = normalize_path(project_root);
+    let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
     let mut packages = Vec::new();
@@ -177,7 +177,7 @@ pub fn build_project_with_options(
     project_root: &Path,
     options: &BuildOptions,
 ) -> Result<BuildOutput, Diagnostic> {
-    let project_root = normalize_path(project_root);
+    let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
     let started = Instant::now();
@@ -249,7 +249,7 @@ pub fn run_project_with_options(
     project_root: &Path,
     options: &RunOptions,
 ) -> Result<i32, Diagnostic> {
-    let project_root = normalize_path(project_root);
+    let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     if options.package.is_none() && graph.context(&project_root)?.manifest.is_workspace_only() {
         return Err(Diagnostic::new(
@@ -291,7 +291,7 @@ pub fn run_project_tests_with_options(
     project_root: &Path,
     options: &TestOptions,
 ) -> Result<TestOutput, Diagnostic> {
-    let project_root = normalize_path(project_root);
+    let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
     let manifest_path_text = manifest_path(&project_root).display().to_string();
@@ -491,6 +491,7 @@ fn analyze_package(
     package_root: &Path,
 ) -> Result<AnalyzedProject, Diagnostic> {
     let package_root = normalize_path(package_root);
+    let package_root = canonicalize_existing_path(&package_root, "package root")?;
     let manifest = graph.context(&package_root)?.manifest.clone();
     if manifest.is_workspace_only() {
         return Err(Diagnostic::new(
@@ -3383,8 +3384,9 @@ fn canonicalize_package_path(
     kind: &'static str,
     outside_message: &'static str,
 ) -> Result<PathBuf, Diagnostic> {
+    let package_root = canonicalize_existing_path(package_root, "package root")?;
     let canonical = canonicalize_existing_path(path, "package path")?;
-    if !canonical.starts_with(package_root) {
+    if !canonical.starts_with(&package_root) {
         return Err(Diagnostic::new(kind, outside_message).with_path(path.display().to_string()));
     }
     Ok(canonical)
@@ -3578,6 +3580,54 @@ mod tests {
         assert_eq!(error.kind, "manifest");
         assert_eq!(error.message, "loaded modules require a package manifest");
         assert_eq!(error.path, Some(manifest_path(&root).display().to_string()));
+    }
+
+    #[test]
+    fn analyze_package_accepts_relative_root_with_canonical_graph_key() {
+        let cwd = std::env::current_dir().unwrap_or_else(|err| panic!("current dir: {err}"));
+        let dir = tempfile::Builder::new()
+            .prefix("axiomc-relative-root-")
+            .tempdir_in(&cwd)
+            .unwrap_or_else(|err| panic!("tempdir in cwd: {err}"));
+        let relative_root = dir
+            .path()
+            .strip_prefix(&cwd)
+            .unwrap_or_else(|err| panic!("relative root: {err}"))
+            .to_path_buf();
+        let root =
+            fs::canonicalize(dir.path()).unwrap_or_else(|err| panic!("canonical root: {err}"));
+        let source_root = root.join("src");
+        fs::create_dir_all(&source_root).unwrap_or_else(|err| panic!("create src: {err}"));
+        fs::write(source_root.join("main.ax"), "")
+            .unwrap_or_else(|err| panic!("write entry: {err}"));
+
+        let manifest = package_manifest();
+        fs::write(
+            manifest_path(&root),
+            crate::manifest::render_manifest("demo"),
+        )
+        .unwrap_or_else(|err| panic!("write manifest: {err}"));
+        fs::write(
+            crate::manifest::lockfile_path(&root),
+            crate::lockfile::render_lockfile_for_project(&root, &manifest)
+                .unwrap_or_else(|err| panic!("render lockfile: {err}")),
+        )
+        .unwrap_or_else(|err| panic!("write lockfile: {err}"));
+
+        let mut graph = PackageGraph::default();
+        graph.packages.insert(
+            root.clone(),
+            PackageContext {
+                root,
+                manifest,
+                source_root,
+                dependencies: BTreeMap::new(),
+                workspace_members: Vec::new(),
+            },
+        );
+
+        analyze_package(&graph, &relative_root)
+            .unwrap_or_else(|err| panic!("relative package root should analyze: {err:?}"));
     }
 
     #[cfg(unix)]
