@@ -52,6 +52,14 @@ def normalize_module_search_paths(
     return normalized
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 @dataclass
 class ModuleLoader:
     module_search_paths: Optional[Sequence[Path]] = None
@@ -181,7 +189,13 @@ class ModuleLoader:
             candidate_path = root / candidate
             searched_locations.append(str(candidate_path))
             if candidate_path.exists():
-                return candidate_path
+                resolved_root = root.resolve(strict=True)
+                resolved_candidate = candidate_path.resolve(strict=True)
+                if not _is_relative_to(resolved_candidate, resolved_root):
+                    raise AxiomCompileError(
+                        f"import path resolves outside module search root: {raw!r}"
+                    )
+                return resolved_candidate
         raise AxiomCompileError(
             self._missing_import_message(
                 candidate,
