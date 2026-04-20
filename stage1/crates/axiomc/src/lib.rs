@@ -300,6 +300,19 @@ mod tests {
     }
 
     #[test]
+    fn render_rust_keeps_http_response_size_guards() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("const MAX_HEADER_BYTES: usize = 64 * 1024;"));
+        assert!(rendered.contains("const MAX_BODY_BYTES: usize = 1024 * 1024;"));
+        assert!(rendered.contains("axiom_resolve_public_socket_addrs(host, port)?"));
+        assert!(rendered.contains("TcpStream::connect_timeout(&addr, Duration::from_secs(5))"));
+    }
+
+    #[test]
     fn parser_lowers_struct_literals_and_field_access() {
         let source = "struct BuildInfo {\nname: string\ncount: int\n}\n\nfn count_of(info: BuildInfo): int {\nreturn info.count\n}\n\nlet info: BuildInfo = BuildInfo { name: \"stage1\", count: 42 }\nprint count_of(info)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
