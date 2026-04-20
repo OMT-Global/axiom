@@ -1,4 +1,4 @@
-match fs_read("stage1/examples/capabilities/src/fixture.txt") {
+match fs_read("src/fixture.txt") {
 Some(value) {
 print value
 }

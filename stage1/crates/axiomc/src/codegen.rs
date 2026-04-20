@@ -12,6 +12,15 @@ pub fn render_rust(program: &Program) -> String {
 }
 
 pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
+    render_rust_for_package(program, debug, Path::new("."), Path::new("."))
+}
+
+pub fn render_rust_for_package(
+    program: &Program,
+    debug: bool,
+    package_root: &Path,
+    fs_root: &Path,
+) -> String {
     let type_context = TypeContext::new(program);
     let uses_http_get = program_uses_call(program, "http_get");
     let mut out = String::new();
@@ -19,6 +28,13 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("use std::collections::HashMap;\n");
     out.push_str("use std::panic;\n");
     out.push_str("use std::sync::Once;\n\n");
+    let package_root = rust_path_literal(package_root);
+    let fs_root = rust_path_literal(fs_root);
+    out.push_str(&format!(
+        "const AXIOM_PACKAGE_ROOT: &str = {package_root:?};\n"
+    ));
+    out.push_str(&format!("const AXIOM_FS_ROOT: &str = {fs_root:?};\n"));
+    out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("fn axiom_install_panic_hook() {\n");
     out.push_str("    static AXIOM_PANIC_HOOK: Once = Once::new();\n");
@@ -215,7 +231,36 @@ pub fn render_rust_with_debug(program: &Program, debug: bool) -> String {
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
-    out.push_str("    std::fs::read_to_string(path).ok()\n");
+    out.push_str("    use std::io::Read;\n");
+    out.push_str(
+        "    let canonical_package_root = std::fs::canonicalize(AXIOM_PACKAGE_ROOT).ok()?;\n",
+    );
+    out.push_str("    let canonical_fs_root = std::fs::canonicalize(AXIOM_FS_ROOT).ok()?;\n");
+    out.push_str("    if !canonical_fs_root.starts_with(&canonical_package_root) {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let requested = std::path::Path::new(&path);\n");
+    out.push_str("    let candidate = if requested.is_absolute() {\n");
+    out.push_str("        requested.to_path_buf()\n");
+    out.push_str("    } else {\n");
+    out.push_str("        canonical_package_root.join(requested)\n");
+    out.push_str("    };\n");
+    out.push_str("    let canonical_candidate = std::fs::canonicalize(candidate).ok()?;\n");
+    out.push_str("    if !canonical_candidate.starts_with(&canonical_fs_root) {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let metadata = std::fs::metadata(&canonical_candidate).ok()?;\n");
+    out.push_str("    if !metadata.is_file() || metadata.len() > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let file = std::fs::File::open(&canonical_candidate).ok()?;\n");
+    out.push_str("    let mut reader = file.take(AXIOM_MAX_FS_READ_BYTES + 1);\n");
+    out.push_str("    let mut content = String::new();\n");
+    out.push_str("    reader.read_to_string(&mut content).ok()?;\n");
+    out.push_str("    if content.len() as u64 > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    Some(content)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_is_blocked_network_ip(ip: std::net::IpAddr) -> bool {\n");
@@ -853,6 +898,10 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("    }\n");
     out.push_str("}\n");
     out
+}
+
+fn rust_path_literal(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 fn program_uses_call(program: &Program, name: &str) -> bool {

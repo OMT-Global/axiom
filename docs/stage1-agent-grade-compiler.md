@@ -216,9 +216,14 @@ Work packages:
     `stage1_project_rejects_stdlib_env_without_env_capability`).
   - `std.fs` — **landed** as `std/fs.ax` exposing
     `read_file(path: string): Option<string>` on top of the existing `fs_read`
-    intrinsic. Covered by `stage1/examples/stdlib_fs` and two Rust tests
+    intrinsic. The generated helper treats relative paths as package-relative,
+    restricts access to the package root by default or `[capabilities]
+    fs_root = "<relative package path>"`, canonicalizes requested files to deny
+    traversal and symlink escapes, and rejects reads larger than 64 MiB. Covered
+    by `stage1/examples/stdlib_fs` and Rust tests
     (`stage1_project_imports_synthetic_stdlib_fs_module`,
-    `stage1_project_rejects_stdlib_fs_without_fs_capability`).
+    `stage1_project_rejects_stdlib_fs_without_fs_capability`,
+    `build_project_scopes_fs_read_to_manifest_root`).
   - `std.net` — **landed** (extension beyond the original AG4.1 list to close
     the capability/wrapper symmetry) as `std/net.ax` exposing
     `resolve(host: string): Option<string>` on top of the existing

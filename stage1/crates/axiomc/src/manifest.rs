@@ -56,6 +56,7 @@ pub struct TestTarget {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
 pub struct CapabilityConfig {
     pub fs: bool,
+    pub fs_root: Option<String>,
     pub net: bool,
     pub process: bool,
     pub env: bool,
@@ -130,6 +131,7 @@ struct RawTestTarget {
 #[derive(Debug, Default, Deserialize)]
 struct RawCapabilityConfig {
     fs: Option<bool>,
+    fs_root: Option<String>,
     net: Option<bool>,
     process: Option<bool>,
     env: Option<bool>,
@@ -267,6 +269,8 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     let dependencies = normalize_dependencies(raw.dependencies.unwrap_or_default(), path)?;
     let tests = normalize_tests(raw.tests.unwrap_or_default(), path)?;
     let capabilities = raw.capabilities.unwrap_or_default();
+    let fs_root =
+        normalize_optional_relative_path(path, "capabilities.fs_root", capabilities.fs_root)?;
     Ok(Manifest {
         package,
         dependencies,
@@ -275,6 +279,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
         tests,
         capabilities: CapabilityConfig {
             fs: capabilities.fs.unwrap_or(false),
+            fs_root,
             net: capabilities.net.unwrap_or(false),
             process: capabilities.process.unwrap_or(false),
             env: capabilities.env.unwrap_or(false),
@@ -396,6 +401,19 @@ fn normalize_tests(
         });
     }
     Ok(tests)
+}
+
+fn normalize_optional_relative_path(
+    path: &Path,
+    field_name: &str,
+    value: Option<String>,
+) -> Result<Option<String>, Diagnostic> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = required_field(Some(value), path, field_name)?;
+    validate_relative_path(path, field_name, &value)?;
+    Ok(Some(value))
 }
 
 fn validate_relative_path(path: &Path, field_name: &str, value: &str) -> Result<(), Diagnostic> {
