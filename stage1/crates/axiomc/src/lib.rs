@@ -166,6 +166,39 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_generic_functions_to_monomorphized_copies() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.functions.len(), 2);
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        assert_eq!(mir.functions.len(), 3);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn identity__int(value: i64) -> i64 {"));
+        assert!(rendered.contains("fn identity__string(value: String) -> String {"));
+        assert!(rendered.contains("fn singleton__int(value: i64) -> Vec<i64> {"));
+        assert!(rendered.contains("let answer: i64 = identity__int(42);"));
+        assert!(
+            rendered.contains("let label: String = identity__string(String::from(\"stage1\"));")
+        );
+        assert!(rendered.contains("let values: Vec<i64> = singleton__int(answer);"));
+        assert!(!rendered.contains("fn identity("));
+        assert!(!rendered.contains("fn singleton("));
+    }
+
+    #[test]
+    fn parser_lowers_nested_generic_instantiations() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn pair<T>(value: T): (T, T) {\nlet left: T = identity<T>(value)\nreturn (left, left)\n}\n\nlet both: (int, int) = pair<int>(7)\nprint both.0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn pair__int(value: i64) -> (i64, i64) {"));
+        assert!(rendered.contains("fn identity__int(value: i64) -> i64 {"));
+        assert!(rendered.contains("let left: i64 = identity__int(value);"));
+    }
+
+    #[test]
     fn render_rust_uses_structured_runtime_error_reporting() {
         let source = "fn crash(values: [int]): int {\nreturn values[1]\n}\n\nprint crash([7])\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2607,6 +2640,55 @@ mod tests {
             .expect("write source");
         let error = check_project(&project).expect_err("type mismatch should fail");
         assert!(error.message.contains("expects int, got string"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_generic_call_without_type_args() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-missing-type-args");
+        create_project(&project, Some("generic-missing-type-args-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn identity<T>(value: T): T {\nreturn value\n}\n\nprint identity(42)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("generic calls require type args");
+        assert!(error.message.contains("requires explicit type arguments"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_unconstrained_generic_type_param() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-unconstrained");
+        create_project(&project, Some("generic-unconstrained-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn bad<T>(value: int): int {\nreturn value\n}\n\nprint bad<int>(42)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("unconstrained type params should fail");
+        assert!(error.message.contains("unconstrained type parameter"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_generic_instantiation_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-type-mismatch");
+        create_project(&project, Some("generic-type-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn identity<T>(value: T): T {\nreturn value\n}\n\nprint identity<int>(\"nope\")\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("instantiated argument type should fail");
+        assert!(
+            error
+                .message
+                .contains("expects argument type int, got string")
+        );
         assert_eq!(error.kind, "type");
     }
 

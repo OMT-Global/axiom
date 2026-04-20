@@ -1601,6 +1601,7 @@ fn validate_expr_capabilities(
         syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => Ok(()),
         syntax::Expr::Call {
             name,
+            type_args: _,
             args,
             line,
             column,
@@ -2479,6 +2480,7 @@ fn rewrite_expr(
         }
         syntax::Expr::Call {
             name,
+            type_args,
             args,
             line,
             column,
@@ -2496,6 +2498,19 @@ fn rewrite_expr(
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| name.clone()),
+                type_args: type_args
+                    .iter()
+                    .map(|type_arg| {
+                        rewrite_type_name(
+                            type_arg,
+                            visible_types,
+                            private_imported_types,
+                            module_path,
+                            *line,
+                            *column,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
                 args: args
                     .iter()
                     .map(|arg| {

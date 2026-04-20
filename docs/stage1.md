@@ -75,8 +75,8 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Language surface gaps
 
 - Modules are now limited to package-local path imports plus direct `pub type`, `pub struct`, `pub enum`, and `pub fn` exports only.
-- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, borrowed slice types, borrowed array slice expressions, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, field access, tuple indexing, map indexing, array indexing, exhaustive statement-level `match`, and the built-in collection helpers `len(...)`, `first(...)`, and `last(...)` now exist, but there are still no user-defined generic abstractions or a general borrow system.
-- No generic functions or generic types.
+- Structs, tuples, tuple-style enum payloads, named-payload enum variants, `Option<T>`, `Result<T, E>`, maps, arrays, borrowed slice types, borrowed array slice expressions, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, field access, tuple indexing, map indexing, array indexing, exhaustive statement-level `match`, monomorphized generic functions with explicit type arguments, and the built-in collection helpers `len(...)`, `first(...)`, and `last(...)` now exist, but there is still no general borrow system.
+- No generic structs, generic enums, or inferred generic function type arguments.
 - No methods, trait-style interfaces, closures, or async/await.
 - Rebinding and shadowing are intentionally rejected today to keep the bootstrap scope small.
 
