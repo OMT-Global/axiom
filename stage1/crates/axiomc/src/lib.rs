@@ -199,6 +199,30 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_generic_structs_and_enums_to_monomorphized_copies() {
+        let source = "struct Box<T> {\nvalue: T\n}\n\nstruct Buckets<T> {\nitems: [T]\nby_name: {string: T}\n}\n\nenum Outcome<T, E> {\nOkValue(T)\nErrValue(E)\n}\n\nlet values: [int] = [1, 2]\nlet table: {string: int} = {\"one\": 1}\nlet boxed: Box<int> = Box { value: 42 }\nlet buckets: Buckets<int> = Buckets { items: values, by_name: table }\nlet outcome: Outcome<int, string> = OkValue(7)\nprint boxed.value\nprint len(buckets.items)\nmatch outcome {\nOkValue(value) {\nprint value\n}\nErrValue(error) {\nprint error\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.structs.len(), 2);
+        assert_eq!(parsed.enums.len(), 1);
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("struct Box__int {"));
+        assert!(rendered.contains("struct Buckets__int {"));
+        assert!(rendered.contains("items: Vec<i64>,"));
+        assert!(rendered.contains("by_name: HashMap<String, i64>,"));
+        assert!(rendered.contains("enum Outcome__int__string {"));
+        assert!(rendered.contains("OkValue(i64),"));
+        assert!(rendered.contains("ErrValue(String),"));
+        assert!(rendered.contains("let boxed: Box__int = Box__int {"));
+        assert!(rendered.contains("let buckets: Buckets__int = Buckets__int {"));
+        assert!(
+            rendered
+                .contains("let outcome: Outcome__int__string = Outcome__int__string::OkValue(7);")
+        );
+    }
+
+    #[test]
     fn parser_lowers_tuple_generic_type_arguments() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nlet pair: (int, int) = identity<(int, int)>((1, 2))\nprint pair.1\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2701,6 +2725,27 @@ mod tests {
                 .contains("expects argument type int, got string")
         );
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_from_generic_structs_and_enums() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-aggregates");
+        create_project(&project, Some("generic-aggregates-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Window<T> {\nview: &[T]\n}\n\nstruct MaybeBox<T> {\nitem: Option<T>\n}\n\nstruct ResultBox<T, E> {\nitem: Result<T, E>\n}\n\nenum Slot<T> {\nFilled(T)\nEmpty\n}\n\nlet values: [int] = [4, 5, 6]\nlet window: Window<int> = Window { view: values[:] }\nprint len(window.view)\nlet maybe: MaybeBox<int> = MaybeBox { item: Some(8) }\nmatch maybe.item {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\nlet result: ResultBox<string, string> = ResultBox { item: Ok(\"ready\") }\nmatch result.item {\nOk(value) {\nprint value\n}\nErr(error) {\nprint error\n}\n}\nlet number: Slot<int> = Filled(42)\nmatch number {\nFilled(value) {\nprint value\n}\nEmpty {\nprint 0\n}\n}\nlet text: Slot<string> = Filled(\"done\")\nmatch text {\nFilled(value) {\nprint value\n}\nEmpty {\nprint \"empty\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build generic aggregates");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "3\n8\nready\n42\ndone\n"
+        );
     }
 
     #[test]

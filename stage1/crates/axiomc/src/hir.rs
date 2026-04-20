@@ -270,7 +270,7 @@ struct LowerContext<'a> {
     structs: &'a HashMap<String, StructDef>,
     enums: &'a HashMap<String, EnumDef>,
     aliases: &'a HashMap<String, syntax::TypeAliasDecl>,
-    variants: &'a HashMap<String, VariantInfo>,
+    variants: &'a HashMap<String, Vec<VariantInfo>>,
     functions: &'a HashMap<String, FunctionSig>,
     capabilities: &'a CapabilityConfig,
     current_return: Option<Type>,
@@ -436,7 +436,7 @@ fn monomorphize_program(program: &syntax::Program) -> Result<syntax::Program, Di
         lowered_functions.push(function);
     }
 
-    Ok(syntax::Program {
+    monomorphize_aggregates(syntax::Program {
         path: program.path.clone(),
         imports: program.imports.clone(),
         consts: program.consts.clone(),
@@ -444,6 +444,207 @@ fn monomorphize_program(program: &syntax::Program) -> Result<syntax::Program, Di
         structs: program.structs.clone(),
         enums: program.enums.clone(),
         functions: lowered_functions,
+        stmts,
+    })
+}
+
+fn monomorphize_aggregates(program: syntax::Program) -> Result<syntax::Program, Diagnostic> {
+    let mut generic_structs = HashMap::new();
+    let mut concrete_structs = Vec::new();
+    let mut seen_struct_names = HashSet::new();
+    for struct_decl in &program.structs {
+        if !seen_struct_names.insert(struct_decl.name.clone()) {
+            return Err(Diagnostic::new(
+                "type",
+                format!("duplicate struct {:?}", struct_decl.name),
+            )
+            .with_span(struct_decl.line, struct_decl.column));
+        }
+        if struct_decl.type_params.is_empty() {
+            concrete_structs.push(struct_decl.clone());
+        } else {
+            validate_generic_struct(struct_decl)?;
+            generic_structs.insert(struct_decl.name.clone(), struct_decl.clone());
+        }
+    }
+
+    let mut generic_enums = HashMap::new();
+    let mut concrete_enums = Vec::new();
+    let mut seen_enum_names = HashSet::new();
+    for enum_decl in &program.enums {
+        if !seen_enum_names.insert(enum_decl.name.clone()) {
+            return Err(
+                Diagnostic::new("type", format!("duplicate enum {:?}", enum_decl.name))
+                    .with_span(enum_decl.line, enum_decl.column),
+            );
+        }
+        if enum_decl.type_params.is_empty() {
+            concrete_enums.push(enum_decl.clone());
+        } else {
+            validate_generic_enum(enum_decl)?;
+            generic_enums.insert(enum_decl.name.clone(), enum_decl.clone());
+        }
+    }
+
+    let mut queue = VecDeque::new();
+    let mut queued = HashSet::new();
+    let mut type_aliases = Vec::new();
+    for alias in &program.type_aliases {
+        type_aliases.push(syntax::TypeAliasDecl {
+            name: alias.name.clone(),
+            ty: rewrite_aggregate_type_name(
+                &alias.ty,
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+                alias.line,
+                alias.column,
+            )?,
+            is_public: alias.is_public,
+            line: alias.line,
+            column: alias.column,
+        });
+    }
+    let consts = program
+        .consts
+        .iter()
+        .map(|constant| {
+            Ok(syntax::ConstDecl {
+                name: constant.name.clone(),
+                ty: rewrite_aggregate_type_name(
+                    &constant.ty,
+                    &generic_structs,
+                    &generic_enums,
+                    &mut queue,
+                    &mut queued,
+                    constant.line,
+                    constant.column,
+                )?,
+                expr: rewrite_expr_aggregate_types(
+                    &constant.expr,
+                    &generic_structs,
+                    &generic_enums,
+                    &mut queue,
+                    &mut queued,
+                )?,
+                is_public: constant.is_public,
+                line: constant.line,
+                column: constant.column,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let structs = concrete_structs
+        .iter()
+        .map(|struct_decl| {
+            rewrite_struct_decl_aggregate_types(
+                struct_decl,
+                &HashMap::new(),
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let enums = concrete_enums
+        .iter()
+        .map(|enum_decl| {
+            rewrite_enum_decl_aggregate_types(
+                enum_decl,
+                &HashMap::new(),
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let functions = program
+        .functions
+        .iter()
+        .map(|function| {
+            rewrite_function_aggregate_types(
+                function,
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let stmts = program
+        .stmts
+        .iter()
+        .map(|stmt| {
+            rewrite_stmt_aggregate_types(
+                stmt,
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut structs = structs;
+    let mut enums = enums;
+    let mut emitted = HashSet::new();
+    while let Some(instantiation) = queue.pop_front() {
+        if !emitted.insert(instantiation.clone()) {
+            continue;
+        }
+        if let Some(template) = generic_structs.get(&instantiation.name) {
+            let type_bindings = generic_decl_type_bindings(
+                &template.name,
+                &template.type_params,
+                &instantiation.type_args,
+                template.line,
+                template.column,
+            )?;
+            let mut lowered = rewrite_struct_decl_aggregate_types(
+                template,
+                &type_bindings,
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+            )?;
+            lowered.name = monomorphized_type_name(&template.name, &instantiation.type_args);
+            lowered.type_params = Vec::new();
+            structs.push(lowered);
+            continue;
+        }
+        if let Some(template) = generic_enums.get(&instantiation.name) {
+            let type_bindings = generic_decl_type_bindings(
+                &template.name,
+                &template.type_params,
+                &instantiation.type_args,
+                template.line,
+                template.column,
+            )?;
+            let mut lowered = rewrite_enum_decl_aggregate_types(
+                template,
+                &type_bindings,
+                &generic_structs,
+                &generic_enums,
+                &mut queue,
+                &mut queued,
+            )?;
+            lowered.name = monomorphized_type_name(&template.name, &instantiation.type_args);
+            lowered.type_params = Vec::new();
+            enums.push(lowered);
+        }
+    }
+
+    Ok(syntax::Program {
+        path: program.path,
+        imports: program.imports,
+        consts,
+        type_aliases,
+        structs,
+        enums,
+        functions,
         stmts,
     })
 }
@@ -468,10 +669,69 @@ fn validate_generic_function(function: &syntax::Function) -> Result<(), Diagnost
     Ok(())
 }
 
+fn validate_generic_struct(struct_decl: &syntax::StructDecl) -> Result<(), Diagnostic> {
+    let mut constrained = HashSet::new();
+    for field in &struct_decl.fields {
+        collect_type_params(&field.ty, &struct_decl.type_params, &mut constrained);
+    }
+    validate_all_type_params_constrained(
+        "struct",
+        &struct_decl.name,
+        &struct_decl.type_params,
+        &constrained,
+        struct_decl.line,
+        struct_decl.column,
+    )
+}
+
+fn validate_generic_enum(enum_decl: &syntax::EnumDecl) -> Result<(), Diagnostic> {
+    let mut constrained = HashSet::new();
+    for variant in &enum_decl.variants {
+        for ty in &variant.payload_tys {
+            collect_type_params(ty, &enum_decl.type_params, &mut constrained);
+        }
+    }
+    validate_all_type_params_constrained(
+        "enum",
+        &enum_decl.name,
+        &enum_decl.type_params,
+        &constrained,
+        enum_decl.line,
+        enum_decl.column,
+    )
+}
+
+fn validate_all_type_params_constrained(
+    kind: &str,
+    name: &str,
+    type_params: &[String],
+    constrained: &HashSet<String>,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
+    for type_param in type_params {
+        if !constrained.contains(type_param) {
+            return Err(Diagnostic::new(
+                "type",
+                format!("generic {kind} {name:?} has unconstrained type parameter {type_param:?}"),
+            )
+            .with_span(line, column));
+        }
+    }
+    Ok(())
+}
+
 fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mut HashSet<String>) {
     match ty {
-        syntax::TypeName::Named(name) if type_params.iter().any(|param| param == name) => {
+        syntax::TypeName::Named(name, args)
+            if args.is_empty() && type_params.iter().any(|param| param == name) =>
+        {
             found.insert(name.clone());
+        }
+        syntax::TypeName::Named(_, args) => {
+            for arg in args {
+                collect_type_params(arg, type_params, found);
+            }
         }
         syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
@@ -486,10 +746,7 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
                 collect_type_params(element, type_params, found);
             }
         }
-        syntax::TypeName::Int
-        | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Named(_) => {}
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => {}
     }
 }
 
@@ -517,6 +774,332 @@ fn generic_type_bindings(
         .collect())
 }
 
+fn generic_decl_type_bindings(
+    name: &str,
+    type_params: &[String],
+    type_args: &[syntax::TypeName],
+    line: usize,
+    column: usize,
+) -> Result<HashMap<String, syntax::TypeName>, Diagnostic> {
+    if type_args.len() != type_params.len() {
+        return Err(Diagnostic::new(
+            "type",
+            format!(
+                "generic type {:?} expects {} type arguments, got {}",
+                name,
+                type_params.len(),
+                type_args.len()
+            ),
+        )
+        .with_span(line, column));
+    }
+    Ok(type_params
+        .iter()
+        .cloned()
+        .zip(type_args.iter().cloned())
+        .collect())
+}
+
+fn rewrite_struct_decl_aggregate_types(
+    struct_decl: &syntax::StructDecl,
+    type_bindings: &HashMap<String, syntax::TypeName>,
+    generic_structs: &HashMap<String, syntax::StructDecl>,
+    generic_enums: &HashMap<String, syntax::EnumDecl>,
+    queue: &mut VecDeque<GenericInstantiation>,
+    queued: &mut HashSet<GenericInstantiation>,
+) -> Result<syntax::StructDecl, Diagnostic> {
+    Ok(syntax::StructDecl {
+        name: struct_decl.name.clone(),
+        type_params: struct_decl.type_params.clone(),
+        fields: struct_decl
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(syntax::StructField {
+                    name: field.name.clone(),
+                    ty: rewrite_aggregate_type_name(
+                        &substitute_type_name(&field.ty, type_bindings),
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                        field.line,
+                        field.column,
+                    )?,
+                    line: field.line,
+                    column: field.column,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?,
+        is_public: struct_decl.is_public,
+        line: struct_decl.line,
+        column: struct_decl.column,
+    })
+}
+
+fn rewrite_enum_decl_aggregate_types(
+    enum_decl: &syntax::EnumDecl,
+    type_bindings: &HashMap<String, syntax::TypeName>,
+    generic_structs: &HashMap<String, syntax::StructDecl>,
+    generic_enums: &HashMap<String, syntax::EnumDecl>,
+    queue: &mut VecDeque<GenericInstantiation>,
+    queued: &mut HashSet<GenericInstantiation>,
+) -> Result<syntax::EnumDecl, Diagnostic> {
+    Ok(syntax::EnumDecl {
+        name: enum_decl.name.clone(),
+        type_params: enum_decl.type_params.clone(),
+        variants: enum_decl
+            .variants
+            .iter()
+            .map(|variant| {
+                Ok(syntax::EnumVariantDecl {
+                    name: variant.name.clone(),
+                    payload_tys: variant
+                        .payload_tys
+                        .iter()
+                        .map(|ty| {
+                            rewrite_aggregate_type_name(
+                                &substitute_type_name(ty, type_bindings),
+                                generic_structs,
+                                generic_enums,
+                                queue,
+                                queued,
+                                variant.line,
+                                variant.column,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, Diagnostic>>()?,
+                    payload_names: variant.payload_names.clone(),
+                    line: variant.line,
+                    column: variant.column,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?,
+        is_public: enum_decl.is_public,
+        line: enum_decl.line,
+        column: enum_decl.column,
+    })
+}
+
+fn rewrite_function_aggregate_types(
+    function: &syntax::Function,
+    generic_structs: &HashMap<String, syntax::StructDecl>,
+    generic_enums: &HashMap<String, syntax::EnumDecl>,
+    queue: &mut VecDeque<GenericInstantiation>,
+    queued: &mut HashSet<GenericInstantiation>,
+) -> Result<syntax::Function, Diagnostic> {
+    Ok(syntax::Function {
+        name: function.name.clone(),
+        source_name: function.source_name.clone(),
+        path: function.path.clone(),
+        type_params: function.type_params.clone(),
+        params: function
+            .params
+            .iter()
+            .map(|param| {
+                Ok(syntax::Param {
+                    name: param.name.clone(),
+                    ty: rewrite_aggregate_type_name(
+                        &param.ty,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                        param.line,
+                        param.column,
+                    )?,
+                    line: param.line,
+                    column: param.column,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?,
+        return_ty: rewrite_aggregate_type_name(
+            &function.return_ty,
+            generic_structs,
+            generic_enums,
+            queue,
+            queued,
+            function.line,
+            function.column,
+        )?,
+        body: function
+            .body
+            .iter()
+            .map(|stmt| {
+                rewrite_stmt_aggregate_types(stmt, generic_structs, generic_enums, queue, queued)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        is_public: function.is_public,
+        line: function.line,
+        column: function.column,
+    })
+}
+
+fn rewrite_aggregate_type_name(
+    ty: &syntax::TypeName,
+    generic_structs: &HashMap<String, syntax::StructDecl>,
+    generic_enums: &HashMap<String, syntax::EnumDecl>,
+    queue: &mut VecDeque<GenericInstantiation>,
+    queued: &mut HashSet<GenericInstantiation>,
+    line: usize,
+    column: usize,
+) -> Result<syntax::TypeName, Diagnostic> {
+    Ok(match ty {
+        syntax::TypeName::Named(name, args) => {
+            let args = args
+                .iter()
+                .map(|arg| {
+                    rewrite_aggregate_type_name(
+                        arg,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                        line,
+                        column,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let is_generic = generic_structs.contains_key(name) || generic_enums.contains_key(name);
+            if args.is_empty() {
+                if is_generic {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("generic type {name:?} requires explicit type arguments"),
+                    )
+                    .with_span(line, column));
+                }
+                syntax::TypeName::Named(name.clone(), Vec::new())
+            } else {
+                let type_params = generic_structs
+                    .get(name)
+                    .map(|decl| decl.type_params.as_slice())
+                    .or_else(|| {
+                        generic_enums
+                            .get(name)
+                            .map(|decl| decl.type_params.as_slice())
+                    })
+                    .ok_or_else(|| {
+                        Diagnostic::new("type", format!("type {name:?} is not generic"))
+                            .with_span(line, column)
+                    })?;
+                generic_decl_type_bindings(name, type_params, &args, line, column)?;
+                let instantiation = GenericInstantiation {
+                    name: name.clone(),
+                    type_args: args.clone(),
+                };
+                if queued.insert(instantiation.clone()) {
+                    queue.push_back(instantiation);
+                }
+                syntax::TypeName::Named(monomorphized_type_name(name, &args), Vec::new())
+            }
+        }
+        syntax::TypeName::Slice(inner) => {
+            syntax::TypeName::Slice(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
+        }
+        syntax::TypeName::MutSlice(inner) => {
+            syntax::TypeName::MutSlice(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
+        }
+        syntax::TypeName::Option(inner) => {
+            syntax::TypeName::Option(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
+        }
+        syntax::TypeName::Result(ok, err) => syntax::TypeName::Result(
+            Box::new(rewrite_aggregate_type_name(
+                ok,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?),
+            Box::new(rewrite_aggregate_type_name(
+                err,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?),
+        ),
+        syntax::TypeName::Tuple(elements) => syntax::TypeName::Tuple(
+            elements
+                .iter()
+                .map(|element| {
+                    rewrite_aggregate_type_name(
+                        element,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                        line,
+                        column,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        syntax::TypeName::Map(key, value) => syntax::TypeName::Map(
+            Box::new(rewrite_aggregate_type_name(
+                key,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?),
+            Box::new(rewrite_aggregate_type_name(
+                value,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?),
+        ),
+        syntax::TypeName::Array(inner) => {
+            syntax::TypeName::Array(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
+        }
+        syntax::TypeName::Int => syntax::TypeName::Int,
+        syntax::TypeName::Bool => syntax::TypeName::Bool,
+        syntax::TypeName::String => syntax::TypeName::String,
+    })
+}
+
 fn rewrite_function_generic_calls(
     function: &syntax::Function,
     type_bindings: &HashMap<String, syntax::TypeName>,
@@ -533,6 +1116,481 @@ fn rewrite_function_generic_calls(
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rewritten)
+}
+
+fn rewrite_stmt_aggregate_types(
+    stmt: &syntax::Stmt,
+    generic_structs: &HashMap<String, syntax::StructDecl>,
+    generic_enums: &HashMap<String, syntax::EnumDecl>,
+    queue: &mut VecDeque<GenericInstantiation>,
+    queued: &mut HashSet<GenericInstantiation>,
+) -> Result<syntax::Stmt, Diagnostic> {
+    Ok(match stmt {
+        syntax::Stmt::Let {
+            name,
+            ty,
+            expr,
+            line,
+            column,
+        } => syntax::Stmt::Let {
+            name: name.clone(),
+            ty: rewrite_aggregate_type_name(
+                ty,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                *line,
+                *column,
+            )?,
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Print { expr, line, column } => syntax::Stmt::Print {
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            line,
+            column,
+        } => syntax::Stmt::If {
+            cond: rewrite_expr_aggregate_types(
+                cond,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            then_block: then_block
+                .iter()
+                .map(|stmt| {
+                    rewrite_stmt_aggregate_types(
+                        stmt,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            else_block: else_block
+                .as_ref()
+                .map(|block| {
+                    block
+                        .iter()
+                        .map(|stmt| {
+                            rewrite_stmt_aggregate_types(
+                                stmt,
+                                generic_structs,
+                                generic_enums,
+                                queue,
+                                queued,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::While {
+            cond,
+            body,
+            line,
+            column,
+        } => syntax::Stmt::While {
+            cond: rewrite_expr_aggregate_types(
+                cond,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            body: body
+                .iter()
+                .map(|stmt| {
+                    rewrite_stmt_aggregate_types(
+                        stmt,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Match {
+            expr,
+            arms,
+            line,
+            column,
+        } => syntax::Stmt::Match {
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            arms: arms
+                .iter()
+                .map(|arm| {
+                    Ok(syntax::MatchArm {
+                        variant: arm.variant.clone(),
+                        bindings: arm.bindings.clone(),
+                        is_named: arm.is_named,
+                        body: arm
+                            .body
+                            .iter()
+                            .map(|stmt| {
+                                rewrite_stmt_aggregate_types(
+                                    stmt,
+                                    generic_structs,
+                                    generic_enums,
+                                    queue,
+                                    queued,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        line: arm.line,
+                        column: arm.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Return { expr, line, column } => syntax::Stmt::Return {
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
+    })
+}
+
+fn rewrite_expr_aggregate_types(
+    expr: &syntax::Expr,
+    generic_structs: &HashMap<String, syntax::StructDecl>,
+    generic_enums: &HashMap<String, syntax::EnumDecl>,
+    queue: &mut VecDeque<GenericInstantiation>,
+    queued: &mut HashSet<GenericInstantiation>,
+) -> Result<syntax::Expr, Diagnostic> {
+    Ok(match expr {
+        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => expr.clone(),
+        syntax::Expr::Call {
+            name,
+            type_args,
+            args,
+            line,
+            column,
+        } => syntax::Expr::Call {
+            name: name.clone(),
+            type_args: type_args
+                .iter()
+                .map(|type_arg| {
+                    rewrite_aggregate_type_name(
+                        type_arg,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                        *line,
+                        *column,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            args: args
+                .iter()
+                .map(|arg| {
+                    rewrite_expr_aggregate_types(arg, generic_structs, generic_enums, queue, queued)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::BinaryAdd {
+            lhs,
+            rhs,
+            line,
+            column,
+        } => syntax::Expr::BinaryAdd {
+            lhs: Box::new(rewrite_expr_aggregate_types(
+                lhs,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            rhs: Box::new(rewrite_expr_aggregate_types(
+                rhs,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::BinaryCompare {
+            op,
+            lhs,
+            rhs,
+            line,
+            column,
+        } => syntax::Expr::BinaryCompare {
+            op: *op,
+            lhs: Box::new(rewrite_expr_aggregate_types(
+                lhs,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            rhs: Box::new(rewrite_expr_aggregate_types(
+                rhs,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
+            expr: Box::new(rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::StructLiteral {
+            name,
+            fields,
+            line,
+            column,
+        } => syntax::Expr::StructLiteral {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| {
+                    Ok(syntax::StructFieldValue {
+                        name: field.name.clone(),
+                        expr: rewrite_expr_aggregate_types(
+                            &field.expr,
+                            generic_structs,
+                            generic_enums,
+                            queue,
+                            queued,
+                        )?,
+                        line: field.line,
+                        column: field.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::FieldAccess {
+            base,
+            field,
+            line,
+            column,
+        } => syntax::Expr::FieldAccess {
+            base: Box::new(rewrite_expr_aggregate_types(
+                base,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            field: field.clone(),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::TupleLiteral {
+            elements,
+            line,
+            column,
+        } => syntax::Expr::TupleLiteral {
+            elements: elements
+                .iter()
+                .map(|element| {
+                    rewrite_expr_aggregate_types(
+                        element,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::TupleIndex {
+            base,
+            index,
+            line,
+            column,
+        } => syntax::Expr::TupleIndex {
+            base: Box::new(rewrite_expr_aggregate_types(
+                base,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            index: *index,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::MapLiteral {
+            entries,
+            line,
+            column,
+        } => syntax::Expr::MapLiteral {
+            entries: entries
+                .iter()
+                .map(|entry| {
+                    Ok(syntax::MapEntry {
+                        key: rewrite_expr_aggregate_types(
+                            &entry.key,
+                            generic_structs,
+                            generic_enums,
+                            queue,
+                            queued,
+                        )?,
+                        value: rewrite_expr_aggregate_types(
+                            &entry.value,
+                            generic_structs,
+                            generic_enums,
+                            queue,
+                            queued,
+                        )?,
+                        line: entry.line,
+                        column: entry.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::ArrayLiteral {
+            elements,
+            line,
+            column,
+        } => syntax::Expr::ArrayLiteral {
+            elements: elements
+                .iter()
+                .map(|element| {
+                    rewrite_expr_aggregate_types(
+                        element,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Slice {
+            base,
+            start,
+            end,
+            line,
+            column,
+        } => syntax::Expr::Slice {
+            base: Box::new(rewrite_expr_aggregate_types(
+                base,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            start: start
+                .as_ref()
+                .map(|expr| {
+                    rewrite_expr_aggregate_types(
+                        expr,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                    )
+                    .map(Box::new)
+                })
+                .transpose()?,
+            end: end
+                .as_ref()
+                .map(|expr| {
+                    rewrite_expr_aggregate_types(
+                        expr,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                    )
+                    .map(Box::new)
+                })
+                .transpose()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Index {
+            base,
+            index,
+            line,
+            column,
+        } => syntax::Expr::Index {
+            base: Box::new(rewrite_expr_aggregate_types(
+                base,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            index: Box::new(rewrite_expr_aggregate_types(
+                index,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
+    })
 }
 
 fn rewrite_stmt_generic_calls(
@@ -1031,10 +2089,16 @@ fn substitute_type_name(
     type_bindings: &HashMap<String, syntax::TypeName>,
 ) -> syntax::TypeName {
     match ty {
-        syntax::TypeName::Named(name) => type_bindings
+        syntax::TypeName::Named(name, args) if args.is_empty() => type_bindings
             .get(name)
             .cloned()
-            .unwrap_or_else(|| syntax::TypeName::Named(name.clone())),
+            .unwrap_or_else(|| syntax::TypeName::Named(name.clone(), Vec::new())),
+        syntax::TypeName::Named(name, args) => syntax::TypeName::Named(
+            name.clone(),
+            args.iter()
+                .map(|arg| substitute_type_name(arg, type_bindings))
+                .collect(),
+        ),
         syntax::TypeName::Slice(inner) => {
             syntax::TypeName::Slice(Box::new(substitute_type_name(inner, type_bindings)))
         }
@@ -1068,6 +2132,14 @@ fn substitute_type_name(
 }
 
 fn monomorphized_function_name(name: &str, type_args: &[syntax::TypeName]) -> String {
+    monomorphized_name(name, type_args)
+}
+
+fn monomorphized_type_name(name: &str, type_args: &[syntax::TypeName]) -> String {
+    monomorphized_name(name, type_args)
+}
+
+fn monomorphized_name(name: &str, type_args: &[syntax::TypeName]) -> String {
     let suffix = type_args
         .iter()
         .map(type_name_monomorph_suffix)
@@ -1081,7 +2153,8 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
         syntax::TypeName::Int => String::from("int"),
         syntax::TypeName::Bool => String::from("bool"),
         syntax::TypeName::String => String::from("string"),
-        syntax::TypeName::Named(name) => name.clone(),
+        syntax::TypeName::Named(name, args) if args.is_empty() => name.clone(),
+        syntax::TypeName::Named(name, args) => monomorphized_type_name(name, args),
         syntax::TypeName::Slice(inner) => format!("slice_{}", type_name_monomorph_suffix(inner)),
         syntax::TypeName::MutSlice(inner) => {
             format!("mutslice_{}", type_name_monomorph_suffix(inner))
@@ -1283,7 +2356,7 @@ fn collect_enum_definitions(
     structs: &HashMap<String, syntax::StructDecl>,
     enum_names: &HashMap<String, ()>,
     aliases: &HashMap<String, syntax::TypeAliasDecl>,
-) -> Result<(HashMap<String, EnumDef>, HashMap<String, VariantInfo>), Diagnostic> {
+) -> Result<(HashMap<String, EnumDef>, HashMap<String, Vec<VariantInfo>>), Diagnostic> {
     let mut lowered = HashMap::new();
     let mut variants = HashMap::new();
     for enum_decl in enums {
@@ -1310,9 +2383,10 @@ fn collect_enum_definitions(
                 )
                 .with_span(variant.line, variant.column));
             }
-            if let Some(existing_enum) = variants.insert(
-                variant.name.clone(),
-                VariantInfo {
+            variants
+                .entry(variant.name.clone())
+                .or_insert_with(Vec::new)
+                .push(VariantInfo {
                     enum_name: enum_decl.name.clone(),
                     payload_tys: variant
                         .payload_tys
@@ -1329,18 +2403,7 @@ fn collect_enum_definitions(
                         })
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
                     payload_names: variant.payload_names.clone(),
-                },
-            ) && existing_enum.enum_name != enum_decl.name
-            {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!(
-                        "duplicate variant name {:?} across enums {:?} and {:?} is not yet supported",
-                        variant.name, existing_enum.enum_name, enum_decl.name
-                    ),
-                )
-                .with_span(variant.line, variant.column));
-            }
+                });
             let payload_tys = variant
                 .payload_tys
                 .iter()
@@ -1472,7 +2535,7 @@ fn lower_function(
     structs: &HashMap<String, StructDef>,
     enums: &HashMap<String, EnumDef>,
     aliases: &HashMap<String, syntax::TypeAliasDecl>,
-    variants: &HashMap<String, VariantInfo>,
+    variants: &HashMap<String, Vec<VariantInfo>>,
     functions: &HashMap<String, FunctionSig>,
     capabilities: &CapabilityConfig,
 ) -> Result<Function, Diagnostic> {
@@ -2381,7 +3444,7 @@ fn lower_expr_with_expected(
                         .with_span(*line, *column),
                 );
             }
-            if let Some(variant) = ctx.variants.get(name) {
+            if let Some(variant) = resolve_variant(name, expected, ctx, *line, *column)? {
                 if !variant.payload_tys.is_empty() {
                     return Err(Diagnostic::new(
                         "type",
@@ -3109,7 +4172,7 @@ fn lower_expr_with_expected(
                     ty: Type::Result(ok_ty.clone(), err_ty.clone()),
                 });
             }
-            if let Some(variant) = ctx.variants.get(name) {
+            if let Some(variant) = resolve_variant(name, expected, ctx, *line, *column)? {
                 return lower_variant_constructor(name, args, *line, *column, variant, env, ctx);
             }
             Err(
@@ -3267,17 +4330,35 @@ fn lower_expr_with_expected(
             line,
             column,
         } => {
-            if let Some(variant) = ctx.variants.get(name)
+            if let Some(variant) = resolve_variant(name, expected, ctx, *line, *column)?
                 && !variant.payload_names.is_empty()
             {
                 return lower_named_variant_constructor(
                     name, fields, *line, *column, variant, env, ctx,
                 );
             }
-            let struct_def = ctx.structs.get(name).ok_or_else(|| {
-                Diagnostic::new("type", format!("undefined struct {name:?}"))
-                    .with_span(*line, *column)
-            })?;
+            let concrete_name = if ctx.structs.contains_key(name) {
+                name.clone()
+            } else if let Some(Type::Struct(expected_name)) = expected {
+                let prefix = format!("{name}__");
+                if expected_name.starts_with(&prefix) && ctx.structs.contains_key(expected_name) {
+                    expected_name.clone()
+                } else {
+                    return Err(
+                        Diagnostic::new("type", format!("undefined struct {name:?}"))
+                            .with_span(*line, *column),
+                    );
+                }
+            } else {
+                return Err(
+                    Diagnostic::new("type", format!("undefined struct {name:?}"))
+                        .with_span(*line, *column),
+                );
+            };
+            let struct_def = ctx
+                .structs
+                .get(&concrete_name)
+                .expect("concrete struct name checked above");
             let mut field_defs = HashMap::new();
             for field in &struct_def.fields {
                 field_defs.insert(field.name.clone(), field.ty.clone());
@@ -3287,7 +4368,7 @@ fn lower_expr_with_expected(
                 let expected = field_defs.get(&field.name).ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {name:?} has no field {:?}", field.name),
+                        format!("struct {concrete_name:?} has no field {:?}", field.name),
                     )
                     .with_span(field.line, field.column)
                 })?;
@@ -3295,7 +4376,7 @@ fn lower_expr_with_expected(
                     return Err(Diagnostic::new(
                         "type",
                         format!(
-                            "duplicate field {:?} in struct literal {name:?}",
+                            "duplicate field {:?} in struct literal {concrete_name:?}",
                             field.name
                         ),
                     )
@@ -3306,7 +4387,7 @@ fn lower_expr_with_expected(
                     return Err(Diagnostic::new(
                         "type",
                         format!(
-                            "struct {name:?} field {:?} expects {expected}, got {}",
+                            "struct {concrete_name:?} field {:?} expects {expected}, got {}",
                             field.name,
                             lowered.ty()
                         ),
@@ -3329,16 +4410,19 @@ fn lower_expr_with_expected(
                 let lowered = lowered_fields.remove(&field.name).ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct literal {name:?} is missing field {:?}", field.name),
+                        format!(
+                            "struct literal {concrete_name:?} is missing field {:?}",
+                            field.name
+                        ),
                     )
                     .with_span(*line, *column)
                 })?;
                 ordered_fields.push(lowered);
             }
             Ok(Expr::StructLiteral {
-                name: name.clone(),
+                name: concrete_name.clone(),
                 fields: ordered_fields,
-                ty: Type::Struct(name.clone()),
+                ty: Type::Struct(concrete_name),
             })
         }
         syntax::Expr::TupleLiteral {
@@ -3870,6 +4954,31 @@ fn require_capability(
             "call to {intrinsic_name:?} requires [capabilities].{} = true",
             kind.name()
         ),
+    )
+    .with_span(line, column))
+}
+
+fn resolve_variant<'a>(
+    name: &str,
+    expected: Option<&Type>,
+    ctx: &'a LowerContext<'_>,
+    line: usize,
+    column: usize,
+) -> Result<Option<&'a VariantInfo>, Diagnostic> {
+    let Some(candidates) = ctx.variants.get(name) else {
+        return Ok(None);
+    };
+    if let Some(Type::Enum(expected_enum)) = expected {
+        return Ok(candidates
+            .iter()
+            .find(|variant| &variant.enum_name == expected_enum));
+    }
+    if candidates.len() == 1 {
+        return Ok(candidates.first());
+    }
+    Err(Diagnostic::new(
+        "type",
+        format!("enum variant {name:?} is ambiguous without an expected enum type"),
     )
     .with_span(line, column))
 }
@@ -4874,7 +5983,14 @@ fn lower_type_inner<T, U>(
         syntax::TypeName::Int => Ok(Type::Int),
         syntax::TypeName::Bool => Ok(Type::Bool),
         syntax::TypeName::String => Ok(Type::String),
-        syntax::TypeName::Named(name) => {
+        syntax::TypeName::Named(name, args) => {
+            if !args.is_empty() {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("generic type {name:?} was not monomorphized"),
+                )
+                .with_span(line, column));
+            }
             if structs.contains_key(name) {
                 return Ok(Type::Struct(name.clone()));
             }

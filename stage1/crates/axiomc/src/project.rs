@@ -2884,7 +2884,7 @@ fn rewrite_type_name(
         syntax::TypeName::Int => Ok(syntax::TypeName::Int),
         syntax::TypeName::Bool => Ok(syntax::TypeName::Bool),
         syntax::TypeName::String => Ok(syntax::TypeName::String),
-        syntax::TypeName::Named(name) => {
+        syntax::TypeName::Named(name, args) => {
             if !visible_types.contains_key(name) && private_imported_types.contains(name) {
                 return Err(Diagnostic::new(
                     "import",
@@ -2898,6 +2898,18 @@ fn rewrite_type_name(
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| name.clone()),
+                args.iter()
+                    .map(|arg| {
+                        rewrite_type_name(
+                            arg,
+                            visible_types,
+                            private_imported_types,
+                            module_path,
+                            line,
+                            column,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
             ))
         }
         syntax::TypeName::Option(inner) => {
