@@ -195,6 +195,10 @@ class AxiomCompileError(AxiomError):
     pass
 
 
+class AxiomBytecodeError(AxiomError, ValueError):
+    pass
+
+
 class AxiomRuntimeError(AxiomError):
     pass
 

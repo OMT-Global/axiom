@@ -4,12 +4,16 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 import struct
 
-from .errors import AxiomCompileError
+from .errors import AxiomBytecodeError, AxiomCompileError
 
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
 VERSION_MINOR = 11
 MAX_STRING_BYTES = 64 * 1024 * 1024
+MAX_STRINGS = 1_000_000
+MAX_INSTRUCTIONS = 10_000_000
+MAX_MODULES = 10_000
+MAX_MODULE_ENTRIES = 100_000
 
 
 class Op:
@@ -166,18 +170,34 @@ class Bytecode:
         def take(n: int) -> bytes:
             nonlocal off
             if off + n > len(mv):
-                raise ValueError("truncated bytecode")
+                raise AxiomBytecodeError("truncated bytecode")
             b = mv[off : off + n].tobytes()
             off += n
             return b
 
+        def read_count(name: str, max_count: int, min_element_bytes: int) -> int:
+            (count,) = struct.unpack("<I", take(4))
+            count = int(count)
+            if count > max_count:
+                raise AxiomBytecodeError(
+                    f"bytecode {name} count {count} exceeds {max_count} limit"
+                )
+            remaining = len(mv) - off
+            if count > remaining // min_element_bytes:
+                raise AxiomBytecodeError(
+                    f"bytecode {name} count {count} exceeds remaining bytecode length"
+                )
+            return count
+
         if take(4) != MAGIC:
-            raise ValueError("bad magic")
+            raise AxiomBytecodeError("bad magic")
         major, minor = struct.unpack("<HH", take(4))
         if major != VERSION_MAJOR:
-            raise ValueError(f"unsupported major version {major}")
+            raise AxiomBytecodeError(f"unsupported major version {major}")
         if minor > VERSION_MINOR:
-            raise ValueError(f"unsupported minor version {minor} (max {VERSION_MINOR})")
+            raise AxiomBytecodeError(
+                f"unsupported minor version {minor} (max {VERSION_MINOR})"
+            )
 
         (locals_count,) = struct.unpack("<I", take(4))
 
@@ -205,17 +225,17 @@ class Bytecode:
                 )
             )
 
-        (n_strings,) = struct.unpack("<I", take(4))
+        n_strings = read_count("string table", MAX_STRINGS, 4)
         strings: List[str] = []
         for _ in range(n_strings):
             (blen,) = struct.unpack("<I", take(4))
             if blen > MAX_STRING_BYTES:
-                raise ValueError(
+                raise AxiomBytecodeError(
                     f"bytecode string exceeds {MAX_STRING_BYTES} byte limit"
                 )
             strings.append(take(blen).decode("utf-8"))
 
-        (n_ins,) = struct.unpack("<I", take(4))
+        n_ins = read_count("instruction", MAX_INSTRUCTIONS, 1)
         ins: List[Instr] = []
         for _ in range(n_ins):
             (op,) = struct.unpack("<B", take(1))
@@ -224,12 +244,14 @@ class Bytecode:
                 ins.append(Instr(op, int(v)))
             elif op == Op.CONST_BOOL:
                 if minor < 9:
-                    raise ValueError("CONST_BOOL requires bytecode version 0.9+")
+                    raise AxiomBytecodeError("CONST_BOOL requires bytecode version 0.9+")
                 (v,) = struct.unpack("<B", take(1))
                 ins.append(Instr(op, int(v)))
             elif op == Op.CONST_STRING:
                 if minor < 8:
-                    raise ValueError("CONST_STRING requires bytecode version 0.8+")
+                    raise AxiomBytecodeError(
+                        "CONST_STRING requires bytecode version 0.8+"
+                    )
                 (index,) = struct.unpack("<I", take(4))
                 ins.append(Instr(op, int(index)))
             elif op == Op.MAKE_ARRAY:
@@ -254,10 +276,10 @@ class Bytecode:
 
         modules: List[ModuleMeta] = []
         if minor >= 7 and off < len(mv):
-            (n_modules,) = struct.unpack("<I", take(4))
+            n_modules = read_count("module", MAX_MODULES, 8)
             for _ in range(n_modules):
                 (namespace_index,) = struct.unpack("<I", take(4))
-                (n_entries,) = struct.unpack("<I", take(4))
+                n_entries = read_count("module entry", MAX_MODULE_ENTRIES, 4)
                 function_indices: List[int] = []
                 for _ in range(n_entries):
                     (function_index,) = struct.unpack("<I", take(4))

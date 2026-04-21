@@ -4,6 +4,11 @@ This project uses a tiny custom binary format (no deps) to keep the bootstrap su
 
 All integers are little-endian.
 
+Decoders reject count fields above implementation limits before iterating:
+1,000,000 strings, 10,000,000 instructions, 10,000 modules, and 100,000
+function entries per module. Declared counts must also fit in the remaining
+bytecode payload at the minimum bytes required for each item.
+
 ## File layout
 
 - 4 bytes: magic `AXBC`
