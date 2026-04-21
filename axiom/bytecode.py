@@ -9,6 +9,7 @@ from .errors import AxiomCompileError
 MAGIC = b"AXBC"
 VERSION_MAJOR = 0
 VERSION_MINOR = 11
+MAX_STRING_BYTES = 64 * 1024 * 1024
 
 
 class Op:
@@ -101,6 +102,10 @@ class Bytecode:
         out += struct.pack("<I", len(self.strings))
         for s in self.strings:
             b = s.encode("utf-8")
+            if len(b) > MAX_STRING_BYTES:
+                raise AxiomCompileError(
+                    f"bytecode string exceeds {MAX_STRING_BYTES} byte limit"
+                )
             out += struct.pack("<I", len(b))
             out += b
 
@@ -204,6 +209,10 @@ class Bytecode:
         strings: List[str] = []
         for _ in range(n_strings):
             (blen,) = struct.unpack("<I", take(4))
+            if blen > MAX_STRING_BYTES:
+                raise ValueError(
+                    f"bytecode string exceeds {MAX_STRING_BYTES} byte limit"
+                )
             strings.append(take(blen).decode("utf-8"))
 
         (n_ins,) = struct.unpack("<I", take(4))

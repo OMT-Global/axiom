@@ -23,7 +23,7 @@ All integers are little-endian.
       - u32: upvalue index (local slot or outer upvalue slot)
 - u32: string_table_count (N)
 - N times:
-  - u32: byte_len
+  - u32: byte_len (must be <= 64 MiB)
   - bytes: UTF-8 string
 - u32: instruction_count (M)
 - M times:
