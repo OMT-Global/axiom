@@ -16,7 +16,7 @@ from axiom.ast import (
     TypeRef,
     VarRef,
 )
-from axiom.bytecode import Bytecode, Instr, Op, VERSION_MINOR
+from axiom.bytecode import Bytecode, FunctionMeta, Instr, Op, VERSION_MINOR
 from axiom.errors import AxiomCompileError, AxiomParseError, AxiomRuntimeError
 from axiom.host import (
     MAX_POW_BASE,
@@ -159,6 +159,94 @@ class RuntimeErrorTests(unittest.TestCase):
         out = io.StringIO()
         Vm(locals_count=decoded.locals_count).run(decoded, out)
         self.assertEqual(out.getvalue(), "hi\n")
+
+    def test_vm_rejects_jump_target_past_instruction_end(self) -> None:
+        bc = Bytecode(
+            strings=[],
+            instructions=[Instr(Op.JMP, 2), Instr(Op.HALT)],
+            locals_count=0,
+            functions=[],
+        )
+
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+
+        self.assertIn(
+            "jump target 2 out of bounds (instruction count 2)",
+            str(cm.exception),
+        )
+
+    def test_vm_rejects_negative_jump_target(self) -> None:
+        bc = Bytecode(
+            strings=[],
+            instructions=[Instr(Op.JMP, -1), Instr(Op.HALT)],
+            locals_count=0,
+            functions=[],
+        )
+
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+
+        self.assertIn(
+            "jump target -1 out of bounds (instruction count 2)",
+            str(cm.exception),
+        )
+
+    def test_vm_rejects_conditional_jump_target_past_instruction_end(self) -> None:
+        bc = Bytecode(
+            strings=[],
+            instructions=[
+                Instr(Op.CONST_BOOL, 0),
+                Instr(Op.JMP_IF_FALSE, 3),
+                Instr(Op.HALT),
+            ],
+            locals_count=0,
+            functions=[],
+        )
+
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+
+        self.assertIn(
+            "conditional jump target 3 out of bounds (instruction count 3)",
+            str(cm.exception),
+        )
+
+    def test_vm_rejects_call_entry_past_instruction_end(self) -> None:
+        bc = Bytecode(
+            strings=["f"],
+            instructions=[Instr(Op.CALL, 0), Instr(Op.HALT)],
+            locals_count=0,
+            functions=[FunctionMeta(name_index=0, entry=2, arity=0, locals_count=0)],
+        )
+
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+
+        self.assertIn(
+            "call target 0 entry 2 out of bounds (instruction count 2)",
+            str(cm.exception),
+        )
+
+    def test_vm_rejects_indirect_call_entry_past_instruction_end(self) -> None:
+        bc = Bytecode(
+            strings=["f"],
+            instructions=[
+                Instr(Op.LOAD_FN, 0),
+                Instr(Op.CALL_INDIRECT, 0),
+                Instr(Op.HALT),
+            ],
+            locals_count=0,
+            functions=[FunctionMeta(name_index=0, entry=3, arity=0, locals_count=0)],
+        )
+
+        with self.assertRaises(AxiomRuntimeError) as cm:
+            Vm(locals_count=bc.locals_count).run(bc, io.StringIO())
+
+        self.assertIn(
+            "indirect call target 0 entry 3 out of bounds (instruction count 3)",
+            str(cm.exception),
+        )
 
     def test_runtime_host_print_requires_explicit_allow(self) -> None:
         with self.assertRaises(AxiomRuntimeError):

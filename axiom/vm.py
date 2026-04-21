@@ -166,7 +166,7 @@ class Vm:
                 self._locals = new_locals
                 self._upvalues = new_upvalues
                 self._current_function = call_idx
-                self.ip = fn.entry
+                self._set_ip(fn.entry, len(ins), f"call target {call_idx} entry")
             elif i.op == Op.HOST_CALL:
                 if i.arg is None:
                     raise AxiomRuntimeError("host call missing arg")
@@ -216,17 +216,17 @@ class Vm:
                 self._locals = frame.locals
                 self._upvalues = frame.upvalues
                 self._current_function = frame.function_index
-                self.ip = frame.ret_ip
+                self._set_ip(frame.ret_ip, len(ins), "return address")
                 self.stack.append(result)
             elif i.op == Op.JMP:
-                self.ip = int(i.arg)
+                self._set_ip(int(i.arg), len(ins), "jump target")
             elif i.op == Op.JMP_IF_FALSE:
                 if not self.stack:
                     raise AxiomRuntimeError("stack underflow on JMP_IF_FALSE")
                 cond = self.stack.pop()
                 try:
                     if not require_condition_bool(cond):
-                        self.ip = int(i.arg)
+                        self._set_ip(int(i.arg), len(ins), "conditional jump target")
                 except ValueError as e:
                     raise AxiomRuntimeError(str(e)) from e
             elif i.op == Op.PRINT:
@@ -303,7 +303,11 @@ class Vm:
                 self._locals = new_locals
                 self._upvalues = new_upvalues
                 self._current_function = fn_idx
-                self.ip = fn.entry
+                self._set_ip(
+                    fn.entry,
+                    len(ins),
+                    f"indirect call target {fn_idx} entry",
+                )
             else:
                 raise AxiomRuntimeError(f"unknown opcode {i.op}")
 
@@ -315,6 +319,14 @@ class Vm:
         b = self.stack.pop()
         a = self.stack.pop()
         return b, a
+
+    def _set_ip(self, target: int, instruction_count: int, context: str) -> None:
+        if target < 0 or target >= instruction_count:
+            raise AxiomRuntimeError(
+                f"{context} {target} out of bounds "
+                f"(instruction count {instruction_count})"
+            )
+        self.ip = target
 
     def _call_host_fn(self, fn_id: int, args: List[Value], out: TextIO) -> Value:
         if fn_id not in HOST_BUILTIN_BY_ID:
