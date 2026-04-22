@@ -1,8 +1,7 @@
 # Axiom package manifest
 
 Stage1 packages use `axiom.toml` with a deterministic `axiom.lock` lockfile.
-The retired JSON `axiom.pkg` manifest belonged to the removed Python runtime and
-is no longer supported.
+The `axiom.pkg` manifest format is no longer supported.
 
 ## Common Commands
 

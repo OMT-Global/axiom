@@ -1,7 +1,6 @@
 # Axiom kernel
 
-This kernel note describes the supported Rust `axiomc` path. The removed Python
-runtime and bytecode VM are no longer part of the executable contract.
+This kernel note describes the supported Rust `axiomc` path.
 
 ## Values
 

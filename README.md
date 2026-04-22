@@ -1,9 +1,7 @@
 # Axiom
 
 Axiom is a small experimental programming language. The supported toolchain is
-now the Rust bootstrap compiler in `stage1/`; the former Python reference
-implementation, bytecode VM, Python tests, and Python package metadata have been
-retired.
+the Rust bootstrap compiler in `stage1/`.
 
 ## Current Status
 
@@ -17,8 +15,8 @@ Axiom currently supports a Rust-only `axiomc` workflow with:
 - A stage1 conformance corpus under `stage1/conformance`.
 - Synthetic standard library modules under the `std/` import prefix.
 
-The old Python command path is no longer supported. Use `cargo run
---manifest-path stage1/Cargo.toml -p axiomc -- ...` or the Make targets below.
+Use `cargo run --manifest-path stage1/Cargo.toml -p axiomc -- ...` or the Make
+targets below.
 
 ## Example
 
@@ -100,10 +98,3 @@ See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and
 - `stage1/conformance/`: Rust-run pass/fail conformance fixtures.
 - `docs/`: language, package, bootstrap, and roadmap documentation.
 - `scripts/ci/`: local and CI validation entrypoints.
-
-## Python Exit
-
-The Python reference implementation has been removed from the supported path.
-Repository validation should not import Python `axiom` modules or depend on
-Python package metadata. New language behavior should be proven with Rust crate
-tests, `stage1/conformance`, and package-level `axiomc test` fixtures.
