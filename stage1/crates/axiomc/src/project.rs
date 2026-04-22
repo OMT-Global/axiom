@@ -92,8 +92,20 @@ pub struct TestCaseResult {
     pub stdout: String,
     pub stderr: String,
     pub expected_stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_error: Option<ExpectedDiagnostic>,
     pub duration_ms: u64,
     pub error: Option<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExpectedDiagnostic {
+    pub kind: String,
+    pub code: Option<String>,
+    pub message: String,
+    pub path: String,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -306,6 +318,29 @@ pub fn run_project_tests_with_options(
     {
         let manifest = graph.context(&package_root)?.manifest.clone();
         validate_lockfile(&package_root, &manifest)?;
+        if expected_error_path(&package_root).exists() {
+            let case_name = manifest
+                .package
+                .as_ref()
+                .map(|package| package.name.clone())
+                .unwrap_or_else(|| package_root.display().to_string());
+            let entry = manifest.build.entry.clone();
+            if options
+                .filter
+                .as_deref()
+                .map(|filter| case_name.contains(filter) || entry.contains(filter))
+                .unwrap_or(true)
+            {
+                packages.push(package_root.display().to_string());
+                cases.push(run_compile_fail_case(
+                    &package_root,
+                    &graph,
+                    &manifest,
+                    &case_name,
+                ));
+            }
+            continue;
+        }
         let tests = collect_test_targets(&package_root, &manifest, options.filter.as_deref())?;
         if tests.is_empty() {
             continue;
@@ -527,7 +562,8 @@ fn analyze_entry(
     let modules = load_modules(graph, package_root, &entry)?;
     validate_module_capabilities(graph, &modules)?;
     let flattened = flatten_modules(graph, &modules)?;
-    let hir = hir::lower_with_capabilities(&flattened, &manifest.capabilities)?;
+    let hir = hir::lower_with_capabilities(&flattened, &manifest.capabilities)
+        .map_err(|error| diagnostic_with_default_path(error, &entry))?;
     let mir = mir::lower(&hir);
     Ok(AnalyzedProject {
         manifest,
@@ -1137,6 +1173,7 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
+            expected_error: None,
             duration_ms: started.elapsed().as_millis() as u64,
             error: Some(error),
         };
@@ -1201,6 +1238,7 @@ fn run_test_case(
                 stdout,
                 stderr,
                 expected_stdout: test.stdout.clone(),
+                expected_error: None,
                 duration_ms: started.elapsed().as_millis() as u64,
                 error,
             }
@@ -1216,6 +1254,7 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
+            expected_error: None,
             duration_ms: started.elapsed().as_millis() as u64,
             error: Some(
                 Diagnostic::new(
@@ -1226,6 +1265,152 @@ fn run_test_case(
             ),
         },
     }
+}
+
+fn run_compile_fail_case(
+    project_root: &Path,
+    graph: &PackageGraph,
+    manifest: &Manifest,
+    case_name: &str,
+) -> TestCaseResult {
+    let started = Instant::now();
+    let expected = match load_expected_error(project_root) {
+        Ok(expected) => expected,
+        Err(error) => {
+            return TestCaseResult {
+                package_root: project_root.display().to_string(),
+                name: case_name.to_string(),
+                entry: manifest.build.entry.clone(),
+                ok: false,
+                binary: None,
+                generated_rust: None,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                expected_stdout: None,
+                expected_error: None,
+                duration_ms: started.elapsed().as_millis() as u64,
+                error: Some(error),
+            };
+        }
+    };
+    let entry_path = project_root.join(&manifest.build.entry);
+    let actual = match analyze_entry(graph, project_root, manifest.clone(), entry_path.clone()) {
+        Ok(_) => {
+            return TestCaseResult {
+                package_root: project_root.display().to_string(),
+                name: case_name.to_string(),
+                entry: manifest.build.entry.clone(),
+                ok: false,
+                binary: None,
+                generated_rust: None,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                expected_stdout: None,
+                expected_error: Some(expected),
+                duration_ms: started.elapsed().as_millis() as u64,
+                error: Some(
+                    Diagnostic::new(
+                        "test",
+                        format!("compile-fail fixture {case_name:?} checked successfully"),
+                    )
+                    .with_path(entry_path.display().to_string()),
+                ),
+            };
+        }
+        Err(error) => diagnostic_with_default_path(error, &entry_path),
+    };
+    let mismatch = expected_error_mismatch(project_root, &expected, &actual);
+    TestCaseResult {
+        package_root: project_root.display().to_string(),
+        name: case_name.to_string(),
+        entry: manifest.build.entry.clone(),
+        ok: mismatch.is_none(),
+        binary: None,
+        generated_rust: None,
+        exit_code: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        expected_stdout: None,
+        expected_error: Some(expected),
+        duration_ms: started.elapsed().as_millis() as u64,
+        error: mismatch.map(|message| {
+            Diagnostic::new("test", message)
+                .with_path(expected_error_path(project_root).display().to_string())
+        }),
+    }
+}
+
+fn expected_error_path(project_root: &Path) -> PathBuf {
+    project_root.join("expected-error.json")
+}
+
+fn load_expected_error(project_root: &Path) -> Result<ExpectedDiagnostic, Diagnostic> {
+    let path = expected_error_path(project_root);
+    let content = fs::read_to_string(&path).map_err(|err| {
+        Diagnostic::new("test", format!("failed to read {}: {err}", path.display()))
+            .with_path(path.display().to_string())
+    })?;
+    serde_json::from_str(&content).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("invalid expected-error.json at {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })
+}
+
+fn expected_error_mismatch(
+    project_root: &Path,
+    expected: &ExpectedDiagnostic,
+    actual: &Diagnostic,
+) -> Option<String> {
+    let actual_path = actual
+        .path
+        .as_deref()
+        .map(|path| relative_diagnostic_path(project_root, path))
+        .unwrap_or_default();
+    let actual_line = actual.line.unwrap_or_default();
+    let actual_column = actual.column.unwrap_or_default();
+    if actual.kind == expected.kind
+        && actual.code == expected.code
+        && actual.message == expected.message
+        && actual_path == expected.path
+        && actual_line == expected.line
+        && actual_column == expected.column
+    {
+        return None;
+    }
+    Some(format!(
+        "compile-fail diagnostic mismatch: expected kind={:?} code={:?} message={:?} path={:?} line={} column={}, got kind={:?} code={:?} message={:?} path={:?} line={} column={}",
+        expected.kind,
+        expected.code,
+        expected.message,
+        expected.path,
+        expected.line,
+        expected.column,
+        actual.kind,
+        actual.code,
+        actual.message,
+        actual_path,
+        actual_line,
+        actual_column,
+    ))
+}
+
+fn relative_diagnostic_path(project_root: &Path, path: &str) -> String {
+    let path = normalize_path(path);
+    path.strip_prefix(project_root)
+        .map(|relative| relative.display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
+fn diagnostic_with_default_path(mut diagnostic: Diagnostic, path: &Path) -> Diagnostic {
+    if diagnostic.path.is_none() {
+        diagnostic.path = Some(path.display().to_string());
+    }
+    diagnostic
 }
 
 #[cfg(test)]
@@ -1282,6 +1467,7 @@ fn failed_test_case_result(
         stdout: String::new(),
         stderr: String::new(),
         expected_stdout: test.stdout.clone(),
+        expected_error: None,
         duration_ms: started.elapsed().as_millis() as u64,
         error: Some(error),
     }

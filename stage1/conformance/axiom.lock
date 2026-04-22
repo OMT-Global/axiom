@@ -1,0 +1,22 @@
+version = 1
+
+[[package]]
+name = "conformance-mutable-borrow-while-shared-live"
+version = "0.1.0"
+source = "path:fail/mutable_borrow_while_shared_live"
+
+[[package]]
+name = "conformance-ownership-use-after-move"
+version = "0.1.0"
+source = "path:fail/ownership_use_after_move"
+
+[[package]]
+name = "conformance-result-ok-without-context"
+version = "0.1.0"
+source = "path:fail/result_ok_without_context"
+
+[[package]]
+name = "conformance-stdlib-clock-without-capability"
+version = "0.1.0"
+source = "path:fail/stdlib_clock_without_capability"
+

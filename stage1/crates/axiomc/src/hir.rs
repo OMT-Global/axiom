@@ -2783,7 +2783,7 @@ fn lower_stmt(
             let borrowed_owners =
                 binding_borrowed_owners_from_expr(&expected, &lowered_expr, env, ctx);
             if let Some(borrow_kind) = borrow_kind_for_type(&expected, ctx.structs, ctx.enums) {
-                increment_active_borrows(&borrowed_owners, env, borrow_kind)?;
+                increment_active_borrows(&borrowed_owners, env, borrow_kind, *line, *column)?;
             }
             if !actual.is_copy() {
                 move_lowered_value(&lowered_expr, env)?;
@@ -2993,7 +2993,7 @@ fn lower_stmt(
             if let Some(borrow_kind) = match_borrow_kind
                 && !reuse_existing_match_binding
             {
-                increment_active_borrows(&match_borrowed_owners, env, borrow_kind)?;
+                increment_active_borrows(&match_borrowed_owners, env, borrow_kind, *line, *column)?;
             }
             if matches!(lowered_expr, Expr::VarRef { .. }) && !lowered_expr.ty().is_copy() {
                 move_lowered_owner_value(&lowered_expr, env)?;
@@ -6112,6 +6112,8 @@ fn increment_active_borrows(
     owner_names: &HashSet<String>,
     env: &mut HashMap<String, Binding>,
     borrow_kind: BorrowKind,
+    line: usize,
+    column: usize,
 ) -> Result<(), Diagnostic> {
     for owner_name in owner_names {
         let binding = env.get_mut(owner_name).ok_or_else(|| {
@@ -6127,7 +6129,8 @@ fn increment_active_borrows(
                     format!(
                         "cannot create shared borrow of value {owner_name:?} while a mutable borrow is still live"
                     ),
-                ));
+                )
+                .with_span(line, column));
             }
             BorrowKind::Mutable if binding.active_mut_borrow_count > 0 => {
                 return Err(ownership_error(
@@ -6135,7 +6138,8 @@ fn increment_active_borrows(
                     format!(
                         "cannot create mutable borrow of value {owner_name:?} while another mutable borrow is still live"
                     ),
-                ));
+                )
+                .with_span(line, column));
             }
             BorrowKind::Mutable if binding.active_borrow_count > 0 => {
                 return Err(ownership_error(
@@ -6143,7 +6147,8 @@ fn increment_active_borrows(
                     format!(
                         "cannot create mutable borrow of value {owner_name:?} while a shared borrow is still live"
                     ),
-                ));
+                )
+                .with_span(line, column));
             }
             _ => {}
         }
@@ -6165,7 +6170,7 @@ fn record_temporary_borrows(
     let Some(borrow_kind) = borrow_kind_for_type(expr.ty(), ctx.structs, ctx.enums) else {
         return Ok(());
     };
-    increment_active_borrows(&owners, env, borrow_kind)?;
+    increment_active_borrows(&owners, env, borrow_kind, 0, 0)?;
     temporary_borrows.push((owners, borrow_kind));
     Ok(())
 }

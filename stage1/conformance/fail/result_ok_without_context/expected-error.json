@@ -1,0 +1,9 @@
+{
+  "kind": "type",
+  "code": null,
+  "message": "Ok requires an expected Result<T, E> context",
+  "path": "src/main.ax",
+  "line": 1,
+  "column": 7
+}
+
