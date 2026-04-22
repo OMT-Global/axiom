@@ -18,7 +18,5 @@ make stage1-smoke
 ## Bootstrap discipline
 Treat the repo as a staged bootstrap:
 - Rust `stage1/` is the supported compiler and runtime path.
-- Removed Python implementation behavior should not be reintroduced through CI,
-  packaging, or documentation.
 - Language behavior should be proven with Rust crate tests, `stage1/conformance`,
   and `axiomc test` package fixtures.
