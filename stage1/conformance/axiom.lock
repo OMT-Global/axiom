@@ -20,3 +20,27 @@ name = "conformance-stdlib-clock-without-capability"
 version = "0.1.0"
 source = "path:fail/stdlib_clock_without_capability"
 
+[[package]]
+name = "conformance-collection-operations"
+version = "0.1.0"
+source = "path:pass/collection_operations"
+
+[[package]]
+name = "conformance-functions-across-modules"
+version = "0.1.0"
+source = "path:pass/functions_across_modules"
+
+[[package]]
+name = "conformance-outcome-control-flow"
+version = "0.1.0"
+source = "path:pass/outcome_control_flow"
+
+[[package]]
+name = "conformance-package-local-modules"
+version = "0.1.0"
+source = "path:pass/package_local_modules"
+
+[[package]]
+name = "conformance-struct-field-access"
+version = "0.1.0"
+source = "path:pass/struct_field_access"

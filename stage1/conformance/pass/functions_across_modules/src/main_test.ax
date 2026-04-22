@@ -1,0 +1,9 @@
+import "math.ax"
+
+fn pair_total(left: int, right: int): int {
+return add(left, right)
+}
+
+print pair_total(3, 5)
+print twice(6) + 1
+print add(pair_total(8, 5), add(3, 5))

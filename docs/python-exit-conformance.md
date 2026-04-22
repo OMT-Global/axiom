@@ -24,6 +24,25 @@ Current negative fixtures cover:
 - `stdlib_clock_without_capability`: rejects clock runtime intrinsic use when
   `[capabilities].clock` is disabled.
 
+## Executable Rust Coverage
+
+Executable fixtures live under `stage1/conformance/pass`. Each fixture is a
+complete package and includes `expected-output.txt` so the runner compiles and
+executes the Rust-generated binary, then checks stdout.
+
+Current executable fixtures cover:
+
+- `functions_across_modules`: function calls and return values imported from a
+  sibling module.
+- `struct_field_access`: struct construction, field access, and passing a
+  struct through a function.
+- `outcome_control_flow`: `Option` and `Result` construction plus `match`
+  control flow.
+- `collection_operations`: standard collection helpers over arrays and
+  borrowed slices.
+- `package_local_modules`: nested package-local module imports that execute
+  successfully.
+
 ## Remaining Gaps
 
 The corpus should still grow before Python stage0 retirement. Remaining
@@ -31,5 +50,6 @@ negative-semantic gaps include broader mutable/shared aliasing shapes, `Err`
 and `?` result propagation failures, non-exhaustive and malformed enum/result
 matches, runtime boundary denials for the other capability-gated stdlib
 surfaces, and package/module visibility edge cases that are not yet represented
-as conformance fixtures.
-
+as conformance fixtures. Executable gaps include richer enum payloads,
+cross-package dependency execution, mutation-heavy collection workflows, and
+stdlib capability success paths.

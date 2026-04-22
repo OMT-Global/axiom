@@ -1,0 +1,7 @@
+pub fn add(left: int, right: int): int {
+return left + right
+}
+
+pub fn twice(value: int): int {
+return add(value, value)
+}

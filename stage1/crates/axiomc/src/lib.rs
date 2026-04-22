@@ -3077,17 +3077,27 @@ mod tests {
     }
 
     #[test]
-    fn conformance_compile_fail_corpus_reports_stable_diagnostics() {
+    fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 4);
-        assert_eq!(output.passed, 4);
+        assert_eq!(output.cases.len(), 9);
+        assert_eq!(output.passed, 9);
         assert_eq!(output.failed, 0);
         assert!(
             output
                 .cases
                 .iter()
-                .all(|case| case.expected_error.is_some())
+                .filter(|case| case.expected_error.is_some())
+                .count()
+                == 4
+        );
+        assert_eq!(
+            output
+                .cases
+                .iter()
+                .filter(|case| case.expected_stdout.is_some())
+                .count(),
+            5
         );
     }
 

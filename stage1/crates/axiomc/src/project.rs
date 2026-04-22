@@ -376,6 +376,13 @@ fn collect_test_targets(
     filter: Option<&str>,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let mut tests = manifest.tests.clone();
+    if let Some(expected_stdout) = load_package_expected_output(project_root)? {
+        for test in &mut tests {
+            if test.stdout.is_none() {
+                test.stdout = Some(expected_stdout.clone());
+            }
+        }
+    }
     let mut seen_entries = tests
         .iter()
         .map(|test| test.entry.clone())
@@ -398,8 +405,14 @@ fn discover_test_targets(
     if !src_root.exists() {
         return Ok(Vec::new());
     }
+    let package_expected_output = load_package_expected_output(project_root)?;
     let mut tests = Vec::new();
-    collect_discovered_tests(project_root, &src_root, &mut tests)?;
+    collect_discovered_tests(
+        project_root,
+        &src_root,
+        package_expected_output.as_deref(),
+        &mut tests,
+    )?;
     tests.sort_by(|left, right| left.entry.cmp(&right.entry));
     Ok(tests)
 }
@@ -407,6 +420,7 @@ fn discover_test_targets(
 fn collect_discovered_tests(
     project_root: &Path,
     dir: &Path,
+    package_expected_output: Option<&str>,
     tests: &mut Vec<crate::manifest::TestTarget>,
 ) -> Result<(), Diagnostic> {
     let entries = fs::read_dir(dir).map_err(|err| {
@@ -420,7 +434,7 @@ fn collect_discovered_tests(
         })?;
         let path = entry.path();
         if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            collect_discovered_tests(project_root, &path, tests)?;
+            collect_discovered_tests(project_root, &path, package_expected_output, tests)?;
             continue;
         }
         if path.extension().and_then(|value| value.to_str()) != Some("ax") {
@@ -444,7 +458,7 @@ fn collect_discovered_tests(
                 .with_path(stdout_path.display().to_string())
             })?)
         } else {
-            None
+            package_expected_output.map(str::to_string)
         };
         tests.push(crate::manifest::TestTarget {
             name: relative.with_extension("").display().to_string(),
@@ -453,6 +467,17 @@ fn collect_discovered_tests(
         });
     }
     Ok(())
+}
+
+fn load_package_expected_output(project_root: &Path) -> Result<Option<String>, Diagnostic> {
+    let path = project_root.join("expected-output.txt");
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path).map(Some).map_err(|err| {
+        Diagnostic::new("test", format!("failed to read {}: {err}", path.display()))
+            .with_path(path.display().to_string())
+    })
 }
 
 pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescriptor>, Diagnostic> {
