@@ -1,9 +1,0 @@
-let s = "hello world"
-print host.string.len(s)
-print host.string.contains(s, "world")
-print host.string.contains(s, "xyz")
-print host.string.starts_with(s, "hello")
-print host.string.ends_with(s, "world")
-print host.string.slice(s, 0, 5)
-print host.string.to_int("42")
-print host.string.concat("foo", "bar")

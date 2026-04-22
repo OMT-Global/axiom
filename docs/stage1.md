@@ -1,11 +1,8 @@
 # Stage1 bootstrap
 
-This repo now has two tracks:
-
-- `stage0`: the current Python implementation in `axiom/`, used as the reference
-  parser/checker/interpreter/VM and the conformance oracle for overlapping language behavior.
-- `stage1`: the Rust bootstrap compiler in `stage1/`, used to prove the long-term
-  native toolchain split without destabilizing stage0.
+The Rust bootstrap compiler in `stage1/` is now the supported Axiom toolchain.
+The former Python reference implementation has been removed from source,
+tests, packaging, and CI.
 
 ## Current bootstrap scope
 
@@ -18,8 +15,9 @@ The Rust compiler is intentionally small in this bootstrap slice:
 - `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
 - A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` struct field access and static tuple indexing now move only the named projection while keeping sibling projections available, non-`Copy` map indexing and array indexing still conservatively move the indexed owner projection, branch-local moves conservatively propagate after `if` and `match`, statically false `if` / `while` branches are now ignored instead of poisoning later ownership state, moving an outer non-`Copy` value inside a `while` body is rejected because the value would not be available on subsequent iterations, post-loop ownership state preserves the pre-loop state since the loop body may execute zero times, and live borrowed slices now block moving their owned collection roots until the borrow scope ends, including when those borrows are wrapped in local tuples, named structs, enum payloads, `Option` / `Result` values, passed through sibling expression evaluation, or introduced by temporary `match` expressions.
 
-This is not the final backend architecture. It is the smallest executable version of the
-stage0/stage1 split that can build a native hello-world and carry the 1.0 package model.
+This is not the final backend architecture. It is the smallest executable
+version of the native compiler path that can build a native hello-world and
+carry the 1.0 package model.
 
 ## Commands
 
@@ -162,7 +160,7 @@ Important bar definition:
 
 ## Working rules for future stage1 work
 
-- Keep `stage0` as the conformance oracle for overlapping features until stage1 owns the full language surface it implements.
-- Keep the current dual-track verification gate: `python -m unittest discover -v` for stage0 and `make stage1-test stage1-smoke` for stage1.
+- Keep the Rust-only verification gate green: `make stage1-test`,
+  `make stage1-conformance`, and `make stage1-smoke`.
 - Land stage1 slices in small, reviewable increments; do not combine data-model work, ownership work, and backend replacement in one change.
 - Prefer compile-fail tests for language rule changes before broad end-to-end examples.

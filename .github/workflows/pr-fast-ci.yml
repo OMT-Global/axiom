@@ -14,7 +14,6 @@ permissions:
 
 env:
   NODE_VERSION: '20'
-  PYTHON_VERSION: '3.12'
 
 defaults:
   run:
@@ -43,10 +42,7 @@ jobs:
               - 'docs/bootstrap/**'
               - 'README.md'
               - 'docs/**'
-              - 'axiom/**'
-              - 'tests/**'
               - 'stage1/**'
-              - 'pyproject.toml'
               - 'Makefile'
             ci:
               - 'project.bootstrap.yaml'
@@ -59,7 +55,6 @@ jobs:
               - 'docs/bootstrap/**'
               - '.env.example'
               - 'CODEOWNERS'
-              - 'pyproject.toml'
               - 'Makefile'
               - '.github/dependabot.yml'
 
@@ -75,6 +70,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4 pinned 2026-04-19
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable pinned 2026-04-19
 
       - name: Run fast checks
         run: bash scripts/ci/run-fast-checks.sh

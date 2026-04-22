@@ -1,30 +1,8 @@
-PYTHON ?= python
-AXIOM_BUILD_DIR ?= .axiom-build
-ARITH_BYTECODE ?= $(AXIOM_BUILD_DIR)/arith.axb
+.PHONY: test smoke stage1-test stage1-conformance stage1-smoke stage1-run
 
-.PHONY: test lint smoke interp compile vm stage1-test stage1-conformance stage1-smoke stage1-run
+test: stage1-test
 
-test:
-	$(PYTHON) -m unittest discover -v
-
-lint:
-	$(PYTHON) -m ruff check .
-
-smoke:
-	$(PYTHON) -m axiom check examples/arith.ax
-	$(PYTHON) -m axiom check tests/programs/bool_values.ax
-	$(PYTHON) -m axiom pkg check examples/typed_package
-	$(PYTHON) -m axiom pkg run examples/typed_package
-
-interp:
-	$(PYTHON) -m axiom interp examples/arith.ax
-
-compile:
-	mkdir -p "$(AXIOM_BUILD_DIR)"
-	$(PYTHON) -m axiom compile examples/arith.ax -o "$(ARITH_BYTECODE)"
-
-vm: compile
-	$(PYTHON) -m axiom vm "$(ARITH_BYTECODE)"
+smoke: stage1-smoke
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
