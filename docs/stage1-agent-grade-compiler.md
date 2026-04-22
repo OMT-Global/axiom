@@ -16,7 +16,7 @@ AG0 is the current entry floor and must remain intact before any downstream work
   arrays, maps, tuples, borrowed slices, `Option<T>`, `Result<T, E>`, and the
   ownership/bootstrap work captured by `stage1/examples/borrowed_shapes`.
 - The required verification gate remains:
-  - `python -m unittest discover -v`
+  - `make stage1-conformance`
   - `make stage1-test stage1-smoke`
 
 Entry rule:
@@ -31,7 +31,7 @@ The first workable-compiler bar is **agent-grade**, not direct-native parity.
 To count as agent-grade:
 
 - Stage1 must provide a complete end-user workflow through `axiomc`, without
-  depending on stage0 to build or run stage1 programs.
+  depending on the retired Python implementation to build or run stage1 programs.
 - The required public commands at this bar are:
   - `axiomc new`
   - `axiomc check`
@@ -140,7 +140,8 @@ Deliberate exclusions:
 
 Acceptance:
 
-- Stage1 examples can express generic wrappers and utility helpers without stage0 assistance.
+- Stage1 examples can express generic wrappers and utility helpers without
+  Python implementation assistance.
 - Generic borrow behavior is covered by both positive and compile-fail tests.
 
 ### AG3: Package graph, module rules, and capability enforcement
@@ -349,7 +350,7 @@ Agent-grade closure bar:
 - AG5 closure work depends on AG3 and AG4 being functional enough to support the
   CLI, worker, and HTTP-service fixtures.
 - Unless a change is truly stage1-only, keep the dual verification gate green:
-  - `python -m unittest discover -v`
+  - `make stage1-conformance`
   - `make stage1-test stage1-smoke`
 
 ## Post-threshold follow-ons

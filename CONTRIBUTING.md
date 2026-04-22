@@ -6,19 +6,19 @@ This repo is intentionally small and test-driven.
 - Keep the language kernel small and specified (`docs/kernel.md`).
 - Add features only with:
   - a spec update, and
-  - at least one conformance test in `tests/programs/`.
+  - at least one Rust-run conformance or package test under `stage1/`.
 
 ## Running tests
 ```bash
-python -m unittest discover -v
-python -m ruff check .
-make smoke
 make stage1-test
+make stage1-conformance
 make stage1-smoke
 ```
 
 ## Bootstrap discipline
 Treat the repo as a staged bootstrap:
-- Python `axiom/` is stage0 and remains the reference parser/checker/interpreter/VM.
-- Rust `stage1/` is the native compiler bootstrap and may support only a subset while it grows.
-- Overlapping language behavior should continue to be proven against stage0 before features are promoted.
+- Rust `stage1/` is the supported compiler and runtime path.
+- Removed Python implementation behavior should not be reintroduced through CI,
+  packaging, or documentation.
+- Language behavior should be proven with Rust crate tests, `stage1/conformance`,
+  and `axiomc test` package fixtures.

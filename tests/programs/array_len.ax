@@ -1,3 +1,0 @@
-let xs: int[] = [5, 10, 15, 20]
-let n: int = host.array.len(xs)
-print n

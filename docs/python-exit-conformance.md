@@ -43,11 +43,16 @@ Current executable fixtures cover:
 - `package_local_modules`: nested package-local module imports that execute
   successfully.
 
+## Python Exit Status
+
+The Python implementation, tests, and package metadata have been retired. The
+Rust conformance corpus is now the supported cross-feature proof surface.
+
 ## Remaining Gaps
 
-The corpus should still grow before Python stage0 retirement. Remaining
-negative-semantic gaps include broader mutable/shared aliasing shapes, `Err`
-and `?` result propagation failures, non-exhaustive and malformed enum/result
+The corpus should continue to grow after Python removal. Remaining
+negative-semantic gaps include broader mutable/shared aliasing shapes, `Err` and
+`?` result propagation failures, non-exhaustive and malformed enum/result
 matches, runtime boundary denials for the other capability-gated stdlib
 surfaces, and package/module visibility edge cases that are not yet represented
 as conformance fixtures. Executable gaps include richer enum payloads,
