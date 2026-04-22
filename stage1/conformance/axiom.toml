@@ -4,5 +4,9 @@ members = [
   "fail/ownership_use_after_move",
   "fail/result_ok_without_context",
   "fail/stdlib_clock_without_capability",
+  "pass/collection_operations",
+  "pass/functions_across_modules",
+  "pass/outcome_control_flow",
+  "pass/package_local_modules",
+  "pass/struct_field_access",
 ]
-

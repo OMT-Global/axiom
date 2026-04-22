@@ -2890,6 +2890,34 @@ mod tests {
     }
 
     #[test]
+    fn run_project_tests_uses_package_expected_output_for_manifest_cases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-package-golden");
+        create_project(&project, Some("runner-package-golden-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\n",
+                render_manifest("runner-package-golden-app")
+            ),
+        )
+        .expect("write manifest");
+        fs::write(project.join("src/math_test.ax"), "print 42\n").expect("write test");
+        fs::write(project.join("expected-output.txt"), "42\n").expect("write package golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 2);
+        assert_eq!(output.failed, 0);
+        let math_case = output
+            .cases
+            .iter()
+            .find(|case| case.name == "math-smoke")
+            .expect("math case");
+        assert_eq!(math_case.expected_stdout.as_deref(), Some("42\n"));
+        assert!(math_case.ok);
+    }
+
+    #[test]
     fn run_project_tests_reports_stdout_mismatch() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner-fail");
@@ -3077,17 +3105,27 @@ mod tests {
     }
 
     #[test]
-    fn conformance_compile_fail_corpus_reports_stable_diagnostics() {
+    fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 4);
-        assert_eq!(output.passed, 4);
+        assert_eq!(output.cases.len(), 9);
+        assert_eq!(output.passed, 9);
         assert_eq!(output.failed, 0);
         assert!(
             output
                 .cases
                 .iter()
-                .all(|case| case.expected_error.is_some())
+                .filter(|case| case.expected_error.is_some())
+                .count()
+                == 4
+        );
+        assert_eq!(
+            output
+                .cases
+                .iter()
+                .filter(|case| case.expected_stdout.is_some())
+                .count(),
+            5
         );
     }
 

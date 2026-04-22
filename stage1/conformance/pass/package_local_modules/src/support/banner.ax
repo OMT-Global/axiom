@@ -1,0 +1,3 @@
+pub fn banner(label: string): string {
+return label
+}
