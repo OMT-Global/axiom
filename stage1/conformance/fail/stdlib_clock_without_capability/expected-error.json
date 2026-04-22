@@ -1,0 +1,8 @@
+{
+  "kind": "capability",
+  "code": null,
+  "message": "call to \"clock_now_ms\" requires [capabilities].clock = true",
+  "path": "src/main.ax",
+  "line": 1,
+  "column": 11
+}

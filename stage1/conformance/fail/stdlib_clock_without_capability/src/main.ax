@@ -1,0 +1,2 @@
+let now: int = clock_now_ms()
+print now > 0

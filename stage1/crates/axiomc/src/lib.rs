@@ -104,6 +104,13 @@ mod tests {
             .join(case)
     }
 
+    fn conformance_fixture() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("conformance")
+    }
+
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
         command_for_executable(path).expect("prepare compiled binary command")
     }
@@ -3067,6 +3074,21 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[test]
+    fn conformance_compile_fail_corpus_reports_stable_diagnostics() {
+        let output =
+            run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
+        assert_eq!(output.cases.len(), 4);
+        assert_eq!(output.passed, 4);
+        assert_eq!(output.failed, 0);
+        assert!(
+            output
+                .cases
+                .iter()
+                .all(|case| case.expected_error.is_some())
+        );
     }
 
     #[test]

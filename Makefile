@@ -2,7 +2,7 @@ PYTHON ?= python
 AXIOM_BUILD_DIR ?= .axiom-build
 ARITH_BYTECODE ?= $(AXIOM_BUILD_DIR)/arith.axb
 
-.PHONY: test lint smoke interp compile vm stage1-test stage1-smoke stage1-run
+.PHONY: test lint smoke interp compile vm stage1-test stage1-conformance stage1-smoke stage1-run
 
 test:
 	$(PYTHON) -m unittest discover -v
@@ -28,6 +28,9 @@ vm: compile
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
+
+stage1-conformance:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
 
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
