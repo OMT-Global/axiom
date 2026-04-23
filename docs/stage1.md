@@ -1,6 +1,9 @@
 # Stage1 bootstrap
 
 The Rust bootstrap compiler in `stage1/` is now the supported Axiom toolchain.
+The Python `stage0` interpreter, bytecode compiler, bytecode format, bytecode
+VM, and disassembler are not supported execution surfaces; see
+[Python Exit VM Disposition](python-exit-vm-disposition.md).
 
 ## Current bootstrap scope
 

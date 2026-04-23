@@ -1,8 +1,11 @@
-.PHONY: test smoke stage1-test stage1-conformance stage1-smoke stage1-run
+.PHONY: test smoke docs-python-exit stage1-test stage1-conformance stage1-smoke stage1-run
 
-test: stage1-test
+test: docs-python-exit stage1-test
 
 smoke: stage1-smoke
+
+docs-python-exit:
+	bash scripts/ci/check-python-exit-docs.sh
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
