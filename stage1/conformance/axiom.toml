@@ -6,6 +6,7 @@ members = [
   "fail/stdlib_clock_without_capability",
   "pass/collection_operations",
   "pass/functions_across_modules",
+  "pass/legacy_core_programs",
   "pass/outcome_control_flow",
   "pass/package_local_modules",
   "pass/struct_field_access",

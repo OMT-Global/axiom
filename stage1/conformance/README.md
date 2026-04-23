@@ -14,6 +14,9 @@ and compares stdout to the package-level expected output.
 
 Current executable fixtures cover:
 
+- `legacy_core_programs`: migrated golden-program coverage for integer
+  addition, bools, `if/else`, `while false`, string concat/escapes, array
+  indexing, and array length.
 - `functions_across_modules`: function calls and return values imported from a
   sibling module.
 - `struct_field_access`: struct construction, field access, and passing a
