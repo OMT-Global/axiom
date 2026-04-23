@@ -1,8 +1,6 @@
 # Stage1 bootstrap
 
 The Rust bootstrap compiler in `stage1/` is now the supported Axiom toolchain.
-The former Python reference implementation has been removed from source,
-tests, packaging, and CI.
 
 ## Current bootstrap scope
 

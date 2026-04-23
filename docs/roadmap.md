@@ -1,8 +1,7 @@
 # Roadmap
 
-This file tracks the Rust compiler line under `stage1/`. The former Python
-reference implementation has been retired, so new work should target the
-Rust-only `axiomc` workflow.
+This file tracks the Rust compiler line under `stage1/`. New work should target
+the Rust-only `axiomc` workflow.
 
 ## Completed Foundations
 
