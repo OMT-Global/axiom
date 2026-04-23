@@ -90,8 +90,31 @@ if rg -n "$legacy_invocation" README.md docs scripts \
   exit 1
 fi
 
-if git ls-files --error-unmatch axiom tests pyproject.toml setup.py setup.cfg tox.ini \
-  >/dev/null 2>&1; then
+python_unittest="python -m unit""test"
+
+if rg -n "$python_unittest" .github scripts Makefile project.bootstrap.yaml; then
+  echo "CI still uses Python unittest as a language/runtime correctness gate" >&2
+  exit 1
+fi
+
+stage0_pathspecs=(
+  ':(glob)axiom/**'
+  ':(glob)tests/**'
+  ':(glob)requirements*.txt'
+  '.python-version'
+  'Pipfile'
+  'Pipfile.lock'
+  'poetry.lock'
+  'pyproject.toml'
+  'setup.cfg'
+  'setup.py'
+  'tox.ini'
+)
+
+tracked_stage0_files="$(git ls-files -- "${stage0_pathspecs[@]}")"
+
+if [[ -n "$tracked_stage0_files" ]]; then
   echo "Python stage0 source, tests, or packaging files are still tracked" >&2
+  printf '%s\n' "$tracked_stage0_files" >&2
   exit 1
 fi
