@@ -18,11 +18,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Create a new stage1 package with axiom.toml, axiom.lock, and starter source.
     New {
         path: PathBuf,
         #[arg(long)]
         name: Option<String>,
     },
+    /// Check a stage1 package or workspace member without building a binary.
     Check {
         path: PathBuf,
         #[arg(long)]
@@ -30,6 +32,7 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
+    /// Build a stage1 package into generated Rust and a native binary.
     Build {
         path: PathBuf,
         #[arg(long)]
@@ -41,11 +44,13 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
+    /// Build and run a stage1 package native binary.
     Run {
         path: PathBuf,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
+    /// Discover, build, and run package test entrypoints.
     Test {
         path: PathBuf,
         #[arg(long)]
@@ -55,6 +60,7 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
+    /// Inspect manifest capability requirements.
     Caps {
         path: Option<PathBuf>,
         #[arg(long)]
@@ -214,6 +220,18 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn help_describes_supported_stage1_workflows() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("Create a new stage1 package"));
+        assert!(help.contains("Check a stage1 package or workspace member"));
+        assert!(help.contains("Build a stage1 package into generated Rust"));
+        assert!(help.contains("Build and run a stage1 package native binary"));
+        assert!(help.contains("Discover, build, and run package test entrypoints"));
+        assert!(help.contains("Inspect manifest capability requirements"));
+    }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
         BuildOutput {
