@@ -25,6 +25,7 @@ required_patterns=(
   '`pkg build` | Use `axiomc build <package>`'
   '`pkg check` | Use `axiomc check <package>`'
   '`pkg run` | Use `axiomc run <package>`'
+  'package tests | Use `axiomc test <package>`'
   '`pkg clean` | Retire'
   '`pkg manifest` | Retire as a separate command'
   '`host list` | Retire'

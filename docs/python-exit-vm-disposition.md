@@ -50,6 +50,7 @@ binary.
 | `pkg build` | Use `axiomc build <package>`. |
 | `pkg check` | Use `axiomc check <package>`. |
 | `pkg run` | Use `axiomc run <package>`. |
+| package tests | Use `axiomc test <package>` for discovered package test entrypoints. |
 | `pkg clean` | Retire. Stage1 build artifacts are ordinary package output under the manifest `out_dir`; remove that directory when a clean tree is needed. |
 | `pkg manifest` | Retire as a separate command. `axiom.toml` and `axiom.lock` are the supported package metadata surfaces, and `axiomc caps <package> --json` reports capability metadata. |
 | `host list` | Retire. Python host discovery is not part of the Rust-supported execution path. |
