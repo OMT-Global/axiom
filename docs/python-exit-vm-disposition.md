@@ -6,6 +6,8 @@ Parent issue: [#265](https://github.com/OMT-Global/axiom/issues/265)
 
 Governing issue: [#269](https://github.com/OMT-Global/axiom/issues/269)
 
+Parity gate: [Python Exit Parity Gate](python-exit-parity-gate.md)
+
 ## Decision
 
 Axiom will retire the Python `stage0` interpreter, bytecode compiler, bytecode
@@ -71,6 +73,9 @@ binary.
   tracked by [#271](https://github.com/OMT-Global/axiom/issues/271).
 - Source deletion remains the final cleanup, tracked by
   [#272](https://github.com/OMT-Global/axiom/issues/272).
+  That issue remains blocked on the
+  [Python Exit Parity Gate](python-exit-parity-gate.md) having no `blocked`
+  rows.
 - A future direct native backend remains separate longer-term work and is not
   required for Python exit; see
   [#105](https://github.com/OMT-Global/axiom/issues/105).
