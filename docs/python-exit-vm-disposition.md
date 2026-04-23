@@ -61,7 +61,8 @@ binary.
 - Final Python deletion is not blocked on bytecode VM ownership.
 - Any behavior formerly protected by Python VM tests must move into Rust-owned
   coverage before deletion, tracked by
-  [#267](https://github.com/OMT-Global/axiom/issues/267).
+  [#267](https://github.com/OMT-Global/axiom/issues/267) and inventoried in
+  [Python Exit Conformance](python-exit-conformance.md).
 - CLI, package, and user-facing workflows must stay `axiomc`-owned, tracked by
   [#268](https://github.com/OMT-Global/axiom/issues/268).
 - Rust-only CI gates replace dual Python/Rust language gates, tracked by
