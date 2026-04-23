@@ -3,6 +3,10 @@
 This file tracks the Rust compiler line under `stage1/`. New work should target
 the Rust-only `axiomc` workflow.
 
+The Python `stage0` interpreter and bytecode VM are retired as supported
+implementation surfaces; see
+[Python Exit VM Disposition](python-exit-vm-disposition.md).
+
 ## Completed Foundations
 
 - Package manifests with `axiom.toml` and `axiom.lock`.
