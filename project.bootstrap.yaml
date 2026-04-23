@@ -86,8 +86,8 @@ ci:
   fastChecks:
     - stage1-test
     - stage1-conformance
-  extendedChecks:
     - stage1-smoke
+  extendedChecks: []
   nightlyCron: 0 7 * * *
 agents:
   manageCodexHome: true
