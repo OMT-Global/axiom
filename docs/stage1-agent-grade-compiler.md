@@ -65,7 +65,7 @@ Deliverables:
 
 - Borrowed slices remain valid inside named structs and enum payloads.
 - `stage1/examples/borrowed_shapes` stays in the checked-in example set.
-- `make stage1-test stage1-smoke` covers the current example matrix.
+- `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` cover the current language gate.
 - `docs/stage1.md` remains the short status page and links to this doc.
 
 Acceptance:
