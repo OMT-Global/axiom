@@ -4,7 +4,8 @@ Axiom is a small experimental programming language. The supported toolchain is
 the Rust bootstrap compiler in `stage1/`.
 
 Python `stage0` and its bytecode VM are not supported execution paths; see
-[docs/python-exit-vm-disposition.md](docs/python-exit-vm-disposition.md).
+[docs/python-exit-vm-disposition.md](docs/python-exit-vm-disposition.md) and
+[docs/python-exit-parity-gate.md](docs/python-exit-parity-gate.md).
 
 ## Current Status
 
