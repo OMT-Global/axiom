@@ -136,7 +136,7 @@ Current proof points:
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
 - `stage1/examples/generic_aggregates` covers monomorphized generic wrappers and borrowed generic utility helpers over arrays, maps, slices, `Option<T>`, `Result<T, E>`, and user-defined enum payloads.
-- `make stage1-test stage1-smoke` now covers all twenty-four checked-in stage1 examples.
+- `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` now cover the checked-in stage1 language gate.
 
 Agent-grade compiler milestone summary:
 

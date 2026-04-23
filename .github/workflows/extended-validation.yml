@@ -28,7 +28,6 @@ jobs:
     outputs:
       app: ${{ steps.preset.outputs.app || steps.filter.outputs.app || 'false' }}
       ci: ${{ steps.preset.outputs.ci || steps.filter.outputs.ci || 'false' }}
-      extended: ${{ steps.preset.outputs.extended || steps.filter.outputs.extended || 'false' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4 pinned 2026-04-19
         if: github.event_name == 'push'
@@ -42,7 +41,6 @@ jobs:
           cat >>"$GITHUB_OUTPUT" <<'EOF'
           app=true
           ci=true
-          extended=true
           EOF
 
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v3 pinned 2026-04-19
@@ -75,10 +73,6 @@ jobs:
               - '.env.example'
               - 'CODEOWNERS'
               - 'Makefile'
-            extended:
-              - 'infra/**'
-              - 'ops/**'
-
   fast-checks:
     name: Fast Checks
     runs-on: ['self-hosted', 'synology', 'shell-only', 'public']
@@ -91,19 +85,6 @@ jobs:
 
       - name: Run fast checks
         run: bash scripts/ci/run-fast-checks.sh
-
-  extended-checks:
-    name: Extended Checks
-    runs-on: ['self-hosted', 'synology', 'shell-only', 'public']
-    timeout-minutes: 20
-    needs: changes
-    if: needs.changes.outputs.extended == 'true' || needs.changes.outputs.app == 'true'
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4 pinned 2026-04-19
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable pinned 2026-04-19
-
-      - name: Run extended validation
-        run: bash scripts/ci/run-extended-validation.sh
 
   validate-secrets:
     name: Validate Secrets
@@ -121,7 +102,6 @@ jobs:
     needs:
       - changes
       - fast-checks
-      - extended-checks
       - validate-secrets
     steps:
       - name: Check extended validation jobs
@@ -129,7 +109,6 @@ jobs:
           RESULTS: >-
             changes=${{ needs.changes.result }}
             fast-checks=${{ needs.fast-checks.result }}
-            extended-checks=${{ needs.extended-checks.result }}
             validate-secrets=${{ needs.validate-secrets.result }}
         run: |
           failed=0

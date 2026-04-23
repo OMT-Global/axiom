@@ -15,9 +15,10 @@ AG0 is the current entry floor and must remain intact before any downstream work
 - The current language floor includes multi-file modules, structs, enums,
   arrays, maps, tuples, borrowed slices, `Option<T>`, `Result<T, E>`, and the
   ownership/bootstrap work captured by `stage1/examples/borrowed_shapes`.
-- The required verification gate remains:
+- The required Rust-only verification gate remains:
+  - `make stage1-test`
   - `make stage1-conformance`
-  - `make stage1-test stage1-smoke`
+  - `make stage1-smoke`
 
 Entry rule:
 
@@ -64,7 +65,7 @@ Deliverables:
 
 - Borrowed slices remain valid inside named structs and enum payloads.
 - `stage1/examples/borrowed_shapes` stays in the checked-in example set.
-- `make stage1-test stage1-smoke` covers the current example matrix.
+- `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` cover the current language gate.
 - `docs/stage1.md` remains the short status page and links to this doc.
 
 Acceptance:
@@ -349,9 +350,10 @@ Agent-grade closure bar:
   that bypass capability checks.
 - AG5 closure work depends on AG3 and AG4 being functional enough to support the
   CLI, worker, and HTTP-service fixtures.
-- Unless a change is truly stage1-only, keep the dual verification gate green:
+- Keep the Rust-only verification gate green:
+  - `make stage1-test`
   - `make stage1-conformance`
-  - `make stage1-test stage1-smoke`
+  - `make stage1-smoke`
 
 ## Post-threshold follow-ons
 
