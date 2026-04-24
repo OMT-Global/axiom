@@ -530,7 +530,11 @@ fn parse_stmt(
             column: 1,
         });
     }
-    if trimmed.starts_with("panic(") || trimmed.starts_with("panic<") {
+    if trimmed == "panic"
+        || trimmed.starts_with("panic(")
+        || trimmed.starts_with("panic<")
+        || trimmed.starts_with("panic ")
+    {
         let expr = parse_expr(trimmed, path, line_no, 1)?;
         *index += 1;
         return Ok(Stmt::Panic {
