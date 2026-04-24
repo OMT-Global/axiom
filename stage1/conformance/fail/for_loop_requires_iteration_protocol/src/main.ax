@@ -1,0 +1,6 @@
+fn main(): int {
+for value in [1, 2, 3] {
+print value
+}
+return 0
+}
