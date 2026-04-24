@@ -66,5 +66,7 @@ Current compile-fail fixtures cover:
   self-recursive enum payloads without an indirection boundary.
 - `match_guard_not_supported`: parse diagnostics for unsupported `if` guard
   clauses on match arms.
+- `named_nested_match_pattern_not_supported`: parse diagnostics for
+  unsupported nested destructuring inside named match patterns.
 - `nested_match_pattern_not_supported`: parse diagnostics for unsupported
   nested destructuring inside match patterns.

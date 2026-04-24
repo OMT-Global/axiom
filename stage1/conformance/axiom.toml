@@ -3,6 +3,7 @@ members = [
   "fail/for_loop_requires_iteration_protocol",
   "fail/match_guard_not_supported",
   "fail/mutable_borrow_while_shared_live",
+  "fail/named_nested_match_pattern_not_supported",
   "fail/nested_match_pattern_not_supported",
   "fail/ownership_use_after_move",
   "fail/panic_rejects_unreachable_statement",
