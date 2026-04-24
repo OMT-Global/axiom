@@ -533,7 +533,9 @@ fn parse_stmt(
     if trimmed == "panic"
         || trimmed.starts_with("panic(")
         || trimmed.starts_with("panic<")
-        || trimmed.starts_with("panic ")
+        || trimmed
+            .strip_prefix("panic")
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
     {
         let expr = parse_expr(trimmed, path, line_no, 1)?;
         *index += 1;

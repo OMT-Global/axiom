@@ -218,6 +218,16 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_panic_statement_with_tab_before_paren() {
+        let source = "fn fail(): int {\npanic\t(\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
     fn parser_lowers_panic_statement_with_generic_call_argument() {
         let source = "fn label<T>(value: T): string {\nreturn \"boom\"\n}\n\nfn require<T>(flag: bool, value: T): T {\nif flag {\nreturn value\n} else {\npanic(label<T>(value))\n}\n}\n\nlet answer: int = require<int>(true, 7)\nprint answer\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
