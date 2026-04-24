@@ -4111,6 +4111,54 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_mutually_recursive_structs_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-structs");
+        create_project(&project, Some("mutually-recursive-structs-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nnext: Link\n}\n\nstruct Link {\nnode: Node\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("mutually recursive structs should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_struct_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-struct-enum");
+        create_project(&project, Some("mutually-recursive-struct-enum-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct ExprNode {\nexpr: Expr\n}\n\nenum Expr {\nWrap(ExprNode)\nLit(int)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error =
+            check_project(&project).expect_err("mutually recursive struct and enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn build_project_allows_recursive_struct_through_array_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-struct-array");
+        create_project(&project, Some("recursive-struct-array-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nchildren: [Node]\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        build_project(&project).expect("recursive struct through array indirection should build");
+    }
+
+    #[test]
     fn check_project_rejects_recursive_const() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("recursive-const");
