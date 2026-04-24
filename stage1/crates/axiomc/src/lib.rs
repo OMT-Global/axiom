@@ -4145,6 +4145,22 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_recursive_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-enum");
+        create_project(&project, Some("recursive-enum-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum List {\nCons(List)\nNil\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("recursive enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn build_project_allows_recursive_struct_through_array_indirection() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("recursive-struct-array");
