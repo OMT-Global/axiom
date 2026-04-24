@@ -44,6 +44,18 @@ assert_failure_contains() {
   fi
 }
 
+assert_output_contains() {
+  local case_name="$1"
+  local output_path="$2"
+  local expected="$3"
+
+  if ! grep -Fq "$expected" "$output_path"; then
+    echo "$case_name: missing expected output: $expected" >&2
+    cat "$output_path" >&2
+    exit 1
+  fi
+}
+
 setup_case_repo() {
   local case_dir="$1"
 
@@ -68,6 +80,7 @@ run_case() {
   local case_name="$1"
   local expected_status="$2"
   local expected_text="${3:-}"
+  local expected_detail="${4:-}"
   local case_dir="$tmpdir/$case_name"
   local output_path="$tmpdir/$case_name.out"
   local status=0
@@ -171,6 +184,10 @@ run_case() {
     assert_success "$case_name" "$status" "$output_path"
   else
     assert_failure_contains "$case_name" "$status" "$output_path" "$expected_text"
+
+    if [[ -n "$expected_detail" ]]; then
+      assert_output_contains "$case_name" "$output_path" "$expected_detail"
+    fi
   fi
 }
 
@@ -182,17 +199,17 @@ run_case rejects_blocked_parity_rows failure "Python exit parity matrix has bloc
 run_case rejects_python_unittest_gate failure "CI still uses Python unittest as a language/runtime correctness gate"
 run_case rejects_python_unittest_gate_in_makefile failure "CI still uses Python unittest as a language/runtime correctness gate"
 run_case rejects_python_unittest_gate_in_bootstrap_config failure "CI still uses Python unittest as a language/runtime correctness gate"
-run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_tests failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_pyproject failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_python_version failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_requirements failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_requirements_lockfile failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_pipfile failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_pipfile_lock failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_poetry_lock failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_setup_cfg failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_setup_py failure "Python stage0 source, tests, or packaging files are still tracked"
-run_case rejects_tracked_stage0_tox_ini failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or packaging files are still tracked" "axiom/legacy.py"
+run_case rejects_tracked_stage0_tests failure "Python stage0 source, tests, or packaging files are still tracked" "tests/test_legacy.py"
+run_case rejects_tracked_stage0_pyproject failure "Python stage0 source, tests, or packaging files are still tracked" "pyproject.toml"
+run_case rejects_tracked_stage0_python_version failure "Python stage0 source, tests, or packaging files are still tracked" ".python-version"
+run_case rejects_tracked_stage0_requirements failure "Python stage0 source, tests, or packaging files are still tracked" "requirements.txt"
+run_case rejects_tracked_stage0_requirements_lockfile failure "Python stage0 source, tests, or packaging files are still tracked" "requirements-dev.txt"
+run_case rejects_tracked_stage0_pipfile failure "Python stage0 source, tests, or packaging files are still tracked" "Pipfile"
+run_case rejects_tracked_stage0_pipfile_lock failure "Python stage0 source, tests, or packaging files are still tracked" "Pipfile.lock"
+run_case rejects_tracked_stage0_poetry_lock failure "Python stage0 source, tests, or packaging files are still tracked" "poetry.lock"
+run_case rejects_tracked_stage0_setup_cfg failure "Python stage0 source, tests, or packaging files are still tracked" "setup.cfg"
+run_case rejects_tracked_stage0_setup_py failure "Python stage0 source, tests, or packaging files are still tracked" "setup.py"
+run_case rejects_tracked_stage0_tox_ini failure "Python stage0 source, tests, or packaging files are still tracked" "tox.ini"
 
 echo "check-python-exit-docs regression cases passed"
