@@ -62,3 +62,5 @@ Current compile-fail fixtures cover:
   mutually recursive struct fields without an indirection boundary.
 - `recursive_struct_enum_without_indirection`: type diagnostics for recursive
   struct-enum cycles without an indirection boundary.
+- `recursive_enum_without_indirection`: type diagnostics for direct
+  self-recursive enum payloads without an indirection boundary.

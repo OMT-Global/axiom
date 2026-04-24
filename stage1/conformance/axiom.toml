@@ -8,6 +8,7 @@ members = [
   "fail/panic_requires_single_argument",
   "fail/panic_requires_string_argument",
   "fail/package_visibility_dependency_boundary",
+  "fail/recursive_enum_without_indirection",
   "fail/recursive_mutual_struct_without_indirection",
   "fail/recursive_struct_enum_without_indirection",
   "fail/recursive_struct_without_indirection",
