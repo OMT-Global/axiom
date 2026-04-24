@@ -1,0 +1,9 @@
+struct Node {
+next: Link
+}
+
+struct Link {
+node: Node
+}
+
+print 0

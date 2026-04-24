@@ -46,6 +46,11 @@ version = "0.1.0"
 source = "path:fail/panic_requires_string_argument"
 
 [[package]]
+name = "conformance-recursive-mutual-struct-without-indirection"
+version = "0.1.0"
+source = "path:fail/recursive_mutual_struct_without_indirection"
+
+[[package]]
 name = "conformance-result-ok-without-context"
 version = "0.1.0"
 source = "path:fail/result_ok_without_context"

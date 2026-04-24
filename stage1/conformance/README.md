@@ -58,5 +58,7 @@ Current compile-fail fixtures cover:
   items that are referenced across a dependency package boundary.
 - `recursive_struct_without_indirection`: type diagnostics for direct
   self-recursive struct fields without an indirection boundary.
+- `recursive_mutual_struct_without_indirection`: type diagnostics for
+  mutually recursive struct fields without an indirection boundary.
 - `recursive_struct_enum_without_indirection`: type diagnostics for recursive
   struct-enum cycles without an indirection boundary.
