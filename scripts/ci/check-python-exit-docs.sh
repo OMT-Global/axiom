@@ -87,8 +87,15 @@ if awk -F '|' '
   exit 1
 fi
 legacy_invocation="python -m axi""om"
+doc_search_paths=()
 
-if rg -n "$legacy_invocation" README.md docs scripts \
+for path in README.md docs scripts; do
+  if [[ -e "$path" ]]; then
+    doc_search_paths+=("$path")
+  fi
+done
+
+if [[ "${#doc_search_paths[@]}" -gt 0 ]] && rg -n "$legacy_invocation" "${doc_search_paths[@]}" \
   --glob '*.md' \
   --glob '*.sh' \
   --glob '!docs/python-exit-parity-gate.md' \
@@ -98,8 +105,15 @@ if rg -n "$legacy_invocation" README.md docs scripts \
 fi
 
 python_unittest="python -m unit""test"
+ci_search_paths=()
 
-if rg -n --hidden "$python_unittest" .github scripts Makefile project.bootstrap.yaml; then
+for path in .github scripts Makefile project.bootstrap.yaml; do
+  if [[ -e "$path" ]]; then
+    ci_search_paths+=("$path")
+  fi
+done
+
+if [[ "${#ci_search_paths[@]}" -gt 0 ]] && rg -n --hidden "$python_unittest" "${ci_search_paths[@]}"; then
   echo "CI still uses Python unittest as a language/runtime correctness gate" >&2
   exit 1
 fi

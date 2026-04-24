@@ -82,6 +82,9 @@ run_case() {
     rejects_legacy_invocation_in_user_docs)
       printf '%s\n' "$legacy_invocation" > "$case_dir/README.md"
       ;;
+    rejects_legacy_invocation_in_docs_tree)
+      printf '%s\n' "$legacy_invocation" > "$case_dir/docs/getting-started.md"
+      ;;
     rejects_blocked_parity_rows)
       awk '
         {
@@ -130,6 +133,7 @@ run_case() {
 
 run_case excluded_docs_allow_legacy_strings success
 run_case rejects_legacy_invocation_in_user_docs failure "user-facing docs still instruct users to run $legacy_invocation"
+run_case rejects_legacy_invocation_in_docs_tree failure "user-facing docs still instruct users to run $legacy_invocation"
 run_case rejects_blocked_parity_rows failure "Python exit parity matrix has blocked rows"
 run_case rejects_python_unittest_gate failure "CI still uses Python unittest as a language/runtime correctness gate"
 run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or packaging files are still tracked"
