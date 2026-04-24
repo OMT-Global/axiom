@@ -86,10 +86,57 @@ if awk -F '|' '
   echo "Python exit parity matrix has blocked rows" >&2
   exit 1
 fi
-
 legacy_invocation="python -m axi""om"
+doc_search_paths=()
 
-if rg -n "$legacy_invocation" README.md docs scripts --glob '*.md' --glob '*.sh'; then
+for path in README.md docs scripts; do
+  if [[ -e "$path" ]]; then
+    doc_search_paths+=("$path")
+  fi
+done
+
+if [[ "${#doc_search_paths[@]}" -gt 0 ]] && rg -n "$legacy_invocation" "${doc_search_paths[@]}" \
+  --glob '*.md' \
+  --glob '*.sh' \
+  --glob '!docs/python-exit-parity-gate.md' \
+  --glob '!docs/python-exit-vm-disposition.md'; then
   echo "user-facing docs still instruct users to run $legacy_invocation" >&2
+  exit 1
+fi
+
+python_unittest="python -m unit""test"
+ci_search_paths=()
+
+for path in .github scripts Makefile project.bootstrap.yaml; do
+  if [[ -e "$path" ]]; then
+    ci_search_paths+=("$path")
+  fi
+done
+
+if [[ "${#ci_search_paths[@]}" -gt 0 ]] && rg -n --hidden "$python_unittest" "${ci_search_paths[@]}"; then
+  echo "CI still uses Python unittest as a language/runtime correctness gate" >&2
+  exit 1
+fi
+
+stage0_pathspecs=(
+  ':(glob)axiom/**'
+  ':(glob)tests/**'
+  ':(glob)requirements*.in'
+  ':(glob)requirements*.txt'
+  '.python-version'
+  'Pipfile'
+  'Pipfile.lock'
+  'poetry.lock'
+  'pyproject.toml'
+  'setup.cfg'
+  'setup.py'
+  'tox.ini'
+)
+
+tracked_stage0_files="$(git ls-files -- "${stage0_pathspecs[@]}")"
+
+if [[ -n "$tracked_stage0_files" ]]; then
+  echo "Python stage0 source, tests, or packaging files are still tracked" >&2
+  printf '%s\n' "$tracked_stage0_files" >&2
   exit 1
 fi
