@@ -125,8 +125,29 @@ run_case() {
     rejects_tracked_stage0_python_version)
       printf '%s\n' '3.12.0' > "$case_dir/.python-version"
       ;;
+    rejects_tracked_stage0_requirements)
+      printf '%s\n' 'pytest==8.0.0' > "$case_dir/requirements.txt"
+      ;;
     rejects_tracked_stage0_requirements_lockfile)
       printf '%s\n' 'pytest==8.0.0' > "$case_dir/requirements-dev.txt"
+      ;;
+    rejects_tracked_stage0_pipfile)
+      printf '%s\n' '[[source]]' > "$case_dir/Pipfile"
+      ;;
+    rejects_tracked_stage0_pipfile_lock)
+      printf '%s\n' '{}' > "$case_dir/Pipfile.lock"
+      ;;
+    rejects_tracked_stage0_poetry_lock)
+      printf '%s\n' '# lock' > "$case_dir/poetry.lock"
+      ;;
+    rejects_tracked_stage0_setup_cfg)
+      printf '%s\n' '[metadata]' > "$case_dir/setup.cfg"
+      ;;
+    rejects_tracked_stage0_setup_py)
+      printf '%s\n' 'from setuptools import setup' > "$case_dir/setup.py"
+      ;;
+    rejects_tracked_stage0_tox_ini)
+      printf '%s\n' '[tox]' > "$case_dir/tox.ini"
       ;;
     *)
       echo "unknown case: $case_name" >&2
@@ -165,6 +186,13 @@ run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or p
 run_case rejects_tracked_stage0_tests failure "Python stage0 source, tests, or packaging files are still tracked"
 run_case rejects_tracked_stage0_pyproject failure "Python stage0 source, tests, or packaging files are still tracked"
 run_case rejects_tracked_stage0_python_version failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_requirements failure "Python stage0 source, tests, or packaging files are still tracked"
 run_case rejects_tracked_stage0_requirements_lockfile failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_pipfile failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_pipfile_lock failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_poetry_lock failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_setup_cfg failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_setup_py failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_tox_ini failure "Python stage0 source, tests, or packaging files are still tracked"
 
 echo "check-python-exit-docs regression cases passed"
