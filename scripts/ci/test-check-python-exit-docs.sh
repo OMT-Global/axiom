@@ -79,6 +79,24 @@ run_case() {
       printf '%s\n' "$legacy_invocation" >> "$case_dir/docs/python-exit-vm-disposition.md"
       printf '%s\n' "$legacy_invocation" >> "$case_dir/docs/python-exit-parity-gate.md"
       ;;
+    rejects_legacy_invocation_in_user_docs)
+      printf '%s\n' "$legacy_invocation" > "$case_dir/README.md"
+      ;;
+    rejects_blocked_parity_rows)
+      python3 - <<'PY' "$case_dir/docs/python-exit-parity-gate.md"
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = "There are no `blocked` rows in the current matrix.\n"
+replacement = (
+    "| synthetic blocked case | `blocked` | Linked child issue is still open. |\n\n"
+    "There are no `blocked` rows in the current matrix.\n"
+)
+path.write_text(text.replace(needle, replacement, 1))
+PY
+      ;;
     rejects_python_unittest_gate)
       mkdir -p "$case_dir/.github/workflows"
       printf '%s\n' "$python_unittest" > "$case_dir/.github/workflows/pr-fast-ci.yml"
@@ -113,6 +131,8 @@ run_case() {
 }
 
 run_case excluded_docs_allow_legacy_strings success
+run_case rejects_legacy_invocation_in_user_docs failure "user-facing docs still instruct users to run $legacy_invocation"
+run_case rejects_blocked_parity_rows failure "Python exit parity matrix has blocked rows"
 run_case rejects_python_unittest_gate failure "CI still uses Python unittest as a language/runtime correctness gate"
 run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or packaging files are still tracked"
 
