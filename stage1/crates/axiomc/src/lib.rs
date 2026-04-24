@@ -358,7 +358,11 @@ mod tests {
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         let error = hir::lower(&parsed).expect_err("panic should reject type arguments");
         assert_eq!(error.kind, "type");
-        assert!(error.message.contains("panic does not accept type arguments"));
+        assert!(
+            error
+                .message
+                .contains("panic does not accept type arguments")
+        );
     }
 
     #[test]
@@ -3608,6 +3612,19 @@ mod tests {
     }
 
     #[test]
+    fn check_project_accepts_panic_as_terminating_match_arm() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-terminates-match-arm");
+        create_project(&project, Some("panic-terminates-match-arm-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Status {\nReady\nFailed\n}\n\nfn require(status: Status): int {\nmatch status {\nReady {\nreturn 7\n}\nFailed {\npanic(\"boom\")\n}\n}\n}\n\nprint require(Ready)\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("panic match arm should count as terminating control flow");
+    }
+
+    #[test]
     fn check_project_rejects_unreachable_statement_after_panic() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("panic-unreachable");
@@ -3619,7 +3636,11 @@ mod tests {
         .expect("write source");
         let error = check_project(&project).expect_err("unreachable statement should fail");
         assert_eq!(error.kind, "control");
-        assert!(error.message.contains("unreachable statements after a terminating control-flow statement"));
+        assert!(
+            error
+                .message
+                .contains("unreachable statements after a terminating control-flow statement")
+        );
     }
 
     #[test]
