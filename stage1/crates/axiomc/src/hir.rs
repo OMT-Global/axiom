@@ -514,7 +514,7 @@ fn monomorphize_aggregates(program: syntax::Program) -> Result<syntax::Program, 
                 alias.line,
                 alias.column,
             )?,
-            is_public: alias.is_public,
+            visibility: alias.visibility,
             line: alias.line,
             column: alias.column,
         });
@@ -541,7 +541,7 @@ fn monomorphize_aggregates(program: syntax::Program) -> Result<syntax::Program, 
                     &mut queue,
                     &mut queued,
                 )?,
-                is_public: constant.is_public,
+                visibility: constant.visibility,
                 line: constant.line,
                 column: constant.column,
             })
@@ -845,7 +845,7 @@ fn rewrite_struct_decl_aggregate_types(
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?,
-        is_public: struct_decl.is_public,
+        visibility: struct_decl.visibility,
         line: struct_decl.line,
         column: struct_decl.column,
     })
@@ -889,7 +889,7 @@ fn rewrite_enum_decl_aggregate_types(
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?,
-        is_public: enum_decl.is_public,
+        visibility: enum_decl.visibility,
         line: enum_decl.line,
         column: enum_decl.column,
     })
@@ -944,7 +944,7 @@ fn rewrite_function_aggregate_types(
             })
             .collect::<Result<Vec<_>, _>>()?,
         is_async: function.is_async,
-        is_public: function.is_public,
+        visibility: function.visibility,
         line: function.line,
         column: function.column,
     })

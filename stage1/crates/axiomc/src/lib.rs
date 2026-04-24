@@ -27,7 +27,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::parse_program;
+    use crate::syntax::{Visibility, parse_program};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -241,6 +241,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_tracks_package_visibility() {
+        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.consts[0].visibility, Visibility::Package);
+        assert_eq!(parsed.type_aliases[0].visibility, Visibility::Package);
+        assert_eq!(parsed.structs[0].visibility, Visibility::Package);
+        assert_eq!(parsed.enums[0].visibility, Visibility::Package);
+        assert_eq!(parsed.functions[0].visibility, Visibility::Package);
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -350,7 +361,11 @@ mod tests {
         let error =
             hir::lower(&parsed).expect_err("bare panic should reject the non-call statement form");
         assert_eq!(error.kind, "type");
-        assert!(error.message.contains("panic statement expects `panic(\"message\")`"));
+        assert!(
+            error
+                .message
+                .contains("panic statement expects `panic(\"message\")`")
+        );
     }
 
     #[test]
@@ -1216,6 +1231,75 @@ mod tests {
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn package_visibility_allows_same_package_module_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-module");
+        create_project(&project, Some("package-visible-module-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"shared.ax\"\n\nlet answer: Id = helper()\nlet info: BuildInfo = build()\nlet status: Status = ready()\nprint answer\nprint info.label\nmatch status {\nReady {\nprint ANSWER\n}\n}\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/shared.ax"),
+            "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
+        )
+        .expect("write shared");
+        let built = build_project(&project).expect("build package-visible module");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\npackage\n42\n");
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-dependency");
+        let dependency = project.join("deps/core");
+        create_project(&project, Some("package-visible-dependency-app")).expect("create root");
+        create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+
+        fs::write(
+            dependency.join("src/shared.ax"),
+            "pub(pkg) fn helper(): int {\nreturn 42\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest("package-visible-dependency-app")
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/shared.ax\"\nprint helper()\n",
+        )
+        .expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error =
+            check_project(&project).expect_err("package-visible dependency import should fail");
+        assert_eq!(error.kind, "import");
+        assert!(error.message.contains("is not visible from this module"));
     }
 
     #[test]
@@ -3843,7 +3927,7 @@ mod tests {
         .expect("write main");
         fs::write(project.join("src/types.ax"), "type Hidden = int\n").expect("write types");
         let error = check_project(&project).expect_err("private type alias should fail");
-        assert!(error.message.contains("is not exported"));
+        assert!(error.message.contains("is not visible from this module"));
         assert_eq!(error.kind, "import");
     }
 
@@ -3946,7 +4030,7 @@ mod tests {
         )
         .expect("write greetings");
         let error = check_project(&project).expect_err("private import should fail");
-        assert!(error.message.contains("is not exported"));
+        assert!(error.message.contains("is not visible from this module"));
         assert_eq!(error.kind, "import");
     }
 

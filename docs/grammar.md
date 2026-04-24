@@ -20,7 +20,7 @@ type_item      := visibility? "type" IDENT generic_params? "=" type ;
 struct_item    := visibility? "struct" IDENT generic_params? "{" fields? "}" ;
 enum_item      := visibility? "enum" IDENT generic_params? "{" variants? "}" ;
 fn_item        := visibility? "fn" IDENT generic_params? "(" params? ")" ":" type block ;
-visibility     := "pub" ;
+visibility     := "pub" | "pub(pkg)" ;
 
 stmt           := let_stmt
                | print_stmt
