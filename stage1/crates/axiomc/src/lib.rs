@@ -278,6 +278,92 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_match_arm_guards() {
+        let source = "enum OptionInt {\nSome(int)\nNone\n}\n\nfn describe(value: OptionInt): int {\nmatch value {\nSome(n) if n > 0 {\nreturn n\n}\nNone {\nreturn 0\n}\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("match arm guards should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "match arm guards are not supported yet");
+        assert_eq!(error.line, Some(8));
+        assert_eq!(error.column, Some(9));
+    }
+
+    #[test]
+    fn parser_accepts_match_arm_identifiers_containing_if() {
+        let source = "enum Prize {\nGift(int)\nNone\n}\n\nmatch Gift(3) {\nGift(gift_value) {\nprint gift_value\n}\nNone {\nprint 0\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+
+        match &parsed.stmts[0] {
+            crate::syntax::Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].variant, "Gift");
+                assert_eq!(arms[0].bindings, vec!["gift_value".to_string()]);
+            }
+            other => panic!("expected match statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_accepts_named_match_arm_identifiers_containing_if() {
+        let source = "enum Prize {\nGift { gift_value: int }\nNone\n}\n\nmatch Gift { gift_value: 3 } {\nGift { gift_value } {\nprint gift_value\n}\nNone {\nprint 0\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+
+        match &parsed.stmts[0] {
+            crate::syntax::Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].variant, "Gift");
+                assert!(arms[0].is_named);
+                assert_eq!(arms[0].bindings, vec!["gift_value".to_string()]);
+            }
+            other => panic!("expected match statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_rejects_nested_match_patterns() {
+        let source = "enum Pair {\nWrap((int, bool))\n}\n\nmatch Wrap((1, true)) {\nWrap((count, true)) {\nprint count\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested match patterns should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(6));
+    }
+
+    #[test]
+    fn parser_reports_nested_match_pattern_at_offending_positional_binding() {
+        let source = "enum Pair {\nWrap(int, (int, bool))\n}\n\nmatch Wrap(1, (2, true)) {\nWrap(value, (count, true)) {\nprint value\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested positional bindings should report the offending binding");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(13));
+    }
+
+    #[test]
+    fn parser_rejects_nested_named_match_patterns() {
+        let source = "enum Event {\nTick { payload: (int, bool) }\n}\n\nmatch Tick { payload: (1, true) } {\nTick { payload: (count, true) } {\nprint count\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested named match patterns should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(15));
+    }
+
+    #[test]
+    fn parser_reports_nested_match_pattern_at_offending_named_binding() {
+        let source = "enum Event {\nTick { tag: int, payload: (int, bool) }\n}\n\nmatch Tick { tag: 1, payload: (2, true) } {\nTick { tag, payload: (count, true) } {\nprint tag\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested named bindings should report the offending binding");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(20));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -3455,8 +3541,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 22);
-        assert_eq!(output.passed, 22);
+        assert_eq!(output.cases.len(), 25);
+        assert_eq!(output.passed, 25);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3464,7 +3550,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 15
+                == 18
         );
         assert_eq!(
             output

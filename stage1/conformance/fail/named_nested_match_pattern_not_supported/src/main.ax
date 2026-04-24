@@ -1,0 +1,9 @@
+enum Event {
+Tick { payload: (int, bool) }
+}
+
+match Tick { payload: (1, true) } {
+Tick { payload: (count, true) } {
+print count
+}
+}
