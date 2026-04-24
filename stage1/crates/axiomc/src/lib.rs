@@ -5494,7 +5494,12 @@ mod tests {
         assert_eq!(debug.cache_misses, 1);
 
         let generated = fs::read_to_string(&debug.generated_rust).expect("read generated rust");
-        let source = project.join("src/main.ax").display().to_string();
+        let source = project
+            .join("src/main.ax")
+            .canonicalize()
+            .expect("canonical source path")
+            .display()
+            .to_string();
         assert!(generated.contains(&format!("// axiom-source: {source}:1:1")));
         assert!(generated.contains(&format!("// axiom-source: {source}:2:1")));
         let map: serde_json::Value =
