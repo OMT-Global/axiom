@@ -3445,8 +3445,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 17);
-        assert_eq!(output.passed, 17);
+        assert_eq!(output.cases.len(), 21);
+        assert_eq!(output.passed, 21);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3454,7 +3454,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 10
+                == 14
         );
         assert_eq!(
             output
@@ -4108,6 +4108,70 @@ mod tests {
         let error = check_project(&project).expect_err("recursive type alias should fail");
         assert!(error.message.contains("is recursive"));
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_structs_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-structs");
+        create_project(&project, Some("mutually-recursive-structs-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nnext: Link\n}\n\nstruct Link {\nnode: Node\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("mutually recursive structs should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_struct_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-struct-enum");
+        create_project(&project, Some("mutually-recursive-struct-enum-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct ExprNode {\nexpr: Expr\n}\n\nenum Expr {\nWrap(ExprNode)\nLit(int)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error =
+            check_project(&project).expect_err("mutually recursive struct and enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_recursive_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-enum");
+        create_project(&project, Some("recursive-enum-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum List {\nCons(List)\nNil\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("recursive enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn build_project_allows_recursive_struct_through_array_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-struct-array");
+        create_project(&project, Some("recursive-struct-array-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nchildren: [Node]\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        build_project(&project).expect("recursive struct through array indirection should build");
     }
 
     #[test]
