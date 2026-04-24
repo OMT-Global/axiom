@@ -1302,6 +1302,90 @@ mod tests {
         assert!(error.message.contains("is not visible from this module"));
     }
 
+    fn assert_cross_package_package_visibility_error(
+        case_name: &str,
+        dependency_source: &str,
+        main_source: &str,
+        expected_message: &str,
+    ) {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join(case_name);
+        let dependency = project.join("deps/core");
+        create_project(&project, Some(case_name)).expect("create root");
+        create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+
+        fs::write(dependency.join("src/shared.ax"), dependency_source).expect("write dependency");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest(case_name)
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(project.join("src/main.ax"), main_source).expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error =
+            check_project(&project).expect_err("package-visible dependency import should fail");
+        assert_eq!(error.kind, "import");
+        assert!(error.message.contains(expected_message));
+        assert!(error.message.contains("is not visible from this module"));
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_const_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-const",
+            "pub(pkg) const ANSWER: int = 42\n",
+            "import \"core/shared.ax\"\nprint ANSWER\n",
+            "const \"ANSWER\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_type_alias_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-type",
+            "pub(pkg) type Id = int\n",
+            "import \"core/shared.ax\"\nlet answer: Id = 42\nprint answer\n",
+            "type \"Id\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_struct_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-struct",
+            "pub(pkg) struct BuildInfo {\nlabel: string\n}\n",
+            "import \"core/shared.ax\"\nlet info: BuildInfo = BuildInfo { label: \"x\" }\nprint info.label\n",
+            "type \"BuildInfo\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_enum_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-enum",
+            "pub(pkg) enum Status {\nReady\n}\n",
+            "import \"core/shared.ax\"\nlet status: Status = Ready\nmatch status {\nReady {\nprint \"ready\"\n}\n}\n",
+            "type \"Status\"",
+        );
+    }
+
     #[test]
     fn stage1_project_supports_workspace_members() {
         let dir = tempdir().expect("tempdir");
