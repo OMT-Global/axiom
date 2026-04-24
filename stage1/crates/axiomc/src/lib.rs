@@ -3455,8 +3455,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 22);
-        assert_eq!(output.passed, 22);
+        assert_eq!(output.cases.len(), 24);
+        assert_eq!(output.passed, 24);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3464,7 +3464,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 15
+                == 17
         );
         assert_eq!(
             output

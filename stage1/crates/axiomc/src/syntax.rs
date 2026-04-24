@@ -1097,6 +1097,20 @@ fn parse_match_arms(
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
+        if let Some(column) = find_top_level_keyword(variant, "if") {
+            return Err(
+                Diagnostic::new("parse", "match arm guards are not supported yet")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + 1),
+            );
+        }
+        if variant.starts_with('(') {
+            return Err(
+                Diagnostic::new("parse", "nested match patterns are not supported yet")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, 1),
+            );
+        }
         let (variant, bindings, is_named) = if variant.ends_with('}')
             && let Some(open_brace) = find_top_level_char(variant, '{')
             && matches!(find_matching_brace(variant, open_brace), Some(close) if close == variant.len() - 1)
@@ -1117,6 +1131,14 @@ fn parse_match_arms(
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
                             .with_span(line_no, open_brace + 2));
+                    }
+                    if looks_like_nested_match_pattern(binding) {
+                        return Err(Diagnostic::new(
+                            "parse",
+                            "nested match patterns are not supported yet",
+                        )
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, open_brace + 2));
                     }
                     validate_ident(binding, path, line_no, open_brace + 2)?;
                     Ok(binding.to_string())
@@ -1143,6 +1165,14 @@ fn parse_match_arms(
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
                             .with_span(line_no, open_paren + 2));
+                    }
+                    if looks_like_nested_match_pattern(binding) {
+                        return Err(Diagnostic::new(
+                            "parse",
+                            "nested match patterns are not supported yet",
+                        )
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, open_paren + 2));
                     }
                     validate_ident(binding, path, line_no, open_paren + 2)?;
                     Ok(binding.to_string())
@@ -1987,6 +2017,13 @@ fn validate_ident(
     Ok(())
 }
 
+fn looks_like_nested_match_pattern(raw: &str) -> bool {
+    find_top_level_char(raw, '(').is_some()
+        || find_top_level_char(raw, '{').is_some()
+        || find_top_level_char(raw, '[').is_some()
+        || find_top_level_char(raw, ':').is_some()
+}
+
 fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut in_string = false;
@@ -2027,6 +2064,68 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
     }
     parts.push(&raw[start..]);
     parts
+}
+
+fn find_top_level_keyword(raw: &str, keyword: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut angle_depth = 0usize;
+    let chars: Vec<(usize, char)> = raw.char_indices().collect();
+    for cursor in 0..chars.len() {
+        let (index, ch) = chars[cursor];
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '<' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                angle_depth += 1;
+            }
+            '>' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                angle_depth = angle_depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        if paren_depth != 0 || brace_depth != 0 || bracket_depth != 0 || angle_depth != 0 {
+            continue;
+        }
+        if !raw[index..].starts_with(keyword) {
+            continue;
+        }
+        let before = if cursor == 0 {
+            None
+        } else {
+            Some(chars[cursor - 1].1)
+        };
+        let after_index = index + keyword.len();
+        let after = raw[after_index..].chars().next();
+        if before.is_none_or(|ch| ch.is_ascii_whitespace())
+            && after.is_none_or(|ch| ch.is_ascii_whitespace())
+        {
+            return Some(index);
+        }
+    }
+    None
 }
 
 fn split_top_level_type(raw: &str, delimiter: char) -> Vec<&str> {

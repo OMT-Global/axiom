@@ -36,6 +36,9 @@ return_stmt    := "return" expr ;
 if_stmt        := "if" expr block ("else" block)? ;
 while_stmt     := "while" expr block ;
 match_stmt     := "match" expr "{" match_arm+ "}" ;
+match_arm      := IDENT match_payload? block ;
+match_payload  := "(" IDENT ("," IDENT)* ")"
+               | "{" IDENT ("," IDENT)* "}" ;
 block          := "{" stmt* "}" ;
 
 type           := IDENT type_args?
@@ -63,3 +66,5 @@ expr           := literal
 
 Comments start with `#` and run to end-of-line. See
 [stage1.md](stage1.md) for the current implementation scope and known gaps.
+Pattern guards and nested destructuring patterns are not supported in the
+current stage1 parser.

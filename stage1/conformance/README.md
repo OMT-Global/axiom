@@ -64,3 +64,7 @@ Current compile-fail fixtures cover:
   struct-enum cycles without an indirection boundary.
 - `recursive_enum_without_indirection`: type diagnostics for direct
   self-recursive enum payloads without an indirection boundary.
+- `match_guard_not_supported`: parse diagnostics for unsupported `if` guard
+  clauses on match arms.
+- `nested_match_pattern_not_supported`: parse diagnostics for unsupported
+  nested destructuring inside match patterns.

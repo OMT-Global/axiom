@@ -6,9 +6,19 @@ version = "0.1.0"
 source = "path:fail/for_loop_requires_iteration_protocol"
 
 [[package]]
+name = "conformance-match-guard-not-supported"
+version = "0.1.0"
+source = "path:fail/match_guard_not_supported"
+
+[[package]]
 name = "conformance-mutable-borrow-while-shared-live"
 version = "0.1.0"
 source = "path:fail/mutable_borrow_while_shared_live"
+
+[[package]]
+name = "conformance-nested-match-pattern-not-supported"
+version = "0.1.0"
+source = "path:fail/nested_match_pattern_not_supported"
 
 [[package]]
 name = "conformance-ownership-use-after-move"

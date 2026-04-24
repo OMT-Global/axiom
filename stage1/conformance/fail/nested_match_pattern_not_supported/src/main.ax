@@ -1,0 +1,9 @@
+enum Pair {
+Wrap((int, bool))
+}
+
+match Wrap((1, true)) {
+Wrap((count, true)) {
+print count
+}
+}
