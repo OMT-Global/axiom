@@ -56,3 +56,7 @@ Current compile-fail fixtures cover:
   intrinsics without the manifest opt-in.
 - `package_visibility_dependency_boundary`: import diagnostics for `pub(pkg)`
   items that are referenced across a dependency package boundary.
+- `recursive_struct_without_indirection`: type diagnostics for direct
+  self-recursive struct fields without an indirection boundary.
+- `recursive_struct_enum_without_indirection`: type diagnostics for recursive
+  struct-enum cycles without an indirection boundary.
