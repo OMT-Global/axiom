@@ -196,6 +196,18 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_panic_statement() {
+        let source = "fn fail(): int {\npanic(\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_panic(message: String) -> ! {"));
+        assert!(rendered.contains("axiom_runtime_error(\"panic\", &message)"));
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -278,6 +290,15 @@ mod tests {
         assert!(!rendered.contains("std::process::exit"));
         assert!(!rendered.contains("assert!("));
         assert!(!rendered.contains("Axiom stack trace"));
+    }
+
+    #[test]
+    fn panic_statement_requires_single_string_argument() {
+        let source = "fn fail(): int {\npanic(1)\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject non-string arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects a string argument"));
     }
 
     #[test]
@@ -2717,6 +2738,32 @@ mod tests {
             !stderr.contains("src/math.ax"),
             "unexpected stderr: {stderr}"
         );
+    }
+
+    #[test]
+    fn stage1_runtime_reports_structured_error_for_panic_statement() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-statement");
+        create_project(&project, Some("panic-statement")).expect("create project");
+        fs::write(project.join("src/main.ax"), "panic(\"boom\")\n").expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+
+        assert!(!output.status.success(), "program should fail");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("{\"kind\":\"panic\",\"message\":\"boom\"}"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(
+            !stderr.contains("runtime panic"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(!stderr.contains("panic:"), "unexpected stderr: {stderr}");
     }
 
     #[test]

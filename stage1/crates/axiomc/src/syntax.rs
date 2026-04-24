@@ -114,6 +114,11 @@ pub enum Stmt {
         line: usize,
         column: usize,
     },
+    Panic {
+        expr: Expr,
+        line: usize,
+        column: usize,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
@@ -525,6 +530,15 @@ fn parse_stmt(
             column: 1,
         });
     }
+    if trimmed.starts_with("panic(") {
+        let expr = parse_expr(trimmed, path, line_no, 1)?;
+        *index += 1;
+        return Ok(Stmt::Panic {
+            expr,
+            line: line_no,
+            column: 1,
+        });
+    }
     if let Some(rest) = trimmed.strip_prefix("return ") {
         let expr = parse_expr(rest, path, line_no, 8)?;
         *index += 1;
@@ -535,9 +549,9 @@ fn parse_stmt(
         });
     }
     let message = if in_block {
-        "stage1 bootstrap currently supports let, print, if/else, while, match, and return statements inside blocks"
+        "stage1 bootstrap currently supports let, print, panic, if/else, while, match, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, if/else, while, and match statements"
+        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, panic, if/else, while, and match statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())

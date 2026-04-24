@@ -103,6 +103,10 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    panic::panic_any(AxiomRuntimeAbort)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_panic(message: String) -> ! {\n");
+    out.push_str("    axiom_runtime_error(\"panic\", &message)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_task_ready<T>(value: T) -> AxiomTask<T> {\n");
     out.push_str("    AxiomTask { value, canceled: false }\n");
     out.push_str("}\n\n");
@@ -990,6 +994,7 @@ fn stmt_uses_call(stmt: &Stmt, name: &str) -> bool {
         Stmt::Let { expr, .. } | Stmt::Print { expr, .. } | Stmt::Return { expr, .. } => {
             expr_uses_call(expr, name)
         }
+        Stmt::Panic { message, .. } => expr_uses_call(message, name),
         Stmt::If {
             cond,
             then_block,
@@ -1311,6 +1316,10 @@ fn render_stmt(
                 "{pad}println!(\"{{}}\", {});\n",
                 render_expr(expr)
             ));
+        }
+        Stmt::Panic { message, span } => {
+            render_source_marker(source_path, *span, out, indent, debug);
+            out.push_str(&format!("{pad}axiom_panic({});\n", render_expr(message)));
         }
         Stmt::If {
             cond,
