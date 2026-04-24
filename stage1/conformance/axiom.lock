@@ -1,6 +1,11 @@
 version = 1
 
 [[package]]
+name = "conformance-for-loop-requires-iteration-protocol"
+version = "0.1.0"
+source = "path:fail/for_loop_requires_iteration_protocol"
+
+[[package]]
 name = "conformance-mutable-borrow-while-shared-live"
 version = "0.1.0"
 source = "path:fail/mutable_borrow_while_shared_live"
