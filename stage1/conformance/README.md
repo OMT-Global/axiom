@@ -27,6 +27,8 @@ Current executable fixtures cover:
   borrowed slices.
 - `package_local_modules`: nested package-local module imports that execute
   successfully.
+- `package_visibility`: `pub(pkg)` items imported across sibling modules within
+  the same package.
 
 Packages under `fail/` are compile-fail fixtures. Each package is a complete
 stage1 project with `axiom.toml`, `axiom.lock`, source, and
@@ -52,3 +54,13 @@ Current compile-fail fixtures cover:
   expected `Result<T, E>` context.
 - `stdlib_clock_without_capability`: capability diagnostics for clock
   intrinsics without the manifest opt-in.
+- `package_visibility_dependency_boundary`: import diagnostics for `pub(pkg)`
+  items that are referenced across a dependency package boundary.
+- `recursive_struct_without_indirection`: type diagnostics for direct
+  self-recursive struct fields without an indirection boundary.
+- `recursive_mutual_struct_without_indirection`: type diagnostics for
+  mutually recursive struct fields without an indirection boundary.
+- `recursive_struct_enum_without_indirection`: type diagnostics for recursive
+  struct-enum cycles without an indirection boundary.
+- `recursive_enum_without_indirection`: type diagnostics for direct
+  self-recursive enum payloads without an indirection boundary.

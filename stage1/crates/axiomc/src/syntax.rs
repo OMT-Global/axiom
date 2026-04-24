@@ -14,6 +14,20 @@ pub struct Program {
     pub stmts: Vec<Stmt>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Module,
+    Package,
+    Public,
+}
+
+impl Visibility {
+    pub fn is_public(self) -> bool {
+        matches!(self, Self::Public)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Import {
     pub path: String,
@@ -31,7 +45,7 @@ pub struct Function {
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
     pub is_async: bool,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -41,7 +55,7 @@ pub struct ConstDecl {
     pub name: String,
     pub ty: TypeName,
     pub expr: Expr,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -50,7 +64,7 @@ pub struct ConstDecl {
 pub struct TypeAliasDecl {
     pub name: String,
     pub ty: TypeName,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -60,7 +74,7 @@ pub struct StructDecl {
     pub name: String,
     pub type_params: Vec<String>,
     pub fields: Vec<StructField>,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -78,7 +92,7 @@ pub struct EnumDecl {
     pub name: String,
     pub type_params: Vec<String>,
     pub variants: Vec<EnumVariantDecl>,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -325,7 +339,9 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             continue;
         }
         if trimmed.starts_with("pub import ")
+            || trimmed.starts_with("pub(pkg) import ")
             || trimmed.starts_with("pub use ")
+            || trimmed.starts_with("pub(pkg) use ")
             || trimmed.starts_with("export ")
         {
             return Err(Diagnostic::new(
@@ -339,25 +355,39 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             || trimmed.starts_with("async fn ")
             || trimmed.starts_with("pub fn ")
             || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub(pkg) fn ")
+            || trimmed.starts_with("pub(pkg) async fn ")
         {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
-        if trimmed.starts_with("const ") || trimmed.starts_with("pub const ") {
+        if trimmed.starts_with("const ")
+            || trimmed.starts_with("pub const ")
+            || trimmed.starts_with("pub(pkg) const ")
+        {
             consts.push(parse_const_decl(trimmed, path, line_no)?);
             index += 1;
             continue;
         }
-        if trimmed.starts_with("type ") || trimmed.starts_with("pub type ") {
+        if trimmed.starts_with("type ")
+            || trimmed.starts_with("pub type ")
+            || trimmed.starts_with("pub(pkg) type ")
+        {
             type_aliases.push(parse_type_alias(trimmed, path, line_no)?);
             index += 1;
             continue;
         }
-        if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
+        if trimmed.starts_with("struct ")
+            || trimmed.starts_with("pub struct ")
+            || trimmed.starts_with("pub(pkg) struct ")
+        {
             structs.push(parse_struct(&lines, &mut index, path)?);
             continue;
         }
-        if trimmed.starts_with("enum ") || trimmed.starts_with("pub enum ") {
+        if trimmed.starts_with("enum ")
+            || trimmed.starts_with("pub enum ")
+            || trimmed.starts_with("pub(pkg) enum ")
+        {
             enums.push(parse_enum(&lines, &mut index, path)?);
             continue;
         }
@@ -567,19 +597,16 @@ fn parse_stmt(
 fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Function, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, is_async, header) = if let Some(rest) = trimmed.strip_prefix("pub async fn ") {
-        (true, true, rest)
-    } else if let Some(rest) = trimmed.strip_prefix("pub fn ") {
-        (true, false, rest)
-    } else if let Some(rest) = trimmed.strip_prefix("async fn ") {
-        (false, true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let (is_async, header, fn_column) = if let Some(rest) = rest.strip_prefix("async fn ") {
+        (true, rest, visibility_column + 6)
     } else {
-        let rest = trimmed.strip_prefix("fn ").ok_or_else(|| {
+        let rest = rest.strip_prefix("fn ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid function declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, false, rest)
+        (false, rest, visibility_column)
     };
     let open_paren = find_top_level_char(header, '(').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration is missing '('")
@@ -592,8 +619,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_span(line_no, 1)
     })?;
     let name_text = header[..open_paren].trim();
-    let (name, type_params) =
-        parse_function_name(name_text, path, line_no, if is_public { 8 } else { 4 })?;
+    let (name, type_params) = parse_function_name(name_text, path, line_no, fn_column + 3)?;
     let params = parse_params(&header[open_paren + 1..close_paren], path, line_no)?;
     let after_paren = header[close_paren + 1..].trim();
     let after_colon = after_paren.strip_prefix(':').ok_or_else(|| {
@@ -624,7 +650,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         return_ty,
         body,
         is_async,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
@@ -635,15 +661,16 @@ fn parse_type_alias(
     path: &Path,
     line_no: usize,
 ) -> Result<TypeAliasDecl, Diagnostic> {
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub type ") {
-        (true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("type ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("type ").ok_or_else(|| {
+        let _ = rest.strip_prefix("type ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid type alias declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        unreachable!()
     };
     let equals = find_top_level_char(header, '=').ok_or_else(|| {
         Diagnostic::new("parse", "type alias declaration is missing '='")
@@ -651,7 +678,7 @@ fn parse_type_alias(
             .with_span(line_no, 1)
     })?;
     let name = header[..equals].trim();
-    validate_ident(name, path, line_no, if is_public { 10 } else { 6 })?;
+    validate_ident(name, path, line_no, visibility_column + 5)?;
     let target = header[equals + 1..].trim();
     if target.is_empty() {
         return Err(
@@ -664,23 +691,25 @@ fn parse_type_alias(
     Ok(TypeAliasDecl {
         name: name.to_string(),
         ty,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
 }
 
 fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstDecl, Diagnostic> {
-    let (is_public, header, column) = if let Some(rest) = trimmed.strip_prefix("pub const ") {
-        (true, rest, 11)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("const ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("const ").ok_or_else(|| {
+        let _ = rest.strip_prefix("const ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid const declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest, 7)
+        unreachable!()
     };
+    let column = visibility_column + 6;
     let colon = find_top_level_char(header, ':').ok_or_else(|| {
         Diagnostic::new("parse", "const declaration is missing ':'")
             .with_path(path.display().to_string())
@@ -721,7 +750,7 @@ fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstD
         name: name.to_string(),
         ty: parse_type_name(ty_text, path, line_no, column + colon + 2)?,
         expr: parse_expr(expr_text, path, line_no, column + equals + 2)?,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
@@ -730,15 +759,16 @@ fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstD
 fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<StructDecl, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub struct ") {
-        (true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("struct ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("struct ").ok_or_else(|| {
+        let _ = rest.strip_prefix("struct ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid struct declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        unreachable!()
     };
     let name_text = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
         Diagnostic::new(
@@ -748,20 +778,15 @@ fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<Struct
         .with_path(path.display().to_string())
         .with_span(line_no, 1)
     })?;
-    let (name, type_params) = parse_decl_name(
-        name_text,
-        "struct",
-        path,
-        line_no,
-        if is_public { 12 } else { 8 },
-    )?;
+    let (name, type_params) =
+        parse_decl_name(name_text, "struct", path, line_no, visibility_column + 7)?;
     *index += 1;
     let fields = parse_struct_fields(lines, index, path)?;
     Ok(StructDecl {
         name: name.to_string(),
         type_params,
         fields,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
@@ -808,38 +833,44 @@ fn parse_struct_fields(
 fn parse_enum(lines: &[&str], index: &mut usize, path: &Path) -> Result<EnumDecl, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub enum ") {
-        (true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("enum ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("enum ").ok_or_else(|| {
+        let _ = rest.strip_prefix("enum ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid enum declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        unreachable!()
     };
     let name_text = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
         Diagnostic::new("parse", "enum declaration must use `enum Name {` syntax")
             .with_path(path.display().to_string())
             .with_span(line_no, 1)
     })?;
-    let (name, type_params) = parse_decl_name(
-        name_text,
-        "enum",
-        path,
-        line_no,
-        if is_public { 10 } else { 6 },
-    )?;
+    let (name, type_params) =
+        parse_decl_name(name_text, "enum", path, line_no, visibility_column + 5)?;
     *index += 1;
     let variants = parse_enum_variants(lines, index, path)?;
     Ok(EnumDecl {
         name: name.to_string(),
         type_params,
         variants,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
+}
+
+fn parse_visibility_prefix(trimmed: &str) -> (Visibility, &str, usize) {
+    if let Some(rest) = trimmed.strip_prefix("pub(pkg) ") {
+        (Visibility::Package, rest, 10)
+    } else if let Some(rest) = trimmed.strip_prefix("pub ") {
+        (Visibility::Public, rest, 5)
+    } else {
+        (Visibility::Module, trimmed, 1)
+    }
 }
 
 fn parse_enum_variants(

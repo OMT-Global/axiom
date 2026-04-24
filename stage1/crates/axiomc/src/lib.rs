@@ -27,7 +27,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::parse_program;
+    use crate::syntax::{Visibility, parse_program};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -241,6 +241,32 @@ mod tests {
     }
 
     #[test]
+    fn parser_tracks_package_visibility() {
+        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.consts[0].visibility, Visibility::Package);
+        assert_eq!(parsed.type_aliases[0].visibility, Visibility::Package);
+        assert_eq!(parsed.structs[0].visibility, Visibility::Package);
+        assert_eq!(parsed.enums[0].visibility, Visibility::Package);
+        assert_eq!(parsed.functions[0].visibility, Visibility::Package);
+        assert_eq!(parsed.functions[1].visibility, Visibility::Package);
+        assert!(parsed.functions[1].is_async);
+    }
+
+    #[test]
+    fn parser_rejects_package_re_exports_explicitly() {
+        for source in [
+            "pub(pkg) import \"math.ax\"\nprint \"skip\"\n",
+            "pub(pkg) use \"math.ax\"\nprint \"skip\"\n",
+        ] {
+            let error = parse_program(source, Path::new("main.ax"))
+                .expect_err("package re-exports should fail during parsing");
+            assert_eq!(error.kind, "parse");
+            assert!(error.message.contains("does not support re-exports"));
+        }
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -350,7 +376,11 @@ mod tests {
         let error =
             hir::lower(&parsed).expect_err("bare panic should reject the non-call statement form");
         assert_eq!(error.kind, "type");
-        assert!(error.message.contains("panic statement expects `panic(\"message\")`"));
+        assert!(
+            error
+                .message
+                .contains("panic statement expects `panic(\"message\")`")
+        );
     }
 
     #[test]
@@ -1216,6 +1246,192 @@ mod tests {
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn package_visibility_allows_same_package_module_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-module");
+        create_project(&project, Some("package-visible-module-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"shared.ax\"\n\nlet answer: Id = helper()\nlet info: BuildInfo = build()\nlet status: Status = ready()\nprint answer\nprint info.label\nmatch status {\nReady {\nprint ANSWER\n}\n}\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/shared.ax"),
+            "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
+        )
+        .expect("write shared");
+        let built = build_project(&project).expect("build package-visible module");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\npackage\n42\n");
+    }
+
+    #[test]
+    fn package_visibility_allows_same_package_async_module_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-async-module");
+        create_project(&project, Some("package-visible-async-module-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/async.ax\"\nimport \"shared.ax\"\n\nlet task: Task<int> = helper(41)\nprint await task\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/shared.ax"),
+            "pub(pkg) async fn helper(value: int): int {\nreturn value + 1\n}\n",
+        )
+        .expect("write shared");
+        let built = build_project(&project).expect("build package-visible async module");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-dependency");
+        let dependency = project.join("deps/core");
+        create_project(&project, Some("package-visible-dependency-app")).expect("create root");
+        create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+
+        fs::write(
+            dependency.join("src/shared.ax"),
+            "pub(pkg) fn helper(): int {\nreturn 42\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest("package-visible-dependency-app")
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/shared.ax\"\nprint helper()\n",
+        )
+        .expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error =
+            check_project(&project).expect_err("package-visible dependency import should fail");
+        assert_eq!(error.kind, "import");
+        assert!(error.message.contains("is not visible from this module"));
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_async_function_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-async-fn",
+            "pub(pkg) async fn helper(): int {\nreturn 42\n}\n",
+            "import \"std/async.ax\"\nimport \"core/shared.ax\"\nlet task: Task<int> = helper()\nprint await task\n",
+            "function \"helper\"",
+        );
+    }
+
+    fn assert_cross_package_package_visibility_error(
+        case_name: &str,
+        dependency_source: &str,
+        main_source: &str,
+        expected_message: &str,
+    ) {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join(case_name);
+        let dependency = project.join("deps/core");
+        create_project(&project, Some(case_name)).expect("create root");
+        create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+
+        fs::write(dependency.join("src/shared.ax"), dependency_source).expect("write dependency");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest(case_name)
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(project.join("src/main.ax"), main_source).expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error =
+            check_project(&project).expect_err("package-visible dependency import should fail");
+        assert_eq!(error.kind, "import");
+        assert!(error.message.contains(expected_message));
+        assert!(error.message.contains("is not visible from this module"));
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_const_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-const",
+            "pub(pkg) const ANSWER: int = 42\n",
+            "import \"core/shared.ax\"\nprint ANSWER\n",
+            "const \"ANSWER\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_type_alias_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-type",
+            "pub(pkg) type Id = int\n",
+            "import \"core/shared.ax\"\nlet answer: Id = 42\nprint answer\n",
+            "type \"Id\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_struct_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-struct",
+            "pub(pkg) struct BuildInfo {\nlabel: string\n}\n",
+            "import \"core/shared.ax\"\nlet info: BuildInfo = BuildInfo { label: \"x\" }\nprint info.label\n",
+            "type \"BuildInfo\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_enum_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-enum",
+            "pub(pkg) enum Status {\nReady\n}\n",
+            "import \"core/shared.ax\"\nlet status: Status = Ready\nmatch status {\nReady {\nprint \"ready\"\n}\n}\n",
+            "type \"Status\"",
+        );
     }
 
     #[test]
@@ -3229,8 +3445,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 15);
-        assert_eq!(output.passed, 15);
+        assert_eq!(output.cases.len(), 21);
+        assert_eq!(output.passed, 21);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3238,7 +3454,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 9
+                == 14
         );
         assert_eq!(
             output
@@ -3246,7 +3462,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            6
+            7
         );
     }
 
@@ -3820,6 +4036,38 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_package_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-re-export");
+        create_project(&project, Some("package-re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub(pkg) use \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("package re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
+    fn check_project_rejects_package_import_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-import-re-export");
+        create_project(&project, Some("package-import-re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub(pkg) import \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("package import re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
     fn check_project_rejects_namespace_qualified_calls_explicitly() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("qualified-call");
@@ -3843,7 +4091,7 @@ mod tests {
         .expect("write main");
         fs::write(project.join("src/types.ax"), "type Hidden = int\n").expect("write types");
         let error = check_project(&project).expect_err("private type alias should fail");
-        assert!(error.message.contains("is not exported"));
+        assert!(error.message.contains("is not visible from this module"));
         assert_eq!(error.kind, "import");
     }
 
@@ -3860,6 +4108,70 @@ mod tests {
         let error = check_project(&project).expect_err("recursive type alias should fail");
         assert!(error.message.contains("is recursive"));
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_structs_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-structs");
+        create_project(&project, Some("mutually-recursive-structs-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nnext: Link\n}\n\nstruct Link {\nnode: Node\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("mutually recursive structs should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_struct_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-struct-enum");
+        create_project(&project, Some("mutually-recursive-struct-enum-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct ExprNode {\nexpr: Expr\n}\n\nenum Expr {\nWrap(ExprNode)\nLit(int)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error =
+            check_project(&project).expect_err("mutually recursive struct and enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_recursive_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-enum");
+        create_project(&project, Some("recursive-enum-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum List {\nCons(List)\nNil\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("recursive enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn build_project_allows_recursive_struct_through_array_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-struct-array");
+        create_project(&project, Some("recursive-struct-array-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nchildren: [Node]\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        build_project(&project).expect("recursive struct through array indirection should build");
     }
 
     #[test]
@@ -3946,7 +4258,7 @@ mod tests {
         )
         .expect("write greetings");
         let error = check_project(&project).expect_err("private import should fail");
-        assert!(error.message.contains("is not exported"));
+        assert!(error.message.contains("is not visible from this module"));
         assert_eq!(error.kind, "import");
     }
 

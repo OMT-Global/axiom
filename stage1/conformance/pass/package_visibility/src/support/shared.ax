@@ -1,0 +1,22 @@
+pub(pkg) const ANSWER: int = 42
+pub(pkg) type Id = int
+
+pub(pkg) struct BuildInfo {
+label: string
+}
+
+pub(pkg) enum Status {
+Ready
+}
+
+pub(pkg) fn helper(): Id {
+return ANSWER
+}
+
+pub(pkg) fn build(): BuildInfo {
+return BuildInfo { label: "package" }
+}
+
+pub(pkg) fn ready(): Status {
+return Ready
+}

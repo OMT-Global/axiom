@@ -320,6 +320,14 @@ pub fn lower_with_capabilities(
     let (enums, variants) =
         collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)?;
     let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)?;
+    validate_recursive_type_cycles(
+        &program,
+        &structs,
+        &enums,
+        &struct_names,
+        &enum_names,
+        &aliases,
+    )?;
     let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)?;
     let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
@@ -356,6 +364,143 @@ pub fn lower_with_capabilities(
         functions: lowered_functions,
         stmts,
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum AggregateRef {
+    Struct(String),
+    Enum(String),
+}
+
+fn validate_recursive_type_cycles(
+    program: &syntax::Program,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    syntax_structs: &HashMap<String, syntax::StructDecl>,
+    syntax_enums: &HashMap<String, ()>,
+    aliases: &HashMap<String, syntax::TypeAliasDecl>,
+) -> Result<(), Diagnostic> {
+    for struct_decl in &program.structs {
+        let owner = AggregateRef::Struct(struct_decl.name.clone());
+        for field in &struct_decl.fields {
+            let ty = lower_type(
+                &field.ty,
+                syntax_structs,
+                syntax_enums,
+                aliases,
+                field.line,
+                field.column,
+            )?;
+            if type_has_unboxed_recursive_path(&ty, &owner, structs, enums, &mut HashSet::new()) {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "recursive field {:?} in struct {:?} requires indirection; unboxed recursive types are not supported",
+                        field.name, struct_decl.name
+                    ),
+                )
+                .with_span(field.line, field.column));
+            }
+        }
+    }
+
+    for enum_decl in &program.enums {
+        let owner = AggregateRef::Enum(enum_decl.name.clone());
+        for variant in &enum_decl.variants {
+            for payload_ty in &variant.payload_tys {
+                let ty = lower_type(
+                    payload_ty,
+                    syntax_structs,
+                    syntax_enums,
+                    aliases,
+                    variant.line,
+                    variant.column,
+                )?;
+                if type_has_unboxed_recursive_path(&ty, &owner, structs, enums, &mut HashSet::new())
+                {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "recursive payload variant {:?} in enum {:?} requires indirection; unboxed recursive types are not supported",
+                            variant.name, enum_decl.name
+                        ),
+                    )
+                    .with_span(variant.line, variant.column));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn type_has_unboxed_recursive_path(
+    ty: &Type,
+    owner: &AggregateRef,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    visiting: &mut HashSet<AggregateRef>,
+) -> bool {
+    match ty {
+        Type::Int | Type::Bool | Type::String => false,
+        Type::Struct(name) => {
+            let current = AggregateRef::Struct(name.clone());
+            if &current == owner {
+                return true;
+            }
+            if !visiting.insert(current.clone()) {
+                return false;
+            }
+            let result = structs
+                .get(name)
+                .map(|struct_def| {
+                    struct_def.fields.iter().any(|field| {
+                        type_has_unboxed_recursive_path(&field.ty, owner, structs, enums, visiting)
+                    })
+                })
+                .unwrap_or(false);
+            visiting.remove(&current);
+            result
+        }
+        Type::Enum(name) => {
+            let current = AggregateRef::Enum(name.clone());
+            if &current == owner {
+                return true;
+            }
+            if !visiting.insert(current.clone()) {
+                return false;
+            }
+            let result = enums
+                .get(name)
+                .map(|enum_def| {
+                    enum_def.variants.iter().any(|variant| {
+                        variant.payload_tys.iter().any(|payload_ty| {
+                            type_has_unboxed_recursive_path(
+                                payload_ty, owner, structs, enums, visiting,
+                            )
+                        })
+                    })
+                })
+                .unwrap_or(false);
+            visiting.remove(&current);
+            result
+        }
+        Type::Slice(_) | Type::MutSlice(_) | Type::Map(_, _) | Type::Array(_) => false,
+        Type::Option(inner)
+        | Type::Task(inner)
+        | Type::JoinHandle(inner)
+        | Type::AsyncChannel(inner)
+        | Type::SelectResult(inner) => {
+            type_has_unboxed_recursive_path(inner, owner, structs, enums, visiting)
+        }
+        Type::Result(ok, err) => {
+            type_has_unboxed_recursive_path(ok, owner, structs, enums, visiting)
+                || type_has_unboxed_recursive_path(err, owner, structs, enums, visiting)
+        }
+        Type::Tuple(elements) => elements.iter().any(|element| {
+            type_has_unboxed_recursive_path(element, owner, structs, enums, visiting)
+        }),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -514,7 +659,7 @@ fn monomorphize_aggregates(program: syntax::Program) -> Result<syntax::Program, 
                 alias.line,
                 alias.column,
             )?,
-            is_public: alias.is_public,
+            visibility: alias.visibility,
             line: alias.line,
             column: alias.column,
         });
@@ -541,7 +686,7 @@ fn monomorphize_aggregates(program: syntax::Program) -> Result<syntax::Program, 
                     &mut queue,
                     &mut queued,
                 )?,
-                is_public: constant.is_public,
+                visibility: constant.visibility,
                 line: constant.line,
                 column: constant.column,
             })
@@ -845,7 +990,7 @@ fn rewrite_struct_decl_aggregate_types(
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?,
-        is_public: struct_decl.is_public,
+        visibility: struct_decl.visibility,
         line: struct_decl.line,
         column: struct_decl.column,
     })
@@ -889,7 +1034,7 @@ fn rewrite_enum_decl_aggregate_types(
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?,
-        is_public: enum_decl.is_public,
+        visibility: enum_decl.visibility,
         line: enum_decl.line,
         column: enum_decl.column,
     })
@@ -944,7 +1089,7 @@ fn rewrite_function_aggregate_types(
             })
             .collect::<Result<Vec<_>, _>>()?,
         is_async: function.is_async,
-        is_public: function.is_public,
+        visibility: function.visibility,
         line: function.line,
         column: function.column,
     })
@@ -2398,16 +2543,6 @@ fn collect_struct_definitions(
                 .with_span(field.line, field.column));
             }
             let ty = lower_type(&field.ty, &names, enums, aliases, field.line, field.column)?;
-            if matches!(&ty, Type::Struct(name) if name == &struct_decl.name) {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!(
-                        "recursive field {:?} in struct {:?} is not supported yet",
-                        field.name, struct_decl.name
-                    ),
-                )
-                .with_span(field.line, field.column));
-            }
             fields.push(StructField {
                 name: field.name.clone(),
                 ty,
@@ -2582,19 +2717,6 @@ fn collect_enum_definitions(
                     )
                     .with_span(variant.line, variant.column));
                 }
-            }
-            if payload_tys
-                .iter()
-                .any(|ty| matches!(ty, Type::Enum(name) if name == &enum_decl.name))
-            {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!(
-                        "recursive payload variant {:?} in enum {:?} is not supported yet",
-                        variant.name, enum_decl.name
-                    ),
-                )
-                .with_span(variant.line, variant.column));
             }
             lowered_variants.push(EnumVariantDef {
                 name: variant.name.clone(),

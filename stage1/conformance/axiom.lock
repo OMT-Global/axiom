@@ -11,6 +11,16 @@ version = "0.1.0"
 source = "path:fail/ownership_use_after_move"
 
 [[package]]
+name = "conformance-package-visibility-dependency-boundary"
+version = "0.1.0"
+source = "path:fail/package_visibility_dependency_boundary"
+
+[[package]]
+name = "core"
+version = "0.1.0"
+source = "path:fail/package_visibility_dependency_boundary/deps/core"
+
+[[package]]
 name = "conformance-panic-rejects-multiple-arguments"
 version = "0.1.0"
 source = "path:fail/panic_rejects_multiple_arguments"
@@ -34,6 +44,26 @@ source = "path:fail/panic_requires_single_argument"
 name = "conformance-panic-requires-string-argument"
 version = "0.1.0"
 source = "path:fail/panic_requires_string_argument"
+
+[[package]]
+name = "conformance-recursive-enum-without-indirection"
+version = "0.1.0"
+source = "path:fail/recursive_enum_without_indirection"
+
+[[package]]
+name = "conformance-recursive-mutual-struct-without-indirection"
+version = "0.1.0"
+source = "path:fail/recursive_mutual_struct_without_indirection"
+
+[[package]]
+name = "conformance-recursive-struct-enum-without-indirection"
+version = "0.1.0"
+source = "path:fail/recursive_struct_enum_without_indirection"
+
+[[package]]
+name = "conformance-recursive-struct-without-indirection"
+version = "0.1.0"
+source = "path:fail/recursive_struct_without_indirection"
 
 [[package]]
 name = "conformance-result-ok-without-context"
@@ -69,6 +99,11 @@ source = "path:pass/outcome_control_flow"
 name = "conformance-package-local-modules"
 version = "0.1.0"
 source = "path:pass/package_local_modules"
+
+[[package]]
+name = "conformance-package-visibility"
+version = "0.1.0"
+source = "path:pass/package_visibility"
 
 [[package]]
 name = "conformance-struct-field-access"
