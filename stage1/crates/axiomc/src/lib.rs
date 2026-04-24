@@ -267,7 +267,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn parser_rejects_for_loops_explicitly() {
         let source = "fn main(): int {\nfor value in [1, 2, 3] {\nprint value\n}\nreturn 0\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
@@ -276,7 +275,9 @@ mod tests {
         assert_eq!(error.line, Some(2));
         assert_eq!(error.column, Some(1));
         assert!(error.message.contains("does not support `for` loops yet"));
-=======
+    }
+
+    #[test]
     fn parser_rejects_match_arm_guards() {
         let source = "enum OptionInt {\nSome(int)\nNone\n}\n\nfn describe(value: OptionInt): int {\nmatch value {\nSome(n) if n > 0 {\nreturn n\n}\nNone {\nreturn 0\n}\n}\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
@@ -327,7 +328,6 @@ mod tests {
         assert_eq!(error.message, "nested match patterns are not supported yet");
         assert_eq!(error.line, Some(6));
         assert_eq!(error.column, Some(6));
->>>>>>> e12139c (test: add parser regressions for match diagnostics)
     }
 
     #[test]
@@ -3541,8 +3541,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 24);
-        assert_eq!(output.passed, 24);
+        assert_eq!(output.cases.len(), 25);
+        assert_eq!(output.passed, 25);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3550,7 +3550,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 17
+                == 18
         );
         assert_eq!(
             output
