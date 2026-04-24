@@ -122,6 +122,12 @@ run_case() {
     rejects_tracked_stage0_pyproject)
       printf '%s\n' '[project]' > "$case_dir/pyproject.toml"
       ;;
+    rejects_tracked_stage0_python_version)
+      printf '%s\n' '3.12.0' > "$case_dir/.python-version"
+      ;;
+    rejects_tracked_stage0_requirements_lockfile)
+      printf '%s\n' 'pytest==8.0.0' > "$case_dir/requirements-dev.txt"
+      ;;
     *)
       echo "unknown case: $case_name" >&2
       exit 1
@@ -158,5 +164,7 @@ run_case rejects_python_unittest_gate_in_bootstrap_config failure "CI still uses
 run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or packaging files are still tracked"
 run_case rejects_tracked_stage0_tests failure "Python stage0 source, tests, or packaging files are still tracked"
 run_case rejects_tracked_stage0_pyproject failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_python_version failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_requirements_lockfile failure "Python stage0 source, tests, or packaging files are still tracked"
 
 echo "check-python-exit-docs regression cases passed"
