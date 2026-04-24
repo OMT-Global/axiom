@@ -38,6 +38,8 @@ Current compile-fail fixtures cover:
 - `mutable_borrow_while_shared_live`: ownership diagnostics for conflicting
   mutable and shared borrows.
 - `ownership_use_after_move`: ownership diagnostics for reading a moved value.
+- `panic_rejects_unreachable_statement`: control diagnostics for statements
+  that appear after `panic(...)` in the same block.
 - `panic_rejects_multiple_arguments`: type diagnostics for `panic(...)` when
   the call supplies more than one message argument.
 - `panic_requires_single_argument`: type diagnostics for `panic(...)` when the
