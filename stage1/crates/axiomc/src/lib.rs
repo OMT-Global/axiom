@@ -208,6 +208,19 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_panic_statement_with_generic_call_argument() {
+        let source = "fn label<T>(value: T): string {\nreturn \"boom\"\n}\n\nfn require<T>(flag: bool, value: T): T {\nif flag {\nreturn value\n} else {\npanic(label<T>(value))\n}\n}\n\nlet answer: int = require<int>(true, 7)\nprint answer\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn label__int(value: i64) -> String {"));
+        assert!(rendered.contains("fn require__int(flag: bool, value: i64) -> i64 {"));
+        assert!(rendered.contains("axiom_panic(label__int(value));"));
+        assert!(rendered.contains("let answer: i64 = require__int(true, 7);"));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
