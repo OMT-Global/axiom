@@ -1117,32 +1117,33 @@ fn parse_match_arms(
         {
             let name = variant[..open_brace].trim();
             validate_ident(name, path, line_no, 1)?;
-            let bindings_raw = variant[open_brace + 1..variant.len() - 1].trim();
-            if bindings_raw.is_empty() {
+            let bindings_raw = &variant[open_brace + 1..variant.len() - 1];
+            if bindings_raw.trim().is_empty() {
                 return Err(Diagnostic::new("parse", "match arm binding is empty")
                     .with_path(path.display().to_string())
                     .with_span(line_no, open_brace + 2));
             }
             let bindings = split_top_level_with_offsets(bindings_raw, ',')
                 .into_iter()
-                .map(|(binding_offset, binding)| {
-                    let binding = binding.trim();
+                .map(|(binding_offset, raw_binding)| {
+                    let binding = raw_binding.trim();
+                    let leading_ws = raw_binding.len().saturating_sub(raw_binding.trim_start().len());
                     let binding_column = open_brace
                         + 2
                         + binding_offset
-                        + binding.len().saturating_sub(binding.trim_start().len());
+                        + leading_ws;
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
                             .with_span(line_no, binding_column));
                     }
-                    if looks_like_nested_match_pattern(binding) {
+                    if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
                         return Err(Diagnostic::new(
                             "parse",
                             "nested match patterns are not supported yet",
                         )
                         .with_path(path.display().to_string())
-                        .with_span(line_no, binding_column));
+                        .with_span(line_no, binding_column + nested_offset));
                     }
                     validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
@@ -1155,32 +1156,33 @@ fn parse_match_arms(
         {
             let name = variant[..open_paren].trim();
             validate_ident(name, path, line_no, 1)?;
-            let bindings_raw = variant[open_paren + 1..variant.len() - 1].trim();
-            if bindings_raw.is_empty() {
+            let bindings_raw = &variant[open_paren + 1..variant.len() - 1];
+            if bindings_raw.trim().is_empty() {
                 return Err(Diagnostic::new("parse", "match arm binding is empty")
                     .with_path(path.display().to_string())
                     .with_span(line_no, open_paren + 2));
             }
             let bindings = split_top_level_with_offsets(bindings_raw, ',')
                 .into_iter()
-                .map(|(binding_offset, binding)| {
-                    let binding = binding.trim();
+                .map(|(binding_offset, raw_binding)| {
+                    let binding = raw_binding.trim();
+                    let leading_ws = raw_binding.len().saturating_sub(raw_binding.trim_start().len());
                     let binding_column = open_paren
                         + 2
                         + binding_offset
-                        + binding.len().saturating_sub(binding.trim_start().len());
+                        + leading_ws;
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
                             .with_span(line_no, binding_column));
                     }
-                    if looks_like_nested_match_pattern(binding) {
+                    if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
                         return Err(Diagnostic::new(
                             "parse",
                             "nested match patterns are not supported yet",
                         )
                         .with_path(path.display().to_string())
-                        .with_span(line_no, binding_column));
+                        .with_span(line_no, binding_column + nested_offset));
                     }
                     validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
@@ -2025,11 +2027,11 @@ fn validate_ident(
     Ok(())
 }
 
-fn looks_like_nested_match_pattern(raw: &str) -> bool {
-    find_top_level_char(raw, '(').is_some()
-        || find_top_level_char(raw, '{').is_some()
-        || find_top_level_char(raw, '[').is_some()
-        || find_top_level_char(raw, ':').is_some()
+fn find_nested_match_pattern_offset(raw: &str) -> Option<usize> {
+    ['(', '{', '[', ':']
+        .into_iter()
+        .filter_map(|ch| find_top_level_char(raw, ch))
+        .min()
 }
 
 fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {

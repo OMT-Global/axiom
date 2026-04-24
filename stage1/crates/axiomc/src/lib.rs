@@ -338,7 +338,7 @@ mod tests {
         assert_eq!(error.kind, "parse");
         assert_eq!(error.message, "nested match patterns are not supported yet");
         assert_eq!(error.line, Some(6));
-        assert_eq!(error.column, Some(12));
+        assert_eq!(error.column, Some(13));
     }
 
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(error.kind, "parse");
         assert_eq!(error.message, "nested match patterns are not supported yet");
         assert_eq!(error.line, Some(6));
-        assert_eq!(error.column, Some(7));
+        assert_eq!(error.column, Some(15));
     }
 
     #[test]
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(error.kind, "parse");
         assert_eq!(error.message, "nested match patterns are not supported yet");
         assert_eq!(error.line, Some(6));
-        assert_eq!(error.column, Some(11));
+        assert_eq!(error.column, Some(20));
     }
 
     #[test]
