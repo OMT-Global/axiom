@@ -1123,14 +1123,18 @@ fn parse_match_arms(
                     .with_path(path.display().to_string())
                     .with_span(line_no, open_brace + 2));
             }
-            let bindings = split_top_level(bindings_raw, ',')
+            let bindings = split_top_level_with_offsets(bindings_raw, ',')
                 .into_iter()
-                .map(|binding| {
+                .map(|(binding_offset, binding)| {
                     let binding = binding.trim();
+                    let binding_column = open_brace
+                        + 2
+                        + binding_offset
+                        + binding.len().saturating_sub(binding.trim_start().len());
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
-                            .with_span(line_no, open_brace + 2));
+                            .with_span(line_no, binding_column));
                     }
                     if looks_like_nested_match_pattern(binding) {
                         return Err(Diagnostic::new(
@@ -1138,9 +1142,9 @@ fn parse_match_arms(
                             "nested match patterns are not supported yet",
                         )
                         .with_path(path.display().to_string())
-                        .with_span(line_no, open_brace + 2));
+                        .with_span(line_no, binding_column));
                     }
-                    validate_ident(binding, path, line_no, open_brace + 2)?;
+                    validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -1157,14 +1161,18 @@ fn parse_match_arms(
                     .with_path(path.display().to_string())
                     .with_span(line_no, open_paren + 2));
             }
-            let bindings = split_top_level(bindings_raw, ',')
+            let bindings = split_top_level_with_offsets(bindings_raw, ',')
                 .into_iter()
-                .map(|binding| {
+                .map(|(binding_offset, binding)| {
                     let binding = binding.trim();
+                    let binding_column = open_paren
+                        + 2
+                        + binding_offset
+                        + binding.len().saturating_sub(binding.trim_start().len());
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
-                            .with_span(line_no, open_paren + 2));
+                            .with_span(line_no, binding_column));
                     }
                     if looks_like_nested_match_pattern(binding) {
                         return Err(Diagnostic::new(
@@ -1172,9 +1180,9 @@ fn parse_match_arms(
                             "nested match patterns are not supported yet",
                         )
                         .with_path(path.display().to_string())
-                        .with_span(line_no, open_paren + 2));
+                        .with_span(line_no, binding_column));
                     }
-                    validate_ident(binding, path, line_no, open_paren + 2)?;
+                    validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -2025,6 +2033,13 @@ fn looks_like_nested_match_pattern(raw: &str) -> bool {
 }
 
 fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
+    split_top_level_with_offsets(raw, delimiter)
+        .into_iter()
+        .map(|(_, part)| part)
+        .collect()
+}
+
+fn split_top_level_with_offsets(raw: &str, delimiter: char) -> Vec<(usize, &str)> {
     let mut parts = Vec::new();
     let mut in_string = false;
     let mut escaped = false;
@@ -2056,13 +2071,13 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
             '[' => bracket_depth += 1,
             ']' => bracket_depth = bracket_depth.saturating_sub(1),
             _ if ch == delimiter && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
-                parts.push(&raw[start..index]);
+                parts.push((start, &raw[start..index]));
                 start = index + ch.len_utf8();
             }
             _ => {}
         }
     }
-    parts.push(&raw[start..]);
+    parts.push((start, &raw[start..]));
     parts
 }
 

@@ -331,6 +331,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_reports_nested_match_pattern_at_offending_positional_binding() {
+        let source = "enum Pair {\nWrap(int, (int, bool))\n}\n\nmatch Wrap(1, (2, true)) {\nWrap(value, (count, true)) {\nprint value\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested positional bindings should report the offending binding");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(12));
+    }
+
+    #[test]
     fn parser_rejects_nested_named_match_patterns() {
         let source = "enum Event {\nTick { payload: (int, bool) }\n}\n\nmatch Tick { payload: (1, true) } {\nTick { payload: (count, true) } {\nprint count\n}\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
@@ -339,6 +350,17 @@ mod tests {
         assert_eq!(error.message, "nested match patterns are not supported yet");
         assert_eq!(error.line, Some(6));
         assert_eq!(error.column, Some(7));
+    }
+
+    #[test]
+    fn parser_reports_nested_match_pattern_at_offending_named_binding() {
+        let source = "enum Event {\nTick { tag: int, payload: (int, bool) }\n}\n\nmatch Tick { tag: 1, payload: (2, true) } {\nTick { tag, payload: (count, true) } {\nprint tag\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested named bindings should report the offending binding");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(11));
     }
 
     #[test]
