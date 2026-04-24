@@ -9,6 +9,8 @@ members = [
   "fail/panic_requires_string_argument",
   "fail/package_visibility_dependency_boundary",
   "fail/recursive_mutual_struct_without_indirection",
+  "fail/recursive_struct_enum_without_indirection",
+  "fail/recursive_struct_without_indirection",
   "fail/result_ok_without_context",
   "fail/stdlib_clock_without_capability",
   "pass/collection_operations",

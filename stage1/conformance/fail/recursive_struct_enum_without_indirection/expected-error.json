@@ -1,7 +1,7 @@
 {
   "kind": "type",
   "code": null,
-  "message": "recursive field \"expr\" in struct \"ExprNode\" requires indirection; unboxed recursive types are not supported",
+  "message": "recursive field \"expr\" in struct \"conformance_recursive_struct_enum_without_indirection_main_ExprNode\" requires indirection; unboxed recursive types are not supported",
   "path": "src/main.ax",
   "line": 2,
   "column": 1
