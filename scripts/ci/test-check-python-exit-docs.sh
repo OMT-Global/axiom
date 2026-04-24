@@ -83,19 +83,17 @@ run_case() {
       printf '%s\n' "$legacy_invocation" > "$case_dir/README.md"
       ;;
     rejects_blocked_parity_rows)
-      python3 - <<'PY' "$case_dir/docs/python-exit-parity-gate.md"
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text()
-needle = "There are no `blocked` rows in the current matrix.\n"
-replacement = (
-    "| synthetic blocked case | `blocked` | Linked child issue is still open. |\n\n"
-    "There are no `blocked` rows in the current matrix.\n"
-)
-path.write_text(text.replace(needle, replacement, 1))
-PY
+      awk '
+        {
+          if (!inserted && $0 == "There are no `blocked` rows in the current matrix.") {
+            print "| synthetic blocked case | `blocked` | Linked child issue is still open. |"
+            print ""
+            inserted = 1
+          }
+          print
+        }
+      ' "$case_dir/docs/python-exit-parity-gate.md" > "$case_dir/docs/python-exit-parity-gate.md.tmp"
+      mv "$case_dir/docs/python-exit-parity-gate.md.tmp" "$case_dir/docs/python-exit-parity-gate.md"
       ;;
     rejects_python_unittest_gate)
       mkdir -p "$case_dir/.github/workflows"
