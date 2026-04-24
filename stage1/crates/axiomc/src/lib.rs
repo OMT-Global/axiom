@@ -3535,6 +3535,34 @@ mod tests {
     }
 
     #[test]
+    fn check_project_accepts_panic_as_terminating_branch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-terminates-branch");
+        create_project(&project, Some("panic-terminates-branch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn require(flag: bool): int {\nif flag {\nreturn 7\n} else {\npanic(\"boom\")\n}\n}\n\nprint require(true)\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("panic branch should count as terminating control flow");
+    }
+
+    #[test]
+    fn check_project_rejects_unreachable_statement_after_panic() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-unreachable");
+        create_project(&project, Some("panic-unreachable-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn fail(): int {\npanic(\"boom\")\nprint 1\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("unreachable statement should fail");
+        assert_eq!(error.kind, "control");
+        assert!(error.message.contains("unreachable statements after a terminating control-flow statement"));
+    }
+
+    #[test]
     fn build_project_emits_native_binary_from_imported_modules() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("modules");
