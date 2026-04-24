@@ -344,6 +344,16 @@ mod tests {
     }
 
     #[test]
+    fn panic_statement_without_parens_rejects_missing_argument() {
+        let source = "fn fail(): int {\npanic\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error =
+            hir::lower(&parsed).expect_err("bare panic should reject the non-call statement form");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic statement expects `panic(\"message\")`"));
+    }
+
+    #[test]
     fn panic_statement_rejects_multiple_arguments() {
         let source = "fn fail(): int {\npanic(\"boom\", \"again\")\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
