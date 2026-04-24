@@ -320,6 +320,15 @@ mod tests {
     }
 
     #[test]
+    fn panic_statement_rejects_type_arguments() {
+        let source = "fn fail(): int {\npanic<string>(\"boom\")\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject type arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic does not accept type arguments"));
+    }
+
+    #[test]
     fn render_rust_uses_checked_slice_access() {
         let source =
             "let values: [int] = [1]\nlet window: &[int] = values[0:1]\nprint len(window)\n";
@@ -3173,8 +3182,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 12);
-        assert_eq!(output.passed, 12);
+        assert_eq!(output.cases.len(), 13);
+        assert_eq!(output.passed, 13);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3182,7 +3191,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 6
+                == 7
         );
         assert_eq!(
             output

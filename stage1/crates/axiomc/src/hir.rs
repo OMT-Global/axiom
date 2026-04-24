@@ -1679,13 +1679,42 @@ fn rewrite_stmt_generic_calls(
             column: *column,
         },
         syntax::Stmt::Panic { expr, line, column } => syntax::Stmt::Panic {
-            expr: rewrite_expr_generic_calls(
-                expr,
-                type_bindings,
-                generic_functions,
-                queue,
-                queued,
-            )?,
+            expr: match expr {
+                syntax::Expr::Call {
+                    name,
+                    type_args,
+                    args,
+                    line,
+                    column,
+                } if name == "panic" => syntax::Expr::Call {
+                    name: name.clone(),
+                    type_args: type_args
+                        .iter()
+                        .map(|type_arg| substitute_type_name(type_arg, type_bindings))
+                        .collect(),
+                    args: args
+                        .iter()
+                        .map(|arg| {
+                            rewrite_expr_generic_calls(
+                                arg,
+                                type_bindings,
+                                generic_functions,
+                                queue,
+                                queued,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    line: *line,
+                    column: *column,
+                },
+                _ => rewrite_expr_generic_calls(
+                    expr,
+                    type_bindings,
+                    generic_functions,
+                    queue,
+                    queued,
+                )?,
+            },
             line: *line,
             column: *column,
         },

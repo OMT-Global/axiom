@@ -42,6 +42,8 @@ Current compile-fail fixtures cover:
   call arity is not exactly one argument.
 - `panic_requires_string_argument`: type diagnostics for `panic(...)` when the
   message is not a `string`.
+- `panic_rejects_type_arguments`: type diagnostics for `panic(...)` when the
+  statement incorrectly supplies type arguments.
 - `result_ok_without_context`: type diagnostics for `Ok(...)` without an
   expected `Result<T, E>` context.
 - `stdlib_clock_without_capability`: capability diagnostics for clock
