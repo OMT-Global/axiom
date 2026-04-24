@@ -288,6 +288,21 @@ mod tests {
     }
 
     #[test]
+    fn parser_accepts_match_arm_identifiers_containing_if() {
+        let source = "enum Prize {\nGift(int)\nNone\n}\n\nmatch Gift(3) {\nGift(gift_value) {\nprint gift_value\n}\nNone {\nprint 0\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+
+        match &parsed.stmts[0] {
+            crate::syntax::Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].variant, "Gift");
+                assert_eq!(arms[0].bindings, vec!["gift_value".to_string()]);
+            }
+            other => panic!("expected match statement, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parser_rejects_nested_match_patterns() {
         let source = "enum Pair {\nWrap((int, bool))\n}\n\nmatch Wrap((1, true)) {\nWrap((count, true)) {\nprint count\n}\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
