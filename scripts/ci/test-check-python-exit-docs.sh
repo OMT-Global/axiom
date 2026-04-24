@@ -85,6 +85,9 @@ run_case() {
     rejects_legacy_invocation_in_docs_tree)
       printf '%s\n' "$legacy_invocation" > "$case_dir/docs/getting-started.md"
       ;;
+    rejects_legacy_invocation_in_scripts_tree)
+      printf '%s\n' "$legacy_invocation" > "$case_dir/scripts/ci/legacy-run.sh"
+      ;;
     rejects_blocked_parity_rows)
       awk '
         {
@@ -102,9 +105,22 @@ run_case() {
       mkdir -p "$case_dir/.github/workflows"
       printf '%s\n' "$python_unittest" > "$case_dir/.github/workflows/pr-fast-ci.yml"
       ;;
+    rejects_python_unittest_gate_in_makefile)
+      printf '%s\n' "$python_unittest" > "$case_dir/Makefile"
+      ;;
+    rejects_python_unittest_gate_in_bootstrap_config)
+      printf '%s\n' "$python_unittest" > "$case_dir/project.bootstrap.yaml"
+      ;;
     rejects_tracked_stage0_files)
       mkdir -p "$case_dir/axiom"
       printf '%s\n' 'print("legacy")' > "$case_dir/axiom/legacy.py"
+      ;;
+    rejects_tracked_stage0_tests)
+      mkdir -p "$case_dir/tests"
+      printf '%s\n' 'print("legacy test")' > "$case_dir/tests/test_legacy.py"
+      ;;
+    rejects_tracked_stage0_pyproject)
+      printf '%s\n' '[project]' > "$case_dir/pyproject.toml"
       ;;
     *)
       echo "unknown case: $case_name" >&2
@@ -134,8 +150,13 @@ run_case() {
 run_case excluded_docs_allow_legacy_strings success
 run_case rejects_legacy_invocation_in_user_docs failure "user-facing docs still instruct users to run $legacy_invocation"
 run_case rejects_legacy_invocation_in_docs_tree failure "user-facing docs still instruct users to run $legacy_invocation"
+run_case rejects_legacy_invocation_in_scripts_tree failure "user-facing docs still instruct users to run $legacy_invocation"
 run_case rejects_blocked_parity_rows failure "Python exit parity matrix has blocked rows"
 run_case rejects_python_unittest_gate failure "CI still uses Python unittest as a language/runtime correctness gate"
+run_case rejects_python_unittest_gate_in_makefile failure "CI still uses Python unittest as a language/runtime correctness gate"
+run_case rejects_python_unittest_gate_in_bootstrap_config failure "CI still uses Python unittest as a language/runtime correctness gate"
 run_case rejects_tracked_stage0_files failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_tests failure "Python stage0 source, tests, or packaging files are still tracked"
+run_case rejects_tracked_stage0_pyproject failure "Python stage0 source, tests, or packaging files are still tracked"
 
 echo "check-python-exit-docs regression cases passed"
