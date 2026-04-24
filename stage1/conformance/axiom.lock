@@ -11,6 +11,11 @@ version = "0.1.0"
 source = "path:fail/ownership_use_after_move"
 
 [[package]]
+name = "conformance-panic-requires-single-argument"
+version = "0.1.0"
+source = "path:fail/panic_requires_single_argument"
+
+[[package]]
 name = "conformance-panic-requires-string-argument"
 version = "0.1.0"
 source = "path:fail/panic_requires_string_argument"

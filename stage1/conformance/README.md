@@ -38,6 +38,8 @@ Current compile-fail fixtures cover:
 - `mutable_borrow_while_shared_live`: ownership diagnostics for conflicting
   mutable and shared borrows.
 - `ownership_use_after_move`: ownership diagnostics for reading a moved value.
+- `panic_requires_single_argument`: type diagnostics for `panic(...)` when the
+  call arity is not exactly one argument.
 - `panic_requires_string_argument`: type diagnostics for `panic(...)` when the
   message is not a `string`.
 - `result_ok_without_context`: type diagnostics for `Ok(...)` without an
