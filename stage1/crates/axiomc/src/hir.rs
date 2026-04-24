@@ -75,6 +75,10 @@ pub enum Stmt {
         expr: Expr,
         span: SourceSpan,
     },
+    Panic {
+        message: Expr,
+        span: SourceSpan,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
@@ -1185,6 +1189,17 @@ fn rewrite_stmt_aggregate_types(
             line: *line,
             column: *column,
         },
+        syntax::Stmt::Panic { expr, line, column } => syntax::Stmt::Panic {
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
         syntax::Stmt::If {
             cond,
             then_block,
@@ -1660,6 +1675,46 @@ fn rewrite_stmt_generic_calls(
                 queue,
                 queued,
             )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Panic { expr, line, column } => syntax::Stmt::Panic {
+            expr: match expr {
+                syntax::Expr::Call {
+                    name,
+                    type_args,
+                    args,
+                    line,
+                    column,
+                } if name == "panic" => syntax::Expr::Call {
+                    name: name.clone(),
+                    type_args: type_args
+                        .iter()
+                        .map(|type_arg| substitute_type_name(type_arg, type_bindings))
+                        .collect(),
+                    args: args
+                        .iter()
+                        .map(|arg| {
+                            rewrite_expr_generic_calls(
+                                arg,
+                                type_bindings,
+                                generic_functions,
+                                queue,
+                                queued,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    line: *line,
+                    column: *column,
+                },
+                _ => rewrite_expr_generic_calls(
+                    expr,
+                    type_bindings,
+                    generic_functions,
+                    queue,
+                    queued,
+                )?,
+            },
             line: *line,
             column: *column,
         },
@@ -2730,7 +2785,7 @@ fn lower_block(
         if guaranteed_return {
             return Err(Diagnostic::new(
                 "control",
-                "unreachable statements after return are not yet supported in stage1",
+                "unreachable statements after a terminating control-flow statement are not yet supported in stage1",
             )
             .with_span(stmt.line(), stmt.column()));
         }
@@ -2827,6 +2882,57 @@ fn lower_stmt(
             }
             Ok(Stmt::Print {
                 expr: lowered,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
+            })
+        }
+        syntax::Stmt::Panic { expr, line, column } => {
+            let syntax::Expr::Call {
+                name,
+                type_args,
+                args,
+                ..
+            } = expr
+            else {
+                return Err(Diagnostic::new(
+                    "type",
+                    "panic statement expects `panic(\"message\")`",
+                )
+                .with_span(*line, *column));
+            };
+            if name != "panic" {
+                return Err(Diagnostic::new(
+                    "type",
+                    "panic statement expects `panic(\"message\")`",
+                )
+                .with_span(*line, *column));
+            }
+            if !type_args.is_empty() {
+                return Err(
+                    Diagnostic::new("type", "panic does not accept type arguments")
+                        .with_span(*line, *column),
+                );
+            }
+            if args.len() != 1 {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("panic expects 1 argument, got {}", args.len()),
+                )
+                .with_span(*line, *column));
+            }
+            let message = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+            if message.ty() != &Type::String {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("panic expects a string argument, got {}", message.ty()),
+                )
+                .with_span(args[0].line(), args[0].column()));
+            }
+            move_lowered_value(&message, env)?;
+            Ok(Stmt::Panic {
+                message,
                 span: SourceSpan {
                     line: *line,
                     column: *column,
@@ -6492,7 +6598,7 @@ impl Expr {
 impl Stmt {
     fn always_returns(&self) -> bool {
         match self {
-            Stmt::Return { .. } => true,
+            Stmt::Return { .. } | Stmt::Panic { .. } => true,
             Stmt::If {
                 cond,
                 then_block,
@@ -6527,6 +6633,7 @@ impl syntax::Stmt {
         match self {
             syntax::Stmt::Let { line, .. }
             | syntax::Stmt::Print { line, .. }
+            | syntax::Stmt::Panic { line, .. }
             | syntax::Stmt::If { line, .. }
             | syntax::Stmt::While { line, .. }
             | syntax::Stmt::Match { line, .. }
@@ -6538,6 +6645,7 @@ impl syntax::Stmt {
         match self {
             syntax::Stmt::Let { column, .. }
             | syntax::Stmt::Print { column, .. }
+            | syntax::Stmt::Panic { column, .. }
             | syntax::Stmt::If { column, .. }
             | syntax::Stmt::While { column, .. }
             | syntax::Stmt::Match { column, .. }

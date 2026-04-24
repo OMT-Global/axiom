@@ -196,6 +196,51 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_panic_statement() {
+        let source = "fn fail(): int {\npanic(\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_panic(message: String) -> ! {"));
+        assert!(rendered.contains("axiom_runtime_error(\"panic\", &message)"));
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
+    fn parser_lowers_panic_statement_with_whitespace_before_paren() {
+        let source = "fn fail(): int {\npanic (\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
+    fn parser_lowers_panic_statement_with_tab_before_paren() {
+        let source = "fn fail(): int {\npanic\t(\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
+    fn parser_lowers_panic_statement_with_generic_call_argument() {
+        let source = "fn label<T>(value: T): string {\nreturn \"boom\"\n}\n\nfn require<T>(flag: bool, value: T): T {\nif flag {\nreturn value\n} else {\npanic(label<T>(value))\n}\n}\n\nlet answer: int = require<int>(true, 7)\nprint answer\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn label__int(value: i64) -> String {"));
+        assert!(rendered.contains("fn require__int(flag: bool, value: i64) -> i64 {"));
+        assert!(rendered.contains("axiom_panic(label__int(value));"));
+        assert!(rendered.contains("let answer: i64 = require__int(true, 7);"));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -278,6 +323,56 @@ mod tests {
         assert!(!rendered.contains("std::process::exit"));
         assert!(!rendered.contains("assert!("));
         assert!(!rendered.contains("Axiom stack trace"));
+    }
+
+    #[test]
+    fn panic_statement_requires_single_string_argument() {
+        let source = "fn fail(): int {\npanic(1)\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject non-string arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects a string argument"));
+    }
+
+    #[test]
+    fn panic_statement_rejects_wrong_arity() {
+        let source = "fn fail(): int {\npanic()\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject missing arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects 1 argument, got 0"));
+    }
+
+    #[test]
+    fn panic_statement_without_parens_rejects_missing_argument() {
+        let source = "fn fail(): int {\npanic\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error =
+            hir::lower(&parsed).expect_err("bare panic should reject the non-call statement form");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic statement expects `panic(\"message\")`"));
+    }
+
+    #[test]
+    fn panic_statement_rejects_multiple_arguments() {
+        let source = "fn fail(): int {\npanic(\"boom\", \"again\")\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject extra arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects 1 argument, got 2"));
+    }
+
+    #[test]
+    fn panic_statement_rejects_type_arguments() {
+        let source = "fn fail(): int {\npanic<string>(\"boom\")\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject type arguments");
+        assert_eq!(error.kind, "type");
+        assert!(
+            error
+                .message
+                .contains("panic does not accept type arguments")
+        );
     }
 
     #[test]
@@ -2720,6 +2815,32 @@ mod tests {
     }
 
     #[test]
+    fn stage1_runtime_reports_structured_error_for_panic_statement() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-statement");
+        create_project(&project, Some("panic-statement")).expect("create project");
+        fs::write(project.join("src/main.ax"), "panic(\"boom\")\n").expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+
+        assert!(!output.status.success(), "program should fail");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("{\"kind\":\"panic\",\"message\":\"boom\"}"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(
+            !stderr.contains("runtime panic"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(!stderr.contains("panic:"), "unexpected stderr: {stderr}");
+    }
+
+    #[test]
     fn stage1_runtime_reports_structured_error_for_slice_failures() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runtime-error-slice");
@@ -3108,8 +3229,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 10);
-        assert_eq!(output.passed, 10);
+        assert_eq!(output.cases.len(), 15);
+        assert_eq!(output.passed, 15);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3117,7 +3238,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 4
+                == 9
         );
         assert_eq!(
             output
@@ -3485,6 +3606,51 @@ mod tests {
         let error = check_project(&project).expect_err("missing return should fail");
         assert!(error.message.contains("does not return along all paths"));
         assert_eq!(error.kind, "control");
+    }
+
+    #[test]
+    fn check_project_accepts_panic_as_terminating_branch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-terminates-branch");
+        create_project(&project, Some("panic-terminates-branch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn require(flag: bool): int {\nif flag {\nreturn 7\n} else {\npanic(\"boom\")\n}\n}\n\nprint require(true)\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("panic branch should count as terminating control flow");
+    }
+
+    #[test]
+    fn check_project_accepts_panic_as_terminating_match_arm() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-terminates-match-arm");
+        create_project(&project, Some("panic-terminates-match-arm-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Status {\nReady\nFailed\n}\n\nfn require(status: Status): int {\nmatch status {\nReady {\nreturn 7\n}\nFailed {\npanic(\"boom\")\n}\n}\n}\n\nprint require(Ready)\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("panic match arm should count as terminating control flow");
+    }
+
+    #[test]
+    fn check_project_rejects_unreachable_statement_after_panic() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-unreachable");
+        create_project(&project, Some("panic-unreachable-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn fail(): int {\npanic(\"boom\")\nprint 1\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("unreachable statement should fail");
+        assert_eq!(error.kind, "control");
+        assert!(
+            error
+                .message
+                .contains("unreachable statements after a terminating control-flow statement")
+        );
     }
 
     #[test]

@@ -2,6 +2,11 @@
 members = [
   "fail/mutable_borrow_while_shared_live",
   "fail/ownership_use_after_move",
+  "fail/panic_rejects_unreachable_statement",
+  "fail/panic_rejects_multiple_arguments",
+  "fail/panic_rejects_type_arguments",
+  "fail/panic_requires_single_argument",
+  "fail/panic_requires_string_argument",
   "fail/result_ok_without_context",
   "fail/stdlib_clock_without_capability",
   "pass/collection_operations",
