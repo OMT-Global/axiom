@@ -302,6 +302,24 @@ mod tests {
     }
 
     #[test]
+    fn panic_statement_rejects_wrong_arity() {
+        let source = "fn fail(): int {\npanic()\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject missing arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects 1 argument, got 0"));
+    }
+
+    #[test]
+    fn panic_statement_rejects_multiple_arguments() {
+        let source = "fn fail(): int {\npanic(\"boom\", \"again\")\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject extra arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects 1 argument, got 2"));
+    }
+
+    #[test]
     fn render_rust_uses_checked_slice_access() {
         let source =
             "let values: [int] = [1]\nlet window: &[int] = values[0:1]\nprint len(window)\n";
