@@ -242,13 +242,15 @@ mod tests {
 
     #[test]
     fn parser_tracks_package_visibility() {
-        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\n";
+        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         assert_eq!(parsed.consts[0].visibility, Visibility::Package);
         assert_eq!(parsed.type_aliases[0].visibility, Visibility::Package);
         assert_eq!(parsed.structs[0].visibility, Visibility::Package);
         assert_eq!(parsed.enums[0].visibility, Visibility::Package);
         assert_eq!(parsed.functions[0].visibility, Visibility::Package);
+        assert_eq!(parsed.functions[1].visibility, Visibility::Package);
+        assert!(parsed.functions[1].is_async);
     }
 
     #[test]
@@ -1253,6 +1255,29 @@ mod tests {
             .output()
             .expect("run compiled binary");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42\npackage\n42\n");
+    }
+
+    #[test]
+    fn package_visibility_allows_same_package_async_module_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-async-module");
+        create_project(&project, Some("package-visible-async-module-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/async.ax\"\nimport \"shared.ax\"\n\nlet task: Task<int> = helper(41)\nprint await task\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/shared.ax"),
+            "pub(pkg) async fn helper(value: int): int {\nreturn value + 1\n}\n",
+        )
+        .expect("write shared");
+        let built = build_project(&project).expect("build package-visible async module");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
     }
 
     #[test]
