@@ -3904,6 +3904,38 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_package_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-re-export");
+        create_project(&project, Some("package-re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub(pkg) use \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("package re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
+    fn check_project_rejects_package_import_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-import-re-export");
+        create_project(&project, Some("package-import-re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub(pkg) import \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("package import re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
     fn check_project_rejects_namespace_qualified_calls_explicitly() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("qualified-call");
