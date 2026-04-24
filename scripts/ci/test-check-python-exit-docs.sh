@@ -88,6 +88,12 @@ run_case() {
   setup_case_repo "$case_dir"
 
   case "$case_name" in
+    rejects_missing_decision_doc)
+      rm -f "$case_dir/docs/python-exit-vm-disposition.md"
+      ;;
+    rejects_missing_parity_doc)
+      rm -f "$case_dir/docs/python-exit-parity-gate.md"
+      ;;
     excluded_docs_allow_legacy_strings)
       printf '%s\n' "$legacy_invocation" >> "$case_dir/docs/python-exit-vm-disposition.md"
       printf '%s\n' "$legacy_invocation" >> "$case_dir/docs/python-exit-parity-gate.md"
@@ -191,6 +197,8 @@ run_case() {
   fi
 }
 
+run_case rejects_missing_decision_doc failure "missing docs/python-exit-vm-disposition.md"
+run_case rejects_missing_parity_doc failure "missing docs/python-exit-parity-gate.md"
 run_case excluded_docs_allow_legacy_strings success
 run_case rejects_legacy_invocation_in_user_docs failure "user-facing docs still instruct users to run $legacy_invocation"
 run_case rejects_legacy_invocation_in_docs_tree failure "user-facing docs still instruct users to run $legacy_invocation"
