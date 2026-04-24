@@ -254,6 +254,19 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_package_re_exports_explicitly() {
+        for source in [
+            "pub(pkg) import \"math.ax\"\nprint \"skip\"\n",
+            "pub(pkg) use \"math.ax\"\nprint \"skip\"\n",
+        ] {
+            let error = parse_program(source, Path::new("main.ax"))
+                .expect_err("package re-exports should fail during parsing");
+            assert_eq!(error.kind, "parse");
+            assert!(error.message.contains("does not support re-exports"));
+        }
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
