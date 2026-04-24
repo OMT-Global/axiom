@@ -121,6 +121,7 @@ fi
 stage0_pathspecs=(
   ':(glob)axiom/**'
   ':(glob)tests/**'
+  ':(glob)requirements*.in'
   ':(glob)requirements*.txt'
   '.python-version'
   'Pipfile'

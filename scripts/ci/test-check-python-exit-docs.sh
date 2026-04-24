@@ -147,6 +147,9 @@ run_case() {
     rejects_tracked_stage0_requirements)
       printf '%s\n' 'pytest==8.0.0' > "$case_dir/requirements.txt"
       ;;
+    rejects_tracked_stage0_requirements_in)
+      printf '%s\n' 'pytest==8.0.0' > "$case_dir/requirements.in"
+      ;;
     rejects_tracked_stage0_requirements_lockfile)
       printf '%s\n' 'pytest==8.0.0' > "$case_dir/requirements-dev.txt"
       ;;
@@ -212,6 +215,7 @@ run_case rejects_tracked_stage0_tests failure "Python stage0 source, tests, or p
 run_case rejects_tracked_stage0_pyproject failure "Python stage0 source, tests, or packaging files are still tracked" "pyproject.toml"
 run_case rejects_tracked_stage0_python_version failure "Python stage0 source, tests, or packaging files are still tracked" ".python-version"
 run_case rejects_tracked_stage0_requirements failure "Python stage0 source, tests, or packaging files are still tracked" "requirements.txt"
+run_case rejects_tracked_stage0_requirements_in failure "Python stage0 source, tests, or packaging files are still tracked" "requirements.in"
 run_case rejects_tracked_stage0_requirements_lockfile failure "Python stage0 source, tests, or packaging files are still tracked" "requirements-dev.txt"
 run_case rejects_tracked_stage0_pipfile failure "Python stage0 source, tests, or packaging files are still tracked" "Pipfile"
 run_case rejects_tracked_stage0_pipfile_lock failure "Python stage0 source, tests, or packaging files are still tracked" "Pipfile.lock"
