@@ -32,3 +32,15 @@ Packages under `fail/` are compile-fail fixtures. Each package is a complete
 stage1 project with `axiom.toml`, `axiom.lock`, source, and
 `expected-error.json`. The conformance runner checks the diagnostic kind, code,
 message, relative path, line, and column.
+
+Current compile-fail fixtures cover:
+
+- `mutable_borrow_while_shared_live`: ownership diagnostics for conflicting
+  mutable and shared borrows.
+- `ownership_use_after_move`: ownership diagnostics for reading a moved value.
+- `panic_requires_string_argument`: type diagnostics for `panic(...)` when the
+  message is not a `string`.
+- `result_ok_without_context`: type diagnostics for `Ok(...)` without an
+  expected `Result<T, E>` context.
+- `stdlib_clock_without_capability`: capability diagnostics for clock
+  intrinsics without the manifest opt-in.

@@ -2,6 +2,7 @@
 members = [
   "fail/mutable_borrow_while_shared_live",
   "fail/ownership_use_after_move",
+  "fail/panic_requires_string_argument",
   "fail/result_ok_without_context",
   "fail/stdlib_clock_without_capability",
   "pass/collection_operations",
