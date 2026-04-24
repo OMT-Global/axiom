@@ -99,7 +99,7 @@ fi
 
 python_unittest="python -m unit""test"
 
-if rg -n "$python_unittest" .github scripts Makefile project.bootstrap.yaml; then
+if rg -n --hidden "$python_unittest" .github scripts Makefile project.bootstrap.yaml; then
   echo "CI still uses Python unittest as a language/runtime correctness gate" >&2
   exit 1
 fi
