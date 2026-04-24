@@ -1327,6 +1327,16 @@ mod tests {
         assert!(error.message.contains("is not visible from this module"));
     }
 
+    #[test]
+    fn package_visibility_rejects_cross_package_async_function_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-async-fn",
+            "pub(pkg) async fn helper(): int {\nreturn 42\n}\n",
+            "import \"std/async.ax\"\nimport \"core/shared.ax\"\nlet task: Task<int> = helper()\nprint await task\n",
+            "function \"helper\"",
+        );
+    }
+
     fn assert_cross_package_package_visibility_error(
         case_name: &str,
         dependency_source: &str,
