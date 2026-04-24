@@ -267,6 +267,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_for_loops_explicitly() {
+        let source = "fn main(): int {\nfor value in [1, 2, 3] {\nprint value\n}\nreturn 0\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("for loops should fail with an explicit parser diagnostic");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.line, Some(2));
+        assert_eq!(error.column, Some(1));
+        assert!(error.message.contains("does not support `for` loops yet"));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -1274,8 +1285,7 @@ mod tests {
     fn package_visibility_allows_same_package_async_module_imports() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("package-visible-async-module");
-        create_project(&project, Some("package-visible-async-module-app"))
-            .expect("create project");
+        create_project(&project, Some("package-visible-async-module-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "import \"std/async.ax\"\nimport \"shared.ax\"\n\nlet task: Task<int> = helper(41)\nprint await task\n",
@@ -3445,8 +3455,8 @@ mod tests {
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 21);
-        assert_eq!(output.passed, 21);
+        assert_eq!(output.cases.len(), 22);
+        assert_eq!(output.passed, 22);
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -3454,7 +3464,7 @@ mod tests {
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 14
+                == 15
         );
         assert_eq!(
             output

@@ -537,6 +537,14 @@ fn parse_stmt(
 ) -> Result<Stmt, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
+    if trimmed.starts_with("for ") {
+        return Err(Diagnostic::new(
+            "parse",
+            "stage1 bootstrap does not support `for` loops yet; use `while`-based iteration until the iteration protocol lands",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, 1));
+    }
     if trimmed.starts_with("if ") {
         return parse_if_stmt(lines, index, path);
     }
