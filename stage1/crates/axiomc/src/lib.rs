@@ -300,6 +300,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_nested_named_match_patterns() {
+        let source = "enum Event {\nTick { payload: (int, bool) }\n}\n\nmatch Tick { payload: (1, true) } {\nTick { payload: (count, true) } {\nprint count\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested named match patterns should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(7));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
