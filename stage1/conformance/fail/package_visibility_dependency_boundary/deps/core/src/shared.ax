@@ -1,0 +1,3 @@
+pub(pkg) fn helper(): int {
+return 42
+}

@@ -7,6 +7,7 @@ members = [
   "fail/panic_rejects_type_arguments",
   "fail/panic_requires_single_argument",
   "fail/panic_requires_string_argument",
+  "fail/package_visibility_dependency_boundary",
   "fail/result_ok_without_context",
   "fail/stdlib_clock_without_capability",
   "pass/collection_operations",
@@ -14,5 +15,6 @@ members = [
   "pass/legacy_core_programs",
   "pass/outcome_control_flow",
   "pass/package_local_modules",
+  "pass/package_visibility",
   "pass/struct_field_access",
 ]

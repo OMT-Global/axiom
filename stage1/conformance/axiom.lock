@@ -11,6 +11,16 @@ version = "0.1.0"
 source = "path:fail/ownership_use_after_move"
 
 [[package]]
+name = "conformance-package-visibility-dependency-boundary"
+version = "0.1.0"
+source = "path:fail/package_visibility_dependency_boundary"
+
+[[package]]
+name = "core"
+version = "0.1.0"
+source = "path:fail/package_visibility_dependency_boundary/deps/core"
+
+[[package]]
 name = "conformance-panic-rejects-multiple-arguments"
 version = "0.1.0"
 source = "path:fail/panic_rejects_multiple_arguments"
@@ -69,6 +79,11 @@ source = "path:pass/outcome_control_flow"
 name = "conformance-package-local-modules"
 version = "0.1.0"
 source = "path:pass/package_local_modules"
+
+[[package]]
+name = "conformance-package-visibility"
+version = "0.1.0"
+source = "path:pass/package_visibility"
 
 [[package]]
 name = "conformance-struct-field-access"
