@@ -267,6 +267,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn parser_rejects_for_loops_explicitly() {
         let source = "fn main(): int {\nfor value in [1, 2, 3] {\nprint value\n}\nreturn 0\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
@@ -275,6 +276,27 @@ mod tests {
         assert_eq!(error.line, Some(2));
         assert_eq!(error.column, Some(1));
         assert!(error.message.contains("does not support `for` loops yet"));
+=======
+    fn parser_rejects_match_arm_guards() {
+        let source = "enum OptionInt {\nSome(int)\nNone\n}\n\nfn describe(value: OptionInt): int {\nmatch value {\nSome(n) if n > 0 {\nreturn n\n}\nNone {\nreturn 0\n}\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("match arm guards should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "match arm guards are not supported yet");
+        assert_eq!(error.line, Some(8));
+        assert_eq!(error.column, Some(9));
+    }
+
+    #[test]
+    fn parser_rejects_nested_match_patterns() {
+        let source = "enum Pair {\nWrap((int, bool))\n}\n\nmatch Wrap((1, true)) {\nWrap((count, true)) {\nprint count\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested match patterns should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(6));
+>>>>>>> e12139c (test: add parser regressions for match diagnostics)
     }
 
     #[test]
