@@ -658,6 +658,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             env_legacy_unrestricted: false,
             clock: true,
             crypto: true,
+            ffi: false,
         },
     };
     graph.packages.insert(
@@ -3317,6 +3318,24 @@ fn rewrite_type_name(
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             ))
+        }
+        syntax::TypeName::Ptr(inner) => Ok(syntax::TypeName::Ptr(Box::new(rewrite_type_name(
+            inner,
+            visible_types,
+            private_imported_types,
+            module_path,
+            line,
+            column,
+        )?))),
+        syntax::TypeName::MutPtr(inner) => {
+            Ok(syntax::TypeName::MutPtr(Box::new(rewrite_type_name(
+                inner,
+                visible_types,
+                private_imported_types,
+                module_path,
+                line,
+                column,
+            )?)))
         }
         syntax::TypeName::Option(inner) => {
             Ok(syntax::TypeName::Option(Box::new(rewrite_type_name(

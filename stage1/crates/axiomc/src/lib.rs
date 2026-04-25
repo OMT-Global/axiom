@@ -1871,10 +1871,10 @@ mod tests {
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-        assert_eq!(caps.len(), 6);
+        assert_eq!(caps.len(), 7);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
-        assert_eq!(project_caps.len(), 6);
+        assert_eq!(project_caps.len(), 7);
     }
 
     #[test]
@@ -1902,6 +1902,73 @@ mod tests {
         assert_eq!(payload["capabilities"][3]["allowed"][0], "FOO");
         assert_eq!(payload["capabilities"][3]["allowed"][1], "LOG_LEVEL");
         assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
+    }
+
+
+    #[test]
+    fn check_project_rejects_extern_function_without_ffi_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("ffi-denied");
+        create_project(&project, Some("ffi-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"extern fn strlen(value: string): int from "c"
+print strlen("hello")
+"#,
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("ffi capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(error.message.contains("requires [capabilities].ffi = true"));
+    }
+
+    #[test]
+    fn build_project_runs_c_ffi_strlen_with_ffi_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("ffi-strlen");
+        create_project(&project, Some("ffi-strlen-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "ffi-strlen-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+ffi = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"extern fn strlen(value: string): int from "c"
+print strlen("hello")
+"#,
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "5\n");
+    }
+
+    #[test]
+    fn parse_extern_function_accepts_pointer_types() {
+        let source = r#"extern fn poke(input: ptr<int>, output: mutptr<int>): bool from "c"
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let function = parsed.functions.first().expect("function");
+        assert!(function.is_extern);
+        assert_eq!(function.extern_library.as_deref(), Some("c"));
+        assert!(matches!(function.params[0].ty, crate::syntax::TypeName::Ptr(_)));
+        assert!(matches!(function.params[1].ty, crate::syntax::TypeName::MutPtr(_)));
     }
 
     #[test]

@@ -47,6 +47,9 @@ pub struct Function {
     pub return_ty: Type,
     pub body: Vec<Stmt>,
     pub is_async: bool,
+    pub is_extern: bool,
+    pub extern_abi: Option<String>,
+    pub extern_library: Option<String>,
     pub line: usize,
     pub column: usize,
 }
@@ -204,6 +207,8 @@ pub enum Type {
     String,
     Struct(String),
     Enum(String),
+    Ptr(Box<Type>),
+    MutPtr(Box<Type>),
     Slice(Box<Type>),
     MutSlice(Box<Type>),
     Option(Box<Type>),
@@ -265,6 +270,7 @@ struct FunctionSig {
     params: Vec<Type>,
     return_ty: Type,
     borrow_return_params: Vec<usize>,
+    is_extern: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -442,7 +448,7 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::String => false,
+        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -892,7 +898,9 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
                 collect_type_params(arg, type_params, found);
             }
         }
-        syntax::TypeName::Slice(inner)
+        syntax::TypeName::Ptr(inner)
+        | syntax::TypeName::MutPtr(inner)
+        | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
         | syntax::TypeName::Option(inner)
         | syntax::TypeName::Array(inner) => collect_type_params(inner, type_params, found),
@@ -1089,6 +1097,9 @@ fn rewrite_function_aggregate_types(
             })
             .collect::<Result<Vec<_>, _>>()?,
         is_async: function.is_async,
+        is_extern: function.is_extern,
+        extern_abi: function.extern_abi.clone(),
+        extern_library: function.extern_library.clone(),
         visibility: function.visibility,
         line: function.line,
         column: function.column,
@@ -1163,6 +1174,28 @@ fn rewrite_aggregate_type_name(
                 }
                 syntax::TypeName::Named(monomorphized_type_name(name, &args), Vec::new())
             }
+        }
+        syntax::TypeName::Ptr(inner) => {
+            syntax::TypeName::Ptr(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
+        }
+        syntax::TypeName::MutPtr(inner) => {
+            syntax::TypeName::MutPtr(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
         }
         syntax::TypeName::Slice(inner) => {
             syntax::TypeName::Slice(Box::new(rewrite_aggregate_type_name(
@@ -2347,6 +2380,12 @@ fn substitute_type_name(
                 .map(|arg| substitute_type_name(arg, type_bindings))
                 .collect(),
         ),
+        syntax::TypeName::Ptr(inner) => {
+            syntax::TypeName::Ptr(Box::new(substitute_type_name(inner, type_bindings)))
+        }
+        syntax::TypeName::MutPtr(inner) => {
+            syntax::TypeName::MutPtr(Box::new(substitute_type_name(inner, type_bindings)))
+        }
         syntax::TypeName::Slice(inner) => {
             syntax::TypeName::Slice(Box::new(substitute_type_name(inner, type_bindings)))
         }
@@ -2428,6 +2467,10 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
         syntax::TypeName::String => String::from("string"),
         syntax::TypeName::Named(name, args) if args.is_empty() => name.clone(),
         syntax::TypeName::Named(name, args) => monomorphized_type_name(name, args),
+        syntax::TypeName::Ptr(inner) => format!("ptr_{}", type_name_monomorph_suffix(inner)),
+        syntax::TypeName::MutPtr(inner) => {
+            format!("mutptr_{}", type_name_monomorph_suffix(inner))
+        }
         syntax::TypeName::Slice(inner) => format!("slice_{}", type_name_monomorph_suffix(inner)),
         syntax::TypeName::MutSlice(inner) => {
             format!("mutslice_{}", type_name_monomorph_suffix(inner))
@@ -2464,7 +2507,7 @@ fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic
 impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool | Type::Slice(_) => true,
+            Type::Int | Type::Bool | Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) => true,
             Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
@@ -2487,6 +2530,8 @@ impl Type {
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
             Type::Struct(_)
             | Type::Enum(_)
+            | Type::Ptr(_)
+            | Type::MutPtr(_)
             | Type::Slice(_)
             | Type::MutSlice(_)
             | Type::Option(_)
@@ -2782,6 +2827,7 @@ fn collect_function_signatures(
                     params,
                     return_ty: signature_return_ty,
                     borrow_return_params,
+                    is_extern: function.is_extern,
                 },
             )
             .is_some()
@@ -2812,6 +2858,23 @@ fn lower_function(
         function.line,
         function.column,
     )?;
+    if function.is_extern {
+        if function.is_async {
+            return Err(Diagnostic::new(
+                "type",
+                format!("extern function {:?} cannot be async", function.name),
+            )
+            .with_span(function.line, function.column));
+        }
+        if !function.type_params.is_empty() {
+            return Err(Diagnostic::new(
+                "type",
+                format!("extern function {:?} cannot be generic", function.name),
+            )
+            .with_span(function.line, function.column));
+        }
+        validate_ffi_signature(function, &return_ty)?;
+    }
     let signature = functions
         .get(&function.name)
         .expect("function signatures collected before lowering");
@@ -2867,7 +2930,11 @@ fn lower_function(
             ty,
         });
     }
-    let (body, _, guaranteed_return) = lower_block(&function.body, &mut env, &ctx)?;
+    let (body, _, guaranteed_return) = if function.is_extern {
+        (Vec::new(), env.clone(), true)
+    } else {
+        lower_block(&function.body, &mut env, &ctx)?
+    };
     if !guaranteed_return {
         return Err(Diagnostic::new(
             "control",
@@ -2890,6 +2957,9 @@ fn lower_function(
         },
         body,
         is_async: function.is_async,
+        is_extern: function.is_extern,
+        extern_abi: function.extern_abi.clone(),
+        extern_library: function.extern_library.clone(),
         line: function.line,
         column: function.column,
     })
@@ -4350,6 +4420,9 @@ fn lower_expr_with_expected(
                 });
             }
             if let Some(signature) = ctx.functions.get(name) {
+                if signature.is_extern {
+                    require_capability(ctx.capabilities, CapabilityKind::Ffi, name, *line, *column)?;
+                }
                 if args.len() != signature.params.len() {
                     return Err(Diagnostic::new(
                         "type",
@@ -5466,6 +5539,42 @@ fn lower_projection_base_expr(
     }
 }
 
+fn validate_ffi_signature(function: &syntax::Function, return_ty: &Type) -> Result<(), Diagnostic> {
+    validate_ffi_type(return_ty, function.line, function.column)?;
+    for param in &function.params {
+        validate_ffi_type_name(&param.ty, param.line, param.column)?;
+    }
+    Ok(())
+}
+
+fn validate_ffi_type_name(ty: &syntax::TypeName, line: usize, column: usize) -> Result<(), Diagnostic> {
+    match ty {
+        syntax::TypeName::Int
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String => Ok(()),
+        syntax::TypeName::Ptr(inner) | syntax::TypeName::MutPtr(inner) => {
+            validate_ffi_type_name(inner, line, column)
+        }
+        _ => Err(Diagnostic::new(
+            "type",
+            "FFI signatures only support int, bool, string, ptr<T>, and mutptr<T> in stage1",
+        )
+        .with_span(line, column)),
+    }
+}
+
+fn validate_ffi_type(ty: &Type, line: usize, column: usize) -> Result<(), Diagnostic> {
+    match ty {
+        Type::Int | Type::Bool | Type::String => Ok(()),
+        Type::Ptr(inner) | Type::MutPtr(inner) => validate_ffi_type(inner, line, column),
+        _ => Err(Diagnostic::new(
+            "type",
+            "FFI signatures only support int, bool, string, ptr<T>, and mutptr<T> in stage1",
+        )
+        .with_span(line, column)),
+    }
+}
+
 fn require_capability(
     capabilities: &CapabilityConfig,
     kind: CapabilityKind,
@@ -6184,7 +6293,7 @@ fn contains_borrowed_slice_type_inner(
             visiting_enums.remove(name);
             contains
         }
-        Type::Int | Type::Bool | Type::String => false,
+        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
     }
 }
 
@@ -6197,7 +6306,7 @@ fn contains_mut_borrowed_slice_type_inner(
 ) -> bool {
     match ty {
         Type::MutSlice(_) => true,
-        Type::Slice(_) | Type::Int | Type::Bool | Type::String => false,
+        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
         Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
             inner,
             structs,
@@ -6581,6 +6690,12 @@ fn lower_type_inner<T, U>(
             }
             Err(Diagnostic::new("type", format!("unknown type {name:?}")).with_span(line, column))
         }
+        syntax::TypeName::Ptr(inner) => Ok(Type::Ptr(Box::new(lower_type_inner(
+            inner, structs, enums, aliases, resolving, line, column,
+        )?))),
+        syntax::TypeName::MutPtr(inner) => Ok(Type::MutPtr(Box::new(lower_type_inner(
+            inner, structs, enums, aliases, resolving, line, column,
+        )?))),
         syntax::TypeName::Slice(inner) => Ok(Type::Slice(Box::new(lower_type_inner(
             inner, structs, enums, aliases, resolving, line, column,
         )?))),
@@ -6839,6 +6954,8 @@ impl std::fmt::Display for Type {
             Type::String => write!(f, "string"),
             Type::Struct(name) => write!(f, "{name}"),
             Type::Enum(name) => write!(f, "{name}"),
+            Type::Ptr(inner) => write!(f, "ptr<{inner}>"),
+            Type::MutPtr(inner) => write!(f, "mutptr<{inner}>"),
             Type::Slice(inner) => write!(f, "&[{inner}]"),
             Type::MutSlice(inner) => write!(f, "&mut [{inner}]"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
