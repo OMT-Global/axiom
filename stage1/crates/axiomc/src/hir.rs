@@ -4318,6 +4318,70 @@ fn lower_expr_with_expected(
                     ty: Type::Int,
                 });
             }
+            if name == "clock_sleep_ms" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Clock,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("clock_sleep_ms expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                if lowered.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "clock_sleep_ms expects an int argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Int,
+                });
+            }
+            if name == "clock_elapsed_ms" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Clock,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("clock_elapsed_ms expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                if lowered.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "clock_elapsed_ms expects an int argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Int,
+                });
+            }
             if name == "env_get" {
                 require_capability(ctx.capabilities, CapabilityKind::Env, name, *line, *column)?;
                 if args.len() != 1 {
