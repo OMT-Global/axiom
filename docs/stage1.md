@@ -39,6 +39,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/wor
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 ```
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
@@ -115,7 +118,9 @@ still far from the stated 1.0 target for service and agent workloads.
   emits generated Rust source markers, and writes a JSON source-map sidecar for
   Axiom file/line/column positions; full Axiom-native debugger stepping remains
   a direct-backend follow-on.
-- There is no stage1 formatter, full benchmark harness, doc generator, publisher, or LSP server yet.
+- `axiomc fmt`, `axiomc bench`, `axiomc doc`, and the stage1 scratch `repl`
+  now exist as bootstrap-grade toolchain commands. Publisher, full LSP, and
+  debugger surfaces remain open.
 - Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
 - Extended validation now carries a small performance regression gate: stage1 `axiomc build` is benchmarked across representative compute (`hello`), I/O/capability (`capabilities`), and concurrency (`stdlib_async`) workloads against checked-in Go and Rust reference builds, with separate cold-build and warm-cache budget multipliers to catch obvious compiler-path regressions without making PR fast CI noisy.
 
@@ -148,6 +153,9 @@ Current proof points:
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
   and `stage1/examples/outcomes` cover the current borrow-aware and enum/result floor.
 - `stage1/examples/generic_aggregates` covers monomorphized generic wrappers and borrowed generic utility helpers over arrays, maps, slices, `Option<T>`, `Result<T, E>`, and user-defined enum payloads.
+- `stage1/examples/benchmarks` provides the first checked-in benchmark suite
+  fixture for `axiomc bench`; the Go/Rust comparison gate remains a later CI
+  policy layer on top of the harness.
 - `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` now cover the checked-in stage1 language gate.
 
 Agent-grade compiler milestone summary:

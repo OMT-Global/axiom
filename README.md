@@ -60,6 +60,11 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/mo
 
 # Inspect capability requirements
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+
+# Format source, generate docs, and run benchmark entrypoints
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 ```
 
 ## Useful Commands
@@ -93,9 +98,12 @@ Stage1 also enforces the current capability-gated runtime surface for `clock`,
 `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/sync.ax`,
 `std/async.ax`, and `std/http.ax`.
 
-See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md),
-[docs/stage1.md](docs/stage1.md), [docs/style.md](docs/style.md), and
-[CONTRIBUTING.md](CONTRIBUTING.md) for more detail.
+See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and
+[docs/stage1.md](docs/stage1.md) for more detail.
+Start with [docs/book.md](docs/book.md) for the tutorial path and
+[docs/style.md](docs/style.md) for canonical source style.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and validation
+expectations.
 
 ## Repo Map
 

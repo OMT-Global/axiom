@@ -1,22 +1,52 @@
-# Axiom style guide
+# Axiom Style Guide
 
-This document defines the canonical source style for `.ax` files until a native
-formatter ships. Treat it as the formatting target for examples, tests,
-RFC snippets, and compiler-generated sample code.
+This document defines the canonical source style for checked-in `.ax` files.
+Use the formatter as the default enforcement path, and treat this guide as the
+readable statement of the layout it is meant to preserve.
 
-The goal matches the spirit of `d2 fmt`: pick one readable layout, apply it
-consistently, and avoid personal formatting dialects.
+## Formatting
 
-## Core rules
+Run the formatter before review:
 
-- Use spaces, never tabs.
-- Indent block contents by two spaces.
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt <path>
+```
+
+Use `--check` in CI or before pushing:
+
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
+```
+
+The formatter currently enforces the bootstrap-safe rules that are stable across
+the parser and examples:
+
+- Unix newlines.
+- No trailing whitespace.
+- Tabs expanded to four spaces.
+- A single final newline.
+- No repeated blank-line runs.
+
+## Core style rules
+
+- Use spaces, never tabs in checked-in source.
 - Keep keywords lowercase (`fn`, `let`, `match`, `return`, `pub`).
 - Put a single space after commas and around infix operators.
 - Put the opening `{` on the same line as `fn`, `if`, `while`, `match`,
   `struct`, and `enum` headers.
 - Prefer one statement per line.
 - End files with a trailing newline.
+
+## Source shape
+
+- Prefer package-local modules over large `main.ax` files.
+- Keep public declarations small and documented with `///` when they are meant
+  to appear in generated docs.
+- Use explicit type annotations for public constants, function parameters, and
+  return values.
+- Keep capability use visible in `axiom.toml`; do not hide filesystem, network,
+  process, environment, clock, or crypto behavior behind helper modules without
+  documenting it.
 
 ## Imports
 
@@ -39,27 +69,25 @@ print banner("hello", label())
   redundant commentary around obvious types.
 - Keep short function signatures on one line when they fit.
 - Break after the header only when the signature becomes hard to scan.
-- Indent statements inside `if`, `else`, `while`, and `match` arms by two
-  spaces.
 
 ```axiom
 fn banner(name: string): string {
-  return "hello " + name
+    return "hello " + name
 }
 
 if ready {
-  print banner("axiom")
+    print banner("axiom")
 } else {
-  print "not ready"
+    print "not ready"
 }
 
 match result {
-  Some(value) {
-    print value
-  }
-  None {
-    print "missing"
-  }
+    Some(value) {
+        print value
+    }
+    None {
+        print "missing"
+    }
 }
 ```
 
@@ -74,46 +102,45 @@ match result {
 
 ```axiom
 struct Pipeline {
-  name: string
-  steps: int
-  ready: bool
+    name: string
+    steps: int
+    ready: bool
 }
 
 let pipeline: Pipeline = Pipeline {
-  name: "stage1",
-  steps: 3,
-  ready: true,
+    name: "stage1",
+    steps: 3,
+    ready: true,
 }
 ```
 
-## Comments
+## Comments and docs
 
 - Use `#` comments sparingly for intent, invariants, or temporary limitations.
 - Prefer explaining why a constraint exists instead of narrating the code.
 - Keep comments updated when behavior changes.
+- Use doc comments on public APIs when they should appear in generated docs.
 
 ```axiom
-# Stage1 still requires an explicit fallback arm here.
-match maybe_name {
-  Some(value) {
-    print value
-  }
-  None {
-    print "guest"
-  }
+/// Returns the display name for a job.
+pub fn label(name: string): string {
+    return "job:" + name
 }
 ```
 
-## Tests, docs, and generated snippets
+Then generate docs with:
 
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc <package>
+```
+
+## Tests and checked-in examples
+
+- Put runnable package tests in `src/*_test.ax`.
+- Add sibling `*.stdout` files for golden-output checks.
+- Add compile-fail language coverage under `stage1/conformance/fail/`.
 - Apply this style to checked-in examples, conformance fixtures, RFC snippets,
   and README/docs code blocks.
 - When existing fixtures use older formatting, clean them opportunistically in
   the same change only if the diff stays easy to review.
 - Do not mix formatting-only churn into unrelated feature work.
-
-## Formatter outlook
-
-A future Axiom formatter should preserve this guide's layout defaults unless the
-project explicitly revises the guide. If formatter behavior and this document
-diverge, update them together in the same pull request.

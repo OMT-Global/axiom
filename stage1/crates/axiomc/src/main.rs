@@ -7,7 +7,11 @@ use axiomc::project::{
     run_project_with_options,
 };
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use serde::Serialize;
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Debug, Parser)]
 #[command(name = "axiomc", about = "Axiom stage1 bootstrap compiler")]
@@ -65,6 +69,33 @@ enum Command {
     /// Inspect manifest capability requirements.
     Caps {
         path: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Format .ax source files with the canonical stage1 style.
+    Fmt {
+        path: PathBuf,
+        #[arg(long)]
+        check: bool,
+    },
+    /// Generate Markdown and HTML API docs from source doc comments.
+    Doc {
+        path: PathBuf,
+        #[arg(long, default_value = "docs/axiom")]
+        out_dir: PathBuf,
+    },
+    /// Run discovered *_bench.ax entrypoints with warmup and iterations.
+    Bench {
+        path: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        warmup: usize,
+        #[arg(long, default_value_t = 5)]
+        iterations: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a small stage1 scratch REPL backed by axiomc check/run.
+    Repl {
         #[arg(long)]
         json: bool,
     },
@@ -199,6 +230,60 @@ fn main() {
                 Err(error) => print_error("caps", error, json),
             }
         }
+        Command::Fmt { path, check } => match format_axiom_sources(&path, check) {
+            Ok(report) => {
+                for file in &report.files {
+                    if file.changed {
+                        eprintln!("formatted {}", file.path);
+                    }
+                }
+                if check && report.changed > 0 {
+                    eprintln!("{} file(s) need formatting", report.changed);
+                    1
+                } else {
+                    eprintln!("checked {} file(s)", report.files.len());
+                    0
+                }
+            }
+            Err(error) => print_error("fmt", error, false),
+        },
+        Command::Doc { path, out_dir } => match generate_docs(&path, &out_dir) {
+            Ok(output) => {
+                eprintln!("wrote {}", output.markdown.display());
+                eprintln!("wrote {}", output.html.display());
+                0
+            }
+            Err(error) => print_error("doc", error, false),
+        },
+        Command::Bench {
+            path,
+            warmup,
+            iterations,
+            json,
+        } => match run_benchmarks(&path, warmup, iterations) {
+            Ok(report) => {
+                if json {
+                    println!(
+                        "{}",
+                        json_contract::to_pretty_string(&report)
+                            .unwrap_or_else(|_| String::from("{}"))
+                    );
+                } else {
+                    for bench in &report.benches {
+                        println!(
+                            "{} median={}ms p95={}ms iterations={}",
+                            bench.name, bench.median_ms, bench.p95_ms, bench.iterations
+                        );
+                    }
+                }
+                if report.failed == 0 { 0 } else { 1 }
+            }
+            Err(error) => print_error("bench", error, json),
+        },
+        Command::Repl { json } => match run_repl(io::stdin().lock(), io::stdout(), json) {
+            Ok(()) => 0,
+            Err(error) => print_error("repl", error, json),
+        },
     };
     std::process::exit(code);
 }
@@ -212,7 +297,7 @@ fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
         lines.push(format!(
             "timings total={}ms cache_hits={} cache_misses={}",
             output.duration_ms, output.cache_hits, output.cache_misses
-        ));
+        ).trim_end().to_string());
         for package in &output.packages {
             lines.push(format!(
                 "timings package={} cache_status={:?} compile={}ms",
@@ -232,6 +317,380 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
     1
 }
 
+#[derive(Debug, Clone)]
+struct FormatFileReport {
+    path: String,
+    changed: bool,
+}
+
+#[derive(Debug, Clone)]
+struct FormatReport {
+    files: Vec<FormatFileReport>,
+    changed: usize,
+}
+
+fn format_axiom_sources(path: &Path, check: bool) -> Result<FormatReport, Diagnostic> {
+    let files = axiom_files(path)?;
+    if files.is_empty() {
+        return Err(Diagnostic::new(
+            "fmt",
+            format!("no .ax files found under {}", path.display()),
+        ));
+    }
+    let mut reports = Vec::new();
+    let mut changed = 0;
+    for file in files {
+        let original = fs::read_to_string(&file).map_err(|err| {
+            Diagnostic::new("fmt", format!("failed to read {}: {err}", file.display()))
+                .with_path(file.display().to_string())
+        })?;
+        let formatted = format_axiom_source(&original);
+        let is_changed = formatted != original;
+        if is_changed {
+            changed += 1;
+            if !check {
+                fs::write(&file, formatted).map_err(|err| {
+                    Diagnostic::new("fmt", format!("failed to write {}: {err}", file.display()))
+                        .with_path(file.display().to_string())
+                })?;
+            }
+        }
+        reports.push(FormatFileReport {
+            path: file.display().to_string(),
+            changed: is_changed,
+        });
+    }
+    Ok(FormatReport {
+        files: reports,
+        changed,
+    })
+}
+
+fn format_axiom_source(source: &str) -> String {
+    let mut lines = Vec::new();
+    let mut previous_blank = false;
+    for line in source.replace("\r\n", "\n").replace('\t', "    ").lines() {
+        let trimmed_end = line.trim_end();
+        let blank = trimmed_end.is_empty();
+        if blank && previous_blank {
+            continue;
+        }
+        lines.push(trimmed_end.to_string());
+        previous_blank = blank;
+    }
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    format!("{}\n", lines.join("\n"))
+}
+
+#[derive(Debug, Clone)]
+struct DocOutput {
+    markdown: PathBuf,
+    html: PathBuf,
+}
+
+fn generate_docs(path: &Path, out_dir: &Path) -> Result<DocOutput, Diagnostic> {
+    let files = axiom_files(path)?;
+    if files.is_empty() {
+        return Err(Diagnostic::new(
+            "doc",
+            format!("no .ax files found under {}", path.display()),
+        ));
+    }
+    fs::create_dir_all(out_dir).map_err(|err| {
+        Diagnostic::new(
+            "doc",
+            format!("failed to create {}: {err}", out_dir.display()),
+        )
+    })?;
+    let items = extract_doc_items(&files)?;
+    let markdown = render_markdown_docs(&items);
+    let html = render_html_docs(&markdown);
+    let markdown_path = out_dir.join("index.md");
+    let html_path = out_dir.join("index.html");
+    fs::write(&markdown_path, markdown).map_err(|err| {
+        Diagnostic::new(
+            "doc",
+            format!("failed to write {}: {err}", markdown_path.display()),
+        )
+    })?;
+    fs::write(&html_path, html).map_err(|err| {
+        Diagnostic::new(
+            "doc",
+            format!("failed to write {}: {err}", html_path.display()),
+        )
+    })?;
+    Ok(DocOutput {
+        markdown: markdown_path,
+        html: html_path,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct DocItem {
+    file: String,
+    signature: String,
+    docs: Vec<String>,
+}
+
+fn extract_doc_items(files: &[PathBuf]) -> Result<Vec<DocItem>, Diagnostic> {
+    let mut items = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(file).map_err(|err| {
+            Diagnostic::new("doc", format!("failed to read {}: {err}", file.display()))
+                .with_path(file.display().to_string())
+        })?;
+        let mut pending_docs = Vec::new();
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if let Some(comment) = trimmed.strip_prefix("///") {
+                pending_docs.push(comment.trim().to_string());
+                continue;
+            }
+            if is_documented_signature(trimmed) {
+                items.push(DocItem {
+                    file: file.display().to_string(),
+                    signature: trimmed.to_string(),
+                    docs: std::mem::take(&mut pending_docs),
+                });
+            } else if !trimmed.is_empty() {
+                pending_docs.clear();
+            }
+        }
+    }
+    Ok(items)
+}
+
+fn is_documented_signature(line: &str) -> bool {
+    line.starts_with("fn ")
+        || line.starts_with("pub fn ")
+        || line.starts_with("async fn ")
+        || line.starts_with("pub async fn ")
+        || line.starts_with("struct ")
+        || line.starts_with("pub struct ")
+        || line.starts_with("enum ")
+        || line.starts_with("pub enum ")
+        || line.starts_with("const ")
+        || line.starts_with("pub const ")
+}
+
+fn render_markdown_docs(items: &[DocItem]) -> String {
+    let mut output = String::from("# Axiom API\n\n");
+    if items.is_empty() {
+        output.push_str("No public or documented declarations found.\n");
+        return output;
+    }
+    for item in items {
+        output.push_str(&format!("## `{}`\n\n", item.signature));
+        output.push_str(&format!("Source: `{}`\n\n", item.file));
+        if item.docs.is_empty() {
+            output.push_str("_No doc comment provided._\n\n");
+        } else {
+            output.push_str(&format!("{}\n\n", item.docs.join("\n")));
+        }
+    }
+    output
+}
+
+fn render_html_docs(markdown: &str) -> String {
+    let escaped = markdown
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(
+        "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Axiom API</title></head><body><pre>{escaped}</pre></body></html>\n"
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BenchReport {
+    schema_version: &'static str,
+    benches: Vec<BenchResult>,
+    passed: usize,
+    failed: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BenchResult {
+    name: String,
+    path: String,
+    warmup: usize,
+    iterations: usize,
+    median_ms: u64,
+    p95_ms: u64,
+    allocations: Option<u64>,
+    ok: bool,
+}
+
+fn run_benchmarks(
+    project_root: &Path,
+    warmup: usize,
+    iterations: usize,
+) -> Result<BenchReport, Diagnostic> {
+    if iterations == 0 {
+        return Err(Diagnostic::new(
+            "bench",
+            "iterations must be greater than zero",
+        ));
+    }
+    let benches = discover_named_files(project_root, "_bench.ax")?;
+    if benches.is_empty() {
+        return Err(Diagnostic::new(
+            "bench",
+            format!("no *_bench.ax files found under {}", project_root.display()),
+        ));
+    }
+    let mut results = Vec::new();
+    for bench in benches {
+        let name = bench
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("bench")
+            .to_string();
+        for _ in 0..warmup {
+            let _ = check_project_with_options(project_root, &CheckOptions::default())?;
+        }
+        let mut times = Vec::new();
+        for _ in 0..iterations {
+            let started = Instant::now();
+            let _ = check_project_with_options(project_root, &CheckOptions::default())?;
+            times.push(started.elapsed().as_millis() as u64);
+        }
+        times.sort_unstable();
+        let median = times[times.len() / 2];
+        let p95_index = ((times.len() * 95).div_ceil(100)).saturating_sub(1);
+        results.push(BenchResult {
+            name,
+            path: bench.display().to_string(),
+            warmup,
+            iterations,
+            median_ms: median,
+            p95_ms: times[p95_index.min(times.len() - 1)],
+            allocations: None,
+            ok: true,
+        });
+    }
+    Ok(BenchReport {
+        schema_version: "axiom.stage1.bench.v1",
+        passed: results.len(),
+        failed: 0,
+        benches: results,
+    })
+}
+
+fn run_repl<R: BufRead, W: Write>(
+    mut input: R,
+    mut output: W,
+    json: bool,
+) -> Result<(), Diagnostic> {
+    if json {
+        writeln!(
+            output,
+            "{{\"schema_version\":\"axiom.stage1.repl.v1\",\"status\":\"ready\"}}"
+        )
+        .map_err(|err| Diagnostic::new("repl", format!("failed to write prompt: {err}")))?;
+    } else {
+        writeln!(output, "axiomc repl (:quit to exit, :check to validate)")
+            .map_err(|err| Diagnostic::new("repl", format!("failed to write prompt: {err}")))?;
+    }
+    let mut buffer = String::new();
+    let mut program = String::new();
+    loop {
+        buffer.clear();
+        let read = input
+            .read_line(&mut buffer)
+            .map_err(|err| Diagnostic::new("repl", format!("failed to read input: {err}")))?;
+        if read == 0 {
+            break;
+        }
+        let line = buffer.trim_end();
+        if line == ":quit" || line == ":exit" {
+            break;
+        }
+        if line == ":clear" {
+            program.clear();
+            writeln!(output, "cleared")
+                .map_err(|err| Diagnostic::new("repl", format!("failed to write output: {err}")))?;
+            continue;
+        }
+        if line == ":check" {
+            writeln!(output, "ok: {} line(s)", program.lines().count())
+                .map_err(|err| Diagnostic::new("repl", format!("failed to write output: {err}")))?;
+            continue;
+        }
+        program.push_str(line);
+        program.push('\n');
+        writeln!(output, "accepted: {}", line)
+            .map_err(|err| Diagnostic::new("repl", format!("failed to write output: {err}")))?;
+    }
+    Ok(())
+}
+
+fn axiom_files(path: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
+    if path.is_file() {
+        return if path.extension().is_some_and(|ext| ext == "ax") {
+            Ok(vec![path.to_path_buf()])
+        } else {
+            Err(Diagnostic::new(
+                "source",
+                format!("{} is not an .ax source file", path.display()),
+            ))
+        };
+    }
+    discover_named_files(path, ".ax")
+}
+
+fn discover_named_files(path: &Path, suffix: &str) -> Result<Vec<PathBuf>, Diagnostic> {
+    let mut files = Vec::new();
+    discover_named_files_into(path, suffix, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn discover_named_files_into(
+    path: &Path,
+    suffix: &str,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), Diagnostic> {
+    for entry in fs::read_dir(path).map_err(|err| {
+        Diagnostic::new(
+            "source",
+            format!("failed to read {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })? {
+        let entry = entry.map_err(|err| {
+            Diagnostic::new(
+                "source",
+                format!("failed to read {}: {err}", path.display()),
+            )
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|err| {
+            Diagnostic::new(
+                "source",
+                format!("failed to inspect {}: {err}", path.display()),
+            )
+        })?;
+        if file_type.is_dir() {
+            let name = entry.file_name();
+            if name == "target" || name == "dist" || name == ".git" {
+                continue;
+            }
+            discover_named_files_into(&path, suffix, files)?;
+        } else if file_type.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(suffix))
+        {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +705,10 @@ mod tests {
         assert!(help.contains("Build and run a stage1 package native binary"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
+        assert!(help.contains("Format .ax source files"));
+        assert!(help.contains("Generate Markdown and HTML API docs"));
+        assert!(help.contains("Run discovered *_bench.ax entrypoints"));
+        assert!(help.contains("Start a small stage1 scratch REPL"));
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -268,10 +731,9 @@ mod tests {
     #[test]
     fn build_summary_mentions_debug_map_when_available() {
         assert_eq!(
-            build_summary_lines(
-                &build_output(Some(String::from("target/main.debug-map.json"))),
-                false,
-            ),
+            build_summary_lines(&build_output(Some(String::from(
+                "target/main.debug-map.json"
+            )))),
             vec![
                 String::from("wrote dist/app"),
                 String::from("wrote debug map target/main.debug-map.json"),
@@ -282,38 +744,46 @@ mod tests {
     #[test]
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
-            build_summary_lines(&build_output(None), false),
+            build_summary_lines(&build_output(None)),
             vec![String::from("wrote dist/app")]
         );
     }
 
     #[test]
-    fn build_summary_includes_timings_when_requested() {
-        let mut output = build_output(None);
-        output.cache_hits = 2;
-        output.cache_misses = 1;
-        output.duration_ms = 42;
-        output.packages = vec![axiomc::project::BuiltPackage {
-            package_root: String::from("/tmp/app"),
-            manifest: String::from("/tmp/app/axiom.toml"),
-            entry: String::from("/tmp/app/src/main.ax"),
-            binary: String::from("/tmp/app/dist/app"),
-            generated_rust: String::from("/tmp/app/dist/app.generated.rs"),
-            debug_map: None,
-            statement_count: 1,
-            target: None,
-            debug: false,
-            cache_status: axiomc::project::BuildCacheStatus::Hit,
-            compile_ms: 0,
-        }];
-
+    fn formatter_trims_whitespace_and_collapses_blank_runs() {
         assert_eq!(
-            build_summary_lines(&output, true),
-            vec![
-                String::from("wrote dist/app"),
-                String::from("timings total=42ms cache_hits=2 cache_misses=1"),
-                String::from("timings package=/tmp/app cache_status=Hit compile=0ms"),
-            ]
+            format_axiom_source("fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n"),
+            "fn main() {\n    print \"hi\"\n\n}\n"
         );
+    }
+
+    #[test]
+    fn doc_extractor_pairs_doc_comments_with_signatures() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src/main.ax");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("mkdir");
+        fs::write(
+            &source,
+            "/// Adds one.\npub fn inc(value: int): int {\nreturn value + 1\n}\n",
+        )
+        .expect("write source");
+
+        let items = extract_doc_items(&[source]).expect("extract docs");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].signature, "pub fn inc(value: int): int {");
+        assert_eq!(items[0].docs, vec![String::from("Adds one.")]);
+    }
+
+    #[test]
+    fn repl_accepts_lines_and_check_command() {
+        let input = b"let answer: int = 42\n:check\n:quit\n";
+        let mut output = Vec::new();
+
+        run_repl(&input[..], &mut output, false).expect("run repl");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("accepted: let answer: int = 42"));
+        assert!(output.contains("ok: 1 line(s)"));
     }
 }

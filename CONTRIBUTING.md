@@ -8,6 +8,8 @@ specified, and backed by executable validation.
 - Keep the language kernel small and specified in `docs/kernel.md`.
 - Use the RFC process in `docs/rfcs/` for language-level or runtime-level
   contract changes.
+- Format `.ax` source with `axiomc fmt`; one canonical style keeps examples,
+  docs, and fixtures reviewable.
 - Add features only with:
   - a spec update when behavior changes, and
   - at least one Rust-run conformance, package, or crate test under `stage1/`.
@@ -47,8 +49,7 @@ that must stay aligned with the project.
 ## Style expectations
 
 For Axiom source, examples, and snippets, follow `docs/style.md`.
-Until a native formatter exists, contributors should hand-format `.ax` files to
-that canonical layout.
+Use `axiomc fmt` to check or apply that canonical layout before review.
 
 ## Validation matrix
 
@@ -68,6 +69,38 @@ make stage1-conformance
 # Rust crate tests only
 make stage1-test
 ```
+
+## Source style
+
+The canonical style is documented in `docs/style.md`. Use:
+
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
+```
+
+Run without `--check` to rewrite files.
+
+## Docs and benchmarks
+
+Source comments that start with `///` are included by `axiomc doc`:
+
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
+```
+
+Benchmark entrypoints use the `*_bench.ax` suffix and run through `axiomc bench`:
+
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
+```
+
+## Bootstrap discipline
+
+Treat the repo as a staged bootstrap:
+
+- Rust `stage1/` is the supported compiler and runtime path.
+- Language behavior should be proven with Rust crate tests, `stage1/conformance`,
+  and `axiomc test` package fixtures.
 
 ### Ownership and borrowing changes
 
