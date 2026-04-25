@@ -14,6 +14,20 @@ pub struct Program {
     pub stmts: Vec<Stmt>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Module,
+    Package,
+    Public,
+}
+
+impl Visibility {
+    pub fn is_public(self) -> bool {
+        matches!(self, Self::Public)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Import {
     pub path: String,
@@ -31,7 +45,10 @@ pub struct Function {
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
     pub is_async: bool,
-    pub is_public: bool,
+    pub is_extern: bool,
+    pub extern_abi: Option<String>,
+    pub extern_library: Option<String>,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -41,7 +58,7 @@ pub struct ConstDecl {
     pub name: String,
     pub ty: TypeName,
     pub expr: Expr,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -50,7 +67,7 @@ pub struct ConstDecl {
 pub struct TypeAliasDecl {
     pub name: String,
     pub ty: TypeName,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -60,7 +77,7 @@ pub struct StructDecl {
     pub name: String,
     pub type_params: Vec<String>,
     pub fields: Vec<StructField>,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -78,7 +95,7 @@ pub struct EnumDecl {
     pub name: String,
     pub type_params: Vec<String>,
     pub variants: Vec<EnumVariantDecl>,
-    pub is_public: bool,
+    pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
 }
@@ -110,6 +127,11 @@ pub enum Stmt {
         column: usize,
     },
     Print {
+        expr: Expr,
+        line: usize,
+        column: usize,
+    },
+    Panic {
         expr: Expr,
         line: usize,
         column: usize,
@@ -156,6 +178,8 @@ pub enum TypeName {
     Bool,
     String,
     Named(String, Vec<TypeName>),
+    Ptr(Box<TypeName>),
+    MutPtr(Box<TypeName>),
     Slice(Box<TypeName>),
     MutSlice(Box<TypeName>),
     Option(Box<TypeName>),
@@ -320,7 +344,9 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             continue;
         }
         if trimmed.starts_with("pub import ")
+            || trimmed.starts_with("pub(pkg) import ")
             || trimmed.starts_with("pub use ")
+            || trimmed.starts_with("pub(pkg) use ")
             || trimmed.starts_with("export ")
         {
             return Err(Diagnostic::new(
@@ -332,27 +358,44 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
         }
         if trimmed.starts_with("fn ")
             || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("extern fn ")
             || trimmed.starts_with("pub fn ")
             || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub extern fn ")
+            || trimmed.starts_with("pub(pkg) fn ")
+            || trimmed.starts_with("pub(pkg) async fn ")
+            || trimmed.starts_with("pub(pkg) extern fn ")
         {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
         }
-        if trimmed.starts_with("const ") || trimmed.starts_with("pub const ") {
+        if trimmed.starts_with("const ")
+            || trimmed.starts_with("pub const ")
+            || trimmed.starts_with("pub(pkg) const ")
+        {
             consts.push(parse_const_decl(trimmed, path, line_no)?);
             index += 1;
             continue;
         }
-        if trimmed.starts_with("type ") || trimmed.starts_with("pub type ") {
+        if trimmed.starts_with("type ")
+            || trimmed.starts_with("pub type ")
+            || trimmed.starts_with("pub(pkg) type ")
+        {
             type_aliases.push(parse_type_alias(trimmed, path, line_no)?);
             index += 1;
             continue;
         }
-        if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
+        if trimmed.starts_with("struct ")
+            || trimmed.starts_with("pub struct ")
+            || trimmed.starts_with("pub(pkg) struct ")
+        {
             structs.push(parse_struct(&lines, &mut index, path)?);
             continue;
         }
-        if trimmed.starts_with("enum ") || trimmed.starts_with("pub enum ") {
+        if trimmed.starts_with("enum ")
+            || trimmed.starts_with("pub enum ")
+            || trimmed.starts_with("pub(pkg) enum ")
+        {
             enums.push(parse_enum(&lines, &mut index, path)?);
             continue;
         }
@@ -445,8 +488,10 @@ fn parse_stmt_list(
         }
         if trimmed.starts_with("fn ")
             || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("extern fn ")
             || trimmed.starts_with("pub fn ")
             || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub extern fn ")
         {
             return Err(Diagnostic::new(
                 "parse",
@@ -502,6 +547,14 @@ fn parse_stmt(
 ) -> Result<Stmt, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
+    if trimmed.starts_with("for ") {
+        return Err(Diagnostic::new(
+            "parse",
+            "stage1 bootstrap does not support `for` loops yet; use `while`-based iteration until the iteration protocol lands",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, 1));
+    }
     if trimmed.starts_with("if ") {
         return parse_if_stmt(lines, index, path);
     }
@@ -525,6 +578,21 @@ fn parse_stmt(
             column: 1,
         });
     }
+    if trimmed == "panic"
+        || trimmed.starts_with("panic(")
+        || trimmed.starts_with("panic<")
+        || trimmed
+            .strip_prefix("panic")
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    {
+        let expr = parse_expr(trimmed, path, line_no, 1)?;
+        *index += 1;
+        return Ok(Stmt::Panic {
+            expr,
+            line: line_no,
+            column: 1,
+        });
+    }
     if let Some(rest) = trimmed.strip_prefix("return ") {
         let expr = parse_expr(rest, path, line_no, 8)?;
         *index += 1;
@@ -535,9 +603,9 @@ fn parse_stmt(
         });
     }
     let message = if in_block {
-        "stage1 bootstrap currently supports let, print, if/else, while, match, and return statements inside blocks"
+        "stage1 bootstrap currently supports let, print, panic, if/else, while, match, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, if/else, while, and match statements"
+        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, panic, if/else, while, and match statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())
@@ -547,19 +615,18 @@ fn parse_stmt(
 fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Function, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, is_async, header) = if let Some(rest) = trimmed.strip_prefix("pub async fn ") {
-        (true, true, rest)
-    } else if let Some(rest) = trimmed.strip_prefix("pub fn ") {
-        (true, false, rest)
-    } else if let Some(rest) = trimmed.strip_prefix("async fn ") {
-        (false, true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let (is_async, is_extern, header, fn_column) = if let Some(rest) = rest.strip_prefix("async fn ") {
+        (true, false, rest, visibility_column + 6)
+    } else if let Some(rest) = rest.strip_prefix("extern fn ") {
+        (false, true, rest, visibility_column + 7)
     } else {
-        let rest = trimmed.strip_prefix("fn ").ok_or_else(|| {
+        let rest = rest.strip_prefix("fn ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid function declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, false, rest)
+        (false, false, rest, visibility_column)
     };
     let open_paren = find_top_level_char(header, '(').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration is missing '('")
@@ -572,8 +639,7 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_span(line_no, 1)
     })?;
     let name_text = header[..open_paren].trim();
-    let (name, type_params) =
-        parse_function_name(name_text, path, line_no, if is_public { 8 } else { 4 })?;
+    let (name, type_params) = parse_function_name(name_text, path, line_no, fn_column + 3)?;
     let params = parse_params(&header[open_paren + 1..close_paren], path, line_no)?;
     let after_paren = header[close_paren + 1..].trim();
     let after_colon = after_paren.strip_prefix(':').ok_or_else(|| {
@@ -581,6 +647,39 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_path(path.display().to_string())
             .with_span(line_no, close_paren + 2)
     })?;
+    if is_extern {
+        let (return_text, extern_library) = after_colon.rsplit_once(" from ").ok_or_else(|| {
+            Diagnostic::new(
+                "parse",
+                "extern function declaration must use `extern fn name(args): type from \"lib\"` syntax",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1)
+        })?;
+        let return_ty = parse_type_name(return_text.trim(), path, line_no, 1)?;
+        let extern_library = serde_json::from_str::<String>(extern_library.trim()).map_err(|_| {
+            Diagnostic::new("parse", "extern function library must be a quoted string")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        *index += 1;
+        return Ok(Function {
+            name: name.to_string(),
+            source_name: name.to_string(),
+            path: path.display().to_string(),
+            type_params,
+            params,
+            return_ty,
+            body: Vec::new(),
+            is_async,
+            is_extern,
+            extern_abi: Some(String::from("C")),
+            extern_library: Some(extern_library),
+            visibility,
+            line: line_no,
+            column: 1,
+        });
+    }
     let return_text = after_colon
         .strip_suffix('{')
         .map(str::trim)
@@ -604,7 +703,10 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         return_ty,
         body,
         is_async,
-        is_public,
+        is_extern,
+        extern_abi: None,
+        extern_library: None,
+        visibility,
         line: line_no,
         column: 1,
     })
@@ -615,15 +717,16 @@ fn parse_type_alias(
     path: &Path,
     line_no: usize,
 ) -> Result<TypeAliasDecl, Diagnostic> {
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub type ") {
-        (true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("type ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("type ").ok_or_else(|| {
+        let _ = rest.strip_prefix("type ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid type alias declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        unreachable!()
     };
     let equals = find_top_level_char(header, '=').ok_or_else(|| {
         Diagnostic::new("parse", "type alias declaration is missing '='")
@@ -631,7 +734,7 @@ fn parse_type_alias(
             .with_span(line_no, 1)
     })?;
     let name = header[..equals].trim();
-    validate_ident(name, path, line_no, if is_public { 10 } else { 6 })?;
+    validate_ident(name, path, line_no, visibility_column + 5)?;
     let target = header[equals + 1..].trim();
     if target.is_empty() {
         return Err(
@@ -644,23 +747,25 @@ fn parse_type_alias(
     Ok(TypeAliasDecl {
         name: name.to_string(),
         ty,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
 }
 
 fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstDecl, Diagnostic> {
-    let (is_public, header, column) = if let Some(rest) = trimmed.strip_prefix("pub const ") {
-        (true, rest, 11)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("const ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("const ").ok_or_else(|| {
+        let _ = rest.strip_prefix("const ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid const declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest, 7)
+        unreachable!()
     };
+    let column = visibility_column + 6;
     let colon = find_top_level_char(header, ':').ok_or_else(|| {
         Diagnostic::new("parse", "const declaration is missing ':'")
             .with_path(path.display().to_string())
@@ -701,7 +806,7 @@ fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstD
         name: name.to_string(),
         ty: parse_type_name(ty_text, path, line_no, column + colon + 2)?,
         expr: parse_expr(expr_text, path, line_no, column + equals + 2)?,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
@@ -710,15 +815,16 @@ fn parse_const_decl(trimmed: &str, path: &Path, line_no: usize) -> Result<ConstD
 fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<StructDecl, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub struct ") {
-        (true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("struct ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("struct ").ok_or_else(|| {
+        let _ = rest.strip_prefix("struct ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid struct declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        unreachable!()
     };
     let name_text = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
         Diagnostic::new(
@@ -728,20 +834,15 @@ fn parse_struct(lines: &[&str], index: &mut usize, path: &Path) -> Result<Struct
         .with_path(path.display().to_string())
         .with_span(line_no, 1)
     })?;
-    let (name, type_params) = parse_decl_name(
-        name_text,
-        "struct",
-        path,
-        line_no,
-        if is_public { 12 } else { 8 },
-    )?;
+    let (name, type_params) =
+        parse_decl_name(name_text, "struct", path, line_no, visibility_column + 7)?;
     *index += 1;
     let fields = parse_struct_fields(lines, index, path)?;
     Ok(StructDecl {
         name: name.to_string(),
         type_params,
         fields,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
@@ -788,38 +889,44 @@ fn parse_struct_fields(
 fn parse_enum(lines: &[&str], index: &mut usize, path: &Path) -> Result<EnumDecl, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
-    let (is_public, header) = if let Some(rest) = trimmed.strip_prefix("pub enum ") {
-        (true, rest)
+    let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
+    let header = if let Some(rest) = rest.strip_prefix("enum ") {
+        rest
     } else {
-        let rest = trimmed.strip_prefix("enum ").ok_or_else(|| {
+        let _ = rest.strip_prefix("enum ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid enum declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest)
+        unreachable!()
     };
     let name_text = header.strip_suffix('{').map(str::trim).ok_or_else(|| {
         Diagnostic::new("parse", "enum declaration must use `enum Name {` syntax")
             .with_path(path.display().to_string())
             .with_span(line_no, 1)
     })?;
-    let (name, type_params) = parse_decl_name(
-        name_text,
-        "enum",
-        path,
-        line_no,
-        if is_public { 10 } else { 6 },
-    )?;
+    let (name, type_params) =
+        parse_decl_name(name_text, "enum", path, line_no, visibility_column + 5)?;
     *index += 1;
     let variants = parse_enum_variants(lines, index, path)?;
     Ok(EnumDecl {
         name: name.to_string(),
         type_params,
         variants,
-        is_public,
+        visibility,
         line: line_no,
         column: 1,
     })
+}
+
+fn parse_visibility_prefix(trimmed: &str) -> (Visibility, &str, usize) {
+    if let Some(rest) = trimmed.strip_prefix("pub(pkg) ") {
+        (Visibility::Package, rest, 10)
+    } else if let Some(rest) = trimmed.strip_prefix("pub ") {
+        (Visibility::Public, rest, 5)
+    } else {
+        (Visibility::Module, trimmed, 1)
+    }
 }
 
 fn parse_enum_variants(
@@ -1038,28 +1145,55 @@ fn parse_match_arms(
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
+        if let Some(column) = find_top_level_keyword(variant, "if") {
+            return Err(
+                Diagnostic::new("parse", "match arm guards are not supported yet")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + 1),
+            );
+        }
+        if variant.starts_with('(') {
+            return Err(
+                Diagnostic::new("parse", "nested match patterns are not supported yet")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, 1),
+            );
+        }
         let (variant, bindings, is_named) = if variant.ends_with('}')
             && let Some(open_brace) = find_top_level_char(variant, '{')
             && matches!(find_matching_brace(variant, open_brace), Some(close) if close == variant.len() - 1)
         {
             let name = variant[..open_brace].trim();
             validate_ident(name, path, line_no, 1)?;
-            let bindings_raw = variant[open_brace + 1..variant.len() - 1].trim();
-            if bindings_raw.is_empty() {
+            let bindings_raw = &variant[open_brace + 1..variant.len() - 1];
+            if bindings_raw.trim().is_empty() {
                 return Err(Diagnostic::new("parse", "match arm binding is empty")
                     .with_path(path.display().to_string())
                     .with_span(line_no, open_brace + 2));
             }
-            let bindings = split_top_level(bindings_raw, ',')
+            let bindings = split_top_level_with_offsets(bindings_raw, ',')
                 .into_iter()
-                .map(|binding| {
-                    let binding = binding.trim();
+                .map(|(binding_offset, raw_binding)| {
+                    let binding = raw_binding.trim();
+                    let leading_ws = raw_binding.len().saturating_sub(raw_binding.trim_start().len());
+                    let binding_column = open_brace
+                        + 2
+                        + binding_offset
+                        + leading_ws;
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
-                            .with_span(line_no, open_brace + 2));
+                            .with_span(line_no, binding_column));
                     }
-                    validate_ident(binding, path, line_no, open_brace + 2)?;
+                    if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
+                        return Err(Diagnostic::new(
+                            "parse",
+                            "nested match patterns are not supported yet",
+                        )
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, binding_column + nested_offset));
+                    }
+                    validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -1070,22 +1204,35 @@ fn parse_match_arms(
         {
             let name = variant[..open_paren].trim();
             validate_ident(name, path, line_no, 1)?;
-            let bindings_raw = variant[open_paren + 1..variant.len() - 1].trim();
-            if bindings_raw.is_empty() {
+            let bindings_raw = &variant[open_paren + 1..variant.len() - 1];
+            if bindings_raw.trim().is_empty() {
                 return Err(Diagnostic::new("parse", "match arm binding is empty")
                     .with_path(path.display().to_string())
                     .with_span(line_no, open_paren + 2));
             }
-            let bindings = split_top_level(bindings_raw, ',')
+            let bindings = split_top_level_with_offsets(bindings_raw, ',')
                 .into_iter()
-                .map(|binding| {
-                    let binding = binding.trim();
+                .map(|(binding_offset, raw_binding)| {
+                    let binding = raw_binding.trim();
+                    let leading_ws = raw_binding.len().saturating_sub(raw_binding.trim_start().len());
+                    let binding_column = open_paren
+                        + 2
+                        + binding_offset
+                        + leading_ws;
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
-                            .with_span(line_no, open_paren + 2));
+                            .with_span(line_no, binding_column));
                     }
-                    validate_ident(binding, path, line_no, open_paren + 2)?;
+                    if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
+                        return Err(Diagnostic::new(
+                            "parse",
+                            "nested match patterns are not supported yet",
+                        )
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, binding_column + nested_offset));
+                    }
+                    validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -1326,6 +1473,26 @@ fn parse_type_name(
                 line_no,
                 column + open_angle + 1,
             )?);
+        }
+        if name == "ptr" {
+            if type_args.len() != 1 {
+                return Err(
+                    Diagnostic::new("parse", "ptr types must use `ptr<type>` syntax")
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, column),
+                );
+            }
+            return Ok(TypeName::Ptr(Box::new(type_args.remove(0))));
+        }
+        if name == "mutptr" {
+            if type_args.len() != 1 {
+                return Err(
+                    Diagnostic::new("parse", "mutptr types must use `mutptr<type>` syntax")
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, column),
+                );
+            }
+            return Ok(TypeName::MutPtr(Box::new(type_args.remove(0))));
         }
         return Ok(TypeName::Named(name.to_string(), type_args));
     }
@@ -1928,7 +2095,21 @@ fn validate_ident(
     Ok(())
 }
 
+fn find_nested_match_pattern_offset(raw: &str) -> Option<usize> {
+    ['(', '{', '[', ':']
+        .into_iter()
+        .filter_map(|ch| find_top_level_char(raw, ch))
+        .min()
+}
+
 fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
+    split_top_level_with_offsets(raw, delimiter)
+        .into_iter()
+        .map(|(_, part)| part)
+        .collect()
+}
+
+fn split_top_level_with_offsets(raw: &str, delimiter: char) -> Vec<(usize, &str)> {
     let mut parts = Vec::new();
     let mut in_string = false;
     let mut escaped = false;
@@ -1960,14 +2141,76 @@ fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
             '[' => bracket_depth += 1,
             ']' => bracket_depth = bracket_depth.saturating_sub(1),
             _ if ch == delimiter && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
-                parts.push(&raw[start..index]);
+                parts.push((start, &raw[start..index]));
                 start = index + ch.len_utf8();
             }
             _ => {}
         }
     }
-    parts.push(&raw[start..]);
+    parts.push((start, &raw[start..]));
     parts
+}
+
+fn find_top_level_keyword(raw: &str, keyword: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut angle_depth = 0usize;
+    let chars: Vec<(usize, char)> = raw.char_indices().collect();
+    for cursor in 0..chars.len() {
+        let (index, ch) = chars[cursor];
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '<' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                angle_depth += 1;
+            }
+            '>' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                angle_depth = angle_depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        if paren_depth != 0 || brace_depth != 0 || bracket_depth != 0 || angle_depth != 0 {
+            continue;
+        }
+        if !raw[index..].starts_with(keyword) {
+            continue;
+        }
+        let before = if cursor == 0 {
+            None
+        } else {
+            Some(chars[cursor - 1].1)
+        };
+        let after_index = index + keyword.len();
+        let after = raw[after_index..].chars().next();
+        if before.is_none_or(|ch| ch.is_ascii_whitespace())
+            && after.is_none_or(|ch| ch.is_ascii_whitespace())
+        {
+            return Some(index);
+        }
+    }
+    None
 }
 
 fn split_top_level_type(raw: &str, delimiter: char) -> Vec<&str> {

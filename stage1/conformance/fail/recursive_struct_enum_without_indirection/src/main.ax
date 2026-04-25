@@ -1,0 +1,10 @@
+struct ExprNode {
+expr: Expr
+}
+
+enum Expr {
+Wrap(ExprNode)
+Lit(int)
+}
+
+print 0

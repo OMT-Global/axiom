@@ -1,0 +1,5 @@
+struct Node {
+next: Node
+}
+
+print 0

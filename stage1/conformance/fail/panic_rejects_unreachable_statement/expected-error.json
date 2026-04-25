@@ -1,0 +1,8 @@
+{
+  "kind": "control",
+  "code": null,
+  "message": "unreachable statements after a terminating control-flow statement are not yet supported in stage1",
+  "path": "src/main.ax",
+  "line": 3,
+  "column": 1
+}

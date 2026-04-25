@@ -1,7 +1,0 @@
-fn banner(): string {
-  return "hello" + ", axiom"
-}
-
-print banner()
-print "same" == "same"
-print "same" != "other"

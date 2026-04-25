@@ -1,0 +1,14 @@
+import "support/shared.ax"
+
+let answer: Id = helper()
+let info: BuildInfo = build()
+let status: Status = ready()
+
+print answer
+print info.label
+
+match status {
+Ready {
+print ANSWER
+}
+}

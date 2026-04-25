@@ -1,0 +1,5 @@
+import "support/banner.ax"
+import "support/math.ax"
+
+print banner("local module ok")
+print answer()

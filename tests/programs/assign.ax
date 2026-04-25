@@ -1,3 +1,0 @@
-let x: int = 1
-x = x + 5
-print x

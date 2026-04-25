@@ -1,0 +1,8 @@
+{
+  "kind": "parse",
+  "code": null,
+  "message": "stage1 bootstrap does not support `for` loops yet; use `while`-based iteration until the iteration protocol lands",
+  "path": "src/main.ax",
+  "line": 2,
+  "column": 1
+}

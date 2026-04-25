@@ -1,0 +1,6 @@
+enum List {
+Cons(List)
+Nil
+}
+
+print 0

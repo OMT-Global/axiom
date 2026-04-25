@@ -1,0 +1,8 @@
+{
+  "kind": "type",
+  "code": null,
+  "message": "recursive payload variant \"Cons\" in enum \"conformance_recursive_enum_without_indirection_main_List\" requires indirection; unboxed recursive types are not supported",
+  "path": "src/main.ax",
+  "line": 2,
+  "column": 1
+}

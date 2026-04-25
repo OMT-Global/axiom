@@ -1,0 +1,20 @@
+enum OptionInt {
+Some(int)
+None
+}
+
+fn describe(value: OptionInt): int {
+match value {
+Some(n) if n > 0 {
+return n
+}
+Some(n) {
+return 0
+}
+None {
+return 0
+}
+}
+}
+
+print describe(Some(1))

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-echo "Generic archetype selected."
-echo "Add project-specific scripts and tighten scripts/ci/run-fast-checks.sh when the stack is finalized."
+bash scripts/ci/check-python-exit-docs.sh
+make stage1-test
+make stage1-conformance
+make stage1-smoke

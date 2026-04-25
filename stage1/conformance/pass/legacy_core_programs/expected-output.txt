@@ -1,0 +1,17 @@
+42
+85
+true
+1
+true
+true
+10
+40
+hello, axiom
+true
+true
+hello
+axiom
+10
+20
+30
+3

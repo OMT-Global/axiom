@@ -1,0 +1,51 @@
+fn choose(flag: bool): bool {
+if flag {
+return false
+}
+return true
+}
+
+fn banner(): string {
+return "hello" + ", axiom"
+}
+
+let x: int = 40 + 2
+print x
+print x + 43
+
+let ready: bool = true
+print ready
+if ready {
+print 1
+}
+
+let changed: bool = 1 < 2
+print changed
+print choose(false)
+
+let branch: int = 2
+if branch == 2 {
+print 10
+} else {
+print 20
+}
+if branch != 2 {
+print 30
+} else {
+print 40
+}
+
+while false {
+print "never"
+}
+
+print banner()
+print "same" == "same"
+print "same" != "other"
+print "hello\naxiom"
+
+let values: [int] = [10, 20, 30]
+print values[0]
+print values[1]
+print values[2]
+print len(values)

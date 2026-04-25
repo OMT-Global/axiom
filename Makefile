@@ -1,33 +1,21 @@
-PYTHON ?= python
-AXIOM_BUILD_DIR ?= .axiom-build
-ARITH_BYTECODE ?= $(AXIOM_BUILD_DIR)/arith.axb
+.PHONY: test smoke docs-python-exit docs-python-exit-test stage1-test stage1-conformance stage1-smoke stage1-run
 
-.PHONY: test lint smoke interp compile vm stage1-test stage1-smoke stage1-run
+test: docs-python-exit stage1-test
 
-test:
-	$(PYTHON) -m unittest discover -v
+smoke: stage1-smoke
 
-lint:
-	$(PYTHON) -m ruff check .
+docs-python-exit:
+	bash scripts/ci/check-python-exit-docs.sh
+	bash scripts/ci/test-check-python-exit-docs.sh
 
-smoke:
-	$(PYTHON) -m axiom check examples/arith.ax
-	$(PYTHON) -m axiom check tests/programs/bool_values.ax
-	$(PYTHON) -m axiom pkg check examples/typed_package
-	$(PYTHON) -m axiom pkg run examples/typed_package
-
-interp:
-	$(PYTHON) -m axiom interp examples/arith.ax
-
-compile:
-	mkdir -p "$(AXIOM_BUILD_DIR)"
-	$(PYTHON) -m axiom compile examples/arith.ax -o "$(ARITH_BYTECODE)"
-
-vm: compile
-	$(PYTHON) -m axiom vm "$(ARITH_BYTECODE)"
+docs-python-exit-test:
+	bash scripts/ci/test-check-python-exit-docs.sh
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
+
+stage1-conformance:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
 
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json

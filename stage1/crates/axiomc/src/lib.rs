@@ -27,7 +27,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::parse_program;
+    use crate::syntax::{Visibility, parse_program};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -102,6 +102,13 @@ mod tests {
             .join("tests")
             .join("ownership_failures")
             .join(case)
+    }
+
+    fn conformance_fixture() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("conformance")
     }
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
@@ -189,6 +196,174 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_panic_statement() {
+        let source = "fn fail(): int {\npanic(\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_panic(message: String) -> ! {"));
+        assert!(rendered.contains("axiom_runtime_error(\"panic\", &message)"));
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
+    fn parser_lowers_panic_statement_with_whitespace_before_paren() {
+        let source = "fn fail(): int {\npanic (\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
+    fn parser_lowers_panic_statement_with_tab_before_paren() {
+        let source = "fn fail(): int {\npanic\t(\"boom\")\n}\n\nprint 0\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("axiom_panic(String::from(\"boom\"));"));
+    }
+
+    #[test]
+    fn parser_lowers_panic_statement_with_generic_call_argument() {
+        let source = "fn label<T>(value: T): string {\nreturn \"boom\"\n}\n\nfn require<T>(flag: bool, value: T): T {\nif flag {\nreturn value\n} else {\npanic(label<T>(value))\n}\n}\n\nlet answer: int = require<int>(true, 7)\nprint answer\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn label__int(value: i64) -> String {"));
+        assert!(rendered.contains("fn require__int(flag: bool, value: i64) -> i64 {"));
+        assert!(rendered.contains("axiom_panic(label__int(value));"));
+        assert!(rendered.contains("let answer: i64 = require__int(true, 7);"));
+    }
+
+    #[test]
+    fn parser_tracks_package_visibility() {
+        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.consts[0].visibility, Visibility::Package);
+        assert_eq!(parsed.type_aliases[0].visibility, Visibility::Package);
+        assert_eq!(parsed.structs[0].visibility, Visibility::Package);
+        assert_eq!(parsed.enums[0].visibility, Visibility::Package);
+        assert_eq!(parsed.functions[0].visibility, Visibility::Package);
+        assert_eq!(parsed.functions[1].visibility, Visibility::Package);
+        assert!(parsed.functions[1].is_async);
+    }
+
+    #[test]
+    fn parser_rejects_package_re_exports_explicitly() {
+        for source in [
+            "pub(pkg) import \"math.ax\"\nprint \"skip\"\n",
+            "pub(pkg) use \"math.ax\"\nprint \"skip\"\n",
+        ] {
+            let error = parse_program(source, Path::new("main.ax"))
+                .expect_err("package re-exports should fail during parsing");
+            assert_eq!(error.kind, "parse");
+            assert!(error.message.contains("does not support re-exports"));
+        }
+    }
+
+    #[test]
+    fn parser_rejects_for_loops_explicitly() {
+        let source = "fn main(): int {\nfor value in [1, 2, 3] {\nprint value\n}\nreturn 0\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("for loops should fail with an explicit parser diagnostic");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.line, Some(2));
+        assert_eq!(error.column, Some(1));
+        assert!(error.message.contains("does not support `for` loops yet"));
+    }
+
+    #[test]
+    fn parser_rejects_match_arm_guards() {
+        let source = "enum OptionInt {\nSome(int)\nNone\n}\n\nfn describe(value: OptionInt): int {\nmatch value {\nSome(n) if n > 0 {\nreturn n\n}\nNone {\nreturn 0\n}\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("match arm guards should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "match arm guards are not supported yet");
+        assert_eq!(error.line, Some(8));
+        assert_eq!(error.column, Some(9));
+    }
+
+    #[test]
+    fn parser_accepts_match_arm_identifiers_containing_if() {
+        let source = "enum Prize {\nGift(int)\nNone\n}\n\nmatch Gift(3) {\nGift(gift_value) {\nprint gift_value\n}\nNone {\nprint 0\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+
+        match &parsed.stmts[0] {
+            crate::syntax::Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].variant, "Gift");
+                assert_eq!(arms[0].bindings, vec!["gift_value".to_string()]);
+            }
+            other => panic!("expected match statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_accepts_named_match_arm_identifiers_containing_if() {
+        let source = "enum Prize {\nGift { gift_value: int }\nNone\n}\n\nmatch Gift { gift_value: 3 } {\nGift { gift_value } {\nprint gift_value\n}\nNone {\nprint 0\n}\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+
+        match &parsed.stmts[0] {
+            crate::syntax::Stmt::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2);
+                assert_eq!(arms[0].variant, "Gift");
+                assert!(arms[0].is_named);
+                assert_eq!(arms[0].bindings, vec!["gift_value".to_string()]);
+            }
+            other => panic!("expected match statement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parser_rejects_nested_match_patterns() {
+        let source = "enum Pair {\nWrap((int, bool))\n}\n\nmatch Wrap((1, true)) {\nWrap((count, true)) {\nprint count\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested match patterns should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(6));
+    }
+
+    #[test]
+    fn parser_reports_nested_match_pattern_at_offending_positional_binding() {
+        let source = "enum Pair {\nWrap(int, (int, bool))\n}\n\nmatch Wrap(1, (2, true)) {\nWrap(value, (count, true)) {\nprint value\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested positional bindings should report the offending binding");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(13));
+    }
+
+    #[test]
+    fn parser_rejects_nested_named_match_patterns() {
+        let source = "enum Event {\nTick { payload: (int, bool) }\n}\n\nmatch Tick { payload: (1, true) } {\nTick { payload: (count, true) } {\nprint count\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested named match patterns should fail during parsing");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(15));
+    }
+
+    #[test]
+    fn parser_reports_nested_match_pattern_at_offending_named_binding() {
+        let source = "enum Event {\nTick { tag: int, payload: (int, bool) }\n}\n\nmatch Tick { tag: 1, payload: (2, true) } {\nTick { tag, payload: (count, true) } {\nprint tag\n}\n}\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested named bindings should report the offending binding");
+        assert_eq!(error.kind, "parse");
+        assert_eq!(error.message, "nested match patterns are not supported yet");
+        assert_eq!(error.line, Some(6));
+        assert_eq!(error.column, Some(20));
+    }
+
+    #[test]
     fn parser_lowers_generic_functions_to_monomorphized_copies() {
         let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nfn singleton<T>(value: T): [T] {\nreturn [value]\n}\n\nlet answer: int = identity<int>(42)\nlet label: string = identity<string>(\"stage1\")\nlet values: [int] = singleton<int>(answer)\nprint answer\nprint label\nprint len(values)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -271,6 +446,60 @@ mod tests {
         assert!(!rendered.contains("std::process::exit"));
         assert!(!rendered.contains("assert!("));
         assert!(!rendered.contains("Axiom stack trace"));
+    }
+
+    #[test]
+    fn panic_statement_requires_single_string_argument() {
+        let source = "fn fail(): int {\npanic(1)\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject non-string arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects a string argument"));
+    }
+
+    #[test]
+    fn panic_statement_rejects_wrong_arity() {
+        let source = "fn fail(): int {\npanic()\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject missing arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects 1 argument, got 0"));
+    }
+
+    #[test]
+    fn panic_statement_without_parens_rejects_missing_argument() {
+        let source = "fn fail(): int {\npanic\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error =
+            hir::lower(&parsed).expect_err("bare panic should reject the non-call statement form");
+        assert_eq!(error.kind, "type");
+        assert!(
+            error
+                .message
+                .contains("panic statement expects `panic(\"message\")`")
+        );
+    }
+
+    #[test]
+    fn panic_statement_rejects_multiple_arguments() {
+        let source = "fn fail(): int {\npanic(\"boom\", \"again\")\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject extra arguments");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("panic expects 1 argument, got 2"));
+    }
+
+    #[test]
+    fn panic_statement_rejects_type_arguments() {
+        let source = "fn fail(): int {\npanic<string>(\"boom\")\n}\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("panic should reject type arguments");
+        assert_eq!(error.kind, "type");
+        assert!(
+            error
+                .message
+                .contains("panic does not accept type arguments")
+        );
     }
 
     #[test]
@@ -1117,6 +1346,191 @@ mod tests {
     }
 
     #[test]
+    fn package_visibility_allows_same_package_module_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-module");
+        create_project(&project, Some("package-visible-module-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"shared.ax\"\n\nlet answer: Id = helper()\nlet info: BuildInfo = build()\nlet status: Status = ready()\nprint answer\nprint info.label\nmatch status {\nReady {\nprint ANSWER\n}\n}\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/shared.ax"),
+            "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
+        )
+        .expect("write shared");
+        let built = build_project(&project).expect("build package-visible module");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\npackage\n42\n");
+    }
+
+    #[test]
+    fn package_visibility_allows_same_package_async_module_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-async-module");
+        create_project(&project, Some("package-visible-async-module-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/async.ax\"\nimport \"shared.ax\"\n\nlet task: Task<int> = helper(41)\nprint await task\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/shared.ax"),
+            "pub(pkg) async fn helper(value: int): int {\nreturn value + 1\n}\n",
+        )
+        .expect("write shared");
+        let built = build_project(&project).expect("build package-visible async module");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_imports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-visible-dependency");
+        let dependency = project.join("deps/core");
+        create_project(&project, Some("package-visible-dependency-app")).expect("create root");
+        create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+
+        fs::write(
+            dependency.join("src/shared.ax"),
+            "pub(pkg) fn helper(): int {\nreturn 42\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest("package-visible-dependency-app")
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/shared.ax\"\nprint helper()\n",
+        )
+        .expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error =
+            check_project(&project).expect_err("package-visible dependency import should fail");
+        assert_eq!(error.kind, "import");
+        assert!(error.message.contains("is not visible from this module"));
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_async_function_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-async-fn",
+            "pub(pkg) async fn helper(): int {\nreturn 42\n}\n",
+            "import \"std/async.ax\"\nimport \"core/shared.ax\"\nlet task: Task<int> = helper()\nprint await task\n",
+            "function \"helper\"",
+        );
+    }
+
+    fn assert_cross_package_package_visibility_error(
+        case_name: &str,
+        dependency_source: &str,
+        main_source: &str,
+        expected_message: &str,
+    ) {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join(case_name);
+        let dependency = project.join("deps/core");
+        create_project(&project, Some(case_name)).expect("create root");
+        create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+
+        fs::write(dependency.join("src/shared.ax"), dependency_source).expect("write dependency");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
+                render_manifest(case_name)
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(project.join("src/main.ax"), main_source).expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error =
+            check_project(&project).expect_err("package-visible dependency import should fail");
+        assert_eq!(error.kind, "import");
+        assert!(error.message.contains(expected_message));
+        assert!(error.message.contains("is not visible from this module"));
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_const_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-const",
+            "pub(pkg) const ANSWER: int = 42\n",
+            "import \"core/shared.ax\"\nprint ANSWER\n",
+            "const \"ANSWER\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_type_alias_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-type",
+            "pub(pkg) type Id = int\n",
+            "import \"core/shared.ax\"\nlet answer: Id = 42\nprint answer\n",
+            "type \"Id\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_struct_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-struct",
+            "pub(pkg) struct BuildInfo {\nlabel: string\n}\n",
+            "import \"core/shared.ax\"\nlet info: BuildInfo = BuildInfo { label: \"x\" }\nprint info.label\n",
+            "type \"BuildInfo\"",
+        );
+    }
+
+    #[test]
+    fn package_visibility_rejects_cross_package_enum_imports() {
+        assert_cross_package_package_visibility_error(
+            "package-visible-dependency-enum",
+            "pub(pkg) enum Status {\nReady\n}\n",
+            "import \"core/shared.ax\"\nlet status: Status = Ready\nmatch status {\nReady {\nprint \"ready\"\n}\n}\n",
+            "type \"Status\"",
+        );
+    }
+
+    #[test]
     fn stage1_project_supports_workspace_members() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("workspace-root");
@@ -1457,10 +1871,10 @@ mod tests {
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-        assert_eq!(caps.len(), 6);
+        assert_eq!(caps.len(), 7);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
-        assert_eq!(project_caps.len(), 6);
+        assert_eq!(project_caps.len(), 7);
     }
 
     #[test]
@@ -1488,6 +1902,73 @@ mod tests {
         assert_eq!(payload["capabilities"][3]["allowed"][0], "FOO");
         assert_eq!(payload["capabilities"][3]["allowed"][1], "LOG_LEVEL");
         assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
+    }
+
+
+    #[test]
+    fn check_project_rejects_extern_function_without_ffi_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("ffi-denied");
+        create_project(&project, Some("ffi-denied-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"extern fn strlen(value: string): int from "c"
+print strlen("hello")
+"#,
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("ffi capability should be required");
+        assert_eq!(error.kind, "capability");
+        assert!(error.message.contains("requires [capabilities].ffi = true"));
+    }
+
+    #[test]
+    fn build_project_runs_c_ffi_strlen_with_ffi_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("ffi-strlen");
+        create_project(&project, Some("ffi-strlen-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "ffi-strlen-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+ffi = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"extern fn strlen(value: string): int from "c"
+print strlen("hello")
+"#,
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "5\n");
+    }
+
+    #[test]
+    fn parse_extern_function_accepts_pointer_types() {
+        let source = r#"extern fn poke(input: ptr<int>, output: mutptr<int>): bool from "c"
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let function = parsed.functions.first().expect("function");
+        assert!(function.is_extern);
+        assert_eq!(function.extern_library.as_deref(), Some("c"));
+        assert!(matches!(function.params[0].ty, crate::syntax::TypeName::Ptr(_)));
+        assert!(matches!(function.params[1].ty, crate::syntax::TypeName::MutPtr(_)));
     }
 
     #[test]
@@ -2713,6 +3194,32 @@ mod tests {
     }
 
     #[test]
+    fn stage1_runtime_reports_structured_error_for_panic_statement() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-statement");
+        create_project(&project, Some("panic-statement")).expect("create project");
+        fs::write(project.join("src/main.ax"), "panic(\"boom\")\n").expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+
+        assert!(!output.status.success(), "program should fail");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("{\"kind\":\"panic\",\"message\":\"boom\"}"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(
+            !stderr.contains("runtime panic"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(!stderr.contains("panic:"), "unexpected stderr: {stderr}");
+    }
+
+    #[test]
     fn stage1_runtime_reports_structured_error_for_slice_failures() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runtime-error-slice");
@@ -2880,6 +3387,34 @@ mod tests {
                 .iter()
                 .any(|case| case.entry == "src/main_test.ax")
         );
+    }
+
+    #[test]
+    fn run_project_tests_uses_package_expected_output_for_manifest_cases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-package-golden");
+        create_project(&project, Some("runner-package-golden-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\n",
+                render_manifest("runner-package-golden-app")
+            ),
+        )
+        .expect("write manifest");
+        fs::write(project.join("src/math_test.ax"), "print 42\n").expect("write test");
+        fs::write(project.join("expected-output.txt"), "42\n").expect("write package golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 2);
+        assert_eq!(output.failed, 0);
+        let math_case = output
+            .cases
+            .iter()
+            .find(|case| case.name == "math-smoke")
+            .expect("math case");
+        assert_eq!(math_case.expected_stdout.as_deref(), Some("42\n"));
+        assert!(math_case.ok);
     }
 
     #[test]
@@ -3067,6 +3602,31 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[test]
+    fn conformance_corpus_reports_stable_results() {
+        let output =
+            run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
+        assert_eq!(output.cases.len(), 25);
+        assert_eq!(output.passed, 25);
+        assert_eq!(output.failed, 0);
+        assert!(
+            output
+                .cases
+                .iter()
+                .filter(|case| case.expected_error.is_some())
+                .count()
+                == 18
+        );
+        assert_eq!(
+            output
+                .cases
+                .iter()
+                .filter(|case| case.expected_stdout.is_some())
+                .count(),
+            7
+        );
     }
 
     #[test]
@@ -3428,6 +3988,51 @@ mod tests {
     }
 
     #[test]
+    fn check_project_accepts_panic_as_terminating_branch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-terminates-branch");
+        create_project(&project, Some("panic-terminates-branch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn require(flag: bool): int {\nif flag {\nreturn 7\n} else {\npanic(\"boom\")\n}\n}\n\nprint require(true)\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("panic branch should count as terminating control flow");
+    }
+
+    #[test]
+    fn check_project_accepts_panic_as_terminating_match_arm() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-terminates-match-arm");
+        create_project(&project, Some("panic-terminates-match-arm-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Status {\nReady\nFailed\n}\n\nfn require(status: Status): int {\nmatch status {\nReady {\nreturn 7\n}\nFailed {\npanic(\"boom\")\n}\n}\n}\n\nprint require(Ready)\n",
+        )
+        .expect("write source");
+        check_project(&project).expect("panic match arm should count as terminating control flow");
+    }
+
+    #[test]
+    fn check_project_rejects_unreachable_statement_after_panic() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("panic-unreachable");
+        create_project(&project, Some("panic-unreachable-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn fail(): int {\npanic(\"boom\")\nprint 1\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("unreachable statement should fail");
+        assert_eq!(error.kind, "control");
+        assert!(
+            error
+                .message
+                .contains("unreachable statements after a terminating control-flow statement")
+        );
+    }
+
+    #[test]
     fn build_project_emits_native_binary_from_imported_modules() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("modules");
@@ -3594,6 +4199,38 @@ mod tests {
     }
 
     #[test]
+    fn check_project_rejects_package_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-re-export");
+        create_project(&project, Some("package-re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub(pkg) use \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("package re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
+    fn check_project_rejects_package_import_re_exports_explicitly() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("package-import-re-export");
+        create_project(&project, Some("package-import-re-export-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "pub(pkg) import \"math.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("package import re-exports should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(error.message.contains("does not support re-exports"));
+    }
+
+    #[test]
     fn check_project_rejects_namespace_qualified_calls_explicitly() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("qualified-call");
@@ -3617,7 +4254,7 @@ mod tests {
         .expect("write main");
         fs::write(project.join("src/types.ax"), "type Hidden = int\n").expect("write types");
         let error = check_project(&project).expect_err("private type alias should fail");
-        assert!(error.message.contains("is not exported"));
+        assert!(error.message.contains("is not visible from this module"));
         assert_eq!(error.kind, "import");
     }
 
@@ -3634,6 +4271,70 @@ mod tests {
         let error = check_project(&project).expect_err("recursive type alias should fail");
         assert!(error.message.contains("is recursive"));
         assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_structs_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-structs");
+        create_project(&project, Some("mutually-recursive-structs-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nnext: Link\n}\n\nstruct Link {\nnode: Node\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("mutually recursive structs should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_mutually_recursive_struct_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mutually-recursive-struct-enum");
+        create_project(&project, Some("mutually-recursive-struct-enum-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct ExprNode {\nexpr: Expr\n}\n\nenum Expr {\nWrap(ExprNode)\nLit(int)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error =
+            check_project(&project).expect_err("mutually recursive struct and enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_recursive_enum_without_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-enum");
+        create_project(&project, Some("recursive-enum-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum List {\nCons(List)\nNil\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("recursive enum should fail");
+        assert!(error.message.contains("requires indirection"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn build_project_allows_recursive_struct_through_array_indirection() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-struct-array");
+        create_project(&project, Some("recursive-struct-array-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Node {\nchildren: [Node]\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+
+        build_project(&project).expect("recursive struct through array indirection should build");
     }
 
     #[test]
@@ -3720,7 +4421,7 @@ mod tests {
         )
         .expect("write greetings");
         let error = check_project(&project).expect_err("private import should fail");
-        assert!(error.message.contains("is not exported"));
+        assert!(error.message.contains("is not visible from this module"));
         assert_eq!(error.kind, "import");
     }
 
@@ -4946,7 +5647,12 @@ mod tests {
         assert_eq!(debug.cache_misses, 1);
 
         let generated = fs::read_to_string(&debug.generated_rust).expect("read generated rust");
-        let source = project.join("src/main.ax").display().to_string();
+        let source = project
+            .join("src/main.ax")
+            .canonicalize()
+            .expect("canonical source path")
+            .display()
+            .to_string();
         assert!(generated.contains(&format!("// axiom-source: {source}:1:1")));
         assert!(generated.contains(&format!("// axiom-source: {source}:2:1")));
         let map: serde_json::Value =

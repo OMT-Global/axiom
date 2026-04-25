@@ -40,9 +40,36 @@ pub fn render_rust_for_package_with_capabilities(
 ) -> String {
     let type_context = TypeContext::new(program);
     let uses_http_get = program_uses_call(program, "http_get");
+    let uses_ffi = program.functions.iter().any(|function| function.is_extern);
+    let uses_ffi_cstring = program
+        .functions
+        .iter()
+        .filter(|function| function.is_extern)
+        .any(|function| function.params.iter().any(|param| matches!(param.ty, Type::String)));
+    let uses_ffi_cstr = program
+        .functions
+        .iter()
+        .filter(|function| function.is_extern)
+        .any(|function| matches!(function.return_ty, Type::String));
     let mut out = String::new();
-    out.push_str("#[allow(unused_imports)]\n");
-    out.push_str("use std::collections::HashMap;\n");
+    out.push_str("#[allow(unused_imports)]
+");
+    out.push_str("use std::collections::HashMap;
+");
+    if uses_ffi_cstr && uses_ffi_cstring {
+        out.push_str("use std::ffi::{CStr, CString};
+");
+    } else if uses_ffi_cstr {
+        out.push_str("use std::ffi::CStr;
+");
+    } else if uses_ffi_cstring {
+        out.push_str("use std::ffi::CString;
+");
+    }
+    if uses_ffi {
+        out.push_str("use std::os::raw::c_char;
+");
+    }
     out.push_str("use std::panic;\n");
     out.push_str("use std::sync::Once;\n\n");
     let package_root = rust_path_literal(package_root);
@@ -101,6 +128,10 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("fn axiom_runtime_error(kind: &str, message: &str) -> ! {\n");
     out.push_str("    axiom_runtime_report(kind, message);\n");
     out.push_str("    panic::panic_any(AxiomRuntimeAbort)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_panic(message: String) -> ! {\n");
+    out.push_str("    axiom_runtime_error(\"panic\", &message)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_task_ready<T>(value: T) -> AxiomTask<T> {\n");
@@ -990,6 +1021,7 @@ fn stmt_uses_call(stmt: &Stmt, name: &str) -> bool {
         Stmt::Let { expr, .. } | Stmt::Print { expr, .. } | Stmt::Return { expr, .. } => {
             expr_uses_call(expr, name)
         }
+        Stmt::Panic { message, .. } => expr_uses_call(message, name),
         Stmt::If {
             cond,
             then_block,
@@ -1094,7 +1126,7 @@ impl<'a> TypeContext<'a> {
         visiting_enums: &mut HashSet<String>,
     ) -> bool {
         match ty {
-            Type::Int | Type::Bool | Type::String => false,
+            Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
             Type::Slice(_) | Type::MutSlice(_) => true,
             Type::Struct(name) => {
                 if !visiting_structs.insert(name.clone()) {
@@ -1239,6 +1271,10 @@ fn render_function(
     out: &mut String,
     debug: bool,
 ) {
+    if function.is_extern {
+        render_extern_function(function, type_context, out);
+        return;
+    }
     let uses_slice_lifetime = function_signature_uses_borrowed_slice(function, type_context);
     let params = function
         .params
@@ -1267,6 +1303,103 @@ fn render_function(
         );
     }
     out.push_str("}\n");
+}
+
+fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, out: &mut String) {
+    let abi = function.extern_abi.as_deref().unwrap_or("C");
+    let library = function
+        .extern_library
+        .as_deref()
+        .expect("extern functions require a library");
+    let extern_name = format!("{}_extern", function.name);
+    out.push_str("#[link(name = ");
+    out.push_str(&format!("{:?}", library));
+    out.push_str(")]
+");
+    out.push_str("unsafe extern ");
+    out.push_str(&format!("{:?}", abi));
+    out.push_str(" {
+");
+    out.push_str("    #[link_name = ");
+    out.push_str(&format!("{:?}", function.source_name));
+    out.push_str("]
+");
+    out.push_str("    fn ");
+    out.push_str(&extern_name);
+    out.push('(');
+    out.push_str(
+        &function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| format!("arg{index}: {}", rust_ffi_type(&param.ty, type_context)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    out.push_str(") -> ");
+    out.push_str(&rust_ffi_type(&function.return_ty, type_context));
+    out.push_str(";
+}
+");
+    out.push_str("#[allow(non_snake_case)]
+");
+    out.push_str(&format!(
+        "fn {}({}) -> {} {{
+",
+        function.name,
+        function
+            .params
+            .iter()
+            .map(|param| format!("{}: {}", param.name, rust_type(&param.ty, type_context)))
+            .collect::<Vec<_>>()
+            .join(", "),
+        rust_type(&function.return_ty, type_context)
+    ));
+    for param in &function.params {
+        if matches!(param.ty, Type::String) {
+            out.push_str(&format!(
+                "    let {}__ffi = CString::new({}).unwrap_or_else(|_| axiom_runtime_error(\"ffi\", \"string argument contains interior NUL byte\"));\n",
+                param.name, param.name
+            ));
+        }
+    }
+    out.push_str("    unsafe {\n");
+    let call_args = function
+        .params
+        .iter()
+        .map(|param| render_ffi_arg(&param.name, &param.ty))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if matches!(function.return_ty, Type::String) {
+        out.push_str(&format!("        let value = {extern_name}({call_args});\n"));
+        out.push_str("        if value.is_null() {\n");
+        out.push_str("            axiom_runtime_error(\"ffi\", \"extern function returned a null string pointer\");\n");
+        out.push_str("        }\n");
+        out.push_str("        CStr::from_ptr(value).to_string_lossy().into_owned()\n");
+    } else {
+        out.push_str(&format!("        {extern_name}({call_args})
+"));
+    }
+    out.push_str("    }
+");
+    out.push_str("}
+");
+}
+
+fn render_ffi_arg(name: &str, ty: &Type) -> String {
+    match ty {
+        Type::String => format!("{}__ffi.as_ptr()", name),
+        _ => name.to_string(),
+    }
+}
+
+fn rust_ffi_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
+    match ty {
+        Type::String => String::from("*const c_char"),
+        Type::Ptr(inner) => format!("*const {}", rust_type(inner, type_context)),
+        Type::MutPtr(inner) => format!("*mut {}", rust_type(inner, type_context)),
+        _ => rust_type(ty, type_context),
+    }
 }
 
 fn render_param(
@@ -1311,6 +1444,10 @@ fn render_stmt(
                 "{pad}println!(\"{{}}\", {});\n",
                 render_expr(expr)
             ));
+        }
+        Stmt::Panic { message, span } => {
+            render_source_marker(source_path, *span, out, indent, debug);
+            out.push_str(&format!("{pad}axiom_panic({});\n", render_expr(message)));
         }
         Stmt::If {
             cond,
@@ -1611,7 +1748,7 @@ fn render_expr(expr: &Expr) -> String {
             Type::Bool => unreachable!("type checker rejects bool addition"),
             Type::Struct(_) => unreachable!("type checker rejects struct addition"),
             Type::Enum(_) => unreachable!("type checker rejects enum addition"),
-            Type::Slice(_) | Type::MutSlice(_) => {
+            Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) | Type::MutSlice(_) => {
                 unreachable!("type checker rejects slice addition")
             }
             Type::Option(_) => unreachable!("type checker rejects option addition"),
@@ -1821,6 +1958,12 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
             } else {
                 name.clone()
             }
+        }
+        Type::Ptr(inner) => {
+            format!("*const {}", rust_type_inner(inner, lifetime, type_context))
+        }
+        Type::MutPtr(inner) => {
+            format!("*mut {}", rust_type_inner(inner, lifetime, type_context))
         }
         Type::Slice(inner) => {
             let inner = rust_type_inner(inner, lifetime, type_context);

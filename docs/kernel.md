@@ -1,66 +1,45 @@
-# Axiom kernel (v0.9)
+# Axiom kernel
+
+This kernel note describes the supported Rust `axiomc` path.
 
 ## Values
-- integers, strings, and booleans (Python `int`, `str`, and `bool` in the seed implementation)
-- conditions are bool-only
-- comparisons produce booleans
-- `print` renders booleans as `true` / `false`
+
+- Scalars: `int`, `string`, and `bool`.
+- Aggregates: structs, enums, tuples, arrays, maps, borrowed slices,
+  `Option<T>`, and `Result<T, E>`.
+- Conditions are bool-only.
+- Comparisons produce booleans.
+- `print` renders booleans as `true` / `false`.
 
 ## Statements
-- `let <ident>: <type> = <expr>` binds in the current lexical scope
-- `<ident> = <expr>` assigns to nearest existing lexical binding
-- `print <expr>` prints the formatted value plus a newline
-- `{ ... }` introduces a nested lexical scope
-- `if <expr> { ... } else { ... }`
-- `while <expr> { ... }`
-- `fn <name>(<typed params>): <return_type> { ... }`
-- `return <expr>`
-- nested functions capture outer bindings by reference (lexical closures)
-- `import "<path>"` for file module inclusion (resolved relative to file path; loaded at compile time)
-  - Import paths must be relative and must not use parent traversal (`..`).
-  - A single file may import each module path at most once.
-  - Default namespaces are derived from the import path with directory separators normalized into dot-notation
-    (for example `import "math/math_utils"` exposes `math.math_utils.fn_name`).
-  - Optional aliasing is supported: `import "math_utils" as mu` exposes `mu.fn_name`.
-- function calls: `<name>(<arg1>, ... )`
-- namespaced function calls: `<module>.<name>(...)`
-- nested function declarations are supported; function names resolve lexically (nearest function scope first)
-- identifiers named `host` are reserved for host namespace (`let host`, parameters, and function names are rejected)
-- `host.<name>(...)` for host bridge calls (reserved namespace)
-- Host calls are resolved from a registry. Add custom capabilities via
-  `axiom.host.register_host_builtin(name, arity, side_effecting, handler, arg_kinds=..., return_kind=...)` where
-  `handler(args: list[Value], out: TextIO) -> Value`, and remove custom capabilities via
-  `axiom.host.unregister_host_builtin(name)`.
 
-## Expressions
-- integer literals: `123`, `-5`
-- string literals: `"hello"`, `"hello\naxiom"`
-- boolean literals: `true`, `false`
-- variables: `x`
-- binary ops: `+ - * / == != < <= > >=`
-- parentheses: `( ... )`
-- unary negation: `-<expr>`
-- call expressions: `name(arg1, arg2, ...)`
-- host calls: `host.version()`, `host.print(value)`, `host.read(prompt)`, `host.int.parse(text)`, `host.abs(value)`, `host.math.abs(value)` (gated for side effects only)
+- `import "<path>"` for package-local, dependency-prefixed, or `std/` modules.
+- `pub const`, `const`, `pub type`, and `type` declarations.
+- `pub struct`, `struct`, `pub enum`, and `enum` declarations.
+- `pub fn` and `fn` declarations.
+- `let <ident>: <type> = <expr>` and inferred `let <ident> = <expr>`.
+- `print <expr>`, `return <expr>`, `if` / `else`, `while`, and statement-level
+  `match`.
 
 ## Execution
-- single file program
-- lexical scopes resolve from innermost to outermost
-- all variables must be defined before use
-- integer division truncates toward zero
-- functions use explicit call frames with locals + return address + captured upvalues
-- every function returns a value of its declared type
-  - implicit fallthrough returns the zero value of the declared type: `0`, `""`, or `false`
-- `host.print` and `host.read` are side-effecting; they require an explicit runtime flag when enabled
-- `host.read` returns a string; `host.int.parse` converts a string to an int
-- non-side-effecting host calls can be used in deterministic tool pipelines without flags
-- `python -m axiom host list --safe-only` enumerates host calls that are safe by default
-- `python -m axiom host describe` returns machine-readable host contract metadata for deterministic agents:
-  - `schema_version`
-  - `runtime_version_minor`
-  - `capabilities`
-  - per-capability `arg_kinds` and `return_kind`
-  - `capabilities_signature` (`sha256` hash of sorted capabilities payload for change detection)
-- `host` call payloads in bytecode are name-based (string table index) starting at
-  bytecode `v0.6` to preserve behavior if host registry order changes.
-- `python -m axiom host list` enumerates the currently registered host capabilities.
+
+- Packages are checked, built, run, and tested through `axiomc`.
+- `axiomc build` generates Rust and invokes `rustc` to produce a native binary.
+- `axiomc test` discovers `src/**/*_test.ax` entrypoints and compares stdout
+  with sibling `*.stdout` files when present.
+- `axiomc check --json`, `build --json`, `test --json`, and `caps --json` emit
+  the versioned `axiom.stage1.v1` schema envelope.
+
+## Capabilities
+
+Runtime capabilities are declared in `axiom.toml` and enforced before native
+execution. Current capability classes are `clock`, `env`, `fs`, `net`,
+`process`, and `crypto`.
+
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+```
+
+The `caps` command reports the package capability surface in machine-readable
+form. Standard library wrappers preserve manifest enforcement for importing
+packages.

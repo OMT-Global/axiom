@@ -1,0 +1,7 @@
+version = 1
+
+[[package]]
+name = "conformance-ownership-use-after-move"
+version = "0.1.0"
+source = "path"
+

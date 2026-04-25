@@ -1,8 +1,8 @@
 version: 1
 project:
   name: axiom
-  description: An experimental, end-to-end inspectable programming language with a hand-written
-    compiler, type checker, bytecode VM, and a Rust-based native bootstrap stage.
+  description: An experimental, end-to-end inspectable programming language with a Rust-based
+    native bootstrap compiler.
   visibility: public
   owner: OMT-Global
   defaultBranch: main
@@ -84,11 +84,11 @@ github:
 ci:
   runnerPolicy: hybrid-safe
   nodeVersion: "20"
-  pythonVersion: "3.12"
   fastChecks:
-    - secrets
-  extendedChecks:
-    - template-review
+    - stage1-test
+    - stage1-conformance
+    - stage1-smoke
+  extendedChecks: []
   nightlyCron: 0 7 * * *
 agents:
   manageCodexHome: true

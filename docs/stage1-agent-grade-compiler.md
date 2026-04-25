@@ -15,9 +15,10 @@ AG0 is the current entry floor and must remain intact before any downstream work
 - The current language floor includes multi-file modules, structs, enums,
   arrays, maps, tuples, borrowed slices, `Option<T>`, `Result<T, E>`, and the
   ownership/bootstrap work captured by `stage1/examples/borrowed_shapes`.
-- The required verification gate remains:
-  - `python -m unittest discover -v`
-  - `make stage1-test stage1-smoke`
+- The required Rust-only verification gate remains:
+  - `make stage1-test`
+  - `make stage1-conformance`
+  - `make stage1-smoke`
 
 Entry rule:
 
@@ -30,8 +31,8 @@ The first workable-compiler bar is **agent-grade**, not direct-native parity.
 
 To count as agent-grade:
 
-- Stage1 must provide a complete end-user workflow through `axiomc`, without
-  depending on stage0 to build or run stage1 programs.
+- Stage1 must provide a complete end-user workflow through `axiomc` for
+  building and running stage1 programs.
 - The required public commands at this bar are:
   - `axiomc new`
   - `axiomc check`
@@ -64,7 +65,7 @@ Deliverables:
 
 - Borrowed slices remain valid inside named structs and enum payloads.
 - `stage1/examples/borrowed_shapes` stays in the checked-in example set.
-- `make stage1-test stage1-smoke` covers the current example matrix.
+- `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` cover the current language gate.
 - `docs/stage1.md` remains the short status page and links to this doc.
 
 Acceptance:
@@ -140,7 +141,8 @@ Deliberate exclusions:
 
 Acceptance:
 
-- Stage1 examples can express generic wrappers and utility helpers without stage0 assistance.
+- Stage1 examples can express generic wrappers and utility helpers directly in
+  the current compiler.
 - Generic borrow behavior is covered by both positive and compile-fail tests.
 
 ### AG3: Package graph, module rules, and capability enforcement
@@ -329,7 +331,7 @@ Agent-grade closure bar:
 - A queue-style worker builds and runs under `axiomc`.
 - A small HTTP service builds and runs under `axiomc`.
 - All three use stage1 capability-gated APIs.
-- Stage0 is not part of the user-facing workflow for those stage1 programs.
+- The user-facing workflow for those stage1 programs stays within `axiomc`.
 
 ## Public interfaces and contracts
 
@@ -348,9 +350,10 @@ Agent-grade closure bar:
   that bypass capability checks.
 - AG5 closure work depends on AG3 and AG4 being functional enough to support the
   CLI, worker, and HTTP-service fixtures.
-- Unless a change is truly stage1-only, keep the dual verification gate green:
-  - `python -m unittest discover -v`
-  - `make stage1-test stage1-smoke`
+- Keep the Rust-only verification gate green:
+  - `make stage1-test`
+  - `make stage1-conformance`
+  - `make stage1-smoke`
 
 ## Post-threshold follow-ons
 

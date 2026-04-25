@@ -1,0 +1,8 @@
+{
+  "kind": "parse",
+  "code": null,
+  "message": "match arm guards are not supported yet",
+  "path": "src/main.ax",
+  "line": 8,
+  "column": 9
+}

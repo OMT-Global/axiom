@@ -1,7 +1,0 @@
-let x: int = 1
-print x
-{
-  let x: int = 2
-  print x
-}
-print x

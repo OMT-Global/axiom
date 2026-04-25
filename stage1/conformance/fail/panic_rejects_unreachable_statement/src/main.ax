@@ -1,0 +1,4 @@
+fn fail(): int {
+panic("boom")
+print 1
+}

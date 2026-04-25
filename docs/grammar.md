@@ -1,57 +1,70 @@
-# Axiom grammar (v0.11)
+# Axiom grammar
 
-Whitespace is generally ignored except newlines, which can terminate statements.
+The authoritative grammar lives in the Rust parser under
+`stage1/crates/axiomc/src/syntax.rs`. This document is a compact guide to the
+currently supported source shape.
 
 ```ebnf
-program        := stmt* EOF ;
+program        := item* EOF ;
+
+item           := import_item
+               | const_item
+               | type_item
+               | struct_item
+               | enum_item
+               | fn_item ;
+
+import_item    := "import" STRING ;
+const_item     := visibility? "const" IDENT ":" type "=" expr ;
+type_item      := visibility? "type" IDENT generic_params? "=" type ;
+struct_item    := visibility? "struct" IDENT generic_params? "{" fields? "}" ;
+enum_item      := visibility? "enum" IDENT generic_params? "{" variants? "}" ;
+fn_item        := visibility? "fn" IDENT generic_params? "(" params? ")" ":" type block ;
+visibility     := "pub" | "pub(pkg)" ;
 
 stmt           := let_stmt
-               | assign_stmt
-               | import_stmt
-               | fn_stmt
-               | return_stmt
                | print_stmt
+               | return_stmt
                | if_stmt
                | while_stmt
-               | for_stmt
-               | block
-               | expr_stmt ;
+               | match_stmt
+               | expr ;
 
-import_stmt    := "import" STRING terminator ;                      # default module namespace from path, using dots for path separators
-               | "import" STRING "as" qualified_ident terminator ;  # explicit alias
-qualified_ident := IDENT ("." IDENT)* ;
-               # imported modules are function-only and may contain imports plus fn declarations.
-fn_stmt        := "fn" IDENT "(" params? ")" ":" type_name block ;  # IDENT and params may not be "host"
-params         := param ("," param)* ;
-param          := IDENT ":" type_name ;
-return_stmt    := "return" expr terminator ;
-let_stmt       := "let" IDENT (":" type_name)? "=" expr terminator ;  # type annotation is optional; inferred from RHS when omitted
-assign_stmt    := IDENT "=" expr terminator ;
-print_stmt     := "print" expr terminator ;
+let_stmt       := "let" IDENT (":" type)? "=" expr ;
+print_stmt     := "print" expr ;
+return_stmt    := "return" expr ;
 if_stmt        := "if" expr block ("else" block)? ;
 while_stmt     := "while" expr block ;
-for_stmt       := "for" IDENT "in" expr block ;              # iterate over an array; IDENT bound to each element
-block          := "{" NEWLINE* stmt* "}" ;
-expr_stmt      := expr terminator ;
-call_expr      := IDENT ("." IDENT)* "(" args? ")" ;  # dotted call namespace: host.* or imported module.*
-                  # each import path may appear at most once per file, and alias names must be unique.
-args           := expr ("," expr)* ;
+match_stmt     := "match" expr "{" match_arm+ "}" ;
+match_arm      := IDENT match_payload? block ;
+match_payload  := "(" IDENT ("," IDENT)* ")"
+               | "{" IDENT ("," IDENT)* "}" ;
+block          := "{" stmt* "}" ;
 
-terminator     := ";" | NEWLINE | EOF ;
-type_name      := "int" | "string" | "bool"
-               | type_name "[]"                                       # array type: int[], string[], bool[]
-               | "fn" "(" (type_name ("," type_name)*)? ")" ":" type_name ;  # function type: fn(int,string):bool
+type           := IDENT type_args?
+               | "[" type "]"
+               | "&" "[" type "]"
+               | "map" "[" type "," type "]"
+               | "(" type ("," type)+ ")" ;
 
-expr           := equality ;
-equality       := comparison (("==" | "!=") comparison)* ;
-comparison     := term (("<" | "<=" | ">" | ">=") term)* ;
-term           := factor (("+" | "-") factor)* ;
-factor         := postfix (("*" | "/") postfix)* ;
-postfix        := primary ("[" expr "]")* ;                           # index expressions: xs[i]
-unary          := "-" postfix | primary ;
-primary        := INT | STRING | "true" | "false" | IDENT | call_expr | "(" expr ")"
-               | "[" (expr ("," expr)* ","?)? "]" ;                  # array literal: [1, 2, 3]
-STRING         := double-quoted UTF-8 string ;
+expr           := literal
+               | IDENT
+               | call
+               | struct_literal
+               | enum_literal
+               | array_literal
+               | map_literal
+               | tuple_literal
+               | match_expr
+               | expr binary_op expr
+               | expr "?"
+               | expr "." IDENT
+               | expr "." INT
+               | expr "[" expr "]"
+               | "&" expr "[" range? "]" ;
 ```
 
-Comments start with `#` and run to end-of-line.
+Comments start with `#` and run to end-of-line. See
+[stage1.md](stage1.md) for the current implementation scope and known gaps.
+Pattern guards and nested destructuring patterns are not supported in the
+current stage1 parser.
