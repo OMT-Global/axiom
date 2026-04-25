@@ -44,6 +44,9 @@ pub struct Function {
     pub return_ty: Type,
     pub body: Vec<Stmt>,
     pub is_async: bool,
+    pub is_extern: bool,
+    pub extern_abi: Option<String>,
+    pub extern_library: Option<String>,
     pub line: usize,
     pub column: usize,
 }
@@ -215,6 +218,8 @@ pub enum Type {
     String,
     Struct(String),
     Enum(String),
+    Ptr(Box<Type>),
+    MutPtr(Box<Type>),
     Slice(Box<Type>),
     MutSlice(Box<Type>),
     Option(Box<Type>),
@@ -231,7 +236,7 @@ pub enum Type {
 impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool | Type::Slice(_) => true,
+            Type::Int | Type::Bool | Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) => true,
             Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
@@ -333,6 +338,9 @@ fn lower_function(function: &hir::Function) -> Function {
         return_ty: lower_type(&function.return_ty),
         body: function.body.iter().map(lower_stmt).collect(),
         is_async: function.is_async,
+        is_extern: function.is_extern,
+        extern_abi: function.extern_abi.clone(),
+        extern_library: function.extern_library.clone(),
         line: function.line,
         column: function.column,
     }
@@ -554,6 +562,8 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::String => Type::String,
         hir::Type::Struct(name) => Type::Struct(name.clone()),
         hir::Type::Enum(name) => Type::Enum(name.clone()),
+        hir::Type::Ptr(inner) => Type::Ptr(Box::new(lower_type(inner))),
+        hir::Type::MutPtr(inner) => Type::MutPtr(Box::new(lower_type(inner))),
         hir::Type::Slice(inner) => Type::Slice(Box::new(lower_type(inner))),
         hir::Type::MutSlice(inner) => Type::MutSlice(Box::new(lower_type(inner))),
         hir::Type::Option(inner) => Type::Option(Box::new(lower_type(inner))),

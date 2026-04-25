@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
-pub const KNOWN_CAPABILITIES: [CapabilityKind; 6] = [
+pub const KNOWN_CAPABILITIES: [CapabilityKind; 7] = [
     CapabilityKind::Fs,
     CapabilityKind::Net,
     CapabilityKind::Process,
     CapabilityKind::Env,
     CapabilityKind::Clock,
     CapabilityKind::Crypto,
+    CapabilityKind::Ffi,
 ];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -66,6 +67,7 @@ pub struct CapabilityConfig {
     pub env_legacy_unrestricted: bool,
     pub clock: bool,
     pub crypto: bool,
+    pub ffi: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -77,6 +79,7 @@ pub enum CapabilityKind {
     Env,
     Clock,
     Crypto,
+    Ffi,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -146,6 +149,7 @@ struct RawCapabilityConfig {
     env_unrestricted: Option<bool>,
     clock: Option<bool>,
     crypto: Option<bool>,
+    ffi: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,7 +231,7 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
 
 pub fn render_manifest(name: &str) -> String {
     format!(
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n"
+        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
     )
 }
 
@@ -240,6 +244,7 @@ impl CapabilityConfig {
             CapabilityKind::Env => self.env,
             CapabilityKind::Clock => self.clock,
             CapabilityKind::Crypto => self.crypto,
+            CapabilityKind::Ffi => self.ffi,
         }
     }
 
@@ -273,6 +278,7 @@ impl CapabilityKind {
             CapabilityKind::Env => "env",
             CapabilityKind::Clock => "clock",
             CapabilityKind::Crypto => "crypto",
+            CapabilityKind::Ffi => "ffi",
         }
     }
 
@@ -284,6 +290,7 @@ impl CapabilityKind {
             CapabilityKind::Env => "environment variable access",
             CapabilityKind::Clock => "wall-clock time access",
             CapabilityKind::Crypto => "hashing and cryptography primitives",
+            CapabilityKind::Ffi => "foreign function interface access",
         }
     }
 }
@@ -333,6 +340,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             env_legacy_unrestricted,
             clock: capabilities.clock.unwrap_or(false),
             crypto: capabilities.crypto.unwrap_or(false),
+            ffi: capabilities.ffi.unwrap_or(false),
         },
     })
 }

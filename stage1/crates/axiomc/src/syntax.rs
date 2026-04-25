@@ -45,6 +45,9 @@ pub struct Function {
     pub return_ty: TypeName,
     pub body: Vec<Stmt>,
     pub is_async: bool,
+    pub is_extern: bool,
+    pub extern_abi: Option<String>,
+    pub extern_library: Option<String>,
     pub visibility: Visibility,
     pub line: usize,
     pub column: usize,
@@ -175,6 +178,8 @@ pub enum TypeName {
     Bool,
     String,
     Named(String, Vec<TypeName>),
+    Ptr(Box<TypeName>),
+    MutPtr(Box<TypeName>),
     Slice(Box<TypeName>),
     MutSlice(Box<TypeName>),
     Option(Box<TypeName>),
@@ -353,10 +358,13 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
         }
         if trimmed.starts_with("fn ")
             || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("extern fn ")
             || trimmed.starts_with("pub fn ")
             || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub extern fn ")
             || trimmed.starts_with("pub(pkg) fn ")
             || trimmed.starts_with("pub(pkg) async fn ")
+            || trimmed.starts_with("pub(pkg) extern fn ")
         {
             functions.push(parse_function(&lines, &mut index, path)?);
             continue;
@@ -480,8 +488,10 @@ fn parse_stmt_list(
         }
         if trimmed.starts_with("fn ")
             || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("extern fn ")
             || trimmed.starts_with("pub fn ")
             || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub extern fn ")
         {
             return Err(Diagnostic::new(
                 "parse",
@@ -606,15 +616,17 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
     let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
-    let (is_async, header, fn_column) = if let Some(rest) = rest.strip_prefix("async fn ") {
-        (true, rest, visibility_column + 6)
+    let (is_async, is_extern, header, fn_column) = if let Some(rest) = rest.strip_prefix("async fn ") {
+        (true, false, rest, visibility_column + 6)
+    } else if let Some(rest) = rest.strip_prefix("extern fn ") {
+        (false, true, rest, visibility_column + 7)
     } else {
         let rest = rest.strip_prefix("fn ").ok_or_else(|| {
             Diagnostic::new("parse", "invalid function declaration")
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
-        (false, rest, visibility_column)
+        (false, false, rest, visibility_column)
     };
     let open_paren = find_top_level_char(header, '(').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration is missing '('")
@@ -635,6 +647,39 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_path(path.display().to_string())
             .with_span(line_no, close_paren + 2)
     })?;
+    if is_extern {
+        let (return_text, extern_library) = after_colon.rsplit_once(" from ").ok_or_else(|| {
+            Diagnostic::new(
+                "parse",
+                "extern function declaration must use `extern fn name(args): type from \"lib\"` syntax",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1)
+        })?;
+        let return_ty = parse_type_name(return_text.trim(), path, line_no, 1)?;
+        let extern_library = serde_json::from_str::<String>(extern_library.trim()).map_err(|_| {
+            Diagnostic::new("parse", "extern function library must be a quoted string")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+        *index += 1;
+        return Ok(Function {
+            name: name.to_string(),
+            source_name: name.to_string(),
+            path: path.display().to_string(),
+            type_params,
+            params,
+            return_ty,
+            body: Vec::new(),
+            is_async,
+            is_extern,
+            extern_abi: Some(String::from("C")),
+            extern_library: Some(extern_library),
+            visibility,
+            line: line_no,
+            column: 1,
+        });
+    }
     let return_text = after_colon
         .strip_suffix('{')
         .map(str::trim)
@@ -658,6 +703,9 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         return_ty,
         body,
         is_async,
+        is_extern,
+        extern_abi: None,
+        extern_library: None,
         visibility,
         line: line_no,
         column: 1,
@@ -1425,6 +1473,26 @@ fn parse_type_name(
                 line_no,
                 column + open_angle + 1,
             )?);
+        }
+        if name == "ptr" {
+            if type_args.len() != 1 {
+                return Err(
+                    Diagnostic::new("parse", "ptr types must use `ptr<type>` syntax")
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, column),
+                );
+            }
+            return Ok(TypeName::Ptr(Box::new(type_args.remove(0))));
+        }
+        if name == "mutptr" {
+            if type_args.len() != 1 {
+                return Err(
+                    Diagnostic::new("parse", "mutptr types must use `mutptr<type>` syntax")
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, column),
+                );
+            }
+            return Ok(TypeName::MutPtr(Box::new(type_args.remove(0))));
         }
         return Ok(TypeName::Named(name.to_string(), type_args));
     }
