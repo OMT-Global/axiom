@@ -18,6 +18,7 @@
   - `## Notes`
 - Make sure the PR body links or closes the governing issue.
 - Record the local validation you actually ran so `Validate PR Description` and `CI Gate` can pass cleanly.
+- Older pull requests may still pass a temporary legacy fallback when they link an issue and include a short prose summary, but new pull requests should use the structured template above.
 - Keep required checks aligned to `CI Gate`; optional review-automation lanes should stay non-required.
 
 ## Environments

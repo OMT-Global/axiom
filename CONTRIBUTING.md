@@ -124,6 +124,8 @@ Please use the generated PR template in `.github/PULL_REQUEST_TEMPLATE.md` and f
 
 In particular, make sure the PR body clearly links or closes the governing issue and records the validation you actually ran so the required `Validate PR Description` and `CI Gate` checks can pass.
 
+Older pull requests may still pass a temporary legacy fallback when they link an issue and include a short prose summary, but new pull requests should use the structured template above.
+
 Please include:
 
 - what changed;
