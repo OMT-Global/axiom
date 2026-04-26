@@ -1788,6 +1788,7 @@ fn validate_stmt_capabilities(
         syntax::Stmt::Let { expr, .. }
         | syntax::Stmt::Print { expr, .. }
         | syntax::Stmt::Panic { expr, .. }
+        | syntax::Stmt::Defer { expr, .. }
         | syntax::Stmt::Return { expr, .. } => {
             validate_expr_capabilities(module_path, expr, capabilities)?;
         }
@@ -2657,6 +2658,21 @@ fn rewrite_stmt(
             column: *column,
         },
         syntax::Stmt::Panic { expr, line, column } => syntax::Stmt::Panic {
+            expr: rewrite_expr(
+                expr,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Defer { expr, line, column } => syntax::Stmt::Defer {
             expr: rewrite_expr(
                 expr,
                 visible_functions,
@@ -3947,6 +3963,7 @@ fn stmt_line(stmt: &syntax::Stmt) -> usize {
         syntax::Stmt::Let { line, .. }
         | syntax::Stmt::Print { line, .. }
         | syntax::Stmt::Panic { line, .. }
+        | syntax::Stmt::Defer { line, .. }
         | syntax::Stmt::If { line, .. }
         | syntax::Stmt::While { line, .. }
         | syntax::Stmt::Match { line, .. }
@@ -3959,6 +3976,7 @@ fn stmt_column(stmt: &syntax::Stmt) -> usize {
         syntax::Stmt::Let { column, .. }
         | syntax::Stmt::Print { column, .. }
         | syntax::Stmt::Panic { column, .. }
+        | syntax::Stmt::Defer { column, .. }
         | syntax::Stmt::If { column, .. }
         | syntax::Stmt::While { column, .. }
         | syntax::Stmt::Match { column, .. }

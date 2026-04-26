@@ -79,6 +79,10 @@ pub enum Stmt {
         message: Expr,
         span: SourceSpan,
     },
+    Defer {
+        expr: Expr,
+        span: SourceSpan,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
@@ -307,7 +311,11 @@ impl Expr {
 
 fn count_stmt(stmt: &Stmt) -> usize {
     match stmt {
-        Stmt::Let { .. } | Stmt::Print { .. } | Stmt::Panic { .. } | Stmt::Return { .. } => 1,
+        Stmt::Let { .. }
+        | Stmt::Print { .. }
+        | Stmt::Panic { .. }
+        | Stmt::Defer { .. }
+        | Stmt::Return { .. } => 1,
         Stmt::If {
             then_block,
             else_block,
@@ -401,6 +409,10 @@ fn lower_stmt(stmt: &hir::Stmt) -> Stmt {
         },
         hir::Stmt::Panic { message, span } => Stmt::Panic {
             message: lower_expr(message),
+            span: lower_source_span(span),
+        },
+        hir::Stmt::Defer { expr, span } => Stmt::Defer {
+            expr: lower_expr(expr),
             span: lower_source_span(span),
         },
         hir::Stmt::If {
