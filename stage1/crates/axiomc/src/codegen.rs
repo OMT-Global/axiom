@@ -855,6 +855,22 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("    now.as_millis() as i64\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_clock_elapsed_ms(start_ms: i64) -> i64 {\n");
+    out.push_str("    let now = axiom_clock_now_ms();\n");
+    out.push_str("    if now < start_ms {\n");
+    out.push_str("        return -1;\n");
+    out.push_str("    }\n");
+    out.push_str("    now - start_ms\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_clock_sleep_ms(milliseconds: i64) -> i64 {\n");
+    out.push_str("    if milliseconds < 0 {\n");
+    out.push_str("        return -1;\n");
+    out.push_str("    }\n");
+    out.push_str("    std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));\n");
+    out.push_str("    0\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_env_get(name: String) -> Option<String> {\n");
     out.push_str(
         "    if !AXIOM_ENV_UNRESTRICTED && !AXIOM_ENV_ALLOWLIST.contains(&name.as_str()) {\n",
@@ -1790,6 +1806,12 @@ fn render_expr(expr: &Expr) -> String {
             format!("axiom_process_status({})", render_expr(&args[0]))
         }
         Expr::Call { name, .. } if name == "clock_now_ms" => String::from("axiom_clock_now_ms()"),
+        Expr::Call { name, args, .. } if name == "clock_elapsed_ms" => {
+            format!("axiom_clock_elapsed_ms({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "clock_sleep_ms" => {
+            format!("axiom_clock_sleep_ms({})", render_expr(&args[0]))
+        }
         Expr::Call { name, args, .. } if name == "env_get" => {
             format!("axiom_env_get({})", render_expr(&args[0]))
         }

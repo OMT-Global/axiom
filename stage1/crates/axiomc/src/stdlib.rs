@@ -11,7 +11,9 @@
 //! Today this provides twelve stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
-//! * `std/time.ax` — `now_ms()` on top of `clock_now_ms` (clock).
+//! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
+//!   `elapsed_ms(start)`, and `sleep(duration)` on top of `clock_now_ms`,
+//!   `clock_elapsed_ms`, and `clock_sleep_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
 //! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
 //! * `std/net.ax` — `resolve(host)` on top of `net_resolve` (net).
@@ -67,7 +69,13 @@ pub(crate) const STDLIB_PACKAGE_VERSION: &str = "0.0.0";
 const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "time.ax",
-        "pub fn now_ms(): int {\nreturn clock_now_ms()\n}\n",
+        "pub struct Duration {\nms: int\n}\n\
+pub struct Instant {\nms: int\n}\n\
+pub fn duration_ms(ms: int): Duration {\nreturn Duration { ms: ms }\n}\n\
+pub fn now_ms(): int {\nreturn clock_now_ms()\n}\n\
+pub fn now(): Instant {\nreturn Instant { ms: clock_now_ms() }\n}\n\
+pub fn elapsed_ms(start: Instant): int {\nreturn clock_elapsed_ms(start.ms)\n}\n\
+pub fn sleep(duration: Duration): int {\nreturn clock_sleep_ms(duration.ms)\n}\n",
     ),
     (
         "env.ax",

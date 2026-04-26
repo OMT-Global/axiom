@@ -2435,21 +2435,25 @@ print strlen("hello")
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            "import \"std/time.ax\"\nlet now: int = now_ms()\nprint now > 0\n",
+            "import \"std/time.ax\"\nlet start: Instant = now()\nlet pause: Duration = duration_ms(0)\nprint start.ms > 0\nprint now_ms() > 0\nprint sleep(pause) == 0\nlet elapsed: int = elapsed_ms(start)\nprint elapsed == elapsed\n",
         )
         .expect("write source");
         fs::write(
             project.join("src/main_test.ax"),
-            "import \"std/time.ax\"\nlet now: int = now_ms()\nprint now > 0\n",
+            "import \"std/time.ax\"\nlet start: Instant = now()\nlet pause: Duration = duration_ms(0)\nprint start.ms > 0\nprint now_ms() > 0\nprint sleep(pause) == 0\nlet elapsed: int = elapsed_ms(start)\nprint elapsed == elapsed\n",
         )
         .expect("write test");
-        fs::write(project.join("src/main_test.stdout"), "true\n").expect("write golden");
+        fs::write(project.join("src/main_test.stdout"), "true\ntrue\ntrue\ntrue\n")
+            .expect("write golden");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\ntrue\n"
+        );
 
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
@@ -2482,7 +2486,7 @@ print strlen("hello")
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            "import \"std/time.ax\"\nlet now: int = now_ms()\nprint now > 0\n",
+            "import \"std/time.ax\"\nlet start: Instant = now()\nprint sleep(duration_ms(0))\nprint elapsed_ms(start)\n",
         )
         .expect("write source");
 
