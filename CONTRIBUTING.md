@@ -114,7 +114,15 @@ See `docs/rfcs/README.md` for the acceptance bar and file conventions.
 
 ## Pull requests
 
-Please use the generated PR template and fill each section with concrete content. In particular, make sure the PR body clearly links or closes the governing issue and records the validation you actually ran.
+Please use the generated PR template in `.github/PULL_REQUEST_TEMPLATE.md` and fill each section with concrete content. The required headings are:
+
+- `## Summary`
+- `## Governing Issue`
+- `## Validation`
+- `## Bootstrap Governance`
+- `## Notes`
+
+In particular, make sure the PR body clearly links or closes the governing issue and records the validation you actually ran so the required `Validate PR Description` and `CI Gate` checks can pass.
 
 Please include:
 
