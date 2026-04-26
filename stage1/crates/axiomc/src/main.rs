@@ -40,6 +40,8 @@ enum Command {
         #[arg(long)]
         debug: bool,
         #[arg(long)]
+        timings: bool,
+        #[arg(long)]
         target: Option<String>,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
@@ -105,6 +107,7 @@ fn main() {
             path,
             json,
             debug,
+            timings,
             target,
             package,
         } => {
@@ -120,7 +123,7 @@ fn main() {
                     if json {
                         println!("{}", json_contract::build_success(&path, &output));
                     } else {
-                        for line in build_summary_lines(&output) {
+                        for line in build_summary_lines(&output, timings) {
                             eprintln!("{line}");
                         }
                     }
@@ -200,10 +203,22 @@ fn main() {
     std::process::exit(code);
 }
 
-fn build_summary_lines(output: &BuildOutput) -> Vec<String> {
+fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
     let mut lines = vec![format!("wrote {}", output.binary)];
     if let Some(debug_map) = &output.debug_map {
         lines.push(format!("wrote debug map {debug_map}"));
+    }
+    if timings {
+        lines.push(format!(
+            "timings total={}ms cache_hits={} cache_misses={}",
+            output.duration_ms, output.cache_hits, output.cache_misses
+        ));
+        for package in &output.packages {
+            lines.push(format!(
+                "timings package={} cache_status={:?} compile={}ms",
+                package.package_root, package.cache_status, package.compile_ms
+            ));
+        }
     }
     lines
 }
@@ -253,9 +268,10 @@ mod tests {
     #[test]
     fn build_summary_mentions_debug_map_when_available() {
         assert_eq!(
-            build_summary_lines(&build_output(Some(String::from(
-                "target/main.debug-map.json"
-            )))),
+            build_summary_lines(
+                &build_output(Some(String::from("target/main.debug-map.json"))),
+                false,
+            ),
             vec![
                 String::from("wrote dist/app"),
                 String::from("wrote debug map target/main.debug-map.json"),
@@ -266,8 +282,38 @@ mod tests {
     #[test]
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
-            build_summary_lines(&build_output(None)),
+            build_summary_lines(&build_output(None), false),
             vec![String::from("wrote dist/app")]
+        );
+    }
+
+    #[test]
+    fn build_summary_includes_timings_when_requested() {
+        let mut output = build_output(None);
+        output.cache_hits = 2;
+        output.cache_misses = 1;
+        output.duration_ms = 42;
+        output.packages = vec![axiomc::project::BuiltPackage {
+            package_root: String::from("/tmp/app"),
+            manifest: String::from("/tmp/app/axiom.toml"),
+            entry: String::from("/tmp/app/src/main.ax"),
+            binary: String::from("/tmp/app/dist/app"),
+            generated_rust: String::from("/tmp/app/dist/app.generated.rs"),
+            debug_map: None,
+            statement_count: 1,
+            target: None,
+            debug: false,
+            cache_status: axiomc::project::BuildCacheStatus::Hit,
+            compile_ms: 0,
+        }];
+
+        assert_eq!(
+            build_summary_lines(&output, true),
+            vec![
+                String::from("wrote dist/app"),
+                String::from("timings total=42ms cache_hits=2 cache_misses=1"),
+                String::from("timings package=/tmp/app cache_status=Hit compile=0ms"),
+            ]
         );
     }
 }
