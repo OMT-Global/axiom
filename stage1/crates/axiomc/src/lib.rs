@@ -241,6 +241,132 @@ mod tests {
     }
 
     #[test]
+    fn parser_lowers_defer_statement() {
+        let source = r#"fn trace(label: string): int {
+print label
+return 0
+}
+
+fn demo(): int {
+defer trace("cleanup")
+return 7
+}
+
+print demo()
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        let cleanup = rendered
+            .find("let _ = trace(String::from(\"cleanup\"));")
+            .expect("defer cleanup rendered");
+        let ret = rendered.find("return 7;").expect("return rendered");
+        assert!(
+            cleanup < ret,
+            "defer should render before return: {rendered}"
+        );
+    }
+
+    #[test]
+    fn run_project_executes_defer_on_return_panic_and_nested_scope() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("axiom.toml"), render_manifest("defer-demo"))
+            .expect("write manifest");
+        let manifest = load_manifest(dir.path()).expect("load manifest");
+        fs::write(
+            dir.path().join("axiom.lock"),
+            render_lockfile_for_project(dir.path(), &manifest).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::create_dir_all(dir.path().join("src")).expect("create src");
+        fs::write(
+            dir.path().join("src/main.ax"),
+            r#"fn trace(label: string): int {
+print label
+return 0
+}
+
+fn nested(flag: bool): int {
+defer trace("outer-1")
+defer trace("outer-2")
+if flag {
+defer trace("inner")
+return 10
+}
+return 20
+}
+
+fn fail(): int {
+defer trace("panic-cleanup")
+panic("boom")
+}
+
+print nested(true)
+print nested(false)
+if false {
+print fail()
+}
+"#,
+        )
+        .expect("write source");
+
+        let built = build_project(dir.path()).expect("build project");
+        let output = compiled_binary_command(Path::new(&built.binary))
+            .output()
+            .expect("run binary");
+        assert!(output.status.success(), "binary failed: {output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout,
+            "inner
+outer-2
+outer-1
+10
+outer-2
+outer-1
+20
+"
+        );
+
+        fs::write(
+            dir.path().join("src/main.ax"),
+            r#"fn trace(label: string): int {
+print label
+return 0
+}
+
+fn fail(): int {
+defer trace("panic-cleanup")
+panic("boom")
+}
+
+print fail()
+"#,
+        )
+        .expect("rewrite source");
+        let built = build_project(dir.path()).expect("rebuild project");
+        let output = compiled_binary_command(Path::new(&built.binary))
+            .output()
+            .expect("run panic binary");
+        assert!(
+            !output.status.success(),
+            "panic binary unexpectedly succeeded"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stdout,
+            "panic-cleanup
+"
+        );
+        assert!(
+            stderr.contains("\"kind\":\"panic\""),
+            "stderr missing panic report: {stderr}"
+        );
+    }
+
+    #[test]
     fn parser_tracks_package_visibility() {
         let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -1904,7 +2030,6 @@ mod tests {
         assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
     }
 
-
     #[test]
     fn check_project_rejects_extern_function_without_ffi_capability() {
         let dir = tempdir().expect("tempdir");
@@ -1967,8 +2092,14 @@ print strlen("hello")
         let function = parsed.functions.first().expect("function");
         assert!(function.is_extern);
         assert_eq!(function.extern_library.as_deref(), Some("c"));
-        assert!(matches!(function.params[0].ty, crate::syntax::TypeName::Ptr(_)));
-        assert!(matches!(function.params[1].ty, crate::syntax::TypeName::MutPtr(_)));
+        assert!(matches!(
+            function.params[0].ty,
+            crate::syntax::TypeName::Ptr(_)
+        ));
+        assert!(matches!(
+            function.params[1].ty,
+            crate::syntax::TypeName::MutPtr(_)
+        ));
     }
 
     #[test]

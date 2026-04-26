@@ -49,6 +49,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/h
 # Build a native binary
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
 
+# Inspect build cache and compile timing
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --timings
+
 # Run a package
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 
