@@ -114,6 +114,8 @@ See `docs/rfcs/README.md` for the acceptance bar and file conventions.
 
 ## Pull requests
 
+Please use the generated PR template and fill each section with concrete content. In particular, make sure the PR body clearly links or closes the governing issue and records the validation you actually ran.
+
 Please include:
 
 - what changed;
