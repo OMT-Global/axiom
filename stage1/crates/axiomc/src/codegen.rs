@@ -45,30 +45,47 @@ pub fn render_rust_for_package_with_capabilities(
         .functions
         .iter()
         .filter(|function| function.is_extern)
-        .any(|function| function.params.iter().any(|param| matches!(param.ty, Type::String)));
+        .any(|function| {
+            function
+                .params
+                .iter()
+                .any(|param| matches!(param.ty, Type::String))
+        });
     let uses_ffi_cstr = program
         .functions
         .iter()
         .filter(|function| function.is_extern)
         .any(|function| matches!(function.return_ty, Type::String));
     let mut out = String::new();
-    out.push_str("#[allow(unused_imports)]
-");
-    out.push_str("use std::collections::HashMap;
-");
+    out.push_str(
+        "#[allow(unused_imports)]
+",
+    );
+    out.push_str(
+        "use std::collections::HashMap;
+",
+    );
     if uses_ffi_cstr && uses_ffi_cstring {
-        out.push_str("use std::ffi::{CStr, CString};
-");
+        out.push_str(
+            "use std::ffi::{CStr, CString};
+",
+        );
     } else if uses_ffi_cstr {
-        out.push_str("use std::ffi::CStr;
-");
+        out.push_str(
+            "use std::ffi::CStr;
+",
+        );
     } else if uses_ffi_cstring {
-        out.push_str("use std::ffi::CString;
-");
+        out.push_str(
+            "use std::ffi::CString;
+",
+        );
     }
     if uses_ffi {
-        out.push_str("use std::os::raw::c_char;
-");
+        out.push_str(
+            "use std::os::raw::c_char;
+",
+        );
     }
     out.push_str("use std::panic;\n");
     out.push_str("use std::sync::Once;\n\n");
@@ -996,17 +1013,16 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("fn main() -> std::process::ExitCode {\n");
     out.push_str("    axiom_install_panic_hook();\n");
     out.push_str("    let result = panic::catch_unwind(|| {\n");
-    for stmt in &program.stmts {
-        render_stmt(
-            stmt,
-            &type_context,
-            &mut out,
-            2,
-            &program.path,
-            false,
-            debug,
-        );
-    }
+    render_stmt_block(
+        &program.stmts,
+        &type_context,
+        &mut out,
+        2,
+        &program.path,
+        false,
+        debug,
+        &[],
+    );
     out.push_str("    });\n");
     out.push_str("    match result {\n");
     out.push_str("        Ok(()) => std::process::ExitCode::SUCCESS,\n");
@@ -1034,9 +1050,10 @@ fn program_uses_call(program: &Program, name: &str) -> bool {
 
 fn stmt_uses_call(stmt: &Stmt, name: &str) -> bool {
     match stmt {
-        Stmt::Let { expr, .. } | Stmt::Print { expr, .. } | Stmt::Return { expr, .. } => {
-            expr_uses_call(expr, name)
-        }
+        Stmt::Let { expr, .. }
+        | Stmt::Print { expr, .. }
+        | Stmt::Defer { expr, .. }
+        | Stmt::Return { expr, .. } => expr_uses_call(expr, name),
         Stmt::Panic { message, .. } => expr_uses_call(message, name),
         Stmt::If {
             cond,
@@ -1307,17 +1324,16 @@ fn render_function(
         params,
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
-    for stmt in &function.body {
-        render_stmt(
-            stmt,
-            type_context,
-            out,
-            1,
-            &function.path,
-            function.is_async,
-            debug,
-        );
-    }
+    render_stmt_block(
+        &function.body,
+        type_context,
+        out,
+        1,
+        &function.path,
+        function.is_async,
+        debug,
+        &[],
+    );
     out.push_str("}\n");
 }
 
@@ -1330,16 +1346,22 @@ fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, o
     let extern_name = format!("{}_extern", function.name);
     out.push_str("#[link(name = ");
     out.push_str(&format!("{:?}", library));
-    out.push_str(")]
-");
+    out.push_str(
+        ")]
+",
+    );
     out.push_str("unsafe extern ");
     out.push_str(&format!("{:?}", abi));
-    out.push_str(" {
-");
+    out.push_str(
+        " {
+",
+    );
     out.push_str("    #[link_name = ");
     out.push_str(&format!("{:?}", function.source_name));
-    out.push_str("]
-");
+    out.push_str(
+        "]
+",
+    );
     out.push_str("    fn ");
     out.push_str(&extern_name);
     out.push('(');
@@ -1354,11 +1376,15 @@ fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, o
     );
     out.push_str(") -> ");
     out.push_str(&rust_ffi_type(&function.return_ty, type_context));
-    out.push_str(";
+    out.push_str(
+        ";
 }
-");
-    out.push_str("#[allow(non_snake_case)]
-");
+",
+    );
+    out.push_str(
+        "#[allow(non_snake_case)]
+",
+    );
     out.push_str(&format!(
         "fn {}({}) -> {} {{
 ",
@@ -1387,19 +1413,27 @@ fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, o
         .collect::<Vec<_>>()
         .join(", ");
     if matches!(function.return_ty, Type::String) {
-        out.push_str(&format!("        let value = {extern_name}({call_args});\n"));
+        out.push_str(&format!(
+            "        let value = {extern_name}({call_args});\n"
+        ));
         out.push_str("        if value.is_null() {\n");
         out.push_str("            axiom_runtime_error(\"ffi\", \"extern function returned a null string pointer\");\n");
         out.push_str("        }\n");
         out.push_str("        CStr::from_ptr(value).to_string_lossy().into_owned()\n");
     } else {
-        out.push_str(&format!("        {extern_name}({call_args})
-"));
+        out.push_str(&format!(
+            "        {extern_name}({call_args})
+"
+        ));
     }
-    out.push_str("    }
-");
-    out.push_str("}
-");
+    out.push_str(
+        "    }
+",
+    );
+    out.push_str(
+        "}
+",
+    );
 }
 
 fn render_ffi_arg(name: &str, ty: &Type) -> String {
@@ -1430,6 +1464,43 @@ fn render_param(
     )
 }
 
+fn render_stmt_block(
+    stmts: &[Stmt],
+    type_context: &TypeContext<'_>,
+    out: &mut String,
+    indent: usize,
+    source_path: &str,
+    in_async_function: bool,
+    debug: bool,
+    active_defers: &[(String, SourceSpan)],
+) {
+    let mut local_defers: Vec<(String, SourceSpan)> = Vec::new();
+    for stmt in stmts {
+        render_stmt(
+            stmt,
+            type_context,
+            out,
+            indent,
+            source_path,
+            in_async_function,
+            debug,
+            active_defers,
+            &mut local_defers,
+        );
+    }
+    render_deferred_exprs(out, indent, &local_defers);
+}
+
+fn render_deferred_exprs(out: &mut String, indent: usize, defers: &[(String, SourceSpan)]) {
+    let pad = "    ".repeat(indent);
+    for (expr, _) in defers.iter().rev() {
+        out.push_str(&format!(
+            "{pad}let _ = {expr};
+"
+        ));
+    }
+}
+
 fn render_stmt(
     stmt: &Stmt,
     type_context: &TypeContext<'_>,
@@ -1438,6 +1509,8 @@ fn render_stmt(
     source_path: &str,
     in_async_function: bool,
     debug: bool,
+    active_defers: &[(String, SourceSpan)],
+    local_defers: &mut Vec<(String, SourceSpan)>,
 ) {
     let pad = "    ".repeat(indent);
     match stmt {
@@ -1449,7 +1522,8 @@ fn render_stmt(
         } => {
             render_source_marker(source_path, *span, out, indent, debug);
             out.push_str(&format!(
-                "{pad}let {name}: {} = {};\n",
+                "{pad}let {name}: {} = {};
+",
                 rust_type(ty, type_context),
                 render_expr(expr)
             ));
@@ -1463,7 +1537,17 @@ fn render_stmt(
         }
         Stmt::Panic { message, span } => {
             render_source_marker(source_path, *span, out, indent, debug);
-            out.push_str(&format!("{pad}axiom_panic({});\n", render_expr(message)));
+            render_deferred_exprs(out, indent, local_defers);
+            render_deferred_exprs(out, indent, active_defers);
+            out.push_str(&format!(
+                "{pad}axiom_panic({});
+",
+                render_expr(message)
+            ));
+        }
+        Stmt::Defer { expr, span } => {
+            render_source_marker(source_path, *span, out, indent, debug);
+            local_defers.push((render_expr(expr), *span));
         }
         Stmt::If {
             cond,
@@ -1472,55 +1556,82 @@ fn render_stmt(
             span,
         } => {
             render_source_marker(source_path, *span, out, indent, debug);
-            out.push_str(&format!("{pad}if {} {{\n", render_expr(cond)));
-            for stmt in then_block {
-                render_stmt(
-                    stmt,
+            let mut scoped_defers = active_defers.to_vec();
+            scoped_defers.extend(local_defers.iter().cloned());
+            out.push_str(&format!(
+                "{pad}if {} {{
+",
+                render_expr(cond)
+            ));
+            render_stmt_block(
+                then_block,
+                type_context,
+                out,
+                indent + 1,
+                source_path,
+                in_async_function,
+                debug,
+                &scoped_defers,
+            );
+            if let Some(else_block) = else_block {
+                out.push_str(&format!(
+                    "{pad}}} else {{
+"
+                ));
+                render_stmt_block(
+                    else_block,
                     type_context,
                     out,
                     indent + 1,
                     source_path,
                     in_async_function,
                     debug,
+                    &scoped_defers,
                 );
-            }
-            if let Some(else_block) = else_block {
-                out.push_str(&format!("{pad}}} else {{\n"));
-                for stmt in else_block {
-                    render_stmt(
-                        stmt,
-                        type_context,
-                        out,
-                        indent + 1,
-                        source_path,
-                        in_async_function,
-                        debug,
-                    );
-                }
-                out.push_str(&format!("{pad}}}\n"));
+                out.push_str(&format!(
+                    "{pad}}}
+"
+                ));
             } else {
-                out.push_str(&format!("{pad}}}\n"));
+                out.push_str(&format!(
+                    "{pad}}}
+"
+                ));
             }
         }
         Stmt::While { cond, body, span } => {
             render_source_marker(source_path, *span, out, indent, debug);
-            out.push_str(&format!("{pad}while {} {{\n", render_expr(cond)));
-            for stmt in body {
-                render_stmt(
-                    stmt,
-                    type_context,
-                    out,
-                    indent + 1,
-                    source_path,
-                    in_async_function,
-                    debug,
-                );
-            }
-            out.push_str(&format!("{pad}}}\n"));
+            let mut scoped_defers = active_defers.to_vec();
+            scoped_defers.extend(local_defers.iter().cloned());
+            out.push_str(&format!(
+                "{pad}while {} {{
+",
+                render_expr(cond)
+            ));
+            render_stmt_block(
+                body,
+                type_context,
+                out,
+                indent + 1,
+                source_path,
+                in_async_function,
+                debug,
+                &scoped_defers,
+            );
+            out.push_str(&format!(
+                "{pad}}}
+"
+            ));
         }
         Stmt::Match { expr, arms, span } => {
             render_source_marker(source_path, *span, out, indent, debug);
-            out.push_str(&format!("{pad}match {} {{\n", render_expr(expr)));
+            let mut scoped_defers = active_defers.to_vec();
+            scoped_defers.extend(local_defers.iter().cloned());
+            out.push_str(&format!(
+                "{pad}match {} {{
+",
+                render_expr(expr)
+            ));
             for arm in arms {
                 render_match_arm(
                     arm,
@@ -1530,19 +1641,30 @@ fn render_stmt(
                     source_path,
                     in_async_function,
                     debug,
+                    &scoped_defers,
                 );
             }
-            out.push_str(&format!("{pad}}}\n"));
+            out.push_str(&format!(
+                "{pad}}}
+"
+            ));
         }
         Stmt::Return { expr, span } => {
             render_source_marker(source_path, *span, out, indent, debug);
+            render_deferred_exprs(out, indent, local_defers);
+            render_deferred_exprs(out, indent, active_defers);
             if in_async_function {
                 out.push_str(&format!(
-                    "{pad}return axiom_task_ready({});\n",
+                    "{pad}return axiom_task_ready({});
+",
                     render_expr(expr)
                 ));
             } else {
-                out.push_str(&format!("{pad}return {};\n", render_expr(expr)));
+                out.push_str(&format!(
+                    "{pad}return {};
+",
+                    render_expr(expr)
+                ));
             }
         }
     }
@@ -1556,6 +1678,7 @@ fn render_match_arm(
     source_path: &str,
     in_async_function: bool,
     debug: bool,
+    active_defers: &[(String, SourceSpan)],
 ) {
     let pad = "    ".repeat(indent);
     if arm.bindings.is_empty() {
@@ -1575,17 +1698,16 @@ fn render_match_arm(
             arm.bindings.join(", ")
         ));
     }
-    for stmt in &arm.body {
-        render_stmt(
-            stmt,
-            type_context,
-            out,
-            indent + 1,
-            source_path,
-            in_async_function,
-            debug,
-        );
-    }
+    render_stmt_block(
+        &arm.body,
+        type_context,
+        out,
+        indent + 1,
+        source_path,
+        in_async_function,
+        debug,
+        active_defers,
+    );
     out.push_str(&format!("{pad}}},\n"));
 }
 

@@ -82,6 +82,10 @@ pub enum Stmt {
         message: Expr,
         span: SourceSpan,
     },
+    Defer {
+        expr: Expr,
+        span: SourceSpan,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
@@ -1378,6 +1382,17 @@ fn rewrite_stmt_aggregate_types(
             line: *line,
             column: *column,
         },
+        syntax::Stmt::Defer { expr, line, column } => syntax::Stmt::Defer {
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
         syntax::Stmt::If {
             cond,
             then_block,
@@ -1893,6 +1908,17 @@ fn rewrite_stmt_generic_calls(
                     queued,
                 )?,
             },
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Defer { expr, line, column } => syntax::Stmt::Defer {
+            expr: rewrite_expr_generic_calls(
+                expr,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?,
             line: *line,
             column: *column,
         },
@@ -3498,6 +3524,19 @@ fn lower_stmt(
                 },
             })
         }
+        syntax::Stmt::Defer { expr, line, column } => {
+            let lowered_expr = lower_expr(expr, env, ctx)?;
+            if !lowered_expr.ty().is_copy() {
+                move_lowered_value(&lowered_expr, env)?;
+            }
+            Ok(Stmt::Defer {
+                expr: lowered_expr,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
+            })
+        }
         syntax::Stmt::Return { expr, line, column } => {
             let Some(expected) = ctx.current_return.as_ref() else {
                 return Err(
@@ -4485,7 +4524,13 @@ fn lower_expr_with_expected(
             }
             if let Some(signature) = ctx.functions.get(name) {
                 if signature.is_extern {
-                    require_capability(ctx.capabilities, CapabilityKind::Ffi, name, *line, *column)?;
+                    require_capability(
+                        ctx.capabilities,
+                        CapabilityKind::Ffi,
+                        name,
+                        *line,
+                        *column,
+                    )?;
                 }
                 if args.len() != signature.params.len() {
                     return Err(Diagnostic::new(
@@ -5611,11 +5656,13 @@ fn validate_ffi_signature(function: &syntax::Function, return_ty: &Type) -> Resu
     Ok(())
 }
 
-fn validate_ffi_type_name(ty: &syntax::TypeName, line: usize, column: usize) -> Result<(), Diagnostic> {
+fn validate_ffi_type_name(
+    ty: &syntax::TypeName,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
     match ty {
-        syntax::TypeName::Int
-        | syntax::TypeName::Bool
-        | syntax::TypeName::String => Ok(()),
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => Ok(()),
         syntax::TypeName::Ptr(inner) | syntax::TypeName::MutPtr(inner) => {
             validate_ffi_type_name(inner, line, column)
         }
@@ -6370,7 +6417,9 @@ fn contains_mut_borrowed_slice_type_inner(
 ) -> bool {
     match ty {
         Type::MutSlice(_) => true,
-        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
         Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
             inner,
             structs,
@@ -6900,6 +6949,7 @@ impl Stmt {
     fn always_returns(&self) -> bool {
         match self {
             Stmt::Return { .. } | Stmt::Panic { .. } => true,
+            Stmt::Defer { .. } => false,
             Stmt::If {
                 cond,
                 then_block,
@@ -6935,6 +6985,7 @@ impl syntax::Stmt {
             syntax::Stmt::Let { line, .. }
             | syntax::Stmt::Print { line, .. }
             | syntax::Stmt::Panic { line, .. }
+            | syntax::Stmt::Defer { line, .. }
             | syntax::Stmt::If { line, .. }
             | syntax::Stmt::While { line, .. }
             | syntax::Stmt::Match { line, .. }
@@ -6947,6 +6998,7 @@ impl syntax::Stmt {
             syntax::Stmt::Let { column, .. }
             | syntax::Stmt::Print { column, .. }
             | syntax::Stmt::Panic { column, .. }
+            | syntax::Stmt::Defer { column, .. }
             | syntax::Stmt::If { column, .. }
             | syntax::Stmt::While { column, .. }
             | syntax::Stmt::Match { column, .. }

@@ -136,6 +136,11 @@ pub enum Stmt {
         line: usize,
         column: usize,
     },
+    Defer {
+        expr: Expr,
+        line: usize,
+        column: usize,
+    },
     If {
         cond: Expr,
         then_block: Vec<Stmt>,
@@ -593,6 +598,15 @@ fn parse_stmt(
             column: 1,
         });
     }
+    if let Some(rest) = trimmed.strip_prefix("defer ") {
+        let expr = parse_expr(rest, path, line_no, 7)?;
+        *index += 1;
+        return Ok(Stmt::Defer {
+            expr,
+            line: line_no,
+            column: 1,
+        });
+    }
     if let Some(rest) = trimmed.strip_prefix("return ") {
         let expr = parse_expr(rest, path, line_no, 8)?;
         *index += 1;
@@ -603,9 +617,9 @@ fn parse_stmt(
         });
     }
     let message = if in_block {
-        "stage1 bootstrap currently supports let, print, panic, if/else, while, match, and return statements inside blocks"
+        "stage1 bootstrap currently supports let, print, panic, defer, if/else, while, match, and return statements inside blocks"
     } else {
-        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, panic, if/else, while, and match statements"
+        "stage1 bootstrap currently supports top-level import, const, type, struct, enum, fn, let, print, panic, defer, if/else, while, and match statements"
     };
     Err(Diagnostic::new("parse", message)
         .with_path(path.display().to_string())
@@ -616,18 +630,19 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
     let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
-    let (is_async, is_extern, header, fn_column) = if let Some(rest) = rest.strip_prefix("async fn ") {
-        (true, false, rest, visibility_column + 6)
-    } else if let Some(rest) = rest.strip_prefix("extern fn ") {
-        (false, true, rest, visibility_column + 7)
-    } else {
-        let rest = rest.strip_prefix("fn ").ok_or_else(|| {
-            Diagnostic::new("parse", "invalid function declaration")
-                .with_path(path.display().to_string())
-                .with_span(line_no, 1)
-        })?;
-        (false, false, rest, visibility_column)
-    };
+    let (is_async, is_extern, header, fn_column) =
+        if let Some(rest) = rest.strip_prefix("async fn ") {
+            (true, false, rest, visibility_column + 6)
+        } else if let Some(rest) = rest.strip_prefix("extern fn ") {
+            (false, true, rest, visibility_column + 7)
+        } else {
+            let rest = rest.strip_prefix("fn ").ok_or_else(|| {
+                Diagnostic::new("parse", "invalid function declaration")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, 1)
+            })?;
+            (false, false, rest, visibility_column)
+        };
     let open_paren = find_top_level_char(header, '(').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration is missing '('")
             .with_path(path.display().to_string())
@@ -657,11 +672,12 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             .with_span(line_no, 1)
         })?;
         let return_ty = parse_type_name(return_text.trim(), path, line_no, 1)?;
-        let extern_library = serde_json::from_str::<String>(extern_library.trim()).map_err(|_| {
-            Diagnostic::new("parse", "extern function library must be a quoted string")
-                .with_path(path.display().to_string())
-                .with_span(line_no, 1)
-        })?;
+        let extern_library =
+            serde_json::from_str::<String>(extern_library.trim()).map_err(|_| {
+                Diagnostic::new("parse", "extern function library must be a quoted string")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, 1)
+            })?;
         *index += 1;
         return Ok(Function {
             name: name.to_string(),
@@ -1175,11 +1191,10 @@ fn parse_match_arms(
                 .into_iter()
                 .map(|(binding_offset, raw_binding)| {
                     let binding = raw_binding.trim();
-                    let leading_ws = raw_binding.len().saturating_sub(raw_binding.trim_start().len());
-                    let binding_column = open_brace
-                        + 2
-                        + binding_offset
-                        + leading_ws;
+                    let leading_ws = raw_binding
+                        .len()
+                        .saturating_sub(raw_binding.trim_start().len());
+                    let binding_column = open_brace + 2 + binding_offset + leading_ws;
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
@@ -1214,11 +1229,10 @@ fn parse_match_arms(
                 .into_iter()
                 .map(|(binding_offset, raw_binding)| {
                     let binding = raw_binding.trim();
-                    let leading_ws = raw_binding.len().saturating_sub(raw_binding.trim_start().len());
-                    let binding_column = open_paren
-                        + 2
-                        + binding_offset
-                        + leading_ws;
+                    let leading_ws = raw_binding
+                        .len()
+                        .saturating_sub(raw_binding.trim_start().len());
+                    let binding_column = open_paren + 2 + binding_offset + leading_ws;
                     if binding.is_empty() {
                         return Err(Diagnostic::new("parse", "match arm binding is empty")
                             .with_path(path.display().to_string())
@@ -1486,11 +1500,12 @@ fn parse_type_name(
         }
         if name == "mutptr" {
             if type_args.len() != 1 {
-                return Err(
-                    Diagnostic::new("parse", "mutptr types must use `mutptr<type>` syntax")
-                        .with_path(path.display().to_string())
-                        .with_span(line_no, column),
-                );
+                return Err(Diagnostic::new(
+                    "parse",
+                    "mutptr types must use `mutptr<type>` syntax",
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, column));
             }
             return Ok(TypeName::MutPtr(Box::new(type_args.remove(0))));
         }
