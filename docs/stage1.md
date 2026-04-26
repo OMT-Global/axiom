@@ -26,6 +26,7 @@ carry the 1.0 package model.
 ```bash
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --timings
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --debug
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target "$(rustc -vV | sed -n 's/^host: //p')"
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
@@ -65,7 +66,9 @@ requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
 with generated source-position markers. Debug builds also report `debug_map`,
 a JSON sidecar that maps generated Rust statement lines back to Axiom
-file/line/column positions.
+file/line/column positions. `axiomc build --timings` prints total build time,
+cache hit/miss counts, and per-package compile timing/cache status for the
+incremental generated-Rust cache.
 
 ## Current gaps
 
@@ -103,6 +106,11 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Backend and tooling gaps
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
+- Generated-Rust builds now use a persistent per-artifact cache keyed by
+  compiler version, target, debug mode, manifest/lockfile hash, rendered Rust,
+  module source hashes, and dependency imports. Cache hits skip `rustc`, cache
+  misses repair stale generated Rust or binary artifacts, and `--timings`
+  exposes the hit/miss counts plus per-package compile time.
 - `axiomc build --debug` now asks `rustc` for debuginfo, disables optimization,
   emits generated Rust source markers, and writes a JSON source-map sidecar for
   Axiom file/line/column positions; full Axiom-native debugger stepping remains
