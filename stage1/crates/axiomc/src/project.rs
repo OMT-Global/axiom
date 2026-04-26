@@ -1860,6 +1860,13 @@ fn validate_expr_capabilities(
             }
             Ok(())
         }
+        syntax::Expr::MethodCall { base, args, .. } => {
+            validate_expr_capabilities(module_path, base, capabilities)?;
+            for arg in args {
+                validate_expr_capabilities(module_path, arg, capabilities)?;
+            }
+            Ok(())
+        }
         syntax::Expr::BinaryAdd { lhs, rhs, .. } | syntax::Expr::BinaryCompare { lhs, rhs, .. } => {
             validate_expr_capabilities(module_path, lhs, capabilities)?;
             validate_expr_capabilities(module_path, rhs, capabilities)
@@ -2599,6 +2606,29 @@ fn rewrite_function(
         function.line,
         function.column,
     )?;
+    if let Some(target) = &function.impl_target {
+        let rewritten_target = rewrite_type_name(
+            &syntax::TypeName::Named(target.clone(), Vec::new()),
+            visible_types,
+            private_imported_types,
+            module_path,
+            function.line,
+            function.column,
+        )?;
+        match rewritten_target {
+            syntax::TypeName::Named(name, args) if args.is_empty() => {
+                rewritten.impl_target = Some(name);
+            }
+            _ => {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("impl target {:?} must resolve to a named type", target),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(function.line, function.column));
+            }
+        }
+    }
     Ok(rewritten)
 }
 
@@ -2908,6 +2938,75 @@ fn rewrite_expr(
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| name.clone()),
+                type_args: type_args
+                    .iter()
+                    .map(|type_arg| {
+                        rewrite_type_name(
+                            type_arg,
+                            visible_types,
+                            private_imported_types,
+                            module_path,
+                            *line,
+                            *column,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                args: args
+                    .iter()
+                    .map(|arg| {
+                        rewrite_expr(
+                            arg,
+                            visible_functions,
+                            visible_consts,
+                            visible_structs,
+                            visible_types,
+                            private_imported,
+                            private_imported_consts,
+                            private_imported_types,
+                            module_path,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                line: *line,
+                column: *column,
+            }
+        }
+        syntax::Expr::MethodCall {
+            base,
+            method,
+            type_args,
+            args,
+            line,
+            column,
+        } => {
+            let rewritten_base = rewrite_expr(
+                base,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?;
+            let rewritten_base = match rewritten_base {
+                syntax::Expr::VarRef { name, line, column } => {
+                    if let Some(mapped) = visible_types.get(&name) {
+                        syntax::Expr::VarRef {
+                            name: mapped.clone(),
+                            line,
+                            column,
+                        }
+                    } else {
+                        syntax::Expr::VarRef { name, line, column }
+                    }
+                }
+                other => other,
+            };
+            syntax::Expr::MethodCall {
+                base: Box::new(rewritten_base),
+                method: method.clone(),
                 type_args: type_args
                     .iter()
                     .map(|type_arg| {
