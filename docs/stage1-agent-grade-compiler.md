@@ -153,7 +153,7 @@ Status: complete for the current stage1 bootstrap contract.
 
 - `AG3.1` local path dependency graphs, package-root workspace members, and root lockfile validation are landed.
 - `AG3.2` now rejects import aliases, re-exports, and namespace-qualified calls with explicit parser diagnostics.
-- `AG3.3` now denies capability-gated compiler-known intrinsics across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, and `crypto_sha256(...)`.
+- `AG3.3` now denies capability-gated compiler-known intrinsics across all six manifest flags: `fs_read(...)`, `net_resolve(...)`, `process_status(...)`, `env_get(...)`, `clock_now_ms()`, `clock_elapsed_ms(...)`, `clock_sleep_ms(...)`, and `crypto_sha256(...)`.
 - Workspace-only manifests are now accepted at the root, and `axiomc check/build/run/test -p <package>` can target a concrete workspace member when the root has no `[package]` section.
 
 Work packages:
@@ -206,8 +206,11 @@ Work packages:
     still runs against the **importing** package's manifest via
     `hir::lower_with_capabilities`, so stdlib imports stay transparent to the
     capability model.
-  - `std.time` — **landed** as `std/time.ax` exposing `now_ms(): int` on top of
-    the existing `clock_now_ms` intrinsic. Covered by
+  - `std.time` — **landed** as `std/time.ax` exposing `Duration`, `Instant`,
+    `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`,
+    `elapsed_ms(start): int`, and `sleep(duration): int` on top of the existing
+    `clock_now_ms` intrinsic and the new `clock_elapsed_ms` / `clock_sleep_ms`
+    intrinsics. Covered by
     `stage1/examples/stdlib_time` and three Rust tests
     (`stage1_project_imports_synthetic_stdlib_time_module`,
     `stage1_project_rejects_stdlib_time_without_clock_capability`,
