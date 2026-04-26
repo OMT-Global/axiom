@@ -731,9 +731,10 @@ mod tests {
     #[test]
     fn build_summary_mentions_debug_map_when_available() {
         assert_eq!(
-            build_summary_lines(&build_output(Some(String::from(
-                "target/main.debug-map.json"
-            )))),
+            build_summary_lines(
+                &build_output(Some(String::from("target/main.debug-map.json"))),
+                false,
+            ),
             vec![
                 String::from("wrote dist/app"),
                 String::from("wrote debug map target/main.debug-map.json"),
@@ -744,7 +745,7 @@ mod tests {
     #[test]
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
-            build_summary_lines(&build_output(None)),
+            build_summary_lines(&build_output(None), false),
             vec![String::from("wrote dist/app")]
         );
     }
