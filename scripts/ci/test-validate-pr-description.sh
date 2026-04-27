@@ -147,6 +147,25 @@ BODY
 BODY
 )
       ;;
+    structured_fixes_issue_url)
+      body=$(cat <<'BODY'
+## Summary
+- Tighten PR validation.
+
+## Governing Issue
+- Fixes https://github.com/OMT-Global/axiom/issues/262
+
+## Validation
+- [x] bash scripts/ci/test-validate-pr-description.sh
+
+## Bootstrap Governance
+- No bootstrap changes.
+
+## Notes
+- None.
+BODY
+)
+      ;;
     structured_fixes_issue)
       body=$(cat <<'BODY'
 ## Summary
@@ -258,6 +277,14 @@ Implements the Apollo-assigned fix for the contributor docs and CI guidance.
 BODY
 )
       ;;
+    legacy_resolves_issue_url_valid)
+      body=$(cat <<'BODY'
+Resolves https://github.com/OMT-Global/axiom/issues/262
+
+Implements the Apollo-assigned fix for the contributor docs and CI guidance.
+BODY
+)
+      ;;
     legacy_valid)
       body=$(cat <<'BODY'
 Closes #262
@@ -321,6 +348,7 @@ run_case structured_missing_validation failure "PR body must include validation 
 run_case structured_placeholder_issue failure "PR body still contains template placeholder text."
 run_case structured_qualified_issue success
 run_case structured_issue_url success
+run_case structured_fixes_issue_url success
 run_case structured_fixes_issue success
 run_case structured_qualified_fixes_issue success
 run_case structured_resolves_issue success
@@ -332,6 +360,7 @@ run_case legacy_qualified_resolves_issue_valid success
 run_case legacy_live_pr_296_body_valid success
 run_case legacy_qualified_issue_valid success
 run_case legacy_issue_url_valid success
+run_case legacy_resolves_issue_url_valid success
 run_case legacy_issue_only failure "Legacy PR body must include a short prose summary in addition to the issue link."
 run_case legacy_missing_issue failure "Legacy PR body must still close/link an issue or explicitly explain why no issue is linked."
 
