@@ -166,6 +166,44 @@ BODY
 BODY
 )
       ;;
+    structured_resolves_issue)
+      body=$(cat <<'BODY'
+## Summary
+- Tighten PR validation.
+
+## Governing Issue
+- Resolves #262
+
+## Validation
+- [x] bash scripts/ci/test-validate-pr-description.sh
+
+## Bootstrap Governance
+- No bootstrap changes.
+
+## Notes
+- None.
+BODY
+)
+      ;;
+    structured_lowercase_no_link_reason)
+      body=$(cat <<'BODY'
+## Summary
+- Tighten PR validation.
+
+## Governing Issue
+- no linked issue because this only repairs CI wording.
+
+## Validation
+- [x] bash scripts/ci/test-validate-pr-description.sh
+
+## Bootstrap Governance
+- No bootstrap changes.
+
+## Notes
+- None.
+BODY
+)
+      ;;
     structured_no_link_reason)
       body=$(cat <<'BODY'
 ## Summary
@@ -257,6 +295,8 @@ run_case structured_placeholder_issue failure "PR body still contains template p
 run_case structured_qualified_issue success
 run_case structured_issue_url success
 run_case structured_fixes_issue success
+run_case structured_resolves_issue success
+run_case structured_lowercase_no_link_reason success
 run_case structured_no_link_reason success
 run_case legacy_valid success
 run_case legacy_fixes_issue_valid success
