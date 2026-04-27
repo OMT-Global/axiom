@@ -1,0 +1,3 @@
+import "render.ax"
+
+print render_command("core", "1")
