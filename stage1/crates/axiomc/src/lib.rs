@@ -3458,6 +3458,23 @@ print strlen("hello")
     }
 
     #[test]
+    fn stage1_project_suggests_similar_stdlib_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-suggestion");
+        create_project(&project, Some("stdlib-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/tmie.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected unknown stdlib module error");
+        assert!(err.message.contains("unknown stdlib module"));
+        assert!(err.message.contains("did you mean \"time.ax\"?"));
+        assert_eq!(err.kind, "import");
+    }
+
+    #[test]
     fn manifest_parses_test_targets() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tests");
@@ -4036,6 +4053,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("missing function should fail");
         assert!(error.message.contains("undefined function"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_local_for_undefined_variable() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-variable-suggestion");
+        create_project(&project, Some("missing-variable-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint anwser\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("missing variable should fail");
+        assert!(error.message.contains("undefined variable \"anwser\""));
+        assert!(error.message.contains("did you mean \"answer\"?"));
         assert_eq!(error.kind, "type");
     }
 
@@ -4732,6 +4766,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("missing field should fail");
         assert!(error.message.contains("is missing field"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_struct_field() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-field-suggestion");
+        create_project(&project, Some("struct-field-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct User {\nname: string\ncount: int\n}\n\nlet user: User = User { name: \"agent\", count: 1 }\nprint user.naem\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("unknown field should fail");
+        assert!(error.message.contains("has no field \"naem\""));
+        assert!(error.message.contains("did you mean \"name\"?"));
         assert_eq!(error.kind, "type");
     }
 
@@ -5457,6 +5508,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("match should reject unknown variant");
         assert!(error.message.contains("has no variant"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_match_variant() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("match-variant-suggestion");
+        create_project(&project, Some("match-variant-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Status {\nReady\nFailed\n}\n\nfn label(status: Status): string {\nmatch status {\nReday {\nreturn \"ready\"\n}\nFailed {\nreturn \"failed\"\n}\n}\n}\n\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("match should reject unknown variant");
+        assert!(error.message.contains("has no variant \"Reday\""));
+        assert!(error.message.contains("did you mean \"Ready\"?"));
         assert_eq!(error.kind, "type");
     }
 
