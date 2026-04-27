@@ -93,8 +93,9 @@ Stage1 also enforces the current capability-gated runtime surface for `clock`,
 `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/sync.ax`,
 `std/async.ax`, and `std/http.ax`.
 
-See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and
-[docs/stage1.md](docs/stage1.md) for more detail.
+See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md),
+[docs/stage1.md](docs/stage1.md), [docs/style.md](docs/style.md), and
+[CONTRIBUTING.md](CONTRIBUTING.md) for more detail.
 
 ## Repo Map
 
