@@ -128,6 +128,8 @@ still far from the stated 1.0 target for service and agent workloads.
 
 The detailed execution spec for turning stage1 into the first workable compiler now
 lives in [docs/stage1-agent-grade-compiler.md](stage1-agent-grade-compiler.md).
+The broad Phase A language issue disposition for #216 through #225 is tracked in
+[Stage1 Language Issue Disposition](stage1-language-issue-disposition.md).
 
 Current proof points:
 
