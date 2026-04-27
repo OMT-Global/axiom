@@ -1,8 +1,8 @@
 use crate::diagnostics::Diagnostic;
 use crate::manifest::CapabilityConfig;
 use crate::mir::{
-    EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, Stmt, StructDef,
-    StructField, Type,
+    EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, StaticDef, Stmt,
+    StructDef, StructField, Type,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -1006,6 +1006,10 @@ fn axiom_http_get(url: String) -> Option<String> {
         render_struct(struct_def, &type_context, &mut out);
         out.push('\n');
     }
+    for static_def in &program.statics {
+        render_static(static_def, &type_context, &mut out);
+        out.push('\n');
+    }
     for function in &program.functions {
         render_function(function, &type_context, &mut out, debug);
         out.push('\n');
@@ -1242,6 +1246,17 @@ fn render_struct(struct_def: &StructDef, type_context: &TypeContext<'_>, out: &m
         render_struct_field(field, type_context, out, 1, !lifetime.is_empty());
     }
     out.push_str("}\n");
+}
+
+fn render_static(static_def: &StaticDef, type_context: &TypeContext<'_>, out: &mut String) {
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("#[allow(non_upper_case_globals)]\n");
+    out.push_str(&format!(
+        "static {}: {} = {};\n",
+        static_def.name,
+        rust_static_type(&static_def.ty, type_context),
+        render_static_expr(&static_def.expr)
+    ));
 }
 
 fn render_enum(enum_def: &EnumDef, type_context: &TypeContext<'_>, out: &mut String) {
@@ -2069,8 +2084,33 @@ fn render_expr(expr: &Expr) -> String {
     }
 }
 
+fn render_static_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Literal(LiteralValue::String(value)) => format!("{value:?}"),
+        Expr::BinaryAdd { lhs, rhs, .. } => {
+            format!("{} + {}", render_static_expr(lhs), render_static_expr(rhs))
+        }
+        Expr::BinaryCompare { op, lhs, rhs, .. } => {
+            format!(
+                "{} {} {}",
+                render_static_expr(lhs),
+                op.lexeme(),
+                render_static_expr(rhs)
+            )
+        }
+        _ => render_expr(expr),
+    }
+}
+
 fn rust_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
     rust_type_inner(ty, None, type_context)
+}
+
+fn rust_static_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
+    match ty {
+        Type::String => String::from("&'static str"),
+        _ => rust_type(ty, type_context),
+    }
 }
 
 fn rust_type_in_signature(

@@ -4282,6 +4282,60 @@ print strlen("hello")
     }
 
     #[test]
+    fn build_project_emits_native_binary_with_static_globals() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-globals");
+        create_project(&project, Some("static-globals-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static LIMIT: int = 40 + 2\nstatic READY: bool = LIMIT == 42\nstatic LABEL: string = \"stage1\"\nprint LIMIT\nprint READY\nprint LABEL\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with static globals");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("static static_globals_app_main_LIMIT: i64 = 40 + 2;"));
+        assert!(generated.contains("static static_globals_app_main_READY: bool = 40 + 2 == 42;"));
+        assert!(
+            generated.contains("static static_globals_app_main_LABEL: &'static str = \"stage1\";")
+        );
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\ntrue\nstage1\n"
+        );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_imported_public_static_globals() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-static-globals");
+        create_project(&project, Some("public-static-globals-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"values.ax\"\nprint LIMIT\nprint READY\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/values.ax"),
+            "pub static LIMIT: int = 40 + 2\npub static READY: bool = LIMIT == 42\n",
+        )
+        .expect("write values");
+        let built = build_project(&project).expect("build project with imported static globals");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("static public_static_globals_app_values_LIMIT: i64 = 40 + 2;"));
+        assert!(
+            generated
+                .contains("static public_static_globals_app_values_READY: bool = 40 + 2 == 42;")
+        );
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\n");
+    }
+
+    #[test]
     fn check_project_rejects_missing_import() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-import");
@@ -4503,6 +4557,25 @@ print strlen("hello")
     }
 
     #[test]
+    fn check_project_rejects_static_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-type-mismatch");
+        create_project(&project, Some("static-type-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static READY: bool = 42\nprint READY\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("static type mismatch should fail");
+        assert!(
+            error
+                .message
+                .contains("static \"READY\" expects bool, got int")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn check_project_rejects_type_alias_inside_function_block() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("block-type-alias");
@@ -4535,7 +4608,7 @@ print strlen("hello")
         assert!(
             error
                 .message
-                .contains("only supports top-level const declarations")
+                .contains("only supports top-level const/static declarations")
         );
         assert_eq!(error.kind, "parse");
     }
