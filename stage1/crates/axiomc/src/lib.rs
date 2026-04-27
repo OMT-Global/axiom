@@ -4447,6 +4447,27 @@ print strlen("hello")
     }
 
     #[test]
+    fn build_project_preserves_static_source_names_for_recursion_tracking() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-source-names");
+        create_project(&project, Some("p")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static A: int = 1\nstatic p_main_A: int = A\nprint A\nprint p_main_A\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("static names should not false-recurse");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("static p_main_A: i64 = 1;"));
+        assert!(generated.contains("static p_main_p_main_A: i64 = 1;"));
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n1\n");
+    }
+
+    #[test]
     fn build_project_emits_native_binary_with_imported_public_static_globals() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("public-static-globals");

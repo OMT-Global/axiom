@@ -2177,6 +2177,7 @@ fn flatten_modules(
                     .cloned()
                     .unwrap_or_else(|| const_decl.clone());
                 rewritten.expr = resolved_expr;
+                rewritten.name = format!("{}_{}", module_symbols.module_id, const_decl.name);
                 flattened_consts.push(rewritten);
             }
         }
@@ -2370,12 +2371,8 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
                     .with_span(const_decl.line, const_decl.column),
             );
         }
-        let mut stored_const = const_decl.clone();
-        if const_decl.is_static {
-            stored_const.name = format!("{module_id}_{}", const_decl.name);
-        }
         if consts
-            .insert(const_decl.name.clone(), stored_const.clone())
+            .insert(const_decl.name.clone(), const_decl.clone())
             .is_some()
         {
             return Err(
@@ -2386,10 +2383,10 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
         }
         match const_decl.visibility {
             syntax::Visibility::Public => {
-                public_consts.insert(const_decl.name.clone(), stored_const.clone());
+                public_consts.insert(const_decl.name.clone(), const_decl.clone());
             }
             syntax::Visibility::Package => {
-                package_consts.insert(const_decl.name.clone(), stored_const.clone());
+                package_consts.insert(const_decl.name.clone(), const_decl.clone());
             }
             syntax::Visibility::Module => {
                 private_consts.insert(const_decl.name.clone());
