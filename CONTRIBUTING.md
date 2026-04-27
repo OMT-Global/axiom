@@ -68,6 +68,9 @@ make stage1-conformance
 
 # Rust crate tests only
 make stage1-test
+
+# Supply-chain checks, offline lockfile verification, and SBOM emission
+make supply-chain
 ```
 
 ## Source style
