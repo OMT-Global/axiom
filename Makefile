@@ -111,6 +111,9 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_http --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_http
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --out-dir .axiom-build/docs/hello
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 
 stage1-run:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello

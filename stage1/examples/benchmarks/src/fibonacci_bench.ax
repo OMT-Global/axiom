@@ -1,0 +1,14 @@
+/// Benchmark fixture for repeated arithmetic and loops.
+fn fib(limit: int): int {
+    let left: int = 1
+    let right: int = 1
+    let index: int = 0
+    while index < limit {
+        print left + right
+        return left + right
+    }
+    return right
+}
+
+let value: int = fib(8)
+print value
