@@ -50,6 +50,7 @@ pub struct BuiltPackage {
     pub binary: String,
     pub generated_rust: String,
     pub debug_map: Option<String>,
+    pub debug_manifest: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
@@ -64,6 +65,7 @@ pub struct BuildOutput {
     pub binary: String,
     pub generated_rust: String,
     pub debug_map: Option<String>,
+    pub debug_manifest: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
@@ -220,6 +222,9 @@ pub fn build_project_with_options(
             debug_map: options
                 .debug
                 .then(|| debug_source_map_path(&generated_rust).display().to_string()),
+            debug_manifest: options
+                .debug
+                .then(|| debug_manifest_path(&generated_rust).display().to_string()),
             statement_count: analyzed.mir.statement_count(),
             target: options.target.clone(),
             debug: options.debug,
@@ -247,6 +252,7 @@ pub fn build_project_with_options(
         binary: root.binary,
         generated_rust: root.generated_rust,
         debug_map: root.debug_map,
+        debug_manifest: root.debug_manifest,
         statement_count: root.statement_count,
         target: root.target,
         debug: root.debug,
@@ -902,7 +908,7 @@ fn build_artifacts(
         .is_some_and(|stored| cache_matches(stored, &cache, generated_rust, binary))
     {
         if options.debug {
-            write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
+            write_debug_artifacts(generated_rust, binary, analyzed)?;
         }
         return Ok(BuildArtifactReport {
             cache_status: BuildCacheStatus::Hit,
@@ -915,9 +921,6 @@ fn build_artifacts(
             format!("failed to write {}: {err}", generated_rust.display()),
         )
     })?;
-    if options.debug {
-        write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
-    }
     let started = Instant::now();
     compile_native(
         generated_rust,
@@ -926,6 +929,9 @@ fn build_artifacts(
         options.debug,
     )?;
     let compile_ms = started.elapsed().as_millis() as u64;
+    if options.debug {
+        write_debug_artifacts(generated_rust, binary, analyzed)?;
+    }
     let mut cache = cache;
     cache.binary_hash = Some(hash_file_bytes(binary)?);
     write_build_cache(&cache_path, &cache)?;
@@ -943,6 +949,10 @@ fn debug_source_map_path(generated_rust: &Path) -> PathBuf {
     generated_rust.with_extension("debug-map.json")
 }
 
+fn debug_manifest_path(generated_rust: &Path) -> PathBuf {
+    generated_rust.with_extension("debug-manifest.json")
+}
+
 #[derive(Debug, Serialize)]
 struct DebugSourceMap<'a> {
     schema_version: &'static str,
@@ -956,6 +966,50 @@ struct DebugSourceMapping {
     source: String,
     line: usize,
     column: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugManifest<'a> {
+    schema_version: &'static str,
+    binary: &'a str,
+    binary_hash: String,
+    generated_rust: &'a str,
+    generated_rust_hash: String,
+    debug_map: &'a str,
+    rustc: DebugRustcInfo,
+    source_files: Vec<DebugSourceFile>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugRustcInfo {
+    debuginfo: u8,
+    opt_level: u8,
+    native_debug_info: &'static str,
+    axiom_dwarf: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugSourceFile {
+    path: String,
+    source_hash: String,
+    line_count: usize,
+    mapping_count: usize,
+}
+
+fn write_debug_artifacts(
+    generated_rust: &Path,
+    binary: &Path,
+    analyzed: &AnalyzedProject,
+) -> Result<(), Diagnostic> {
+    let debug_map = debug_source_map_path(generated_rust);
+    write_debug_source_map(generated_rust, &debug_map)?;
+    write_debug_manifest(
+        generated_rust,
+        binary,
+        &debug_map,
+        &debug_manifest_path(generated_rust),
+        analyzed,
+    )
 }
 
 fn write_debug_source_map(generated_rust: &Path, debug_map: &Path) -> Result<(), Diagnostic> {
@@ -980,6 +1034,72 @@ fn write_debug_source_map(generated_rust: &Path, debug_map: &Path) -> Result<(),
             format!("failed to write {}: {err}", debug_map.display()),
         )
     })
+}
+
+fn write_debug_manifest(
+    generated_rust: &Path,
+    binary: &Path,
+    debug_map: &Path,
+    debug_manifest: &Path,
+    analyzed: &AnalyzedProject,
+) -> Result<(), Diagnostic> {
+    let generated_source = fs::read_to_string(generated_rust).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to read {}: {err}", generated_rust.display()),
+        )
+    })?;
+    let generated_rust_path = generated_rust.display().to_string();
+    let binary_path = binary.display().to_string();
+    let debug_map_path = debug_map.display().to_string();
+    let manifest = DebugManifest {
+        schema_version: "axiom.stage1.debug_manifest.v1",
+        binary: &binary_path,
+        binary_hash: hash_file_bytes(binary)?,
+        generated_rust: &generated_rust_path,
+        generated_rust_hash: hash_file(generated_rust)?,
+        debug_map: &debug_map_path,
+        rustc: DebugRustcInfo {
+            debuginfo: 2,
+            opt_level: 0,
+            native_debug_info: "rustc DWARF points at generated Rust",
+            axiom_dwarf: false,
+        },
+        source_files: debug_source_files(analyzed, &generated_source)?,
+    };
+    let content = serde_json::to_string_pretty(&manifest).map_err(|err| {
+        Diagnostic::new("build", format!("failed to render debug manifest: {err}"))
+    })?;
+    fs::write(debug_manifest, format!("{content}\n")).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to write {}: {err}", debug_manifest.display()),
+        )
+    })
+}
+
+fn debug_source_files(
+    analyzed: &AnalyzedProject,
+    generated_source: &str,
+) -> Result<Vec<DebugSourceFile>, Diagnostic> {
+    let mut mapping_counts = BTreeMap::<String, usize>::new();
+    for mapping in debug_source_mappings(generated_source) {
+        *mapping_counts.entry(mapping.source).or_default() += 1;
+    }
+    analyzed
+        .modules
+        .iter()
+        .map(|module| {
+            let source = module_source(&module.path)?;
+            let path = module.path.display().to_string();
+            Ok(DebugSourceFile {
+                mapping_count: mapping_counts.get(&path).copied().unwrap_or(0),
+                path,
+                source_hash: hash_text(&source),
+                line_count: source.lines().count(),
+            })
+        })
+        .collect()
 }
 
 fn debug_source_mappings(generated_source: &str) -> Vec<DebugSourceMapping> {

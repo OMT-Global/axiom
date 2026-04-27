@@ -294,6 +294,9 @@ fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
     if let Some(debug_map) = &output.debug_map {
         lines.push(format!("wrote debug map {debug_map}"));
     }
+    if let Some(debug_manifest) = &output.debug_manifest {
+        lines.push(format!("wrote debug manifest {debug_manifest}"));
+    }
     if timings {
         lines.push(format!(
             "timings total={}ms cache_hits={} cache_misses={}",
@@ -729,13 +732,14 @@ mod tests {
         assert!(help.contains("Start a small stage1 scratch REPL"));
     }
 
-    fn build_output(debug_map: Option<String>) -> BuildOutput {
+    fn build_output(debug_map: Option<String>, debug_manifest: Option<String>) -> BuildOutput {
         BuildOutput {
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
             generated_rust: String::from("target/main.rs"),
             debug_map,
+            debug_manifest,
             statement_count: 1,
             target: None,
             debug: true,
@@ -747,15 +751,19 @@ mod tests {
     }
 
     #[test]
-    fn build_summary_mentions_debug_map_when_available() {
+    fn build_summary_mentions_debug_artifacts_when_available() {
         assert_eq!(
             build_summary_lines(
-                &build_output(Some(String::from("target/main.debug-map.json"))),
+                &build_output(
+                    Some(String::from("target/main.debug-map.json")),
+                    Some(String::from("target/main.debug-manifest.json")),
+                ),
                 false,
             ),
             vec![
                 String::from("wrote dist/app"),
                 String::from("wrote debug map target/main.debug-map.json"),
+                String::from("wrote debug manifest target/main.debug-manifest.json"),
             ]
         );
     }
@@ -763,7 +771,7 @@ mod tests {
     #[test]
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
-            build_summary_lines(&build_output(None), false),
+            build_summary_lines(&build_output(None, None), false),
             vec![String::from("wrote dist/app")]
         );
     }
