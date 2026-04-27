@@ -1,0 +1,4 @@
+import "std/log.ax"
+
+let attrs: string = fields3(field_string("component", "worker"), field_int("attempt", 2), field_bool("ready", true))
+print event("info", "started", attrs)
