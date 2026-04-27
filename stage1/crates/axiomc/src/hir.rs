@@ -1,4 +1,4 @@
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{Diagnostic, message_with_suggestion};
 use crate::manifest::{CapabilityConfig, CapabilityKind};
 use crate::syntax;
 use serde::Serialize;
@@ -3623,7 +3623,11 @@ fn lower_stmt(
                     .ok_or_else(|| {
                         Diagnostic::new(
                             "type",
-                            format!("enum {enum_name:?} has no variant {:?}", arm.variant),
+                            message_with_suggestion(
+                                format!("enum {enum_name:?} has no variant {:?}", arm.variant),
+                                &arm.variant,
+                                variant_defs.iter().map(|variant| variant.name.as_str()),
+                            ),
                         )
                         .with_span(arm.line, arm.column)
                     })?;
@@ -4172,10 +4176,11 @@ fn lower_expr_with_expected(
                     ty: Type::Enum(variant.enum_name.clone()),
                 });
             }
-            Err(
-                Diagnostic::new("type", format!("undefined variable {name:?}"))
-                    .with_span(*line, *column),
+            Err(Diagnostic::new(
+                "type",
+                message_with_suggestion(format!("undefined variable {name:?}"), name, env.keys()),
             )
+            .with_span(*line, *column))
         }
         syntax::Expr::Call {
             name,
@@ -4962,10 +4967,17 @@ fn lower_expr_with_expected(
             if let Some(variant) = resolve_variant(name, expected, ctx, *line, *column)? {
                 return lower_variant_constructor(name, args, *line, *column, variant, env, ctx);
             }
-            Err(
-                Diagnostic::new("type", format!("undefined function {name:?}"))
-                    .with_span(*line, *column),
+            Err(Diagnostic::new(
+                "type",
+                message_with_suggestion(
+                    format!("undefined function {name:?}"),
+                    name,
+                    ctx.functions
+                        .keys()
+                        .map(|candidate| candidate.rsplit("__").next().unwrap_or(candidate)),
+                ),
             )
+            .with_span(*line, *column))
         }
         syntax::Expr::MethodCall {
             base,
@@ -5333,7 +5345,11 @@ fn lower_expr_with_expected(
                 let expected = field_defs.get(&field.name).ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {concrete_name:?} has no field {:?}", field.name),
+                        message_with_suggestion(
+                            format!("struct {concrete_name:?} has no field {:?}", field.name),
+                            &field.name,
+                            field_defs.keys(),
+                        ),
                     )
                     .with_span(field.line, field.column)
                 })?;
@@ -5465,7 +5481,11 @@ fn lower_expr_with_expected(
                 .ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {struct_name:?} has no field {field:?}"),
+                        message_with_suggestion(
+                            format!("struct {struct_name:?} has no field {field:?}"),
+                            field,
+                            struct_def.fields.iter().map(|entry| entry.name.as_str()),
+                        ),
                     )
                     .with_span(*line, *column)
                 })?;
@@ -6035,7 +6055,11 @@ fn lower_projection_base_expr(
                 .ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {struct_name:?} has no field {field:?}"),
+                        message_with_suggestion(
+                            format!("struct {struct_name:?} has no field {field:?}"),
+                            field,
+                            struct_def.fields.iter().map(|entry| entry.name.as_str()),
+                        ),
                     )
                     .with_span(*line, *column)
                 })?;
