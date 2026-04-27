@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 const DAP_CAPABILITIES_SCHEMA_VERSION: &str = "axiom.stage1.dap.v1";
+const MAX_DAP_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct DebugAdapter {
@@ -157,6 +158,7 @@ pub fn serve_dap<R: Read, W: Write>(reader: R, mut writer: W) -> Result<(), Diag
 }
 
 fn launch(adapter: &mut DebugAdapter, arguments: &Value) -> Result<Value, Diagnostic> {
+    adapter.session = None;
     let program = arguments
         .get("program")
         .and_then(Value::as_str)
@@ -363,6 +365,14 @@ fn read_dap_message<R: BufRead>(reader: &mut R) -> Result<Option<Vec<u8>>, Diagn
     }
     let length = content_length
         .ok_or_else(|| Diagnostic::new("dap", "DAP message missing Content-Length header"))?;
+    if length > MAX_DAP_FRAME_SIZE {
+        return Err(Diagnostic::new(
+            "dap",
+            format!(
+                "DAP message Content-Length {length} exceeds maximum frame size {MAX_DAP_FRAME_SIZE}"
+            ),
+        ));
+    }
     let mut body = vec![0; length];
     reader
         .read_exact(&mut body)

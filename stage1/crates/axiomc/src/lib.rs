@@ -6037,6 +6037,22 @@ print strlen("hello")
     }
 
     #[test]
+    fn dap_stdio_rejects_oversized_content_length_before_body_read() {
+        let input = b"Content-Length: 16777217\r\n\r\n";
+        let mut output = Vec::new();
+
+        let error = serve_dap(input.as_slice(), &mut output).expect_err("oversized frame");
+
+        assert!(output.is_empty());
+        assert_eq!(error.kind, "dap");
+        assert!(
+            error
+                .message
+                .contains("exceeds maximum frame size 16777216")
+        );
+    }
+
+    #[test]
     fn dap_launch_builds_debug_map_and_verifies_breakpoints() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("dap-debug");
@@ -6090,6 +6106,78 @@ print strlen("hello")
         assert_eq!(body[0]["line"], 1);
         assert_eq!(body[1]["verified"], false);
         assert_eq!(body[1]["line"], 99);
+    }
+
+    #[test]
+    fn dap_failed_launch_clears_previous_debug_session() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("dap-debug-stale-session");
+        create_project(&project, Some("dap-debug-stale-session-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint answer\n",
+        )
+        .expect("write source");
+        let source = project
+            .join("src/main.ax")
+            .canonicalize()
+            .expect("canonical source path")
+            .display()
+            .to_string();
+
+        let mut adapter = DebugAdapter::new();
+        let launch = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"program": project}
+            }),
+        );
+        assert_eq!(launch[0]["success"], true);
+
+        let failed_launch = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 3,
+                "type": "request",
+                "command": "launch",
+                "arguments": {}
+            }),
+        );
+        assert_eq!(failed_launch.len(), 1);
+        assert_eq!(failed_launch[0]["success"], false);
+
+        let loaded_sources = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 4,
+                "type": "request",
+                "command": "loadedSources"
+            }),
+        );
+        assert_eq!(
+            loaded_sources[0]["body"]["sources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+
+        let breakpoints = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 5,
+                "type": "request",
+                "command": "setBreakpoints",
+                "arguments": {
+                    "source": {"path": source},
+                    "breakpoints": [{"line": 1}]
+                }
+            }),
+        );
+        assert_eq!(breakpoints[0]["body"]["breakpoints"][0]["verified"], false);
     }
 
     #[test]
