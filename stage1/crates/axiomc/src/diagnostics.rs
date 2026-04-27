@@ -9,6 +9,8 @@ pub struct Diagnostic {
     pub path: Option<String>,
     pub line: Option<usize>,
     pub column: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<Diagnostic>,
 }
 
 impl Diagnostic {
@@ -20,6 +22,7 @@ impl Diagnostic {
             path: None,
             line: None,
             column: None,
+            related: Vec::new(),
         }
     }
 
@@ -36,6 +39,11 @@ impl Diagnostic {
     pub fn with_span(mut self, line: usize, column: usize) -> Self {
         self.line = Some(line);
         self.column = Some(column);
+        self
+    }
+
+    pub fn with_related(mut self, related: Vec<Diagnostic>) -> Self {
+        self.related = related;
         self
     }
 }

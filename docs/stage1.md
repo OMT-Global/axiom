@@ -72,6 +72,9 @@ a JSON sidecar that maps generated Rust statement lines back to Axiom
 file/line/column positions. `axiomc build --timings` prints total build time,
 cache hit/miss counts, and per-package compile timing/cache status for the
 incremental generated-Rust cache.
+Parser diagnostics now preserve additional recovered top-level parse errors in
+the error payload's `related` array when possible, so editor tooling can show
+more than the first syntax error without waiting for full checker recovery.
 
 ## Current gaps
 
@@ -121,7 +124,7 @@ still far from the stated 1.0 target for service and agent workloads.
 - `axiomc fmt`, `axiomc bench`, `axiomc doc`, and the stage1 scratch `repl`
   now exist as bootstrap-grade toolchain commands. Publisher, full LSP, and
   debugger surfaces remain open.
-- Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
+- Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes and top-level parser recovery, but checker recovery, span quality, and note richness are still limited.
 - Extended validation now carries a small performance regression gate: stage1 `axiomc build` is benchmarked across representative compute (`hello`), I/O/capability (`capabilities`), and concurrency (`stdlib_async`) workloads against checked-in Go and Rust reference builds, with separate cold-build and warm-cache budget multipliers to catch obvious compiler-path regressions without making PR fast CI noisy.
 
 ## Execution plan
