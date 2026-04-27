@@ -8675,6 +8675,9 @@ print takes_two(three)
         assert!(debug.packages[0].debug);
         let debug_map = PathBuf::from(debug.debug_map.as_ref().expect("debug map path"));
         assert!(debug_map.exists());
+        let debug_manifest =
+            PathBuf::from(debug.debug_manifest.as_ref().expect("debug manifest path"));
+        assert!(debug_manifest.exists());
         assert_eq!(debug.cache_hits, 0);
         assert_eq!(debug.cache_misses, 1);
 
@@ -8696,6 +8699,23 @@ print takes_two(three)
         assert_eq!(map["mappings"][0]["line"], 1);
         assert_eq!(map["mappings"][0]["column"], 1);
         assert!(map["mappings"][0]["generated_line"].is_u64());
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&debug_manifest).expect("read debug manifest"),
+        )
+        .expect("parse debug manifest");
+        assert_eq!(manifest["schema_version"], "axiom.stage1.debug_manifest.v1");
+        assert_eq!(manifest["binary"], debug.binary);
+        assert_eq!(manifest["generated_rust"], debug.generated_rust);
+        assert_eq!(manifest["debug_map"], debug_map.display().to_string());
+        assert_eq!(manifest["rustc"]["debuginfo"], 2);
+        assert_eq!(manifest["rustc"]["opt_level"], 0);
+        assert_eq!(manifest["rustc"]["axiom_dwarf"], false);
+        assert_eq!(manifest["source_files"][0]["path"], source);
+        assert_eq!(manifest["source_files"][0]["line_count"], 2);
+        assert_eq!(manifest["source_files"][0]["mapping_count"], 2);
+        assert!(manifest["source_files"][0]["source_hash"].is_string());
+        assert!(manifest["binary_hash"].is_string());
+        assert!(manifest["generated_rust_hash"].is_string());
 
         if let Ok(readelf) = which::which("readelf") {
             let output = Command::new(readelf)
@@ -8788,6 +8808,7 @@ print takes_two(three)
         );
 
         fs::remove_file(&debug_map).expect("remove debug map");
+        fs::remove_file(&debug_manifest).expect("remove debug manifest");
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
@@ -8802,6 +8823,7 @@ print takes_two(three)
         assert_eq!(cached_debug.cache_hits, 1);
         assert_eq!(cached_debug.cache_misses, 0);
         assert!(debug_map.exists());
+        assert!(debug_manifest.exists());
     }
 
     #[test]
@@ -9041,6 +9063,18 @@ print takes_two(three)
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
+        assert!(payload["debug_manifest"].is_string());
+        assert_eq!(payload["cache_key"]["target"], payload["target"]);
+        assert_eq!(payload["cache_key"]["debug"], true);
+        assert!(payload["cache_key"]["manifest_hash"].is_string());
+        assert!(payload["cache_key"]["lockfile_hash"].is_string());
+        assert!(payload["cache_key"]["generated_rust_hash"].is_string());
+        assert!(payload["cache_key"]["sources"].is_array());
+        assert!(payload["cache_key"]["sources"][0]["source_hash"].is_string());
+        assert_eq!(
+            payload["packages"][0]["cache_key"]["lockfile_hash"],
+            payload["cache_key"]["lockfile_hash"]
+        );
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());
