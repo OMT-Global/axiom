@@ -17,8 +17,9 @@ letting large roadmap issues become implicit work queues.
 - `docs/stage1-agent-grade-compiler.md` is the execution contract for the
   AG0-AG5 compiler track.
 - GitHub issues remain the source of record for agent execution work. Broad
-  roadmap issues should either point to a current execution issue, be closed as
-  already shipped, or be deferred until their prerequisite milestone is active.
+  roadmap issues should either point to a current execution issue, be closed
+  only when already shipped, or remain open until their prerequisite milestone
+  is active.
 
 ## Current Execution Bar
 
@@ -32,7 +33,7 @@ scope when it advances one of these active contracts:
   `docs/bootstrap/onboarding.md`.
 
 The following are explicitly outside the current agent-grade bar unless a new
-issue reopens them with scoped acceptance criteria and owner approval:
+issue scopes them with testable acceptance criteria and owner approval:
 
 - Hosted package registry service design or operation.
 - `axiomc publish` and package upload workflows.
@@ -45,9 +46,9 @@ issue reopens them with scoped acceptance criteria and owner approval:
 | Issue | Status | Disposition | Evidence and rationale |
 | --- | --- | --- | --- |
 | [#264](https://github.com/OMT-Global/axiom/issues/264) Roadmap parity and agentic-native lead | Complete with this ledger | Close as completed when this PR lands | The broad roadmap is now represented by `docs/roadmap.md`, this ledger, and the AG0-AG5 execution contract. Future work should use scoped child issues rather than keeping the umbrella issue open as an implicit backlog. |
-| [#263](https://github.com/OMT-Global/axiom/issues/263) Hosted package registry | Deferred outside current bar | Close as not planned for this execution pass | A hosted registry depends on publish, signed packages, trust roots, and service ownership. The current repo has no registry service and the agent-grade bar explicitly excludes registry publishing. |
-| [#245](https://github.com/OMT-Global/axiom/issues/245) `axiomc publish` and package registry | Deferred outside current bar | Close as not planned for this execution pass | `docs/stage1-agent-grade-compiler.md` explicitly says publish and registry publishing are not required for the agent-grade bar. Stage1 currently supports local path dependencies and lockfiles, not package upload. |
-| [#248](https://github.com/OMT-Global/axiom/issues/248) Lockfile integrity and signed packages | Deferred outside current bar | Close as not planned for this execution pass | Stage1 lockfiles are deterministic for local path graphs, but signed packages, SBOMs, and offline verification require a registry and trust model that do not exist in the current execution scope. |
+| [#263](https://github.com/OMT-Global/axiom/issues/263) Hosted package registry | Deferred outside current bar | Keep open until implemented or formally descoped | A hosted registry depends on publish, signed packages, trust roots, and service ownership. The current repo has no registry service and the agent-grade bar explicitly excludes registry publishing. |
+| [#245](https://github.com/OMT-Global/axiom/issues/245) `axiomc publish` and package registry | Deferred outside current bar | Keep open until implemented or formally descoped | `docs/stage1-agent-grade-compiler.md` explicitly says publish and registry publishing are not required for the agent-grade bar. Stage1 currently supports local path dependencies and lockfiles, not package upload. |
+| [#248](https://github.com/OMT-Global/axiom/issues/248) Lockfile integrity and signed packages | Deferred outside current bar | Keep open until implemented or formally descoped | Stage1 lockfiles are deterministic for local path graphs, but signed packages, SBOMs, and offline verification require a registry and trust model that do not exist in the current execution scope. |
 | [#101](https://github.com/OMT-Global/axiom/issues/101) AG5.3 proof workload fixtures | Open, blocked | Keep open | The issue requires CLI, worker, and HTTP service proof workloads. AG4.3 HTTP server support remains open, so the HTTP service fixture cannot honestly close yet. |
 | [#102](https://github.com/OMT-Global/axiom/issues/102) AG5.4 CI closure | Open, blocked | Keep open | CI can only make proof workloads blocking after #101 exists. This remains blocked on AG5.3 and AG4.3. |
 | [#243](https://github.com/OMT-Global/axiom/issues/243) `axiomc bench` | Already shipped | Close as completed | `axiomc bench` is implemented in `stage1/crates/axiomc/src/main.rs`, documented in README and `docs/stage1.md`, and has a checked-in fixture at `stage1/examples/benchmarks`. |
@@ -56,9 +57,9 @@ issue reopens them with scoped acceptance criteria and owner approval:
 
 ## Reopening Rule
 
-Deferred registry, publish, and supply-chain work may be reopened as new scoped
-issues after the agent-grade bar is met or after an explicit owner decision
-creates an ecosystem milestone. A reopen issue must name:
+Deferred registry, publish, and supply-chain work should remain open until the
+agent-grade bar is met or until an explicit owner decision creates an ecosystem
+milestone. A scoped implementation issue must name:
 
 - the prerequisite milestone it depends on;
 - the concrete `axiomc` user workflow it enables;
