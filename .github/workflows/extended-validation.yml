@@ -95,6 +95,22 @@ jobs:
       - name: Scan repository for secret patterns
         run: bash scripts/check-detect-secrets.sh --all-files
 
+  performance-benchmarks:
+    name: Performance Benchmarks
+    runs-on: ['self-hosted', 'synology', 'shell-only', 'public']
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4 pinned 2026-04-19
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable pinned 2026-04-19
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6 pinned 2026-04-19
+        with:
+          go-version: '1.24.2'
+      - name: Run stage1 benchmark gate
+        run: make stage1-bench-gate
+
   extended-validation-gate:
     name: Extended Validation Gate
     runs-on: ['self-hosted', 'synology', 'shell-only', 'public']
@@ -103,6 +119,7 @@ jobs:
       - changes
       - fast-checks
       - validate-secrets
+      - performance-benchmarks
     steps:
       - name: Check extended validation jobs
         env:
@@ -110,6 +127,7 @@ jobs:
             changes=${{ needs.changes.result }}
             fast-checks=${{ needs.fast-checks.result }}
             validate-secrets=${{ needs.validate-secrets.result }}
+            performance-benchmarks=${{ needs.performance-benchmarks.result }}
         run: |
           failed=0
           for entry in $RESULTS; do

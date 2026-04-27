@@ -364,4 +364,4 @@ After AG5 closes, the next compiler track is:
 
 - replace generated-Rust codegen with a direct native backend
 - add `fmt`, `bench`, `doc`, `publish`, and LSP
-- add benchmark gates against simple Go and Rust references
+- keep benchmark gates against simple Go and Rust references green
