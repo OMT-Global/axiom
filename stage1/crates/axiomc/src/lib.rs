@@ -3101,12 +3101,12 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nprint object3(field_string(\"name\", \"agent\"), field_int(\"retries\", 3), field_bool(\"ready\", true))\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "42\nagent\ntrue\n7\n\"agent\"\nnone\n",
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n",
         )
         .expect("write golden");
 
@@ -3116,7 +3116,7 @@ print strlen("hello")
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "42\nagent\ntrue\n7\n\"agent\"\nnone\n"
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3166,6 +3166,108 @@ print strlen("hello")
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
             "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_string_builder_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-string-builder-app");
+        create_project(&project, Some("stdlib-string-builder-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-string-builder-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/string_builder.ax\"\nlet empty: StringBuilder = builder()\nlet greeting: StringBuilder = push_str(empty, \"hello\")\nlet spaced: StringBuilder = push_str(greeting, \" \")\nlet finished: StringBuilder = push_str(spaced, \"stdlib\")\nprint finish(finished)\nlet seeded: StringBuilder = from_string(\"first\")\nlet second: StringBuilder = push_line(seeded, \" line\")\nlet third: StringBuilder = push_str(second, \"second line\")\nprint finish(third)\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "hello stdlib\nfirst line\nsecond line\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "hello stdlib\nfirst line\nsecond line\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_log_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-log-app");
+        create_project(&project, Some("stdlib-log-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-log-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/log.ax\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nprint event(\"info\", \"started\", attrs)\nlet attrs_for_log: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nlet written: int = info_attrs(\"started\", attrs_for_log)\nprint written > 0\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/log.ax\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nprint event(\"info\", \"started\", attrs)\n",
+        )
+        .expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\ntrue\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3585,6 +3687,23 @@ print strlen("hello")
             err.message.contains("unknown stdlib module"),
             "unexpected diagnostic: {err:?}",
         );
+    }
+
+    #[test]
+    fn stage1_project_suggests_similar_stdlib_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-suggestion");
+        create_project(&project, Some("stdlib-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/tmie.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected unknown stdlib module error");
+        assert!(err.message.contains("unknown stdlib module"));
+        assert!(err.message.contains("did you mean \"time.ax\"?"));
+        assert_eq!(err.kind, "import");
     }
 
     #[test]
@@ -4166,6 +4285,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("missing function should fail");
         assert!(error.message.contains("undefined function"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_local_for_undefined_variable() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-variable-suggestion");
+        create_project(&project, Some("missing-variable-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint anwser\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("missing variable should fail");
+        assert!(error.message.contains("undefined variable \"anwser\""));
+        assert!(error.message.contains("did you mean \"answer\"?"));
         assert_eq!(error.kind, "type");
     }
 
@@ -4862,6 +4998,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("missing field should fail");
         assert!(error.message.contains("is missing field"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_struct_field() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-field-suggestion");
+        create_project(&project, Some("struct-field-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct User {\nname: string\ncount: int\n}\n\nlet user: User = User { name: \"agent\", count: 1 }\nprint user.naem\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("unknown field should fail");
+        assert!(error.message.contains("has no field \"naem\""));
+        assert!(error.message.contains("did you mean \"name\"?"));
         assert_eq!(error.kind, "type");
     }
 
@@ -5587,6 +5740,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("match should reject unknown variant");
         assert!(error.message.contains("has no variant"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_match_variant() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("match-variant-suggestion");
+        create_project(&project, Some("match-variant-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Status {\nReady\nFailed\n}\n\nfn label(status: Status): string {\nmatch status {\nReday {\nreturn \"ready\"\n}\nFailed {\nreturn \"failed\"\n}\n}\n}\n\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("match should reject unknown variant");
+        assert!(error.message.contains("has no variant \"Reday\""));
+        assert!(error.message.contains("did you mean \"Ready\"?"));
         assert_eq!(error.kind, "type");
     }
 
