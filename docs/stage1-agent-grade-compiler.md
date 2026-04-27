@@ -263,7 +263,8 @@ Work packages:
     companion denial test because `std.io` has no capability to withhold.
   - `std.json` — **landed** as `std/json.ax` exposing scalar/string JSON
     parsing and serialisation helpers on top of the ungated `json_parse_*` and
-    `json_stringify_*` intrinsics. Covered by `stage1/examples/stdlib_json`
+    `json_stringify_*` intrinsics, plus manual `field_*` / `object*` builders
+    for deterministic object encoding. Covered by `stage1/examples/stdlib_json`
     and two Rust tests (`stage1_project_imports_synthetic_stdlib_json_module`,
     `stage1_project_rejects_stdlib_json_with_wrong_argument_type`).
   - `std.http` — **landed (client only)** as `std/http.ax` exposing
@@ -284,6 +285,17 @@ Work packages:
     and `window`) on top of AG2 generic functions plus existing collection
     primitives. Covered by `stage1/examples/stdlib_collections` and one Rust
     test (`stage1_project_imports_synthetic_stdlib_collections_module`).
+  - `std.string_builder` — **landed** as `std/string_builder.ax` exposing
+    `StringBuilder`, `builder`, `from_string`, `push_str`, `push_line`, and
+    `finish` as a pure owned string accumulator. This is not a growable generic
+    vector or map substitute. Covered by `stage1/examples/stdlib_string_builder`
+    and one Rust test
+    (`stage1_project_imports_synthetic_stdlib_string_builder_module`).
+  - `std.log` — **landed** as `std/log.ax` exposing deterministic JSON-line
+    event formatting, levels, key-value attributes, and ambient stderr logging.
+    It deliberately does not add host log sinks, runtime filtering, or replay
+    buffers. Covered by `stage1/examples/stdlib_log` and one Rust test
+    (`stage1_project_imports_synthetic_stdlib_log_module`).
   - `std.sync` — **landed** as `std/sync.ax` exposing ownership-shaped
     primitives (`Mutex`, `MutexGuard`, `Once`, and `Channel`) implemented in
     Axiom without host-thread capabilities. The stage1 channel is single-slot
