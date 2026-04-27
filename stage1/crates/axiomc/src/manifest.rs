@@ -52,6 +52,18 @@ pub struct TestTarget {
     pub name: String,
     pub entry: String,
     pub stdout: Option<String>,
+    pub kind: TestKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TestKind {
+    #[default]
+    Unit,
+    Table,
+    Property,
+    Snapshot,
+    Benchmark,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -137,6 +149,7 @@ struct RawTestTarget {
     name: Option<String>,
     entry: Option<String>,
     stdout: Option<String>,
+    kind: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -503,9 +516,31 @@ fn normalize_tests(
             name,
             entry,
             stdout: raw_test.stdout,
+            kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
         });
     }
     Ok(tests)
+}
+
+fn normalize_test_kind(
+    value: Option<String>,
+    path: &Path,
+    field_name: &str,
+) -> Result<TestKind, Diagnostic> {
+    match value.as_deref().unwrap_or("unit") {
+        "unit" => Ok(TestKind::Unit),
+        "table" => Ok(TestKind::Table),
+        "property" => Ok(TestKind::Property),
+        "snapshot" => Ok(TestKind::Snapshot),
+        "benchmark" => Ok(TestKind::Benchmark),
+        other => Err(Diagnostic::new(
+            "manifest",
+            format!(
+                "{field_name} must be one of unit, table, property, snapshot, or benchmark; got {other:?}"
+            ),
+        )
+        .with_path(path.display().to_string())),
+    }
 }
 
 fn normalize_optional_relative_path(

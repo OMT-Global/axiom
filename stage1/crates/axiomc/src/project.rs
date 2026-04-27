@@ -4,7 +4,7 @@ use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
-    binary_path, capability_descriptors, entry_path, generated_rust_path, load_manifest,
+    TestKind, binary_path, capability_descriptors, entry_path, generated_rust_path, load_manifest,
     manifest_path, out_dir_path,
 };
 use crate::mir;
@@ -84,6 +84,7 @@ pub enum BuildCacheStatus {
 pub struct TestCaseResult {
     pub package_root: String,
     pub name: String,
+    pub kind: TestKind,
     pub entry: String,
     pub ok: bool,
     pub binary: Option<String>,
@@ -116,6 +117,7 @@ pub struct TestOutput {
     pub passed: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub kinds: BTreeMap<TestKind, usize>,
     pub duration_ms: u64,
 }
 
@@ -140,6 +142,7 @@ pub struct RunOptions {
 pub struct TestOptions {
     pub filter: Option<String>,
     pub package: Option<String>,
+    pub include_benchmarks: bool,
 }
 
 pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
@@ -341,7 +344,12 @@ pub fn run_project_tests_with_options(
             }
             continue;
         }
-        let tests = collect_test_targets(&package_root, &manifest, options.filter.as_deref())?;
+        let tests = collect_test_targets(
+            &package_root,
+            &manifest,
+            options.filter.as_deref(),
+            options.include_benchmarks,
+        )?;
         if tests.is_empty() {
             continue;
         }
@@ -359,6 +367,10 @@ pub fn run_project_tests_with_options(
     }
     let passed = cases.iter().filter(|case| case.ok).count();
     let failed = cases.len().saturating_sub(passed);
+    let mut kinds = BTreeMap::new();
+    for case in &cases {
+        *kinds.entry(case.kind).or_insert(0) += 1;
+    }
     Ok(TestOutput {
         manifest: manifest_path(&project_root).display().to_string(),
         packages,
@@ -366,6 +378,7 @@ pub fn run_project_tests_with_options(
         passed,
         failed,
         skipped: 0,
+        kinds,
         duration_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -374,6 +387,7 @@ fn collect_test_targets(
     project_root: &Path,
     manifest: &Manifest,
     filter: Option<&str>,
+    include_benchmarks: bool,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let mut tests = manifest.tests.clone();
     if let Some(expected_stdout) = load_package_expected_output(project_root)? {
@@ -387,7 +401,7 @@ fn collect_test_targets(
         .iter()
         .map(|test| test.entry.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    for discovered in discover_test_targets(project_root)? {
+    for discovered in discover_test_targets(project_root, include_benchmarks)? {
         if seen_entries.insert(discovered.entry.clone()) {
             tests.push(discovered);
         }
@@ -400,6 +414,7 @@ fn collect_test_targets(
 
 fn discover_test_targets(
     project_root: &Path,
+    include_benchmarks: bool,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let src_root = project_root.join("src");
     if !src_root.exists() {
@@ -411,6 +426,7 @@ fn discover_test_targets(
         project_root,
         &src_root,
         package_expected_output.as_deref(),
+        include_benchmarks,
         &mut tests,
     )?;
     tests.sort_by(|left, right| left.entry.cmp(&right.entry));
@@ -421,6 +437,7 @@ fn collect_discovered_tests(
     project_root: &Path,
     dir: &Path,
     package_expected_output: Option<&str>,
+    include_benchmarks: bool,
     tests: &mut Vec<crate::manifest::TestTarget>,
 ) -> Result<(), Diagnostic> {
     let entries = fs::read_dir(dir).map_err(|err| {
@@ -434,7 +451,13 @@ fn collect_discovered_tests(
         })?;
         let path = entry.path();
         if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            collect_discovered_tests(project_root, &path, package_expected_output, tests)?;
+            collect_discovered_tests(
+                project_root,
+                &path,
+                package_expected_output,
+                include_benchmarks,
+                tests,
+            )?;
             continue;
         }
         if path.extension().and_then(|value| value.to_str()) != Some("ax") {
@@ -444,9 +467,11 @@ fn collect_discovered_tests(
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("");
-        if !stem.ends_with("_test") {
+        let kind = discovered_test_kind(stem, include_benchmarks);
+        if kind.is_none() {
             continue;
         }
+        let kind = kind.expect("test kind checked");
         let relative = normalize_path(path.strip_prefix(project_root).unwrap_or(&path));
         let stdout_path = path.with_extension("stdout");
         let stdout = if stdout_path.exists() {
@@ -464,9 +489,29 @@ fn collect_discovered_tests(
             name: relative.with_extension("").display().to_string(),
             entry: relative.display().to_string(),
             stdout,
+            kind,
         });
     }
     Ok(())
+}
+
+fn discovered_test_kind(stem: &str, include_benchmarks: bool) -> Option<TestKind> {
+    if include_benchmarks && stem.ends_with("_bench") {
+        return Some(TestKind::Benchmark);
+    }
+    if stem.ends_with("_property") || stem.ends_with("_property_test") {
+        return Some(TestKind::Property);
+    }
+    if stem.ends_with("_table_test") {
+        return Some(TestKind::Table);
+    }
+    if stem.ends_with("_snapshot_test") || stem.ends_with("_golden_test") {
+        return Some(TestKind::Snapshot);
+    }
+    if stem.ends_with("_test") {
+        return Some(TestKind::Unit);
+    }
+    None
 }
 
 fn load_package_expected_output(project_root: &Path) -> Result<Option<String>, Diagnostic> {
@@ -1196,6 +1241,7 @@ fn run_test_case(
         return TestCaseResult {
             package_root: project_root.display().to_string(),
             name: test.name.clone(),
+            kind: test.kind,
             entry: test.entry.clone(),
             ok: false,
             binary: Some(binary.display().to_string()),
@@ -1261,6 +1307,7 @@ fn run_test_case(
             TestCaseResult {
                 package_root: project_root.display().to_string(),
                 name: test.name.clone(),
+                kind: test.kind,
                 entry: test.entry.clone(),
                 ok: error.is_none(),
                 binary: Some(binary.display().to_string()),
@@ -1277,6 +1324,7 @@ fn run_test_case(
         Err(err) => TestCaseResult {
             package_root: project_root.display().to_string(),
             name: test.name.clone(),
+            kind: test.kind,
             entry: test.entry.clone(),
             ok: false,
             binary: Some(binary.display().to_string()),
@@ -1311,6 +1359,7 @@ fn run_compile_fail_case(
             return TestCaseResult {
                 package_root: project_root.display().to_string(),
                 name: case_name.to_string(),
+                kind: TestKind::Unit,
                 entry: manifest.build.entry.clone(),
                 ok: false,
                 binary: None,
@@ -1331,6 +1380,7 @@ fn run_compile_fail_case(
             return TestCaseResult {
                 package_root: project_root.display().to_string(),
                 name: case_name.to_string(),
+                kind: TestKind::Unit,
                 entry: manifest.build.entry.clone(),
                 ok: false,
                 binary: None,
@@ -1356,6 +1406,7 @@ fn run_compile_fail_case(
     TestCaseResult {
         package_root: project_root.display().to_string(),
         name: case_name.to_string(),
+        kind: TestKind::Unit,
         entry: manifest.build.entry.clone(),
         ok: mismatch.is_none(),
         binary: None,
@@ -1490,6 +1541,7 @@ fn failed_test_case_result(
     TestCaseResult {
         package_root: project_root.display().to_string(),
         name: test.name.clone(),
+        kind: test.kind,
         entry: test.entry.clone(),
         ok: false,
         binary,

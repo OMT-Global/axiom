@@ -17,7 +17,8 @@ mod tests {
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{
-        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, render_manifest,
+        CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
+        render_manifest,
     };
     use crate::mir;
     use crate::new_project::create_project;
@@ -1825,6 +1826,7 @@ print fail()
             &TestOptions {
                 filter: None,
                 package: Some(String::from("workspace-app")),
+                include_benchmarks: false,
             },
         )
         .expect("test selected workspace package");
@@ -3477,8 +3479,27 @@ print strlen("hello")
                 name: String::from("math-smoke"),
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
+                kind: TestKind::Unit,
             }]
         );
+    }
+
+    #[test]
+    fn manifest_parses_richer_test_kinds() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("typed-tests");
+        create_project(&project, Some("typed-tests-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"json-table\"\nentry = \"src/main_test.ax\"\nkind = \"table\"\nstdout = \"0\\n\"\n",
+                render_manifest("typed-tests-app")
+            ),
+        )
+        .expect("write manifest");
+
+        let manifest = load_manifest(&project).expect("load manifest");
+        assert_eq!(manifest.tests[0].kind, TestKind::Table);
     }
 
     #[test]
@@ -3682,6 +3703,66 @@ print strlen("hello")
             .expect("math test");
         assert_eq!(math_case.stdout, "42\n");
         assert!(math_case.ok);
+    }
+
+    #[test]
+    fn run_project_tests_classifies_richer_fixture_kinds() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-rich-discovery");
+        create_project(&project, Some("runner-rich-discovery-app")).expect("create project");
+        fs::write(
+            project.join("src/cases_table_test.ax"),
+            "let ok: int = assert_eq(40 + 2, 42)\nprint ok\n",
+        )
+        .expect("write table test");
+        fs::write(project.join("src/cases_table_test.stdout"), "0\n").expect("write table golden");
+        fs::write(
+            project.join("src/roundtrip_property.ax"),
+            "let ok: int = assert_true(42 == 42)\nprint ok\n",
+        )
+        .expect("write property test");
+        fs::write(project.join("src/roundtrip_property.stdout"), "0\n")
+            .expect("write property golden");
+        fs::write(
+            project.join("src/output_snapshot_test.ax"),
+            "print \"snapshot\"\n",
+        )
+        .expect("write snapshot test");
+        fs::write(
+            project.join("src/output_snapshot_test.stdout"),
+            "snapshot\n",
+        )
+        .expect("write snapshot golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.kinds.get(&TestKind::Table), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Property), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Snapshot), Some(&1));
+    }
+
+    #[test]
+    fn run_project_tests_can_include_benchmark_smoke_fixtures() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-benchmark-discovery");
+        create_project(&project, Some("runner-benchmark-discovery-app")).expect("create project");
+        fs::write(project.join("src/compute_bench.ax"), "print \"bench\"\n")
+            .expect("write benchmark");
+
+        let default_output = run_project_tests(&project).expect("run default tests");
+        assert_eq!(default_output.kinds.get(&TestKind::Benchmark), None);
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: None,
+                package: None,
+                include_benchmarks: true,
+            },
+        )
+        .expect("run benchmark smoke tests");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.kinds.get(&TestKind::Benchmark), Some(&1));
     }
 
     #[test]
@@ -5903,6 +5984,7 @@ print strlen("hello")
             &TestOptions {
                 filter: Some(String::from("math")),
                 package: None,
+                include_benchmarks: false,
             },
         )
         .expect("run filtered tests");
@@ -5971,6 +6053,7 @@ print strlen("hello")
             &TestOptions {
                 filter: Some(String::from("main")),
                 package: None,
+                include_benchmarks: false,
             },
         )
         .expect("test project");
@@ -5983,6 +6066,8 @@ print strlen("hello")
         assert_eq!(payload["command"], "test");
         assert_eq!(payload["filter"], "main");
         assert_eq!(payload["skipped"], 0);
+        assert_eq!(payload["cases"][0]["kind"], "unit");
+        assert_eq!(payload["kinds"]["unit"], 1);
         assert!(payload["duration_ms"].is_u64());
     }
 

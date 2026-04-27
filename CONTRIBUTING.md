@@ -94,6 +94,13 @@ Benchmark entrypoints use the `*_bench.ax` suffix and run through `axiomc bench`
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 ```
 
+Richer package-test fixtures use naming conventions the test runner reports in
+JSON: `*_table_test.ax` for table-driven cases, `*_property.ax` or
+`*_property_test.ax` for bounded deterministic property-style samples, and
+`*_snapshot_test.ax` / `*_golden_test.ax` with sibling `*.stdout` files for
+snapshot/golden checks. Use `axiomc test --include-benchmarks` when a package's
+`*_bench.ax` entrypoints should also compile and execute once as a smoke gate.
+
 ## Bootstrap discipline
 
 Treat the repo as a staged bootstrap:
