@@ -2443,8 +2443,11 @@ print strlen("hello")
             "import \"std/time.ax\"\nlet start: Instant = now()\nlet pause: Duration = duration_ms(0)\nprint start.ms > 0\nprint now_ms() > 0\nprint sleep(pause) == 0\nlet elapsed: int = elapsed_ms(start)\nprint elapsed == elapsed\n",
         )
         .expect("write test");
-        fs::write(project.join("src/main_test.stdout"), "true\ntrue\ntrue\ntrue\n")
-            .expect("write golden");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\ntrue\ntrue\n",
+        )
+        .expect("write golden");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
@@ -2971,12 +2974,12 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nprint object3(field_string(\"name\", \"agent\"), field_int(\"retries\", 3), field_bool(\"ready\", true))\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "42\nagent\ntrue\n7\n\"agent\"\nnone\n",
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n",
         )
         .expect("write golden");
 
@@ -2986,7 +2989,7 @@ print strlen("hello")
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "42\nagent\ntrue\n7\n\"agent\"\nnone\n"
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3036,6 +3039,108 @@ print strlen("hello")
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
             "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_string_builder_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-string-builder-app");
+        create_project(&project, Some("stdlib-string-builder-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-string-builder-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/string_builder.ax\"\nlet empty: StringBuilder = builder()\nlet greeting: StringBuilder = push_str(empty, \"hello\")\nlet spaced: StringBuilder = push_str(greeting, \" \")\nlet finished: StringBuilder = push_str(spaced, \"stdlib\")\nprint finish(finished)\nlet seeded: StringBuilder = from_string(\"first\")\nlet second: StringBuilder = push_line(seeded, \" line\")\nlet third: StringBuilder = push_str(second, \"second line\")\nprint finish(third)\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "hello stdlib\nfirst line\nsecond line\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "hello stdlib\nfirst line\nsecond line\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_log_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-log-app");
+        create_project(&project, Some("stdlib-log-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-log-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/log.ax\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nprint event(\"info\", \"started\", attrs)\nlet attrs_for_log: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nlet written: int = info_attrs(\"started\", attrs_for_log)\nprint written > 0\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/log.ax\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nprint event(\"info\", \"started\", attrs)\n",
+        )
+        .expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\ntrue\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
