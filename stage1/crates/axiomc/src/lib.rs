@@ -1,4 +1,5 @@
 pub mod codegen;
+pub mod dap;
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -13,6 +14,7 @@ pub mod syntax;
 #[cfg(test)]
 mod tests {
     use crate::codegen::render_rust;
+    use crate::dap::{DebugAdapter, handle_request, serve_dap};
     use crate::hir;
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
@@ -5813,6 +5815,108 @@ print strlen("hello")
         assert_eq!(cached_debug.cache_hits, 1);
         assert_eq!(cached_debug.cache_misses, 0);
         assert!(debug_map.exists());
+    }
+
+    #[test]
+    fn dap_initialize_advertises_bounded_stage1_capabilities() {
+        let mut adapter = DebugAdapter::new();
+        let responses = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 1,
+                "type": "request",
+                "command": "initialize",
+                "arguments": {"adapterID": "axiom"}
+            }),
+        );
+
+        assert_eq!(responses.len(), 1);
+        let response = &responses[0];
+        assert_eq!(response["type"], "response");
+        assert_eq!(response["success"], true);
+        assert_eq!(response["command"], "initialize");
+        assert_eq!(response["body"]["schema_version"], "axiom.stage1.dap.v1");
+        assert_eq!(response["body"]["supportsConfigurationDoneRequest"], true);
+        assert_eq!(response["body"]["supportsLoadedSourcesRequest"], true);
+        assert_eq!(response["body"]["supportsSetVariable"], false);
+    }
+
+    #[test]
+    fn dap_stdio_protocol_frames_initialize_response() {
+        let request = serde_json::json!({
+            "seq": 1,
+            "type": "request",
+            "command": "initialize",
+            "arguments": {"adapterID": "axiom"}
+        });
+        let body = serde_json::to_vec(&request).expect("serialize request");
+        let framed = format!("Content-Length: {}\r\n\r\n", body.len());
+        let mut input = framed.into_bytes();
+        input.extend(body);
+        let mut output = Vec::new();
+
+        serve_dap(input.as_slice(), &mut output).expect("serve one DAP request");
+
+        let text = String::from_utf8(output).expect("DAP output utf8");
+        assert!(text.starts_with("Content-Length: "));
+        assert!(text.contains("\"command\":\"initialize\""));
+        assert!(text.contains("\"schema_version\":\"axiom.stage1.dap.v1\""));
+    }
+
+    #[test]
+    fn dap_launch_builds_debug_map_and_verifies_breakpoints() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("dap-debug");
+        create_project(&project, Some("dap-debug-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint answer\n",
+        )
+        .expect("write source");
+        let source = project
+            .join("src/main.ax")
+            .canonicalize()
+            .expect("canonical source path")
+            .display()
+            .to_string();
+
+        let mut adapter = DebugAdapter::new();
+        let launch = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 2,
+                "type": "request",
+                "command": "launch",
+                "arguments": {"program": project}
+            }),
+        );
+
+        assert_eq!(launch.len(), 2);
+        assert_eq!(launch[0]["success"], true);
+        assert_eq!(launch[0]["body"]["statementCount"], 2);
+        assert!(Path::new(launch[0]["body"]["debugMap"].as_str().unwrap()).exists());
+        assert_eq!(launch[1]["type"], "event");
+        assert_eq!(launch[1]["event"], "initialized");
+
+        let breakpoints = handle_request(
+            &mut adapter,
+            serde_json::json!({
+                "seq": 3,
+                "type": "request",
+                "command": "setBreakpoints",
+                "arguments": {
+                    "source": {"path": source},
+                    "breakpoints": [{"line": 1}, {"line": 99}]
+                }
+            }),
+        );
+
+        assert_eq!(breakpoints.len(), 1);
+        let body = &breakpoints[0]["body"]["breakpoints"];
+        assert_eq!(body[0]["verified"], true);
+        assert_eq!(body[0]["line"], 1);
+        assert_eq!(body[1]["verified"], false);
+        assert_eq!(body[1]["line"], 99);
     }
 
     #[test]

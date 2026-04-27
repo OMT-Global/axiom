@@ -1,3 +1,4 @@
+use axiomc::dap::serve_dap;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::new_project::create_project;
@@ -100,6 +101,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Serve a bounded Debug Adapter Protocol endpoint over stdin/stdout.
+    Dap,
 }
 
 fn main() {
@@ -284,6 +287,10 @@ fn main() {
         Command::Repl { json } => match run_repl(io::stdin().lock(), io::stdout(), json) {
             Ok(()) => 0,
             Err(error) => print_error("repl", error, json),
+        },
+        Command::Dap => match serve_dap(io::stdin().lock(), io::stdout()) {
+            Ok(()) => 0,
+            Err(error) => print_error("dap", error, false),
         },
     };
     std::process::exit(code);
