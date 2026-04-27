@@ -4052,6 +4052,41 @@ fn lower_expr(
     lower_expr_with_expected(expr, None, env, ctx)
 }
 
+fn lower_string_intrinsic_args(
+    name: &str,
+    args: &[syntax::Expr],
+    expected_count: usize,
+    line: usize,
+    column: usize,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Vec<Expr>, Diagnostic> {
+    if args.len() != expected_count {
+        return Err(Diagnostic::new(
+            "type",
+            format!(
+                "{name} expects {expected_count} argument(s), got {}",
+                args.len()
+            ),
+        )
+        .with_span(line, column));
+    }
+    let mut lowered_args = Vec::with_capacity(args.len());
+    for arg in args {
+        let lowered = lower_expr_with_expected(arg, Some(&Type::String), env, ctx)?;
+        if lowered.ty() != &Type::String {
+            return Err(Diagnostic::new(
+                "type",
+                format!("{name} expects a string argument, got {}", lowered.ty()),
+            )
+            .with_span(arg.line(), arg.column()));
+        }
+        move_lowered_value(&lowered, env)?;
+        lowered_args.push(lowered);
+    }
+    Ok(lowered_args)
+}
+
 fn lower_expr_with_expected(
     expr: &syntax::Expr,
     expected: Option<&Type>,
@@ -4443,6 +4478,33 @@ fn lower_expr_with_expected(
                 return Ok(Expr::Call {
                     name: name.clone(),
                     args: vec![lowered],
+                    ty: Type::String,
+                });
+            }
+            if name == "regex_is_match" {
+                let lowered_args =
+                    lower_string_intrinsic_args(name, args, 2, *line, *column, env, ctx)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
+                    ty: Type::Bool,
+                });
+            }
+            if name == "regex_find" {
+                let lowered_args =
+                    lower_string_intrinsic_args(name, args, 2, *line, *column, env, ctx)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if name == "regex_replace_all" {
+                let lowered_args =
+                    lower_string_intrinsic_args(name, args, 3, *line, *column, env, ctx)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
                     ty: Type::String,
                 });
             }

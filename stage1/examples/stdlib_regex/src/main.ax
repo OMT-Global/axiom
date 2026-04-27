@@ -1,0 +1,18 @@
+import "std/regex.ax"
+
+print is_match("^[a-z]+[0-9]+$", "agent42")
+print is_match("^[a-z]+[0-9]+$", "agent")
+
+match find("[0-9]+", "agent42-build7") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+
+print replace_all("[0-9]+", "agent42-build7", "#")
+print is_match("colou?r", "color")
+print is_match("colou?r", "colour")
+print is_match("a.*z", "abcz")

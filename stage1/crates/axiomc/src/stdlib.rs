@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides twelve stdlib modules. Six are thin wrappers over
+//! Today this provides thirteen stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -34,7 +34,7 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth, ninth, tenth, eleventh, and twelfth modules are stdlib surfaces not tied to a
+//! The eighth, ninth, tenth, eleventh, twelfth, and thirteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -48,6 +48,8 @@
 //!   nonblocking channels.
 //! * `std/async.ax` — deterministic task, join, channel, timeout,
 //!   cancellation, and select wrappers over the stage1 async runtime values.
+//! * `std/regex.ax` — `is_match`, `find`, and `replace_all` backed by a
+//!   bounded generated-runtime regex floor.
 
 use std::path::{Path, PathBuf};
 
@@ -155,6 +157,12 @@ pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_sel
     (
         "http.ax",
         "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
+    ),
+    (
+        "regex.ax",
+        "pub fn is_match(pattern: string, text: string): bool {\nreturn regex_is_match(pattern, text)\n}\n\
+pub fn find(pattern: string, text: string): Option<string> {\nreturn regex_find(pattern, text)\n}\n\
+pub fn replace_all(pattern: string, text: string, replacement: string): string {\nreturn regex_replace_all(pattern, text, replacement)\n}\n",
     ),
 ];
 

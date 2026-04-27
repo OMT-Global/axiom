@@ -8,6 +8,273 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
+const AXIOM_REGEX_RUNTIME: &str = r#"
+#[derive(Clone)]
+enum AxiomRegexAtom {
+    Literal(char),
+    Any,
+    Class(Vec<(char, char)>, bool),
+}
+
+#[derive(Clone, Copy)]
+enum AxiomRegexRepeat {
+    One,
+    ZeroOrOne,
+    ZeroOrMore,
+    OneOrMore,
+}
+
+#[derive(Clone)]
+struct AxiomRegexToken {
+    atom: AxiomRegexAtom,
+    repeat: AxiomRegexRepeat,
+}
+
+struct AxiomRegexProgram {
+    tokens: Vec<AxiomRegexToken>,
+    anchor_start: bool,
+    anchor_end: bool,
+}
+
+fn axiom_regex_escape_char(ch: char) -> char {
+    match ch {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        other => other,
+    }
+}
+
+fn axiom_regex_compile(pattern: &str) -> Option<AxiomRegexProgram> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut index = 0usize;
+    let mut anchor_start = false;
+    let mut anchor_end = false;
+    let mut tokens = Vec::new();
+    if chars.first() == Some(&'^') {
+        anchor_start = true;
+        index += 1;
+    }
+    while index < chars.len() {
+        if chars[index] == '$' && index + 1 == chars.len() {
+            anchor_end = true;
+            break;
+        }
+        let atom = match chars[index] {
+            '.' => {
+                index += 1;
+                AxiomRegexAtom::Any
+            }
+            '\\' => {
+                index += 1;
+                let ch = *chars.get(index)?;
+                index += 1;
+                AxiomRegexAtom::Literal(axiom_regex_escape_char(ch))
+            }
+            '[' => {
+                index += 1;
+                let mut negated = false;
+                if chars.get(index) == Some(&'^') {
+                    negated = true;
+                    index += 1;
+                }
+                let mut ranges = Vec::new();
+                let mut closed = false;
+                while index < chars.len() {
+                    if chars[index] == ']' {
+                        closed = true;
+                        index += 1;
+                        break;
+                    }
+                    let start = if chars[index] == '\\' {
+                        index += 1;
+                        let ch = *chars.get(index)?;
+                        index += 1;
+                        axiom_regex_escape_char(ch)
+                    } else {
+                        let ch = chars[index];
+                        index += 1;
+                        ch
+                    };
+                    if chars.get(index) == Some(&'-') && chars.get(index + 1).is_some() && chars[index + 1] != ']' {
+                        index += 1;
+                        let end = if chars[index] == '\\' {
+                            index += 1;
+                            let ch = *chars.get(index)?;
+                            index += 1;
+                            axiom_regex_escape_char(ch)
+                        } else {
+                            let ch = chars[index];
+                            index += 1;
+                            ch
+                        };
+                        if start > end {
+                            return None;
+                        }
+                        ranges.push((start, end));
+                    } else {
+                        ranges.push((start, start));
+                    }
+                }
+                if !closed || ranges.is_empty() {
+                    return None;
+                }
+                AxiomRegexAtom::Class(ranges, negated)
+            }
+            '*' | '+' | '?' => return None,
+            ch => {
+                index += 1;
+                AxiomRegexAtom::Literal(ch)
+            }
+        };
+        let repeat = match chars.get(index) {
+            Some('*') => {
+                index += 1;
+                AxiomRegexRepeat::ZeroOrMore
+            }
+            Some('+') => {
+                index += 1;
+                AxiomRegexRepeat::OneOrMore
+            }
+            Some('?') => {
+                index += 1;
+                AxiomRegexRepeat::ZeroOrOne
+            }
+            _ => AxiomRegexRepeat::One,
+        };
+        tokens.push(AxiomRegexToken { atom, repeat });
+    }
+    Some(AxiomRegexProgram { tokens, anchor_start, anchor_end })
+}
+
+fn axiom_regex_atom_matches(atom: &AxiomRegexAtom, ch: char) -> bool {
+    match atom {
+        AxiomRegexAtom::Literal(expected) => *expected == ch,
+        AxiomRegexAtom::Any => true,
+        AxiomRegexAtom::Class(ranges, negated) => {
+            let contains = ranges.iter().any(|(start, end)| *start <= ch && ch <= *end);
+            if *negated { !contains } else { contains }
+        }
+    }
+}
+
+fn axiom_regex_push_position(positions: &mut Vec<usize>, position: usize) {
+    if !positions.contains(&position) {
+        positions.push(position);
+    }
+}
+
+fn axiom_regex_apply_token(token: &AxiomRegexToken, chars: &[char], positions: &[usize]) -> Vec<usize> {
+    let mut next = Vec::new();
+    for &position in positions {
+        match token.repeat {
+            AxiomRegexRepeat::One => {
+                if position < chars.len() && axiom_regex_atom_matches(&token.atom, chars[position]) {
+                    axiom_regex_push_position(&mut next, position + 1);
+                }
+            }
+            AxiomRegexRepeat::ZeroOrOne => {
+                axiom_regex_push_position(&mut next, position);
+                if position < chars.len() && axiom_regex_atom_matches(&token.atom, chars[position]) {
+                    axiom_regex_push_position(&mut next, position + 1);
+                }
+            }
+            AxiomRegexRepeat::ZeroOrMore | AxiomRegexRepeat::OneOrMore => {
+                let mut current = position;
+                if matches!(token.repeat, AxiomRegexRepeat::ZeroOrMore) {
+                    axiom_regex_push_position(&mut next, current);
+                }
+                while current < chars.len() && axiom_regex_atom_matches(&token.atom, chars[current]) {
+                    current += 1;
+                    axiom_regex_push_position(&mut next, current);
+                }
+            }
+        }
+    }
+    next.sort_unstable();
+    next
+}
+
+fn axiom_regex_match_from(program: &AxiomRegexProgram, chars: &[char], start: usize) -> Option<usize> {
+    let mut positions = vec![start];
+    for token in &program.tokens {
+        positions = axiom_regex_apply_token(token, chars, &positions);
+        if positions.is_empty() {
+            return None;
+        }
+    }
+    if program.anchor_end {
+        positions.into_iter().find(|position| *position == chars.len())
+    } else {
+        positions.into_iter().last()
+    }
+}
+
+fn axiom_regex_find_span(pattern: &str, text: &str, min_start: usize) -> Option<(usize, usize)> {
+    let program = axiom_regex_compile(pattern)?;
+    let chars: Vec<char> = text.chars().collect();
+    if program.anchor_start {
+        if min_start > 0 {
+            return None;
+        }
+        return axiom_regex_match_from(&program, &chars, 0).map(|end| (0, end));
+    }
+    for start in min_start..=chars.len() {
+        if let Some(end) = axiom_regex_match_from(&program, &chars, start) {
+            return Some((start, end));
+        }
+    }
+    None
+}
+
+fn axiom_regex_byte_offsets(text: &str) -> Vec<usize> {
+    let mut offsets: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+    offsets.push(text.len());
+    offsets
+}
+
+fn axiom_regex_is_match(pattern: String, text: String) -> bool {
+    axiom_regex_find_span(&pattern, &text, 0).is_some()
+}
+
+fn axiom_regex_find(pattern: String, text: String) -> Option<String> {
+    let offsets = axiom_regex_byte_offsets(&text);
+    let (start, end) = axiom_regex_find_span(&pattern, &text, 0)?;
+    Some(text[offsets[start]..offsets[end]].to_string())
+}
+
+fn axiom_regex_replace_all(pattern: String, text: String, replacement: String) -> String {
+    let offsets = axiom_regex_byte_offsets(&text);
+    let char_count = offsets.len().saturating_sub(1);
+    let mut out = String::new();
+    let mut search_start = 0usize;
+    let mut copied_until = 0usize;
+    while search_start <= char_count {
+        let Some((start, end)) = axiom_regex_find_span(&pattern, &text, search_start) else {
+            break;
+        };
+        out.push_str(&text[offsets[copied_until]..offsets[start]]);
+        out.push_str(&replacement);
+        if end == start {
+            if end >= char_count {
+                copied_until = end;
+                search_start = char_count + 1;
+            } else {
+                out.push_str(&text[offsets[end]..offsets[end + 1]]);
+                copied_until = end + 1;
+                search_start = end + 1;
+            }
+        } else {
+            copied_until = end;
+            search_start = end;
+        }
+    }
+    out.push_str(&text[offsets[copied_until]..]);
+    out
+}
+
+"#;
+
 pub fn render_rust(program: &Program) -> String {
     render_rust_with_debug(program, false)
 }
@@ -40,6 +307,9 @@ pub fn render_rust_for_package_with_capabilities(
 ) -> String {
     let type_context = TypeContext::new(program);
     let uses_http_get = program_uses_call(program, "http_get");
+    let uses_regex = program_uses_call(program, "regex_is_match")
+        || program_uses_call(program, "regex_find")
+        || program_uses_call(program, "regex_replace_all");
     let uses_ffi = program.functions.iter().any(|function| function.is_extern);
     let uses_ffi_cstring = program
         .functions
@@ -337,6 +607,9 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("fn axiom_json_stringify_string(value: String) -> String {\n");
     out.push_str("    axiom_json_escape_string(&value)\n");
     out.push_str("}\n\n");
+    if uses_regex {
+        out.push_str(AXIOM_REGEX_RUNTIME);
+    }
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
@@ -1793,6 +2066,28 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "json_stringify_string" => {
             format!("axiom_json_stringify_string({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "regex_is_match" => {
+            format!(
+                "axiom_regex_is_match({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "regex_find" => {
+            format!(
+                "axiom_regex_find({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "regex_replace_all" => {
+            format!(
+                "axiom_regex_replace_all({}, {}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2])
+            )
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
