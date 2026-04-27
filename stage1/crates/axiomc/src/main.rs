@@ -6,6 +6,7 @@ use axiomc::project::{
     check_project_with_options, project_capabilities, run_project_tests_with_options,
     run_project_with_options,
 };
+use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::fs;
@@ -615,8 +616,14 @@ fn run_repl<R: BufRead, W: Write>(
             continue;
         }
         if line == ":check" {
-            writeln!(output, "ok: {} line(s)", program.lines().count())
-                .map_err(|err| Diagnostic::new("repl", format!("failed to write output: {err}")))?;
+            match validate_repl_program(&program) {
+                Ok(items) => writeln!(output, "ok: {items} item(s)").map_err(|err| {
+                    Diagnostic::new("repl", format!("failed to write output: {err}"))
+                })?,
+                Err(error) => writeln!(output, "error: {error}").map_err(|err| {
+                    Diagnostic::new("repl", format!("failed to write output: {err}"))
+                })?,
+            }
             continue;
         }
         program.push_str(line);
@@ -625,6 +632,17 @@ fn run_repl<R: BufRead, W: Write>(
             .map_err(|err| Diagnostic::new("repl", format!("failed to write output: {err}")))?;
     }
     Ok(())
+}
+
+fn validate_repl_program(source: &str) -> Result<usize, Diagnostic> {
+    let program = parse_program(source, Path::new("<repl>"))?;
+    Ok(program.imports.len()
+        + program.consts.len()
+        + program.type_aliases.len()
+        + program.structs.len()
+        + program.enums.len()
+        + program.functions.len()
+        + program.stmts.len())
 }
 
 fn axiom_files(path: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
@@ -785,6 +803,19 @@ mod tests {
 
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("accepted: let answer: int = 42"));
-        assert!(output.contains("ok: 1 line(s)"));
+        assert!(output.contains("ok: 1 item(s)"));
+    }
+
+    #[test]
+    fn repl_check_reports_parse_errors() {
+        let input = b"let answer: = 42\n:check\n:quit\n";
+        let mut output = Vec::new();
+
+        run_repl(&input[..], &mut output, false).expect("run repl");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("accepted: let answer: = 42"));
+        assert!(output.contains("error:"));
+        assert!(!output.contains("ok:"));
     }
 }
