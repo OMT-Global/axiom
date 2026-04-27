@@ -25,7 +25,9 @@ for section in \
   fi
 done
 
-issue_link_regex='(^|[[:space:]-])((close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+|no issue is linked|no linked issue|without a linked issue|no governing issue)'
+issue_ref_regex='([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+'
+issue_url_regex='https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[0-9]+'
+issue_link_regex="(^|[[:space:]-])((close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+(${issue_ref_regex}|${issue_url_regex})|${issue_ref_regex}|${issue_url_regex}|no issue is linked|no linked issue|without a linked issue|no governing issue)"
 validation_regex='(^|[[:space:]-])(\[[xX]\]|not run|not applicable|n/a)'
 
 if (( has_structured_sections )); then
@@ -35,7 +37,7 @@ if (( has_structured_sections )); then
   require_line "## Bootstrap Governance"
   require_line "## Notes"
 
-  if grep -Eiq 'Closes #[[:space:]]*$|#<issue-number>|what changed|why it changed|notable tradeoffs|migration or rollout notes|follow-up work if any' <<<"$pr_body"; then
+  if grep -Eiq 'Closes[[:space:]]+(owner/repo#<issue-number>|#[[:space:]]*$|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[[:space:]]*$)|#<issue-number>|what changed|why it changed|notable tradeoffs|migration or rollout notes|follow-up work if any' <<<"$pr_body"; then
     echo "PR body still contains template placeholder text."
     failed=1
   fi
@@ -52,7 +54,7 @@ if (( has_structured_sections )); then
 else
   echo "PR body does not use the structured template yet; applying legacy fallback validation."
 
-  if grep -Eiq 'Closes #[[:space:]]*$|#<issue-number>' <<<"$pr_body"; then
+  if grep -Eiq 'Closes[[:space:]]+(owner/repo#<issue-number>|#[[:space:]]*$|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[[:space:]]*$)|#<issue-number>' <<<"$pr_body"; then
     echo "PR body still contains template placeholder text."
     failed=1
   fi
@@ -62,7 +64,7 @@ else
     failed=1
   fi
 
-  prose_lines=$(printf '%s\n' "$pr_body" | awk 'BEGIN { count = 0 } { lower = tolower($0) } !match(lower, /^[[:space:]]*$/) && !match(lower, /^[[:space:]]*(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+[[:space:]]*$/) { count++ } END { print count }')
+  prose_lines=$(printf '%s\n' "$pr_body" | awk 'BEGIN { count = 0 } { lower = tolower($0) } !match(lower, /^[[:space:]]*$/) && !match(lower, /^[[:space:]]*(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+(([[:alnum:]_.-]+\/[[:alnum:]_.-]+)?#[0-9]+|https:\/\/github\.com\/[[:alnum:]_.-]+\/[[:alnum:]_.-]+\/issues\/[0-9]+)[[:space:]]*$/) { count++ } END { print count }')
   if (( prose_lines == 0 )); then
     echo "Legacy PR body must include a short prose summary in addition to the issue link."
     failed=1
