@@ -1,0 +1,18 @@
+import "std/async.ax"
+
+async fn process(job: string): string {
+return "processed " + job
+}
+
+let queue: AsyncChannel<string> = channel<string>()
+let queued: AsyncChannel<string> = await send<string>(queue, "invoice")
+let job: Option<string> = await recv<string>(queued)
+match job {
+Some(name) {
+let handle: JoinHandle<string> = spawn<string>(process(name))
+print await join<string>(handle)
+}
+None {
+print "idle"
+}
+}
