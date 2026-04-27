@@ -128,6 +128,44 @@ BODY
 BODY
 )
       ;;
+    structured_issue_url)
+      body=$(cat <<'BODY'
+## Summary
+- Tighten PR validation.
+
+## Governing Issue
+- Closes https://github.com/OMT-Global/axiom/issues/262
+
+## Validation
+- [x] bash scripts/ci/test-validate-pr-description.sh
+
+## Bootstrap Governance
+- No bootstrap changes.
+
+## Notes
+- None.
+BODY
+)
+      ;;
+    structured_no_link_reason)
+      body=$(cat <<'BODY'
+## Summary
+- Tighten PR validation.
+
+## Governing Issue
+- No governing issue for this maintenance-only CI repair.
+
+## Validation
+- [x] bash scripts/ci/test-validate-pr-description.sh
+
+## Bootstrap Governance
+- No bootstrap changes.
+
+## Notes
+- None.
+BODY
+)
+      ;;
     legacy_qualified_issue_valid)
       body=$(cat <<'BODY'
 Closes OMT-Global/axiom#262
@@ -180,6 +218,8 @@ run_case structured_valid success
 run_case structured_missing_validation failure "PR body must include validation evidence, a checked validation item, or a reason validation was not run."
 run_case structured_placeholder_issue failure "PR body still contains template placeholder text."
 run_case structured_qualified_issue success
+run_case structured_issue_url success
+run_case structured_no_link_reason success
 run_case legacy_valid success
 run_case legacy_qualified_issue_valid success
 run_case legacy_issue_url_valid success
