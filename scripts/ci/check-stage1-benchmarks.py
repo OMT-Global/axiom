@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 ROUNDS = 5
@@ -17,10 +18,24 @@ COLD_BUILD_LIMIT_MULTIPLIER = 4.0
 WARM_BUILD_LIMIT_MULTIPLIER = 2.0
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HELLO_PROJECT = REPO_ROOT / "stage1/examples/hello"
 AXIOMC_MANIFEST = REPO_ROOT / "stage1/Cargo.toml"
 AXIOMC_BIN = REPO_ROOT / "stage1/target/debug/axiomc"
-REF_DIR = REPO_ROOT / "stage1/benchmarks/reference/hello"
+REF_ROOT = REPO_ROOT / "stage1/benchmarks/reference"
+
+
+@dataclass(frozen=True)
+class Workload:
+    name: str
+    kind: str
+    project: Path
+    reference: Path
+
+
+WORKLOADS = [
+    Workload("hello", "compute", REPO_ROOT / "stage1/examples/hello", REF_ROOT / "hello"),
+    Workload("capabilities", "io", REPO_ROOT / "stage1/examples/capabilities", REF_ROOT / "capabilities"),
+    Workload("stdlib_async", "concurrency", REPO_ROOT / "stage1/examples/stdlib_async", REF_ROOT / "stdlib_async"),
+]
 
 
 def run(cmd: list[str], *, cwd: Path | None = None) -> float:
@@ -66,25 +81,22 @@ def build_axiomc() -> None:
     )
 
 
-def axiom_cold_build() -> float:
-    shutil.rmtree(HELLO_PROJECT / "dist", ignore_errors=True)
-    return run([str(AXIOMC_BIN), "build", str(HELLO_PROJECT), "--json"], cwd=REPO_ROOT)
+def axiom_build(workload: Workload, *, cold: bool) -> float:
+    if cold:
+        shutil.rmtree(workload.project / "dist", ignore_errors=True)
+    return run([str(AXIOMC_BIN), "build", str(workload.project), "--json"], cwd=REPO_ROOT)
 
 
-def axiom_warm_build() -> float:
-    return run([str(AXIOMC_BIN), "build", str(HELLO_PROJECT), "--json"], cwd=REPO_ROOT)
-
-
-def go_build(temp_dir: Path) -> float:
-    output = temp_dir / "hello-go"
+def go_build(workload: Workload, temp_dir: Path) -> float:
+    output = temp_dir / f"{workload.name}-go"
     output.unlink(missing_ok=True)
-    return run(["go", "build", "-o", str(output), str(REF_DIR / "main.go")], cwd=temp_dir)
+    return run(["go", "build", "-o", str(output), str(workload.reference / "main.go")], cwd=temp_dir)
 
 
-def rust_build(temp_dir: Path) -> float:
-    output = temp_dir / "hello-rust"
+def rust_build(workload: Workload, temp_dir: Path) -> float:
+    output = temp_dir / f"{workload.name}-rust"
     output.unlink(missing_ok=True)
-    return run(["rustc", str(REF_DIR / "main.rs"), "-O", "-o", str(output)], cwd=temp_dir)
+    return run(["rustc", str(workload.reference / "main.rs"), "-O", "-o", str(output)], cwd=temp_dir)
 
 
 def check_limit(label: str, actual_ms: float, limit_ms: float) -> None:
@@ -94,35 +106,25 @@ def check_limit(label: str, actual_ms: float, limit_ms: float) -> None:
         raise SystemExit(1)
 
 
-def main() -> int:
-    os.chdir(REPO_ROOT)
-    ensure_tools()
-    build_axiomc()
+def benchmark_workload(workload: Workload, temp_dir: Path) -> dict:
+    print(f"warming benchmark commands for {workload.name} ({workload.kind})...")
+    axiom_build(workload, cold=True)
+    axiom_build(workload, cold=False)
+    go_build(workload, temp_dir)
+    rust_build(workload, temp_dir)
 
-    with tempfile.TemporaryDirectory(prefix="axiom-stage1-bench-") as temp_name:
-        temp_dir = Path(temp_name)
-
-        print("warming benchmark commands...")
-        axiom_cold_build()
-        axiom_warm_build()
-        go_build(temp_dir)
-        rust_build(temp_dir)
-
-        print("collecting benchmark medians...")
-        axiom_cold_samples, axiom_cold_median = collect_samples(axiom_cold_build)
-        axiom_warm_samples, axiom_warm_median = collect_samples(axiom_warm_build)
-        go_samples, go_median = collect_samples(lambda: go_build(temp_dir))
-        rust_samples, rust_median = collect_samples(lambda: rust_build(temp_dir))
+    print(f"collecting benchmark medians for {workload.name}...")
+    axiom_cold_samples, axiom_cold_median = collect_samples(lambda: axiom_build(workload, cold=True))
+    axiom_warm_samples, axiom_warm_median = collect_samples(lambda: axiom_build(workload, cold=False))
+    go_samples, go_median = collect_samples(lambda: go_build(workload, temp_dir))
+    rust_samples, rust_median = collect_samples(lambda: rust_build(workload, temp_dir))
 
     reference_floor = max(min(go_median, rust_median), BASELINE_FLOOR_MS)
     cold_limit = reference_floor * COLD_BUILD_LIMIT_MULTIPLIER
     warm_limit = reference_floor * WARM_BUILD_LIMIT_MULTIPLIER
 
-    report = {
-        "rounds": ROUNDS,
-        "baseline_floor_ms": BASELINE_FLOOR_MS,
-        "cold_build_limit_multiplier": COLD_BUILD_LIMIT_MULTIPLIER,
-        "warm_build_limit_multiplier": WARM_BUILD_LIMIT_MULTIPLIER,
+    result = {
+        "kind": workload.kind,
         "samples_ms": {
             "axiom_cold_build": axiom_cold_samples,
             "axiom_warm_build": axiom_warm_samples,
@@ -142,9 +144,29 @@ def main() -> int:
         },
     }
 
+    check_limit(f"{workload.name} axiom cold build", axiom_cold_median, cold_limit)
+    check_limit(f"{workload.name} axiom warm build", axiom_warm_median, warm_limit)
+    return result
+
+
+def main() -> int:
+    os.chdir(REPO_ROOT)
+    ensure_tools()
+    build_axiomc()
+
+    with tempfile.TemporaryDirectory(prefix="axiom-stage1-bench-") as temp_name:
+        temp_dir = Path(temp_name)
+        workloads = {workload.name: benchmark_workload(workload, temp_dir) for workload in WORKLOADS}
+
+    report = {
+        "rounds": ROUNDS,
+        "baseline_floor_ms": BASELINE_FLOOR_MS,
+        "cold_build_limit_multiplier": COLD_BUILD_LIMIT_MULTIPLIER,
+        "warm_build_limit_multiplier": WARM_BUILD_LIMIT_MULTIPLIER,
+        "workloads": workloads,
+    }
+
     print(json.dumps(report, indent=2))
-    check_limit("axiom cold build", axiom_cold_median, cold_limit)
-    check_limit("axiom warm build", axiom_warm_median, warm_limit)
     return 0
 
 
