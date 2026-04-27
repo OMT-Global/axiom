@@ -277,6 +277,14 @@ struct FunctionSig {
     is_extern: bool,
 }
 
+#[derive(Debug, Clone)]
+struct MethodSig {
+    function_name: String,
+    params: Vec<Type>,
+    return_ty: Type,
+    has_self: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BorrowOrigin {
     Param(String),
@@ -295,6 +303,7 @@ struct LowerContext<'a> {
     aliases: &'a HashMap<String, syntax::TypeAliasDecl>,
     variants: &'a HashMap<String, Vec<VariantInfo>>,
     functions: &'a HashMap<String, FunctionSig>,
+    methods: &'a HashMap<String, HashMap<String, MethodSig>>,
     capabilities: &'a CapabilityConfig,
     current_return: Option<Type>,
     current_borrow_return_params: HashSet<String>,
@@ -314,6 +323,20 @@ const OWNERSHIP_USE_AFTER_MOVE: &str = "use_after_move";
 const OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE: &str = "shared_borrow_while_mutable_live";
 const OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE: &str = "mutable_borrow_while_mutable_live";
 const OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE: &str = "mutable_borrow_while_shared_live";
+
+fn function_symbol_name(function: &syntax::Function) -> String {
+    match &function.impl_target {
+        Some(target) => format!("{target}__{}", function.name),
+        None => function.name.clone(),
+    }
+}
+
+fn method_owner_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Struct(name) | Type::Enum(name) => Some(name.as_str()),
+        _ => None,
+    }
+}
 
 pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
     let capabilities = CapabilityConfig::default();
@@ -339,6 +362,7 @@ pub fn lower_with_capabilities(
         &aliases,
     )?;
     let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)?;
+    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)?;
     let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_enums = enums.values().cloned().collect::<Vec<_>>();
@@ -352,6 +376,7 @@ pub fn lower_with_capabilities(
             &aliases,
             &variants,
             &functions,
+            &methods,
             capabilities,
         )?);
     }
@@ -361,6 +386,7 @@ pub fn lower_with_capabilities(
         aliases: &aliases,
         variants: &variants,
         functions: &functions,
+        methods: &methods,
         capabilities,
         current_return: None,
         current_borrow_return_params: HashSet::new(),
@@ -1105,6 +1131,8 @@ fn rewrite_function_aggregate_types(
         extern_abi: function.extern_abi.clone(),
         extern_library: function.extern_library.clone(),
         visibility: function.visibility,
+        receiver: function.receiver,
+        impl_target: function.impl_target.clone(),
         line: function.line,
         column: function.column,
     })
@@ -1539,6 +1567,45 @@ fn rewrite_expr_aggregate_types(
             column,
         } => syntax::Expr::Call {
             name: name.clone(),
+            type_args: type_args
+                .iter()
+                .map(|type_arg| {
+                    rewrite_aggregate_type_name(
+                        type_arg,
+                        generic_structs,
+                        generic_enums,
+                        queue,
+                        queued,
+                        *line,
+                        *column,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            args: args
+                .iter()
+                .map(|arg| {
+                    rewrite_expr_aggregate_types(arg, generic_structs, generic_enums, queue, queued)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::MethodCall {
+            base,
+            method,
+            type_args,
+            args,
+            line,
+            column,
+        } => syntax::Expr::MethodCall {
+            base: Box::new(rewrite_expr_aggregate_types(
+                base,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            method: method.clone(),
             type_args: type_args
                 .iter()
                 .map(|type_arg| {
@@ -2120,6 +2187,35 @@ fn rewrite_expr_generic_calls(
                 column: *column,
             }
         }
+        syntax::Expr::MethodCall {
+            base,
+            method,
+            type_args,
+            args,
+            line,
+            column,
+        } => syntax::Expr::MethodCall {
+            base: Box::new(rewrite_expr_generic_calls(
+                base,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?),
+            method: method.clone(),
+            type_args: type_args
+                .iter()
+                .map(|type_arg| substitute_type_name(type_arg, type_bindings))
+                .collect(),
+            args: args
+                .iter()
+                .map(|arg| {
+                    rewrite_expr_generic_calls(arg, type_bindings, generic_functions, queue, queued)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
         syntax::Expr::BinaryAdd {
             lhs,
             rhs,
@@ -2823,6 +2919,19 @@ fn collect_function_signatures(
             function.column,
         )?;
         let mut params = Vec::new();
+        if let Some(target_name) = &function.impl_target {
+            let self_ty = lower_type(
+                &syntax::TypeName::Named(target_name.clone(), Vec::new()),
+                structs,
+                enums,
+                aliases,
+                function.line,
+                function.column,
+            )?;
+            if function.receiver.is_some() {
+                params.push(self_ty);
+            }
+        }
         for param in &function.params {
             params.push(lower_type(
                 &param.ty,
@@ -2848,7 +2957,7 @@ fn collect_function_signatures(
         )?;
         if signatures
             .insert(
-                function.name.clone(),
+                function_symbol_name(function),
                 FunctionSig {
                     params,
                     return_ty: signature_return_ty,
@@ -2867,6 +2976,87 @@ fn collect_function_signatures(
     Ok(signatures)
 }
 
+fn collect_method_signatures(
+    functions: &[syntax::Function],
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    aliases: &HashMap<String, syntax::TypeAliasDecl>,
+) -> Result<HashMap<String, HashMap<String, MethodSig>>, Diagnostic> {
+    let mut methods: HashMap<String, HashMap<String, MethodSig>> = HashMap::new();
+    for function in functions {
+        let Some(target_name) = &function.impl_target else {
+            continue;
+        };
+        if !function.type_params.is_empty() {
+            return Err(Diagnostic::new(
+                "type",
+                format!("impl method {:?} cannot be generic yet", function.name),
+            )
+            .with_span(function.line, function.column));
+        }
+        let target_ty = lower_type(
+            &syntax::TypeName::Named(target_name.clone(), Vec::new()),
+            structs,
+            enums,
+            aliases,
+            function.line,
+            function.column,
+        )?;
+        if !matches!(target_ty, Type::Struct(_) | Type::Enum(_)) {
+            return Err(Diagnostic::new(
+                "type",
+                format!("impl target {:?} must be a struct or enum", target_name),
+            )
+            .with_span(function.line, function.column));
+        }
+        let return_ty = lower_type(
+            &function.return_ty,
+            structs,
+            enums,
+            aliases,
+            function.line,
+            function.column,
+        )?;
+        let mut params = Vec::new();
+        if function.receiver.is_some() {
+            params.push(target_ty.clone());
+        }
+        for param in &function.params {
+            params.push(lower_type(
+                &param.ty,
+                structs,
+                enums,
+                aliases,
+                param.line,
+                param.column,
+            )?);
+        }
+        let return_ty = if function.is_async {
+            Type::Task(Box::new(return_ty))
+        } else {
+            return_ty
+        };
+        let method = MethodSig {
+            function_name: function_symbol_name(function),
+            params,
+            return_ty,
+            has_self: function.receiver.is_some(),
+        };
+        let entry = methods.entry(target_name.clone()).or_default();
+        if entry.insert(function.source_name.clone(), method).is_some() {
+            return Err(Diagnostic::new(
+                "type",
+                format!(
+                    "duplicate impl method {:?} for {:?}",
+                    function.name, target_name
+                ),
+            )
+            .with_span(function.line, function.column));
+        }
+    }
+    Ok(methods)
+}
+
 fn lower_function(
     function: &syntax::Function,
     structs: &HashMap<String, StructDef>,
@@ -2874,6 +3064,7 @@ fn lower_function(
     aliases: &HashMap<String, syntax::TypeAliasDecl>,
     variants: &HashMap<String, Vec<VariantInfo>>,
     functions: &HashMap<String, FunctionSig>,
+    methods: &HashMap<String, HashMap<String, MethodSig>>,
     capabilities: &CapabilityConfig,
 ) -> Result<Function, Diagnostic> {
     let return_ty = lower_type(
@@ -2901,25 +3092,41 @@ fn lower_function(
         }
         validate_ffi_signature(function, &return_ty)?;
     }
+    let symbol_name = function_symbol_name(function);
     let signature = functions
-        .get(&function.name)
+        .get(&symbol_name)
         .expect("function signatures collected before lowering");
-    let ctx = LowerContext {
-        structs,
-        enums,
-        aliases,
-        variants,
-        functions,
-        capabilities,
-        current_return: Some(return_ty.clone()),
-        current_borrow_return_params: signature
-            .borrow_return_params
-            .iter()
-            .map(|index| function.params[*index].name.clone())
-            .collect(),
-    };
     let mut env: HashMap<String, Binding> = HashMap::new();
     let mut params = Vec::new();
+    if let Some(target_name) = &function.impl_target
+        && function.receiver.is_some()
+    {
+        let ty = lower_type(
+            &syntax::TypeName::Named(target_name.clone(), Vec::new()),
+            structs,
+            enums,
+            aliases,
+            function.line,
+            function.column,
+        )?;
+        env.insert(
+            String::from("self"),
+            Binding {
+                ty: ty.clone(),
+                moved: false,
+                moved_projections: HashSet::new(),
+                borrow_kind: borrow_kind_for_type(&ty, structs, enums),
+                borrow_origin: binding_borrow_origin(&ty, Some("self"), structs, enums),
+                borrowed_owners: HashSet::new(),
+                active_borrow_count: 0,
+                active_mut_borrow_count: 0,
+            },
+        );
+        params.push(Param {
+            name: String::from("self_"),
+            ty,
+        });
+    }
     for param in &function.params {
         if functions.contains_key(&param.name) {
             return Err(Diagnostic::new(
@@ -2956,6 +3163,21 @@ fn lower_function(
             ty,
         });
     }
+    let ctx = LowerContext {
+        structs,
+        enums,
+        aliases,
+        variants,
+        functions,
+        methods,
+        capabilities,
+        current_return: Some(return_ty.clone()),
+        current_borrow_return_params: signature
+            .borrow_return_params
+            .iter()
+            .filter_map(|index| params.get(*index).map(|param| param.name.clone()))
+            .collect(),
+    };
     let (body, _, guaranteed_return) = if function.is_extern {
         (Vec::new(), env.clone(), true)
     } else {
@@ -2972,7 +3194,7 @@ fn lower_function(
         .with_span(function.line, function.column));
     }
     Ok(Function {
-        name: function.name.clone(),
+        name: symbol_name,
         source_name: function.source_name.clone(),
         path: function.path.clone(),
         params,
@@ -4687,6 +4909,166 @@ fn lower_expr_with_expected(
                 Diagnostic::new("type", format!("undefined function {name:?}"))
                     .with_span(*line, *column),
             )
+        }
+        syntax::Expr::MethodCall {
+            base,
+            method,
+            type_args,
+            args,
+            line,
+            column,
+        } => {
+            if !type_args.is_empty() {
+                return Err(
+                    Diagnostic::new("type", format!("method {:?} is not generic", method))
+                        .with_span(*line, *column),
+                );
+            }
+            if let syntax::Expr::VarRef {
+                name: type_name, ..
+            } = base.as_ref()
+                && !env.contains_key(type_name)
+                && let Some(methods) = ctx.methods.get(type_name)
+                && let Some(signature) = methods.get(method)
+            {
+                if signature.has_self {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "method {:?} on {:?} requires a value receiver",
+                            method, type_name
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let mut lowered_args = Vec::new();
+                let mut temporary_borrows = Vec::new();
+                if args.len() != signature.params.len() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "associated function {:?} expects {} arguments, got {}",
+                            method,
+                            signature.params.len(),
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                for (arg, expected) in args.iter().zip(signature.params.iter()) {
+                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                    if lowered.ty() != expected {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "associated function {:?} expects argument type {expected}, got {}",
+                                method,
+                                lowered.ty()
+                            ),
+                        )
+                        .with_span(arg.line(), arg.column()));
+                    }
+                    record_temporary_borrows(&lowered, env, ctx, &mut temporary_borrows)?;
+                    if !expected.is_copy() {
+                        move_lowered_value(&lowered, env)?;
+                    }
+                    lowered_args.push(lowered);
+                }
+                release_temporary_borrows(&temporary_borrows, env);
+                return Ok(Expr::Call {
+                    name: signature.function_name.clone(),
+                    args: lowered_args,
+                    ty: signature.return_ty.clone(),
+                });
+            }
+            let lowered_base = lower_expr(base, env, ctx)?;
+            let Some(owner_name) = method_owner_name(lowered_base.ty()) else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("type {} does not support method calls", lowered_base.ty()),
+                )
+                .with_span(*line, *column));
+            };
+            let Some(methods) = ctx.methods.get(owner_name) else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("type {} has no impl methods", lowered_base.ty()),
+                )
+                .with_span(*line, *column));
+            };
+            let Some(signature) = methods.get(method) else {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!("type {} has no method {:?}", lowered_base.ty(), method),
+                )
+                .with_span(*line, *column));
+            };
+            if !signature.has_self {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "associated function {:?} must be called as {}.{}()",
+                        method, owner_name, method
+                    ),
+                )
+                .with_span(*line, *column));
+            }
+            if args.len() + 1 != signature.params.len() {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "method {:?} expects {} arguments, got {}",
+                        method,
+                        signature.params.len() - 1,
+                        args.len()
+                    ),
+                )
+                .with_span(*line, *column));
+            }
+            let mut lowered_args = Vec::new();
+            let mut temporary_borrows = Vec::new();
+            let self_expected = &signature.params[0];
+            if lowered_base.ty() != self_expected {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "method {:?} expects receiver type {self_expected}, got {}",
+                        method,
+                        lowered_base.ty()
+                    ),
+                )
+                .with_span(base.line(), base.column()));
+            }
+            record_temporary_borrows(&lowered_base, env, ctx, &mut temporary_borrows)?;
+            if !self_expected.is_copy() {
+                move_lowered_value(&lowered_base, env)?;
+            }
+            lowered_args.push(lowered_base);
+            for (arg, expected) in args.iter().zip(signature.params.iter().skip(1)) {
+                let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                if lowered.ty() != expected {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "method {:?} expects argument type {expected}, got {}",
+                            method,
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(arg.line(), arg.column()));
+                }
+                record_temporary_borrows(&lowered, env, ctx, &mut temporary_borrows)?;
+                if !expected.is_copy() {
+                    move_lowered_value(&lowered, env)?;
+                }
+                lowered_args.push(lowered);
+            }
+            release_temporary_borrows(&temporary_borrows, env);
+            Ok(Expr::Call {
+                name: signature.function_name.clone(),
+                args: lowered_args,
+                ty: signature.return_ty.clone(),
+            })
         }
         syntax::Expr::BinaryAdd {
             lhs,
@@ -7013,6 +7395,7 @@ impl syntax::Expr {
             syntax::Expr::Literal(_) => 1,
             syntax::Expr::VarRef { line, .. }
             | syntax::Expr::Call { line, .. }
+            | syntax::Expr::MethodCall { line, .. }
             | syntax::Expr::BinaryAdd { line, .. }
             | syntax::Expr::BinaryCompare { line, .. }
             | syntax::Expr::Try { line, .. }
@@ -7033,6 +7416,7 @@ impl syntax::Expr {
             syntax::Expr::Literal(_) => 1,
             syntax::Expr::VarRef { column, .. }
             | syntax::Expr::Call { column, .. }
+            | syntax::Expr::MethodCall { column, .. }
             | syntax::Expr::BinaryAdd { column, .. }
             | syntax::Expr::BinaryCompare { column, .. }
             | syntax::Expr::Try { column, .. }

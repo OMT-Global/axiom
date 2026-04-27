@@ -4373,8 +4373,8 @@ print strlen("hello")
         fs::write(project.join("src/main.ax"), "print math.answer()\n").expect("write source");
 
         let error = check_project(&project).expect_err("qualified calls should fail");
-        assert_eq!(error.kind, "parse");
-        assert!(error.message.contains("namespace-qualified calls"));
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("undefined variable \"math\""));
     }
 
     #[test]
@@ -6034,5 +6034,129 @@ print strlen("hello")
         assert_eq!(error.kind, "json");
         assert!(error.message.contains("failed to serialize JSON output"));
         assert!(error.message.contains("forced serializer failure"));
+    }
+    #[test]
+    fn build_project_supports_impl_methods_and_associated_functions() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("impl-methods");
+        create_project(&project, Some("impl-methods-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Counter {
+value: int
+}
+
+impl Counter {
+fn new(value: int): Counter {
+return Counter { value: value }
+}
+
+fn bump(self, delta: int): Counter {
+return Counter { value: self.value + delta }
+}
+
+fn read(self): int {
+return self.value
+}
+}
+
+let counter: Counter = Counter.new(40)
+let next: Counter = counter.bump(2)
+print next.read()
+",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with impl methods");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42
+"
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_self_parameter_outside_impl() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("self-outside-impl");
+        create_project(&project, Some("self-outside-impl-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn read(self): int {
+return 42
+}
+
+print 0
+",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("self outside impl should fail");
+        assert_eq!(error.kind, "parse");
+        assert!(
+            error
+                .message
+                .contains("self parameter is only allowed inside impl methods")
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_calling_method_without_receiver() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("method-without-receiver");
+        create_project(&project, Some("method-without-receiver-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Counter {
+value: int
+}
+
+impl Counter {
+fn bump(self, delta: int): Counter {
+return Counter { value: self.value + delta }
+}
+}
+
+let counter: Counter = Counter.bump(2)
+print counter.value
+",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("method call without receiver should fail");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("requires a value receiver"));
+    }
+
+    #[test]
+    fn check_project_rejects_calling_associated_function_as_method() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("associated-as-method");
+        create_project(&project, Some("associated-as-method-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Counter {
+value: int
+}
+
+impl Counter {
+fn new(value: int): Counter {
+return Counter { value: value }
+}
+}
+
+let counter: Counter = Counter { value: 40 }
+let next: Counter = counter.new(2)
+print next.value
+",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("associated function as method should fail");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains("must be called as"));
+        assert!(error.message.contains(".new()"));
     }
 }
