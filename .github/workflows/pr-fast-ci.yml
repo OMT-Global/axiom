@@ -93,7 +93,7 @@ jobs:
     name: Validate PR Description
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && github.event.pull_request.user.login != 'dependabot[bot]'
     env:
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
