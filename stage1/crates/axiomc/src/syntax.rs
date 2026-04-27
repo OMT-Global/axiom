@@ -15,6 +15,11 @@ pub struct Program {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum ReceiverKind {
+    Value,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Module,
@@ -49,6 +54,8 @@ pub struct Function {
     pub extern_abi: Option<String>,
     pub extern_library: Option<String>,
     pub visibility: Visibility,
+    pub receiver: Option<ReceiverKind>,
+    pub impl_target: Option<String>,
     pub line: usize,
     pub column: usize,
 }
@@ -204,6 +211,14 @@ pub enum Expr {
     },
     Call {
         name: String,
+        type_args: Vec<TypeName>,
+        args: Vec<Expr>,
+        line: usize,
+        column: usize,
+    },
+    MethodCall {
+        base: Box<Expr>,
+        method: String,
         type_args: Vec<TypeName>,
         args: Vec<Expr>,
         line: usize,
@@ -402,6 +417,10 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             || trimmed.starts_with("pub(pkg) enum ")
         {
             enums.push(parse_enum(&lines, &mut index, path)?);
+            continue;
+        }
+        if trimmed.starts_with("impl ") {
+            functions.extend(parse_impl(&lines, &mut index, path)?);
             continue;
         }
         stmts.push(parse_stmt(&lines, &mut index, path, false)?);
@@ -627,6 +646,15 @@ fn parse_stmt(
 }
 
 fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Function, Diagnostic> {
+    parse_function_in_context(lines, index, path, None)
+}
+
+fn parse_function_in_context(
+    lines: &[&str],
+    index: &mut usize,
+    path: &Path,
+    impl_target: Option<&str>,
+) -> Result<Function, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
     let (visibility, rest, visibility_column) = parse_visibility_prefix(trimmed);
@@ -655,7 +683,12 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
     })?;
     let name_text = header[..open_paren].trim();
     let (name, type_params) = parse_function_name(name_text, path, line_no, fn_column + 3)?;
-    let params = parse_params(&header[open_paren + 1..close_paren], path, line_no)?;
+    let (receiver, params) = parse_params(
+        &header[open_paren + 1..close_paren],
+        path,
+        line_no,
+        impl_target.is_some(),
+    )?;
     let after_paren = header[close_paren + 1..].trim();
     let after_colon = after_paren.strip_prefix(':').ok_or_else(|| {
         Diagnostic::new("parse", "function declaration must include a return type")
@@ -692,6 +725,8 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
             extern_abi: Some(String::from("C")),
             extern_library: Some(extern_library),
             visibility,
+            receiver,
+            impl_target: impl_target.map(str::to_string),
             line: line_no,
             column: 1,
         });
@@ -723,6 +758,8 @@ fn parse_function(lines: &[&str], index: &mut usize, path: &Path) -> Result<Func
         extern_abi: None,
         extern_library: None,
         visibility,
+        receiver,
+        impl_target: impl_target.map(str::to_string),
         line: line_no,
         column: 1,
     })
@@ -902,6 +939,58 @@ fn parse_struct_fields(
         .with_span(lines.len().max(1), 1))
 }
 
+fn parse_impl(lines: &[&str], index: &mut usize, path: &Path) -> Result<Vec<Function>, Diagnostic> {
+    let line_no = *index + 1;
+    let trimmed = lines[*index].trim();
+    let target = trimmed
+        .strip_prefix("impl ")
+        .and_then(|rest| rest.strip_suffix('{'))
+        .map(str::trim)
+        .ok_or_else(|| {
+            Diagnostic::new("parse", "impl block must use `impl Type {` syntax")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1)
+        })?;
+    validate_ident(target, path, line_no, 6)?;
+    *index += 1;
+    let mut methods = Vec::new();
+    while *index < lines.len() {
+        skip_blank_lines(lines, index);
+        if *index >= lines.len() {
+            break;
+        }
+        let trimmed = lines[*index].trim();
+        if trimmed == "}" {
+            *index += 1;
+            return Ok(methods);
+        }
+        if trimmed.starts_with("fn ")
+            || trimmed.starts_with("async fn ")
+            || trimmed.starts_with("extern fn ")
+            || trimmed.starts_with("pub fn ")
+            || trimmed.starts_with("pub async fn ")
+            || trimmed.starts_with("pub extern fn ")
+            || trimmed.starts_with("pub(pkg) fn ")
+            || trimmed.starts_with("pub(pkg) async fn ")
+            || trimmed.starts_with("pub(pkg) extern fn ")
+        {
+            methods.push(parse_function_in_context(lines, index, path, Some(target))?);
+            continue;
+        }
+        return Err(Diagnostic::new(
+            "parse",
+            "impl blocks may only contain function declarations",
+        )
+        .with_path(path.display().to_string())
+        .with_span(*index + 1, 1));
+    }
+    Err(
+        Diagnostic::new("parse", "impl block is missing closing '}'")
+            .with_path(path.display().to_string())
+            .with_span(line_no, 1),
+    )
+}
+
 fn parse_enum(lines: &[&str], index: &mut usize, path: &Path) -> Result<EnumDecl, Diagnostic> {
     let line_no = *index + 1;
     let trimmed = lines[*index].trim();
@@ -1028,13 +1117,39 @@ fn parse_enum_variants(
         .with_span(lines.len().max(1), 1))
 }
 
-fn parse_params(raw: &str, path: &Path, line_no: usize) -> Result<Vec<Param>, Diagnostic> {
+fn parse_params(
+    raw: &str,
+    path: &Path,
+    line_no: usize,
+    allow_self: bool,
+) -> Result<(Option<ReceiverKind>, Vec<Param>), Diagnostic> {
     if raw.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok((None, Vec::new()));
     }
+    let mut receiver = None;
     let mut params = Vec::new();
-    for param_text in split_top_level_type(raw, ',') {
+    for (index, param_text) in split_top_level_type(raw, ',').into_iter().enumerate() {
         let param_text = param_text.trim();
+        if param_text == "self" {
+            if !allow_self {
+                return Err(Diagnostic::new(
+                    "parse",
+                    "self parameter is only allowed inside impl methods",
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1));
+            }
+            if index != 0 {
+                return Err(Diagnostic::new(
+                    "parse",
+                    "self parameter must be the first parameter in an impl method",
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1));
+            }
+            receiver = Some(ReceiverKind::Value);
+            continue;
+        }
         let colon = find_top_level_char(param_text, ':').ok_or_else(|| {
             Diagnostic::new("parse", "function parameter is missing ':'")
                 .with_path(path.display().to_string())
@@ -1050,7 +1165,7 @@ fn parse_params(raw: &str, path: &Path, line_no: usize) -> Result<Vec<Param>, Di
             column: 1,
         });
     }
-    Ok(params)
+    Ok((receiver, params))
 }
 
 fn parse_if_stmt(lines: &[&str], index: &mut usize, path: &Path) -> Result<Stmt, Diagnostic> {
@@ -1612,12 +1727,24 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             && let Some(open_paren) = find_top_level_char(field, '(')
             && matches!(find_matching_paren(field, open_paren), Some(close) if close == field.len() - 1)
         {
-            return Err(Diagnostic::new(
-                "parse",
-                "stage1 bootstrap does not support namespace-qualified calls; import exported functions directly",
-            )
-            .with_path(path.display().to_string())
-            .with_span(line_no, column + dot + 1));
+            let method_text = field[..open_paren].trim();
+            let (method, type_args) =
+                parse_call_name(method_text, path, line_no, column + dot + 1)?;
+            validate_ident(method, path, line_no, column + dot + 1)?;
+            let args = parse_call_args(
+                &field[open_paren + 1..field.len() - 1],
+                path,
+                line_no,
+                column + dot + 1,
+            )?;
+            return Ok(Expr::MethodCall {
+                base: Box::new(parse_term(base_raw, path, line_no, column)?),
+                method: method.to_string(),
+                type_args,
+                args,
+                line: line_no,
+                column,
+            });
         }
         if field.chars().all(|ch| ch.is_ascii_digit()) {
             let index = field.parse::<usize>().map_err(|_| {
