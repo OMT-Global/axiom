@@ -490,10 +490,12 @@ pub fn parse_program_with_recovery(source: &str, path: &Path) -> Result<Program,
             }
             continue;
         }
+        let start_index = index;
         match parse_stmt(&lines, &mut index, path, false) {
             Ok(stmt) => stmts.push(stmt),
             Err(error) => {
                 diagnostics.push(error);
+                index = start_index;
                 synchronize_top_level(&lines, &mut index);
             }
         }

@@ -426,6 +426,29 @@ print fail()
     }
 
     #[test]
+    fn parser_recovery_resynchronizes_top_level_statements_from_their_start() {
+        let source =
+            "if true {\nfor value in [1] {\nprint value\n}\n}\nlet answer int = 42\nprint answer\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should skip the failed top-level statement body");
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(6)]
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("does not support `for` loops yet")
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+    }
+
+    #[test]
     fn parser_error_preserves_related_recovery_diagnostics_for_cli_payloads() {
         let source = "import math.ax\nlet answer int = 42\n";
         let error = parse_program(source, Path::new("main.ax"))
