@@ -1,0 +1,3 @@
+axiom cli
+mode=status plan=inspect queue
+true

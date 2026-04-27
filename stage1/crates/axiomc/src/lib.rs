@@ -111,6 +111,14 @@ mod tests {
             .join("conformance")
     }
 
+    fn checked_in_example_fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join(name)
+    }
+
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
         command_for_executable(path).expect("prepare compiled binary command")
     }
@@ -2443,8 +2451,11 @@ print strlen("hello")
             "import \"std/time.ax\"\nlet start: Instant = now()\nlet pause: Duration = duration_ms(0)\nprint start.ms > 0\nprint now_ms() > 0\nprint sleep(pause) == 0\nlet elapsed: int = elapsed_ms(start)\nprint elapsed == elapsed\n",
         )
         .expect("write test");
-        fs::write(project.join("src/main_test.stdout"), "true\ntrue\ntrue\ntrue\n")
-            .expect("write golden");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\ntrue\ntrue\n",
+        )
+        .expect("write golden");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
@@ -3736,6 +3747,31 @@ print strlen("hello")
                 "fixture {case}: {:?}",
                 error.message
             );
+        }
+    }
+
+    #[test]
+    fn checked_in_proof_workload_examples_build_run_and_test() {
+        for example in ["proof_cli", "proof_worker", "proof_http_service"] {
+            let project = checked_in_example_fixture(example);
+            check_project(&project).expect("check checked-in proof workload example");
+
+            let built = build_project(&project).expect("build checked-in proof workload example");
+            let output = compiled_binary_command(&built.binary)
+                .output()
+                .expect("run checked-in proof workload example");
+            let expected = fs::read_to_string(project.join("src/main_test.stdout"))
+                .expect("read expected stdout");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "example {example}"
+            );
+
+            let tests =
+                run_project_tests(&project).expect("test checked-in proof workload example");
+            assert_eq!(tests.passed, 1, "example {example}");
+            assert_eq!(tests.failed, 0, "example {example}");
         }
     }
 
