@@ -182,7 +182,8 @@ Goal: provide the minimum runtime and stdlib needed for agents, workers, and sma
 Status: in progress. AG4.1 has been kicked off with the synthetic stdlib
 plumbing, and every stage1 capability-gated intrinsic now has a matching
 thin-wrapper stdlib module: `std/time.ax`, `std/env.ax`, `std/fs.ax`,
-`std/net.ax`, `std/process.ax`, and `std/crypto_hash.ax`. AG4.1 now also
+`std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`, and
+`std/crypto_mac.ax`. AG4.1 now also
 includes `std/http.ax`, a blocking HTTP/1.0 client for `http://` and
 `https://` URLs on top of a new `http_get` intrinsic that shares the `net`
 capability with `std/net.ax` and demonstrates that the `std.*` surface is not
@@ -248,6 +249,13 @@ Work packages:
     `stage1/examples/stdlib_crypto_hash` and two Rust tests
     (`stage1_project_imports_synthetic_stdlib_crypto_hash_module`,
     `stage1_project_rejects_stdlib_crypto_hash_without_crypto_capability`).
+  - `std.crypto.mac` — **partial** as `std/crypto_mac.ax` exposing
+    `hmac_sha256(key: string, message: string): string` and
+    `constant_time_eq(left: string, right: string): bool` on top of
+    capability-gated compiler intrinsics. Covered by
+    `stage1/examples/stdlib_crypto_mac` and two Rust tests
+    (`stage1_project_imports_synthetic_stdlib_crypto_mac_module`,
+    `stage1_project_rejects_stdlib_crypto_mac_without_crypto_capability`).
   - `std.io` — **landed** as `std/io.ax` exposing
     `eprintln(text: string): int` on top of a new ungated `io_eprintln`
     intrinsic that writes a line to stderr and returns the number of bytes
