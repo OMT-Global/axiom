@@ -115,9 +115,9 @@ still far from the stated 1.0 target for service and agent workloads.
   emits generated Rust source markers, and writes a JSON source-map sidecar for
   Axiom file/line/column positions; full Axiom-native debugger stepping remains
   a direct-backend follow-on.
-- There is no stage1 formatter, benchmark harness, doc generator, publisher, or LSP server yet.
+- There is no stage1 formatter, full benchmark harness, doc generator, publisher, or LSP server yet.
 - Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
-- There are no performance targets or regression gates yet.
+- Extended validation now carries a small performance regression gate: stage1 `axiomc build` for `stage1/examples/hello` is benchmarked against checked-in Go and Rust reference builds, with separate cold-build and warm-cache budget multipliers to catch obvious compiler-path regressions without making PR fast CI noisy.
 
 ## Execution plan
 
