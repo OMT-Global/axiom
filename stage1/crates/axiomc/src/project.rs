@@ -1920,6 +1920,10 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
         "net_resolve" => Some(CapabilityKind::Net),
+        "net_tcp_listen_loopback_once" => Some(CapabilityKind::Net),
+        "net_tcp_dial" => Some(CapabilityKind::Net),
+        "net_udp_bind_loopback_once" => Some(CapabilityKind::Net),
+        "net_udp_send_recv" => Some(CapabilityKind::Net),
         "http_get" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),
         "clock_now_ms" => Some(CapabilityKind::Clock),
