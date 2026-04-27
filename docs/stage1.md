@@ -38,6 +38,8 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/w
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/workspace_only --package workspace-app
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
@@ -160,6 +162,11 @@ Current proof points:
 - `stage1/examples/benchmarks` provides the first checked-in benchmark suite
   fixture for `axiomc bench`; the Go/Rust comparison gate remains a later CI
   policy layer on top of the harness.
+- `stage1/examples/proof_cli` and `stage1/examples/proof_worker` provide the
+  first two AG5 proof-workload fixtures. The CLI fixture proves a multi-package
+  Axiom program, while the worker fixture proves deterministic queue-style async
+  processing. The small HTTP service fixture remains blocked on server-side HTTP
+  support.
 - `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` now cover the checked-in stage1 language gate.
 
 Agent-grade compiler milestone summary:
