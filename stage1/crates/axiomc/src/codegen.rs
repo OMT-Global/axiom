@@ -431,10 +431,7 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str(
         r#"#[allow(dead_code)]
 fn axiom_net_timeout(timeout_ms: i64) -> Option<std::time::Duration> {
-    if !(1..=30_000).contains(&timeout_ms) {
-        return None;
-    }
-    Some(std::time::Duration::from_millis(timeout_ms as u64))
+    Some(std::time::Duration::from_millis(timeout_ms.clamp(1, 30_000) as u64))
 }
 
 #[allow(dead_code)]
@@ -465,8 +462,28 @@ fn axiom_net_tcp_listen_loopback_once(response: String, timeout_ms: i64) -> Opti
                 Ok((mut stream, _peer)) => {
                     let _ = stream.set_read_timeout(Some(timeout));
                     let _ = stream.set_write_timeout(Some(timeout));
-                    let mut buf = [0u8; 1024];
-                    let _ = stream.read(&mut buf);
+                    let mut total_read = 0usize;
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(read) => {
+                                total_read = total_read.saturating_add(read);
+                                if total_read >= 65_536 {
+                                    break;
+                                }
+                            }
+                            Err(err)
+                                if matches!(
+                                    err.kind(),
+                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                                ) =>
+                            {
+                                break;
+                            }
+                            Err(_) => break,
+                        }
+                    }
                     let _ = stream.write_all(response.as_bytes());
                     let _ = stream.flush();
                     break;

@@ -662,6 +662,19 @@ print fail()
     }
 
     #[test]
+    fn render_rust_clamps_socket_timeouts_and_bounds_tcp_request_reads() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("timeout_ms.clamp(1, 30_000)"));
+        assert!(rendered.contains("let mut total_read = 0usize;"));
+        assert!(rendered.contains("if total_read >= 65_536"));
+        assert!(rendered.contains("stream.shutdown(std::net::Shutdown::Write).ok()?;"));
+    }
+
+    #[test]
     fn render_rust_keeps_http_response_size_guards() {
         let source = "match http_get(\"http://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
