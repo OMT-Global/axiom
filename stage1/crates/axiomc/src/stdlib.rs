@@ -33,11 +33,13 @@
 //! wrapper, demonstrating that the `std.*` surface is not limited to one
 //! wrapper per capability:
 //!
-//! * `std/http.ax` — `get(url)` on top of the new `http_get` intrinsic. HTTP
-//!   shares the `net` capability surface because any code that can open a
-//!   raw TCP socket could implement HTTP itself, so a separate `http`
-//!   manifest flag would not add meaningful isolation in stage1. The
-//!   stage1 client supports both http:// and https:// URLs.
+//! * `std/http.ax` — `get(url)` and `serve_once(bind, body)` on top of the new
+//!   `http_get` and `http_serve_once` intrinsics. HTTP shares the `net`
+//!   capability surface because any code that can open a raw TCP socket could
+//!   implement HTTP itself, so a separate `http` manifest flag would not add
+//!   meaningful isolation in stage1. The stage1 client supports both http://
+//!   and https:// URLs; the server serves one blocking HTTP/1.0 response and
+//!   then exits.
 //!
 //! The eighth through fourteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
@@ -257,7 +259,8 @@ pub fn snapshot(name: string, actual: string, expected: string): int {\nreturn a
     ),
     (
         "http.ax",
-        "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
+        "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n\
+pub fn serve_once(bind: string, body: string): bool {\nreturn http_serve_once(bind, body)\n}\n",
     ),
     (
         "regex.ax",

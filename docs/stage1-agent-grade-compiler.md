@@ -197,8 +197,10 @@ adds ungated scalar/string JSON helpers, `std/collections.ax` adds generic
 borrowed-slice helpers on top of AG2 generic functions, `std/sync.ax` provides
 ownership-shaped synchronization values, and `std/async.ax` exposes the
 deterministic AG4.2 task/channel runtime. AG4.4 capability-aware integration
-for the currently landed stdlib/runtime surface is now complete; AG4.3 HTTP
-*server* support remains open.
+for the currently landed stdlib/runtime surface is now complete, and AG4.3
+HTTP service support now has an intermediate loopback-only blocking
+single-request smoke primitive while the full listen/accept/route/respond and
+async lifecycle surface remains open.
 
 Work packages:
 
@@ -274,18 +276,25 @@ Work packages:
     for deterministic object encoding. Covered by `stage1/examples/stdlib_json`
     and two Rust tests (`stage1_project_imports_synthetic_stdlib_json_module`,
     `stage1_project_rejects_stdlib_json_with_wrong_argument_type`).
-  - `std.http` — **landed (client only)** as `std/http.ax` exposing
-    `get(url: string): Option<string>` on top of a new `http_get` intrinsic
-    that implements a blocking HTTP/1.0 client for `http://` and `https://`
-    URLs in the generated Rust runtime. TLS failures return `None` and emit a
-    structured `net` diagnostic. AG4.3 HTTP *server* support stays as follow-on
-    work. `http_get` shares the existing `net` capability because any code that
-    can open a raw TCP socket could implement HTTP itself, so a separate `http`
-    manifest flag would not add meaningful isolation in stage1. Covered by
-    `stage1/examples/stdlib_http` and Rust tests
+  - `std.http` — **landed for client support plus a partial service primitive**
+    as `std/http.ax` exposing `get(url: string): Option<string>` and
+    `serve_once(bind: string, body: string): bool` on top of the `http_get`
+    and `http_serve_once` intrinsics. The client path implements a blocking
+    HTTP/1.0 fetch for `http://` and `https://` URLs in the generated Rust
+    runtime; TLS failures return `None` and emit a structured `net`
+    diagnostic. The server path is intentionally narrow: it accepts only
+    loopback bind addresses, accepts one request, writes a plain-text HTTP/1.0
+    `200 OK` response, and exits. Both intrinsics share the existing `net`
+    capability because any code that can open a raw TCP socket could implement
+    HTTP itself, so a separate `http` manifest flag would not add meaningful
+    isolation in stage1. This is an intermediate AG4.3 slice, not the full
+    listen/accept/route/respond, async-runtime, or lifecycle-controlled service
+    surface. Covered by `stage1/examples/stdlib_http` and Rust tests
     (`stage1_project_imports_synthetic_stdlib_http_module`,
     `stage1_stdlib_http_get_supports_https_urls`,
-    `stage1_stdlib_http_reports_tls_diagnostics`, and
+    `stage1_stdlib_http_reports_tls_diagnostics`,
+    `stage1_stdlib_http_service_serves_one_request`,
+    `stage1_stdlib_http_service_rejects_non_loopback_bind`, and
     `stage1_project_rejects_stdlib_http_without_net_capability`).
   - `std.collections` — **landed** as `std/collections.ax` exposing generic
     borrowed-slice helpers (`count`, `is_empty`, `has_items`, `skip`, `take`,
@@ -314,8 +323,7 @@ Work packages:
   does not provide host-thread scheduling, blocking wakeups, or real timers.
   Covered by `stage1/examples/stdlib_async` and one Rust integration test
   (`stage1_project_supports_async_runtime_surface`).
-- `AG4.3`: HTTP service support
-  - HTTP server support is required at this milestone, not just client support.
+- `AG4.3`: HTTP service support — **partial / intermediate** via the loopback-only blocking single-request `std/http.ax::serve_once(bind, body)` smoke primitive. Full service support still needs listen/accept/route/respond shaping, async-runtime integration, lifecycle controls, and acceptance coverage.
 - `AG4.4`: capability-aware integration
   - **landed for the current stdlib/runtime surface**: compiler-known
     intrinsics enforce all six manifest flags, stdlib wrappers preserve that
