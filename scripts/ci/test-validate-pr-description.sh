@@ -166,6 +166,25 @@ BODY
 BODY
 )
       ;;
+    structured_qualified_fixes_issue)
+      body=$(cat <<'BODY'
+## Summary
+- Tighten PR validation.
+
+## Governing Issue
+- Fixes OMT-Global/axiom#262
+
+## Validation
+- [x] bash scripts/ci/test-validate-pr-description.sh
+
+## Bootstrap Governance
+- No bootstrap changes.
+
+## Notes
+- None.
+BODY
+)
+      ;;
     structured_resolves_issue)
       body=$(cat <<'BODY'
 ## Summary
@@ -255,6 +274,14 @@ Implements the Apollo-assigned fix for the contributor docs and CI guidance.
 BODY
 )
       ;;
+    legacy_qualified_resolves_issue_valid)
+      body=$(cat <<'BODY'
+Resolves OMT-Global/axiom#262
+
+Implements the Apollo-assigned fix for the contributor docs and CI guidance.
+BODY
+)
+      ;;
     legacy_live_pr_296_body_valid)
       # Keep the exact legacy body from live PR #296 covered so CI does not
       # regress on the already-reviewed repair branch.
@@ -295,11 +322,13 @@ run_case structured_placeholder_issue failure "PR body still contains template p
 run_case structured_qualified_issue success
 run_case structured_issue_url success
 run_case structured_fixes_issue success
+run_case structured_qualified_fixes_issue success
 run_case structured_resolves_issue success
 run_case structured_lowercase_no_link_reason success
 run_case structured_no_link_reason success
 run_case legacy_valid success
 run_case legacy_fixes_issue_valid success
+run_case legacy_qualified_resolves_issue_valid success
 run_case legacy_live_pr_296_body_valid success
 run_case legacy_qualified_issue_valid success
 run_case legacy_issue_url_valid success
