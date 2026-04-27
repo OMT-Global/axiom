@@ -1997,10 +1997,11 @@ print fail()
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-        assert_eq!(caps.len(), 7);
+        assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
-        assert_eq!(project_caps.len(), 7);
+        assert_eq!(project_caps.len(), 8);
+        assert!(project_caps.iter().any(|cap| cap.name == "fs:write"));
     }
 
     #[test]
@@ -2024,10 +2025,15 @@ print fail()
         assert!(!env.unsafe_unrestricted);
 
         let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][3]["name"], "env");
-        assert_eq!(payload["capabilities"][3]["allowed"][0], "FOO");
-        assert_eq!(payload["capabilities"][3]["allowed"][1], "LOG_LEVEL");
-        assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
+        let env_payload = payload["capabilities"]
+            .as_array()
+            .expect("capability array")
+            .iter()
+            .find(|cap| cap["name"] == "env")
+            .expect("env payload");
+        assert_eq!(env_payload["allowed"][0], "FOO");
+        assert_eq!(env_payload["allowed"][1], "LOG_LEVEL");
+        assert!(env_payload["unsafe_unrestricted"].is_null());
     }
 
     #[test]
@@ -2443,8 +2449,11 @@ print strlen("hello")
             "import \"std/time.ax\"\nlet start: Instant = now()\nlet pause: Duration = duration_ms(0)\nprint start.ms > 0\nprint now_ms() > 0\nprint sleep(pause) == 0\nlet elapsed: int = elapsed_ms(start)\nprint elapsed == elapsed\n",
         )
         .expect("write test");
-        fs::write(project.join("src/main_test.stdout"), "true\ntrue\ntrue\ntrue\n")
-            .expect("write golden");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\ntrue\ntrue\n",
+        )
+        .expect("write golden");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
@@ -2660,6 +2669,127 @@ print strlen("hello")
             err.message.contains("requires [capabilities].fs = true"),
             "unexpected diagnostic: {err:?}",
         );
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_fs_write_side() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-fs-write-app");
+        create_project(&project, Some("stdlib-fs-write-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"stdlib-fs-write-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\nfs_write = true\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/fs.ax\"\nimport \"std/fs_write.ax\"\nprint mkdir_all(\"scratch/nested\")\nprint write_file(\"scratch/nested/data.txt\", \"one\")\nprint append_file(\"scratch/nested/data.txt\", \"\\ntwo\")\nmatch read_file(\"scratch/nested/data.txt\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\nprint replace_file(\"scratch/nested/data.txt\", \"final\")\nmatch read_file(\"scratch/nested/data.txt\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\nprint create_file(\"scratch/empty.txt\")\nprint remove_file(\"scratch/empty.txt\")\nprint remove_file(\"scratch/nested/data.txt\")\nprint remove_dir(\"scratch/nested\")\nprint remove_dir(\"scratch\")\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\ntrue\none\ntwo\ntrue\nfinal\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\none\ntwo\ntrue\nfinal\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_fs_write_without_fs_write_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-fs-write-denied");
+        create_project(&project, Some("stdlib-fs-write-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-fs-write-denied",
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/fs_write.ax\"\nprint write_file(\"x\", \"value\")\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message
+                .contains("requires [capabilities].fs_write = true")
+        );
+    }
+
+    #[test]
+    fn build_project_scopes_fs_write_to_manifest_root() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("scoped-fs-write");
+        create_project(&project, Some("scoped-fs-write-app")).expect("create project");
+        fs::create_dir_all(project.join("data")).expect("create data dir");
+        let outside = dir.path().join("outside.txt");
+        let outside_literal = outside.to_string_lossy().replace('\\', "\\\\");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"scoped-fs-write-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\nfs_write = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = format!(
+            "import \"std/fs.ax\"\nimport \"std/fs_write.ax\"\nprint mkdir_all(\"data/out\")\nprint write_file(\"data/out/file.txt\", \"ok\")\nprint write_file(\"data/../escape.txt\", \"leak\")\nprint write_file(\"{outside_literal}\", \"leak\")\nmatch read_file(\"data/out/file.txt\") {{\nSome(value) {{\nprint value\n}}\nNone {{\nprint \"missing\"\n}}\n}}\n"
+        );
+        fs::write(project.join("src/main.ax"), &source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\nfalse\nfalse\nok\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\nfalse\nfalse\nok\n"
+        );
+        assert!(!outside.exists(), "absolute write escaped fs_root");
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
     }
 
     #[test]

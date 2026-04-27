@@ -295,10 +295,14 @@ fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
         lines.push(format!("wrote debug map {debug_map}"));
     }
     if timings {
-        lines.push(format!(
-            "timings total={}ms cache_hits={} cache_misses={}",
-            output.duration_ms, output.cache_hits, output.cache_misses
-        ).trim_end().to_string());
+        lines.push(
+            format!(
+                "timings total={}ms cache_hits={} cache_misses={}",
+                output.duration_ms, output.cache_hits, output.cache_misses
+            )
+            .trim_end()
+            .to_string(),
+        );
         for package in &output.packages {
             lines.push(format!(
                 "timings package={} cache_status={:?} compile={}ms",

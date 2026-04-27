@@ -8,14 +8,16 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides twelve stdlib modules. Six are thin wrappers over
-//! single-intrinsic capability-gated surfaces, one per capability class:
+//! Today this provides thirteen stdlib modules. Seven are thin wrappers over
+//! capability-gated surfaces:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
 //!   `elapsed_ms(start)`, and `sleep(duration)` on top of `clock_now_ms`,
 //!   `clock_elapsed_ms`, and `clock_sleep_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
 //! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
+//! * `std/fs_write.ax` — write-side helpers on top of `fs_*` write
+//!   intrinsics (fs:write).
 //! * `std/net.ax` — `resolve(host)` on top of `net_resolve` (net).
 //! * `std/process.ax` — `run_status(command)` on top of `process_status`
 //!   (process).
@@ -24,7 +26,7 @@
 //!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
 //!   separator issues in the virtual stdlib table.)
 //!
-//! The seventh module shares an existing capability class with a peer
+//! One module shares an existing capability class with a peer
 //! wrapper, demonstrating that the `std.*` surface is not limited to one
 //! wrapper per capability:
 //!
@@ -34,8 +36,8 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth, ninth, tenth, eleventh, and twelfth modules are stdlib surfaces not tied to a
-//! capability flag, matching the ambient status of the `print` statement:
+//! Five modules are stdlib surfaces not tied to a capability flag, matching the
+//! ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
 //!   intrinsic (writes a line to stderr and returns bytes written).
@@ -84,6 +86,17 @@ pub fn sleep(duration: Duration): int {\nreturn clock_sleep_ms(duration.ms)\n}\n
     (
         "fs.ax",
         "pub fn read_file(path: string): Option<string> {\nreturn fs_read(path)\n}\n",
+    ),
+    (
+        "fs_write.ax",
+        "pub fn create_file(path: string): bool {\nreturn fs_create_file(path)\n}\n\
+pub fn write_file(path: string, content: string): bool {\nreturn fs_write_file(path, content)\n}\n\
+pub fn append_file(path: string, content: string): bool {\nreturn fs_append_file(path, content)\n}\n\
+pub fn mkdir(path: string): bool {\nreturn fs_mkdir(path)\n}\n\
+pub fn mkdir_all(path: string): bool {\nreturn fs_mkdir_all(path)\n}\n\
+pub fn remove_file(path: string): bool {\nreturn fs_remove_file(path)\n}\n\
+pub fn remove_dir(path: string): bool {\nreturn fs_remove_dir(path)\n}\n\
+pub fn replace_file(path: string, content: string): bool {\nreturn fs_replace_file(path, content)\n}\n",
     ),
     (
         "net.ax",

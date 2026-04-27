@@ -649,6 +649,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
         tests: Vec::new(),
         capabilities: CapabilityConfig {
             fs: true,
+            fs_write: true,
             fs_root: None,
             net: true,
             process: true,
@@ -1919,6 +1920,8 @@ fn validate_expr_capabilities(
 fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
+        "fs_create_file" | "fs_write_file" | "fs_append_file" | "fs_mkdir" | "fs_mkdir_all"
+        | "fs_remove_file" | "fs_remove_dir" | "fs_replace_file" => Some(CapabilityKind::FsWrite),
         "net_resolve" => Some(CapabilityKind::Net),
         "http_get" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),

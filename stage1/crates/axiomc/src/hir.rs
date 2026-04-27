@@ -4470,6 +4470,40 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if let Some(arity) = fs_write_intrinsic_arity(name) {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != arity {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects {arity} argument(s), got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let mut lowered_args = Vec::new();
+                for arg in args {
+                    let lowered = lower_expr_with_expected(arg, Some(&Type::String), env, ctx)?;
+                    if lowered.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("{name} expects string arguments, got {}", lowered.ty()),
+                        )
+                        .with_span(arg.line(), arg.column()));
+                    }
+                    move_lowered_value(&lowered, env)?;
+                    lowered_args.push(lowered);
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
+                    ty: Type::Bool,
+                });
+            }
             if name == "net_resolve" {
                 require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
                 if args.len() != 1 {
@@ -6068,6 +6102,16 @@ fn validate_ffi_type(ty: &Type, line: usize, column: usize) -> Result<(), Diagno
     }
 }
 
+fn fs_write_intrinsic_arity(name: &str) -> Option<usize> {
+    match name {
+        "fs_create_file" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file" | "fs_remove_dir" => {
+            Some(1)
+        }
+        "fs_write_file" | "fs_append_file" | "fs_replace_file" => Some(2),
+        _ => None,
+    }
+}
+
 fn require_capability(
     capabilities: &CapabilityConfig,
     kind: CapabilityKind,
@@ -6078,10 +6122,12 @@ fn require_capability(
     if capabilities.enabled(kind) {
         return Ok(());
     }
-    let requirement = if kind == CapabilityKind::Env {
-        String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true")
-    } else {
-        format!("[capabilities].{} = true", kind.name())
+    let requirement = match kind {
+        CapabilityKind::Env => {
+            String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true")
+        }
+        CapabilityKind::FsWrite => String::from("[capabilities].fs_write = true"),
+        _ => format!("[capabilities].{} = true", kind.name()),
     };
     Err(Diagnostic::new(
         "capability",
