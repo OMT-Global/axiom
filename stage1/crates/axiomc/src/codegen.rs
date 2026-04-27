@@ -1733,6 +1733,7 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Literal(LiteralValue::Int(value)) => value.to_string(),
         Expr::Literal(LiteralValue::Bool(value)) => value.to_string(),
         Expr::Literal(LiteralValue::String(value)) => format!("String::from({value:?})"),
+        Expr::VarRef { name, .. } if name == "self" => String::from("self_"),
         Expr::VarRef { name, .. } => name.clone(),
         Expr::Call { name, args, .. } if name == "assert_true" => {
             format!(
