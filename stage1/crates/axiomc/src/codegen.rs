@@ -1111,12 +1111,12 @@ fn axiom_crypto_hmac_sha256(key: String, message: String) -> String {
 fn axiom_crypto_constant_time_eq(left: String, right: String) -> bool {
     let left = left.as_bytes();
     let right = right.as_bytes();
-    let max_len = left.len().max(right.len());
-    let mut diff = left.len() ^ right.len();
-    for index in 0..max_len {
-        let left_byte = left.get(index).copied().unwrap_or(0);
-        let right_byte = right.get(index).copied().unwrap_or(0);
-        diff |= (left_byte ^ right_byte) as usize;
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&left_byte, &right_byte) in left.iter().zip(right.iter()) {
+        diff |= left_byte ^ right_byte;
     }
     diff == 0
 }
