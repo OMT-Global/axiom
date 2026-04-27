@@ -163,7 +163,7 @@ Current proof points:
   Axiom program, while the worker fixture proves deterministic queue-style async
   processing. The small HTTP service fixture remains blocked on server-side HTTP
   support.
-- `make stage1-test`, `make stage1-conformance`, and `make stage1-smoke` now cover the checked-in stage1 language gate.
+- `make stage1-test` now carries the checked-in AG5 proof-workload tests for `stage1/examples/proof_cli` and `stage1/examples/proof_worker`, while `make stage1-smoke` carries their blocking build/run acceptance path. The small HTTP service proof remains blocked on server-side HTTP support.
 
 Agent-grade compiler milestone summary:
 
