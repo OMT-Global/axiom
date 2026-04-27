@@ -390,9 +390,12 @@ fn collect_test_targets(
     include_benchmarks: bool,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let mut tests = manifest.tests.clone();
+    if !include_benchmarks {
+        tests.retain(|test| test.kind != TestKind::Benchmark);
+    }
     if let Some(expected_stdout) = load_package_expected_output(project_root)? {
         for test in &mut tests {
-            if test.stdout.is_none() {
+            if test.kind != TestKind::Benchmark && test.stdout.is_none() {
                 test.stdout = Some(expected_stdout.clone());
             }
         }
@@ -482,6 +485,8 @@ fn collect_discovered_tests(
                 )
                 .with_path(stdout_path.display().to_string())
             })?)
+        } else if kind == TestKind::Benchmark {
+            None
         } else {
             package_expected_output.map(str::to_string)
         };
@@ -4280,6 +4285,91 @@ mod tests {
 
         analyze_package(&graph, &relative_root)
             .unwrap_or_else(|err| panic!("relative package root should analyze: {err:?}"));
+    }
+
+    #[test]
+    fn manifest_benchmark_tests_require_include_benchmarks() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        let mut manifest = package_manifest();
+        manifest.tests = vec![
+            crate::manifest::TestTarget {
+                name: "unit".to_string(),
+                entry: "src/unit_test.ax".to_string(),
+                stdout: None,
+                kind: TestKind::Unit,
+            },
+            crate::manifest::TestTarget {
+                name: "bench".to_string(),
+                entry: "src/demo_bench.ax".to_string(),
+                stdout: None,
+                kind: TestKind::Benchmark,
+            },
+        ];
+
+        let default_tests = collect_test_targets(root, &manifest, None, false)
+            .unwrap_or_else(|err| panic!("collect default tests: {err:?}"));
+        assert_eq!(
+            default_tests
+                .iter()
+                .map(|test| test.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unit"]
+        );
+
+        let benchmark_tests = collect_test_targets(root, &manifest, None, true)
+            .unwrap_or_else(|err| panic!("collect benchmark tests: {err:?}"));
+        assert_eq!(
+            benchmark_tests
+                .iter()
+                .map(|test| test.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unit", "bench"]
+        );
+    }
+
+    #[test]
+    fn benchmark_tests_do_not_inherit_package_expected_output() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        let source_root = root.join("src");
+        fs::create_dir_all(&source_root).unwrap_or_else(|err| panic!("create src: {err}"));
+        fs::write(root.join("expected-output.txt"), "package\n")
+            .unwrap_or_else(|err| panic!("write package expected output: {err}"));
+        fs::write(source_root.join("unit_test.ax"), "")
+            .unwrap_or_else(|err| panic!("write unit test: {err}"));
+        fs::write(source_root.join("slow_bench.ax"), "")
+            .unwrap_or_else(|err| panic!("write benchmark test: {err}"));
+        fs::write(source_root.join("explicit_bench.ax"), "")
+            .unwrap_or_else(|err| panic!("write explicit benchmark test: {err}"));
+        fs::write(source_root.join("explicit_bench.stdout"), "explicit\n")
+            .unwrap_or_else(|err| panic!("write explicit benchmark stdout: {err}"));
+
+        let mut manifest = package_manifest();
+        manifest.tests.push(crate::manifest::TestTarget {
+            name: "manifest_bench".to_string(),
+            entry: "src/manifest_bench.ax".to_string(),
+            stdout: None,
+            kind: TestKind::Benchmark,
+        });
+
+        let tests = collect_test_targets(root, &manifest, None, true)
+            .unwrap_or_else(|err| panic!("collect benchmark tests: {err:?}"));
+        let stdout_by_name = tests
+            .iter()
+            .map(|test| (test.name.as_str(), test.stdout.as_deref()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            stdout_by_name.get("src/unit_test"),
+            Some(&Some("package\n"))
+        );
+        assert_eq!(stdout_by_name.get("src/slow_bench"), Some(&None));
+        assert_eq!(
+            stdout_by_name.get("src/explicit_bench"),
+            Some(&Some("explicit\n"))
+        );
+        assert_eq!(stdout_by_name.get("manifest_bench"), Some(&None));
     }
 
     #[cfg(unix)]
