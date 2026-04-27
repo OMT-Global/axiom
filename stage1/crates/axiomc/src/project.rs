@@ -1916,6 +1916,8 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "http_get" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),
         "clock_now_ms" => Some(CapabilityKind::Clock),
+        "clock_elapsed_ms" => Some(CapabilityKind::Clock),
+        "clock_sleep_ms" => Some(CapabilityKind::Clock),
         "env_get" => Some(CapabilityKind::Env),
         "crypto_sha256" => Some(CapabilityKind::Crypto),
         _ => None,
