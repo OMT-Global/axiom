@@ -3908,9 +3908,14 @@ fn resolve_import_path(
                 .with_span(import.line, import.column));
             }
             if !stdlib::stdlib_has_module(&remainder) {
+                let module_name = remainder.to_string_lossy();
                 return Err(Diagnostic::new(
                     "import",
-                    format!("unknown stdlib module {:?}", import.path),
+                    crate::diagnostics::message_with_suggestion(
+                        format!("unknown stdlib module {:?}", import.path),
+                        &module_name,
+                        stdlib::stdlib_module_names(),
+                    ),
                 )
                 .with_path(module_path.display().to_string())
                 .with_span(import.line, import.column));

@@ -1,0 +1,4 @@
+import "core/render.ax"
+
+print render_command("status", "3")
+print render_command("run", "7")
