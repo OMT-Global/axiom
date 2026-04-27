@@ -100,7 +100,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4 pinned 2026-04-19
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Require generated PR template content
+      - name: Validate PR description requirements
         run: bash scripts/ci/validate-pr-description.sh
 
   ci-gate:
