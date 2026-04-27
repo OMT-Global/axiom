@@ -4,9 +4,49 @@ use crate::mir::{
     EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, Stmt, StructDef,
     StructField, Type,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::Path;
 use std::process::Command;
+use std::str::FromStr;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NativeBackendKind {
+    #[default]
+    GeneratedRust,
+    DirectNative,
+}
+
+impl NativeBackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GeneratedRust => "generated-rust",
+            Self::DirectNative => "direct-native",
+        }
+    }
+}
+
+impl fmt::Display for NativeBackendKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for NativeBackendKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "generated-rust" => Ok(Self::GeneratedRust),
+            "direct-native" => Ok(Self::DirectNative),
+            other => Err(format!(
+                "unsupported backend {other:?}; expected generated-rust or direct-native"
+            )),
+        }
+    }
+}
 
 pub fn render_rust(program: &Program) -> String {
     render_rust_with_debug(program, false)
@@ -867,7 +907,9 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("    if milliseconds < 0 {\n");
     out.push_str("        return -1;\n");
     out.push_str("    }\n");
-    out.push_str("    std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));\n");
+    out.push_str(
+        "    std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));\n",
+    );
     out.push_str("    0\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
@@ -2220,6 +2262,25 @@ impl crate::mir::CompareOp {
 }
 
 pub fn compile_native(
+    backend: NativeBackendKind,
+    generated_rust: &Path,
+    binary_path: &Path,
+    target: Option<&str>,
+    debug: bool,
+) -> Result<(), Diagnostic> {
+    match backend {
+        NativeBackendKind::GeneratedRust => {
+            compile_generated_rust(generated_rust, binary_path, target, debug)
+        }
+        NativeBackendKind::DirectNative => Err(Diagnostic::new(
+            "build",
+            "direct-native backend is not implemented yet; use --backend generated-rust",
+        )
+        .with_path(generated_rust.display().to_string())),
+    }
+}
+
+fn compile_generated_rust(
     generated_rust: &Path,
     binary_path: &Path,
     target: Option<&str>,

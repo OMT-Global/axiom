@@ -1,3 +1,4 @@
+use axiomc::codegen::NativeBackendKind;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::new_project::create_project;
@@ -37,11 +38,13 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
-    /// Build a stage1 package into generated Rust and a native binary.
+    /// Build a stage1 package into backend artifacts and a native binary.
     Build {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long, default_value_t = NativeBackendKind::GeneratedRust)]
+        backend: NativeBackendKind,
         #[arg(long)]
         debug: bool,
         #[arg(long)]
@@ -138,6 +141,7 @@ fn main() {
         Command::Build {
             path,
             json,
+            backend,
             debug,
             timings,
             target,
@@ -146,6 +150,7 @@ fn main() {
             match build_project_with_options(
                 &path,
                 &BuildOptions {
+                    backend,
                     target,
                     package: package.clone(),
                     debug,
@@ -290,15 +295,22 @@ fn main() {
 }
 
 fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
-    let mut lines = vec![format!("wrote {}", output.binary)];
+    let mut lines = vec![format!(
+        "wrote {} (backend={})",
+        output.binary, output.backend
+    )];
     if let Some(debug_map) = &output.debug_map {
         lines.push(format!("wrote debug map {debug_map}"));
     }
     if timings {
-        lines.push(format!(
-            "timings total={}ms cache_hits={} cache_misses={}",
-            output.duration_ms, output.cache_hits, output.cache_misses
-        ).trim_end().to_string());
+        lines.push(
+            format!(
+                "timings total={}ms cache_hits={} cache_misses={}",
+                output.duration_ms, output.cache_hits, output.cache_misses
+            )
+            .trim_end()
+            .to_string(),
+        );
         for package in &output.packages {
             lines.push(format!(
                 "timings package={} cache_status={:?} compile={}ms",
@@ -719,7 +731,7 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("Create a new stage1 package"));
         assert!(help.contains("Check a stage1 package or workspace member"));
-        assert!(help.contains("Build a stage1 package into generated Rust"));
+        assert!(help.contains("Build a stage1 package into backend artifacts"));
         assert!(help.contains("Build and run a stage1 package native binary"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
@@ -731,6 +743,7 @@ mod tests {
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
         BuildOutput {
+            backend: NativeBackendKind::GeneratedRust,
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -754,7 +767,7 @@ mod tests {
                 false,
             ),
             vec![
-                String::from("wrote dist/app"),
+                String::from("wrote dist/app (backend=generated-rust)"),
                 String::from("wrote debug map target/main.debug-map.json"),
             ]
         );
@@ -764,7 +777,7 @@ mod tests {
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
             build_summary_lines(&build_output(None), false),
-            vec![String::from("wrote dist/app")]
+            vec![String::from("wrote dist/app (backend=generated-rust)")]
         );
     }
 

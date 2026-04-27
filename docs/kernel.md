@@ -24,7 +24,7 @@ This kernel note describes the supported Rust `axiomc` path.
 ## Execution
 
 - Packages are checked, built, run, and tested through `axiomc`.
-- `axiomc build` generates Rust and invokes `rustc` to produce a native binary.
+- `axiomc build` uses the selected native backend (currently generated Rust plus `rustc`) to produce a native binary.
 - `axiomc test` discovers `src/**/*_test.ax` entrypoints and compares stdout
   with sibling `*.stdout` files when present.
 - `axiomc check --json`, `build --json`, `test --json`, and `caps --json` emit
