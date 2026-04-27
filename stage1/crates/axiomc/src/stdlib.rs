@@ -225,3 +225,7 @@ pub(crate) fn stdlib_has_module(import_remainder: &Path) -> bool {
     };
     STDLIB_SOURCES.iter().any(|(name, _)| *name == key)
 }
+
+pub(crate) fn stdlib_module_names() -> impl Iterator<Item = &'static str> {
+    STDLIB_SOURCES.iter().map(|(name, _)| *name)
+}
