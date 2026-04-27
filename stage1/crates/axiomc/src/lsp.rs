@@ -3,7 +3,7 @@ use crate::hir;
 use crate::manifest::CapabilityConfig;
 use crate::mir;
 use crate::syntax::parse_program;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -181,11 +181,12 @@ fn path_for_uri(uri: &str) -> PathBuf {
 }
 
 fn percent_decode(input: &str) -> String {
-    let mut output = String::new();
+    let mut output = Vec::with_capacity(input.len());
     let mut chars = input.chars();
     while let Some(ch) = chars.next() {
         if ch != '%' {
-            output.push(ch);
+            let mut encoded = [0; 4];
+            output.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
             continue;
         }
         let hi = chars.next();
@@ -194,21 +195,24 @@ fn percent_decode(input: &str) -> String {
             (Some(hi), Some(lo)) => {
                 let encoded = format!("{hi}{lo}");
                 if let Ok(value) = u8::from_str_radix(&encoded, 16) {
-                    output.push(value as char);
+                    output.push(value);
                 } else {
-                    output.push('%');
-                    output.push(hi);
-                    output.push(lo);
+                    output.push(b'%');
+                    let mut hi_encoded = [0; 4];
+                    output.extend_from_slice(hi.encode_utf8(&mut hi_encoded).as_bytes());
+                    let mut lo_encoded = [0; 4];
+                    output.extend_from_slice(lo.encode_utf8(&mut lo_encoded).as_bytes());
                 }
             }
             (Some(hi), None) => {
-                output.push('%');
-                output.push(hi);
+                output.push(b'%');
+                let mut encoded = [0; 4];
+                output.extend_from_slice(hi.encode_utf8(&mut encoded).as_bytes());
             }
-            _ => output.push('%'),
+            _ => output.push(b'%'),
         }
     }
-    output
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 fn read_message<R>(input: &mut R) -> Result<Option<String>, Diagnostic>
@@ -228,7 +232,10 @@ where
         if trimmed.is_empty() {
             break;
         }
-        if let Some(value) = trimmed.strip_prefix("Content-Length:") {
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if !name.trim().eq_ignore_ascii_case("Content-Length") {
+                continue;
+            }
             let parsed = value.trim().parse::<usize>().map_err(|err| {
                 Diagnostic::new("lsp", format!("invalid Content-Length header: {err}"))
             })?;
@@ -312,10 +319,12 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0]["source"], json!("axiomc"));
         assert_eq!(diagnostics[0]["code"], json!("parse"));
-        assert!(diagnostics[0]["message"]
-            .as_str()
-            .expect("message")
-            .contains("unexpected closing brace"));
+        assert!(
+            diagnostics[0]["message"]
+                .as_str()
+                .expect("message")
+                .contains("unexpected closing brace")
+        );
         assert_eq!(
             diagnostics[0]["range"]["start"],
             json!({ "line": 0, "character": 0 })
@@ -364,10 +373,12 @@ mod tests {
             .expect("diagnostics array");
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0]["code"], json!("type"));
-        assert!(diagnostics[0]["message"]
-            .as_str()
-            .expect("message")
-            .contains("undefined variable"));
+        assert!(
+            diagnostics[0]["message"]
+                .as_str()
+                .expect("message")
+                .contains("undefined variable")
+        );
     }
 
     #[test]
@@ -382,6 +393,26 @@ mod tests {
         assert!(output.starts_with("Content-Length: "));
         assert!(output.contains(r#""id":7"#));
         assert!(output.contains(r#""axiom-analyzer""#));
+    }
+
+    #[test]
+    fn stdio_loop_accepts_case_insensitive_content_length_header() {
+        let body = r#"{"jsonrpc":"2.0","id":8,"method":"initialize","params":{}}"#;
+        let input = format!("content-length: {}\r\n\r\n{}", body.len(), body);
+        let mut output = Vec::new();
+
+        run_stdio(std::io::Cursor::new(input.into_bytes()), &mut output).expect("run stdio");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.starts_with("Content-Length: "));
+        assert!(output.contains(r#""id":8"#));
+    }
+
+    #[test]
+    fn percent_decode_decodes_utf8_file_uri_bytes_once() {
+        let path = path_for_uri("file:///tmp/%E6%96%87%E4%BB%B6.ax");
+
+        assert_eq!(path, PathBuf::from("/tmp/文件.ax"));
     }
 
     #[test]
