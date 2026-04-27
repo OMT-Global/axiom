@@ -24,6 +24,13 @@ fi
 
 checkout_line=$(printf '%s\n' "$section" | nl -ba | grep 'actions/checkout@' | head -n1 | awk '{print $1}')
 run_line=$(printf '%s\n' "$section" | nl -ba | grep 'bash scripts/ci/validate-pr-description.sh' | head -n1 | awk '{print $1}')
+pr_body_env_line=$(printf '%s\n' "$section" | nl -ba | grep -F 'PR_BODY: ${{ github.event.pull_request.body }}' | head -n1 | awk '{print $1}')
+ci_gate_needs_validate=$(awk '
+  /^  ci-gate:$/ { in_job=1; next }
+  in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+  in_job && /validate-pr-description/ { found=1 }
+  END { if (found) print "yes" }
+' "$workflow")
 
 if [[ -z "$checkout_line" ]]; then
   echo "validate-pr-description job must checkout the repo before running validation" >&2
@@ -37,6 +44,16 @@ fi
 
 if (( checkout_line >= run_line )); then
   echo "validate-pr-description job must checkout the repo before running validation" >&2
+  exit 1
+fi
+
+if [[ -z "$pr_body_env_line" ]]; then
+  echo "validate-pr-description job must pass pull_request.body into PR_BODY" >&2
+  exit 1
+fi
+
+if [[ "$ci_gate_needs_validate" != "yes" ]]; then
+  echo "ci-gate must depend on validate-pr-description so PR body failures block the workflow" >&2
   exit 1
 fi
 
