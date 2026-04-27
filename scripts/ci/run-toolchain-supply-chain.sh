@@ -12,6 +12,16 @@ fi
 
 mkdir -p "$sbom_output_dir"
 
+if [[ -f "$repo_root/package-lock.json" ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to verify signed packages in package-lock.json" >&2
+    exit 1
+  fi
+
+  npm ci --prefix "$repo_root" --ignore-scripts --no-audit --no-fund
+  npm audit signatures --prefix "$repo_root"
+fi
+
 cargo fetch --manifest-path "$manifest_path" --locked
 cargo metadata --manifest-path "$manifest_path" --format-version 1 --locked --offline >/dev/null
 cargo vet --manifest-path "$manifest_path" --locked --frozen

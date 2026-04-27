@@ -13,6 +13,16 @@ grep -Fq 'cargo install cargo-vet --locked' "$workflow" || {
   exit 1
 }
 
+grep -Fq 'actions/setup-node@' "$workflow" || {
+  echo "workflow must install Node.js for signed package verification" >&2
+  exit 1
+}
+
+grep -Fq 'node-version: 20' "$workflow" || {
+  echo "workflow must pin the expected Node.js major version" >&2
+  exit 1
+}
+
 grep -Fq 'bash scripts/ci/run-toolchain-supply-chain.sh' "$workflow" || {
   echo "workflow must run the supply-chain validation script" >&2
   exit 1
@@ -25,6 +35,16 @@ grep -Fq 'stage1/target/sbom/stage1.spdx.json' "$workflow" || {
 
 grep -Fq 'cargo vet --manifest-path "$manifest_path" --locked --frozen' "$script" || {
   echo "supply-chain script must run cargo-vet in locked frozen mode" >&2
+  exit 1
+}
+
+grep -Fq 'npm ci --prefix "$repo_root" --ignore-scripts --no-audit --no-fund' "$script" || {
+  echo "supply-chain script must install Node.js packages without lifecycle scripts" >&2
+  exit 1
+}
+
+grep -Fq 'npm audit signatures --prefix "$repo_root"' "$script" || {
+  echo "supply-chain script must verify signed Node.js packages" >&2
   exit 1
 }
 
