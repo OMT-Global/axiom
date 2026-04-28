@@ -43,7 +43,7 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
-        /// Select the preparatory native-backend seam. Today only `generated-rust` is implemented; direct-native remains future work.
+        /// Select the preparatory native-backend seam. Today only `generated-rust` is implemented; additional native backends remain future work.
         #[arg(long, default_value_t = NativeBackendKind::GeneratedRust)]
         backend: NativeBackendKind,
         #[arg(long)]
@@ -745,8 +745,9 @@ mod tests {
             .render_long_help()
             .to_string();
         assert!(build_help.contains(
-            "Today only `generated-rust` is implemented; direct-native remains future work"
+            "Today only `generated-rust` is implemented; additional native backends remain future work"
         ));
+        assert!(!build_help.contains("direct-native"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
         assert!(help.contains("Format .ax source files"));
