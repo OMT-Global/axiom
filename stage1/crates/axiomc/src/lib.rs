@@ -129,6 +129,11 @@ mod tests {
         command_for_executable(path).expect("prepare compiled binary command")
     }
 
+    fn loopback_socket_bind_available() -> bool {
+        std::net::TcpListener::bind(("127.0.0.1", 0)).is_ok()
+            && std::net::UdpSocket::bind(("127.0.0.1", 0)).is_ok()
+    }
+
     #[cfg(unix)]
     #[test]
     fn process_fixture_is_executable_only_by_owner() {
@@ -725,6 +730,19 @@ print fail()
         assert!(rendered.contains("fn axiom_resolve_public_socket_addrs("));
         assert!(rendered.contains("Network intrinsics reject private, loopback, link-local,"));
         assert!(rendered.contains("addr.to_ipv4_mapped()"));
+    }
+
+    #[test]
+    fn render_rust_clamps_socket_timeouts_and_bounds_tcp_request_reads() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("timeout_ms.clamp(1, 30_000)"));
+        assert!(rendered.contains("let mut total_read = 0usize;"));
+        assert!(rendered.contains("if total_read >= 65_536"));
+        assert!(rendered.contains("stream.shutdown(std::net::Shutdown::Write).ok()?;"));
     }
 
     #[test]
@@ -2924,18 +2942,19 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\nmatch tcp_listen_loopback_once(\"tcp pong\", 1000) {\nSome(port) {\nmatch tcp_dial(\"127.0.0.1\", port, \"tcp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"tcp none\"\n}\n}\n}\nNone {\nprint \"tcp listen none\"\n}\n}\nmatch udp_bind_loopback_once(\"udp pong\", 1000) {\nSome(port) {\nmatch udp_send_recv(\"127.0.0.1\", port, \"udp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"udp none\"\n}\n}\n}\nNone {\nprint \"udp bind none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout == "true\n" || stdout == "false\n",
-            "unexpected stdout for stdlib_net smoke: {stdout:?}"
-        );
+        let expected = if loopback_socket_bind_available() {
+            "false\ntcp pong\nudp pong\n"
+        } else {
+            "false\ntcp listen none\nudp bind none\n"
+        };
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
     }
 
     #[test]
@@ -2964,7 +2983,7 @@ print strlen("hello")
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_a) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+            "import \"std/net.ax\"\nmatch tcp_listen_loopback_once(\"pong\", 1000) {\nSome(_port) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
         )
         .expect("write source");
 
