@@ -867,7 +867,9 @@ fn axiom_http_get(url: String) -> Option<String> {
     out.push_str("    if milliseconds < 0 {\n");
     out.push_str("        return -1;\n");
     out.push_str("    }\n");
-    out.push_str("    std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));\n");
+    out.push_str(
+        "    std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));\n",
+    );
     out.push_str("    0\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
@@ -2252,10 +2254,11 @@ pub fn compile_native(
                 .with_path(generated_rust.display().to_string())
         })?;
     if !status.success() {
-        return Err(
-            Diagnostic::new("build", "rustc failed to produce a native binary")
-                .with_path(generated_rust.display().to_string()),
-        );
+        return Err(Diagnostic::new(
+            "build",
+            "rustc failed to produce the requested build artifact",
+        )
+        .with_path(generated_rust.display().to_string()));
     }
     Ok(())
 }
