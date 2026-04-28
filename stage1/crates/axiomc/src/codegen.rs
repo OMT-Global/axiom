@@ -11,6 +11,10 @@ use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
 
+/// Preparatory selector for native-build backend plumbing.
+///
+/// Stage1 currently implements only the generated-Rust path; additional
+/// native backends remain follow-on work under #105.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum NativeBackendKind {
