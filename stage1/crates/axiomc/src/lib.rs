@@ -1030,27 +1030,6 @@ print fail()
     }
 
     #[test]
-    fn build_project_rejects_unimplemented_direct_native_backend() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("direct-native");
-        create_project(&project, Some("direct-native-app")).expect("create project");
-        let error = build_project_with_options(
-            &project,
-            &BuildOptions {
-                backend: NativeBackendKind::DirectNative,
-                ..BuildOptions::default()
-            },
-        )
-        .expect_err("direct native backend should not build yet");
-        assert!(
-            error
-                .to_string()
-                .contains("direct-native backend is not implemented yet"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
     fn build_project_emits_native_binary() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("native");

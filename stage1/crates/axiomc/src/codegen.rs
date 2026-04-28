@@ -16,14 +16,12 @@ use std::str::FromStr;
 pub enum NativeBackendKind {
     #[default]
     GeneratedRust,
-    DirectNative,
 }
 
 impl NativeBackendKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::GeneratedRust => "generated-rust",
-            Self::DirectNative => "direct-native",
         }
     }
 }
@@ -40,9 +38,8 @@ impl FromStr for NativeBackendKind {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "generated-rust" => Ok(Self::GeneratedRust),
-            "direct-native" => Ok(Self::DirectNative),
             other => Err(format!(
-                "unsupported backend {other:?}; expected generated-rust or direct-native"
+                "unsupported backend {other:?}; expected generated-rust"
             )),
         }
     }
@@ -2272,11 +2269,6 @@ pub fn compile_native(
         NativeBackendKind::GeneratedRust => {
             compile_generated_rust(generated_rust, binary_path, target, debug)
         }
-        NativeBackendKind::DirectNative => Err(Diagnostic::new(
-            "build",
-            "direct-native backend is not implemented yet; use --backend generated-rust",
-        )
-        .with_path(generated_rust.display().to_string())),
     }
 }
 
