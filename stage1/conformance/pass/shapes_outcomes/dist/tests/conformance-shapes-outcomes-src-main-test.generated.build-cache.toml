@@ -1,0 +1,12 @@
+version = 1
+compiler = "axiomc-stage1-0.1.0"
+debug = false
+manifest_hash = "a7bba1e445e93ec5"
+lockfile_hash = "017e7971d4389f56"
+rust_hash = "829fd1a0872b641b"
+binary_hash = "f4b0021099a34eb5"
+
+[[modules]]
+path = "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/shapes_outcomes/src/main_test.ax"
+source_hash = "e90eb0ae22df9ab7"
+imports = []

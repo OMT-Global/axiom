@@ -1,0 +1,6 @@
+version = 1
+
+[[package]]
+name = "conformance-fail-workspace-parent-traversal"
+version = "0.1.0"
+source = "path"

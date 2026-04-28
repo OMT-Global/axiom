@@ -1,0 +1,7 @@
+{
+  "kind": "type",
+  "code": null,
+  "message_contains": "if condition expects bool, got int",
+  "line": 2,
+  "column": 1
+}

@@ -37,6 +37,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/w
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/workspace_only --package workspace-app
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 ```
 
@@ -49,10 +50,11 @@ surface via ordinary `let` bindings, and they abort the test with a source
 location plus expected/actual detail on failure. Projects that need explicit
 naming or inline expectations can still declare `[[tests]]` entries in
 `axiom.toml`. The command now also accepts `--filter <pattern>` to run a subset
-of discovered tests by test name or entry path, and the default CLI summary now
-prints `passed` / `failed` / `skipped` counts. Workspace-only roots are now
-supported as long as build/run commands select a concrete member package with
-`-p/--package`.
+of discovered tests by test name or entry path. A conformance root can also
+include `fail/*/expected-error.json` fixtures; those run as compile-fail checks
+against stable diagnostic fields. The default CLI summary now prints `passed` /
+`failed` / `skipped` counts. Workspace-only roots are now supported as long as
+build/run commands select a concrete member package with `-p/--package`.
 
 ## JSON contract
 
@@ -162,7 +164,7 @@ Important bar definition:
 
 ## Working rules for future stage1 work
 
-- Keep `stage0` as the conformance oracle for overlapping features until stage1 owns the full language surface it implements.
+- Keep `stage0` as the temporary conformance oracle for overlapping features until stage1 owns the full language surface it implements. The retirement plan is tracked in [Python Exit Plan](python-exit-plan.md).
 - Keep the current dual-track verification gate: `python -m unittest discover -v` for stage0 and `make stage1-test stage1-smoke` for stage1.
 - Land stage1 slices in small, reviewable increments; do not combine data-model work, ownership work, and backend replacement in one change.
 - Prefer compile-fail tests for language rule changes before broad end-to-end examples.

@@ -1,0 +1,5 @@
+{
+  "kind": "lockfile",
+  "code": null,
+  "message_contains": "axiom.lock does not match axiom.toml"
+}

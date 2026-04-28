@@ -1,0 +1,7 @@
+{
+  "kind": "import",
+  "code": null,
+  "message_contains": "function \"prefix\" is not exported by an imported module",
+  "line": 2,
+  "column": 7
+}

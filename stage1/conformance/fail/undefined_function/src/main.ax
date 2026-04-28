@@ -1,0 +1,2 @@
+let answer: int = lucky(40)
+print answer

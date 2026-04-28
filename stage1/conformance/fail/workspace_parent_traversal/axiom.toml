@@ -1,0 +1,18 @@
+[package]
+name = "conformance-fail-workspace-parent-traversal"
+version = "0.1.0"
+
+[workspace]
+members = ["../outside"]
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false

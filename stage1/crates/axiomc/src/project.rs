@@ -130,6 +130,15 @@ pub struct TestOptions {
     pub package: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ExpectedTestDiagnostic {
+    pub kind: String,
+    pub code: Option<String>,
+    pub message_contains: String,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+}
+
 pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
     check_project_with_options(project_root, &CheckOptions::default())
 }
@@ -310,15 +319,23 @@ pub fn run_project_tests_with_options(
         if tests.is_empty() {
             continue;
         }
-        packages.push(package_root.display().to_string());
+        push_unique_package(&mut packages, package_root.display().to_string());
         for test in &tests {
             cases.push(run_test_case(&package_root, &graph, &manifest, test));
+        }
+    }
+    if options.package.is_none() {
+        for fail_case in
+            discover_conformance_failure_targets(&project_root, options.filter.as_deref())?
+        {
+            push_unique_package(&mut packages, fail_case.project_root.display().to_string());
+            cases.push(run_expected_failure_case(&fail_case));
         }
     }
     if cases.is_empty() {
         return Err(Diagnostic::new(
             "test",
-            "no tests discovered under src/**/*_test.ax across the workspace and no [[tests]] configured in axiom.toml",
+            "no tests discovered under src/**/*_test.ax, fail/*/expected-error.json, or [[tests]] configured in axiom.toml",
         )
         .with_path(manifest_path_text));
     }
@@ -354,6 +371,96 @@ fn collect_test_targets(
         tests.retain(|test| test_matches_filter(test, filter));
     }
     Ok(tests)
+}
+
+#[derive(Debug, Clone)]
+struct ConformanceFailureTarget {
+    name: String,
+    project_root: PathBuf,
+    entry: String,
+    expected: ExpectedTestDiagnostic,
+}
+
+fn discover_conformance_failure_targets(
+    project_root: &Path,
+    filter: Option<&str>,
+) -> Result<Vec<ConformanceFailureTarget>, Diagnostic> {
+    let fail_root = project_root.join("fail");
+    if !fail_root.exists() {
+        return Ok(Vec::new());
+    }
+    let entries = fs::read_dir(&fail_root).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!(
+                "failed to read conformance fail root {}: {err}",
+                fail_root.display()
+            ),
+        )
+        .with_path(fail_root.display().to_string())
+    })?;
+    let mut targets = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            Diagnostic::new(
+                "test",
+                format!(
+                    "failed to read conformance fail root {}: {err}",
+                    fail_root.display()
+                ),
+            )
+            .with_path(fail_root.display().to_string())
+        })?;
+        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let case_root = entry.path();
+        let manifest = manifest_path(&case_root);
+        let expected_path = case_root.join("expected-error.json");
+        if !manifest.exists() || !expected_path.exists() {
+            continue;
+        }
+        let case_name = case_root
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("unknown");
+        let name = format!("fail/{case_name}");
+        let entry = String::from("src/main.ax");
+        if let Some(filter) = filter {
+            if !name.contains(filter) && !entry.contains(filter) {
+                continue;
+            }
+        }
+        let expected = read_expected_test_diagnostic(&expected_path)?;
+        targets.push(ConformanceFailureTarget {
+            name,
+            project_root: case_root,
+            entry,
+            expected,
+        });
+    }
+    targets.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(targets)
+}
+
+fn read_expected_test_diagnostic(path: &Path) -> Result<ExpectedTestDiagnostic, Diagnostic> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!(
+                "failed to read expected diagnostic {}: {err}",
+                path.display()
+            ),
+        )
+        .with_path(path.display().to_string())
+    })?;
+    serde_json::from_str(&content).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("invalid expected diagnostic {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })
 }
 
 fn discover_test_targets(
@@ -418,6 +525,12 @@ fn collect_discovered_tests(
         });
     }
     Ok(())
+}
+
+fn push_unique_package(packages: &mut Vec<String>, package: String) {
+    if !packages.iter().any(|existing| existing == &package) {
+        packages.push(package);
+    }
 }
 
 pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescriptor>, Diagnostic> {
@@ -1226,6 +1339,83 @@ fn run_test_case(
             ),
         },
     }
+}
+
+fn run_expected_failure_case(test: &ConformanceFailureTarget) -> TestCaseResult {
+    let started = Instant::now();
+    let entry_path = test.project_root.join(&test.entry);
+    let error = match check_project(&test.project_root) {
+        Ok(_) => Some(
+            Diagnostic::new(
+                "test",
+                format!(
+                    "expected compile-fail fixture {:?} to fail, but it checked successfully",
+                    test.name
+                ),
+            )
+            .with_path(entry_path.display().to_string()),
+        ),
+        Err(actual) => expected_diagnostic_mismatch(&test.expected, &actual).map(|message| {
+            Diagnostic::new("test", message).with_path(entry_path.display().to_string())
+        }),
+    };
+    TestCaseResult {
+        package_root: test.project_root.display().to_string(),
+        name: test.name.clone(),
+        entry: test.entry.clone(),
+        ok: error.is_none(),
+        binary: None,
+        generated_rust: None,
+        exit_code: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        expected_stdout: None,
+        duration_ms: started.elapsed().as_millis() as u64,
+        error,
+    }
+}
+
+fn expected_diagnostic_mismatch(
+    expected: &ExpectedTestDiagnostic,
+    actual: &Diagnostic,
+) -> Option<String> {
+    if actual.kind != expected.kind {
+        return Some(format!(
+            "expected diagnostic kind {:?}, got {:?}",
+            expected.kind, actual.kind
+        ));
+    }
+    if actual.code != expected.code {
+        return Some(format!(
+            "expected diagnostic code {:?}, got {:?}",
+            expected.code, actual.code
+        ));
+    }
+    if !actual.message.contains(&expected.message_contains) {
+        return Some(format!(
+            "expected diagnostic message containing {:?}, got {:?}",
+            expected.message_contains, actual.message
+        ));
+    }
+    if let Some(line) = expected.line {
+        if actual.line != Some(line) {
+            return Some(format!(
+                "expected diagnostic line {:?}, got {:?}",
+                Some(line),
+                actual.line
+            ));
+        }
+    }
+    if let Some(column) = expected.column {
+        if actual.column != Some(column) {
+            return Some(format!(
+                "expected diagnostic column {:?}, got {:?}",
+                Some(column),
+                actual.column
+            ));
+        }
+    }
+    None
 }
 
 #[cfg(test)]

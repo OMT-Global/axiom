@@ -162,6 +162,11 @@ make test
 make smoke
 make stage1-test
 make stage1-smoke
+make stage1-conformance
+make coverage
+make crap
+make mutation-python
+make mutation-rust
 
 # Run the stage1 package test suite directly
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
@@ -169,6 +174,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/pa
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/capabilities --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --filter core --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target "$(rustc -vV | sed -n 's/^host: //p')"
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/workspace_only --package workspace-app --json
@@ -177,6 +183,24 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/w
 python -m axiom host list
 python -m axiom host describe
 ```
+
+## Quality Signals
+
+Optional mutation testing and CRAP indicator tooling covers both implementation tracks: Python stage0 under `axiom/` and Rust stage1 under `stage1/`.
+
+```bash
+python3 -m pip install -e '.[quality]'
+cargo install cargo-llvm-cov --locked
+cargo install cargo-mutants --locked
+rustup component add llvm-tools-preview
+
+make coverage
+make crap
+make mutation-python
+make mutation-rust
+```
+
+See [docs/quality.md](docs/quality.md) for the full workflow and report paths.
 
 ## 🗣 Language Snapshot
 
@@ -205,6 +229,8 @@ See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and [d
 For the Rust bootstrap split and the current stage1 status summary, see [docs/stage1.md](docs/stage1.md).
 
 For the detailed agent-facing roadmap to the first workable stage1 compiler, see [docs/stage1-agent-grade-compiler.md](docs/stage1-agent-grade-compiler.md).
+
+For the plan to retire Python `stage0` and make Rust `stage1` the sole supported implementation, see [docs/python-exit-plan.md](docs/python-exit-plan.md).
 
 ## 📁 Repo Map
 

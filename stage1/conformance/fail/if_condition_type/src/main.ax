@@ -1,0 +1,4 @@
+let answer: int = 42
+if answer {
+print answer
+}

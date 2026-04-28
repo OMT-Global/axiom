@@ -1,0 +1,2 @@
+import "math.ax" as math
+print "skip"

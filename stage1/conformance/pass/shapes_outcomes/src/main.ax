@@ -1,0 +1,70 @@
+struct Pipeline {
+name: string
+steps: int
+ready: bool
+}
+
+enum Status {
+Queued(Pipeline)
+Done { id: int, label: string }
+Failed(string)
+}
+
+fn maybe_pipeline(ready: bool): Option<Pipeline> {
+if ready {
+return Some(Pipeline { name: "deploy", steps: 3, ready: true })
+}
+return None
+}
+
+fn load_status(ready: bool): Result<Status, string> {
+if ready {
+return Ok(Done { id: 42, label: "built" })
+}
+return Err("blocked")
+}
+
+fn describe_status(status: Status): string {
+match status {
+Queued(pipeline) {
+print pipeline.steps
+return pipeline.name
+}
+Done { id, label } {
+print id
+return label
+}
+Failed(message) {
+return message
+}
+}
+}
+
+fn describe_option(value: Option<Pipeline>): string {
+match value {
+Some(pipeline) {
+return pipeline.name
+}
+None {
+return "none"
+}
+}
+}
+
+fn describe_result(value: Result<Status, string>): string {
+match value {
+Ok(status) {
+return describe_status(status)
+}
+Err(message) {
+return message
+}
+}
+}
+
+let queued: Status = Queued(Pipeline { name: "queued", steps: 2, ready: true })
+print describe_status(queued)
+print describe_option(maybe_pipeline(true))
+print describe_option(maybe_pipeline(false))
+print describe_result(load_status(true))
+print describe_result(load_status(false))

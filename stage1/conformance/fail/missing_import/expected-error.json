@@ -1,0 +1,7 @@
+{
+  "kind": "import",
+  "code": null,
+  "message_contains": "missing import",
+  "line": 1,
+  "column": 1
+}

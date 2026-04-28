@@ -1,0 +1,2 @@
+import "nope.ax"
+print "skip"

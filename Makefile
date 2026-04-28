@@ -1,8 +1,12 @@
-PYTHON ?= python
+PYTHON ?= python3
 AXIOM_BUILD_DIR ?= .axiom-build
 ARITH_BYTECODE ?= $(AXIOM_BUILD_DIR)/arith.axb
+QUALITY_OUT_DIR ?= .quality
 
-.PHONY: test lint smoke interp compile vm stage1-test stage1-smoke stage1-run
+.PHONY: preflight-test-collection test lint smoke interp compile vm stage1-test stage1-smoke stage1-conformance stage1-run coverage coverage-python coverage-rust crap mutation mutation-python mutation-rust
+
+preflight-test-collection:
+	bash scripts/ci/preflight-test-collection.sh
 
 test:
 	$(PYTHON) -m unittest discover -v
@@ -28,6 +32,9 @@ vm: compile
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
+
+stage1-conformance:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
 
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
@@ -123,3 +130,26 @@ stage1-smoke:
 
 stage1-run:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
+
+coverage: coverage-python coverage-rust
+
+coverage-python:
+	PYTHON="$(PYTHON)" QUALITY_OUT_DIR="$(QUALITY_OUT_DIR)" bash scripts/quality/coverage-python.sh
+
+coverage-rust:
+	QUALITY_OUT_DIR="$(QUALITY_OUT_DIR)" bash scripts/quality/coverage-rust.sh
+
+crap:
+	$(PYTHON) scripts/quality/crap_indicators.py \
+		--python-coverage "$(QUALITY_OUT_DIR)/coverage/python.json" \
+		--rust-lcov "$(QUALITY_OUT_DIR)/coverage/rust.lcov" \
+		--json-out "$(QUALITY_OUT_DIR)/crap.json" \
+		--markdown-out "$(QUALITY_OUT_DIR)/crap.md"
+
+mutation: mutation-python mutation-rust
+
+mutation-python:
+	PYTHON="$(PYTHON)" bash scripts/quality/mutation-python.sh
+
+mutation-rust:
+	bash scripts/quality/mutation-rust.sh

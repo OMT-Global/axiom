@@ -1,0 +1,23 @@
+fn add(left: int, right: int): int {
+return left + right
+}
+
+fn banner(name: string): string {
+return "hello " + name
+}
+
+let answer: int = add(40, 2)
+let ready: bool = answer == 42
+
+print answer
+print ready
+
+if ready {
+print banner("stage1")
+} else {
+print "bad"
+}
+
+while false {
+print "never"
+}

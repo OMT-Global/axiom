@@ -1,0 +1,5 @@
+import "format.ax"
+import "math.ax"
+
+print lucky(40)
+print banner("import")

@@ -1,0 +1,25 @@
+version = 1
+compiler = "axiomc-stage1-0.1.0"
+debug = false
+manifest_hash = "b7c86d7d876ac2d4"
+lockfile_hash = "e44687238ca44b67"
+rust_hash = "2eaa88b031240edf"
+binary_hash = "a1c36a639e4db9d7"
+
+[[modules]]
+path = "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/modules/src/format.ax"
+source_hash = "5d5b5cc7b7310323"
+imports = []
+
+[[modules]]
+path = "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/modules/src/math.ax"
+source_hash = "d5104ad446db8b5e"
+imports = []
+
+[[modules]]
+path = "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/modules/src/main_test.ax"
+source_hash = "faf05cd91bd16eed"
+imports = [
+    "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/modules/src/format.ax",
+    "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/modules/src/math.ax",
+]

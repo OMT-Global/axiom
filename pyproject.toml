@@ -16,6 +16,10 @@ dev = [
     # Keep dev tooling pinned; Dependabot opens update PRs via .github/dependabot.yml.
     "ruff==0.15.11",
 ]
+quality = [
+    "coverage[toml]>=7.6,<8",
+    "mutmut>=3.0,<4",
+]
 
 [project.scripts]
 axiom = "axiom.__main__:main"
@@ -29,3 +33,15 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.coverage.run]
+branch = true
+source = ["axiom"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.mutmut]
+paths_to_mutate = ["axiom/"]
+pytest_add_cli_args_test_selection = ["tests/"]

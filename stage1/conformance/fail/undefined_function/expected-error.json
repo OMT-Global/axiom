@@ -1,0 +1,7 @@
+{
+  "kind": "type",
+  "code": null,
+  "message_contains": "undefined function",
+  "line": 1,
+  "column": 14
+}

@@ -1,0 +1,6 @@
+version = 1
+
+[[package]]
+name = "conformance-fail-missing-dependency"
+version = "0.1.0"
+source = "path"

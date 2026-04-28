@@ -1,0 +1,7 @@
+{
+  "kind": "parse",
+  "code": null,
+  "message_contains": "does not support import aliases",
+  "line": 1,
+  "column": 18
+}

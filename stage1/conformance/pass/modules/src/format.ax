@@ -1,0 +1,7 @@
+pub fn banner(name: string): string {
+return prefix() + name
+}
+
+fn prefix(): string {
+return "module "
+}

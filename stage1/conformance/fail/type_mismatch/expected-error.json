@@ -1,0 +1,7 @@
+{
+  "kind": "type",
+  "code": null,
+  "message_contains": "expects int, got string",
+  "line": 1,
+  "column": 1
+}

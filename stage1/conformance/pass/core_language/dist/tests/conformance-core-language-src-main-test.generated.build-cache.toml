@@ -1,0 +1,12 @@
+version = 1
+compiler = "axiomc-stage1-0.1.0"
+debug = false
+manifest_hash = "52991a710964d009"
+lockfile_hash = "1b3485f729c8e112"
+rust_hash = "1aa4a7c055f784ac"
+binary_hash = "e88f4091a2f493fc"
+
+[[modules]]
+path = "/Users/johnteneyckjr./src/axiom/stage1/conformance/pass/core_language/src/main_test.ax"
+source_hash = "9817a5d4e12bb301"
+imports = []

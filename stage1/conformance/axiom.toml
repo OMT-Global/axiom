@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "pass/core_language",
+  "pass/collections",
+  "pass/modules",
+  "pass/shapes_outcomes",
+]

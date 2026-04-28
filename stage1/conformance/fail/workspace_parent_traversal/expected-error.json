@@ -1,0 +1,5 @@
+{
+  "kind": "manifest",
+  "code": null,
+  "message_contains": "must not use parent traversal"
+}

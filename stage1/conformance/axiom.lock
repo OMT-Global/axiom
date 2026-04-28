@@ -1,0 +1,21 @@
+version = 1
+
+[[package]]
+name = "conformance-core-language"
+version = "0.1.0"
+source = "path:pass/core_language"
+
+[[package]]
+name = "conformance-collections"
+version = "0.1.0"
+source = "path:pass/collections"
+
+[[package]]
+name = "conformance-modules"
+version = "0.1.0"
+source = "path:pass/modules"
+
+[[package]]
+name = "conformance-shapes-outcomes"
+version = "0.1.0"
+source = "path:pass/shapes_outcomes"

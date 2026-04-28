@@ -104,6 +104,13 @@ mod tests {
             .join(case)
     }
 
+    fn conformance_root() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("conformance")
+    }
+
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
         command_for_executable(path).expect("prepare compiled binary command")
     }
@@ -3070,6 +3077,25 @@ mod tests {
     }
 
     #[test]
+    fn conformance_corpus_runs_pass_and_fail_fixtures() {
+        let output = run_project_tests(&conformance_root()).expect("run conformance corpus");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.passed, 13);
+        assert!(
+            output
+                .cases
+                .iter()
+                .any(|case| case.name == "fail/type_mismatch")
+        );
+        assert!(
+            output
+                .cases
+                .iter()
+                .any(|case| case.name == "fail/undefined_function")
+        );
+    }
+
+    #[test]
     fn check_project_rejects_branch_move_followed_by_outer_use() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("branch-moves");
@@ -4946,7 +4972,10 @@ mod tests {
         assert_eq!(debug.cache_misses, 1);
 
         let generated = fs::read_to_string(&debug.generated_rust).expect("read generated rust");
-        let source = project.join("src/main.ax").display().to_string();
+        let source = fs::canonicalize(project.join("src/main.ax"))
+            .expect("canonicalize source")
+            .display()
+            .to_string();
         assert!(generated.contains(&format!("// axiom-source: {source}:1:1")));
         assert!(generated.contains(&format!("// axiom-source: {source}:2:1")));
         let map: serde_json::Value =
