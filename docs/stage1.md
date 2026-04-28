@@ -14,7 +14,7 @@ The Rust compiler is intentionally small in this bootstrap slice:
 - Supported source subset is top-level `import`, `pub const`, `const`, `pub type`, `type`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `panic`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, postfix `?` error propagation on `Option<T>` / `Result<T, E>`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, generic struct and enum definitions with explicit type arguments, transparent type aliases, scalar `const` declarations with compile-time evaluation, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with fifteen landed modules. Six are capability-gated surfaces, one per capability class: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve`, `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, and `std/async.ax`.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
-- `axiomc build` emits a native binary by generating a Rust file and invoking `rustc`.
+- `axiomc build` emits a native binary by default, or a `.wasm` artifact for `--target wasm32` / `--target wasm32-wasi`, by generating Rust and invoking `rustc`.
 - A bootstrap ownership rule is active: non-`Copy` values move on binding and call boundaries, non-`Copy` struct field access and static tuple indexing now move only the named projection while keeping sibling projections available, non-`Copy` map indexing and array indexing still conservatively move the indexed owner projection, branch-local moves conservatively propagate after `if` and `match`, statically false `if` / `while` branches are now ignored instead of poisoning later ownership state, moving an outer non-`Copy` value inside a `while` body is rejected because the value would not be available on subsequent iterations, post-loop ownership state preserves the pre-loop state since the loop body may execute zero times, and live borrowed slices now block moving their owned collection roots until the borrow scope ends, including when those borrows are wrapped in local tuples, named structs, enum payloads, `Option` / `Result` values, passed through sibling expression evaluation, or introduced by temporary `match` expressions.
 
 This is not the final backend architecture. It is the smallest executable
@@ -29,6 +29,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/h
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --timings
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --debug
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target "$(rustc -vV | sed -n 's/^host: //p')"
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --target wasm32
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/workspace --filter core --json
@@ -74,6 +75,9 @@ a JSON sidecar that maps generated Rust statement lines back to Axiom
 file/line/column positions. `axiomc build --timings` prints total build time,
 cache hit/miss counts, and per-package compile timing/cache status for the
 incremental generated-Rust cache.
+Parser diagnostics now preserve additional recovered top-level parse errors in
+the error payload's `related` array when possible, so editor tooling can show
+more than the first syntax error without waiting for full checker recovery.
 
 ## Current gaps
 
@@ -123,7 +127,7 @@ still far from the stated 1.0 target for service and agent workloads.
 - `axiomc fmt`, `axiomc bench`, `axiomc doc`, and the stage1 scratch `repl`
   now exist as bootstrap-grade toolchain commands. Publisher, full LSP, and
   debugger surfaces remain open.
-- Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes, but span quality and note richness are still limited.
+- Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes and top-level parser recovery, but checker recovery, span quality, and note richness are still limited.
 - Extended validation now carries a small performance regression gate: stage1 `axiomc build` is benchmarked across representative compute (`hello`), I/O/capability (`capabilities`), and concurrency (`stdlib_async`) workloads against checked-in Go and Rust reference builds, with separate cold-build and warm-cache budget multipliers to catch obvious compiler-path regressions without making PR fast CI noisy.
 
 ## Execution plan
