@@ -59,9 +59,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unimplemented_direct_native_backend() {
+    fn rejects_unsupported_backend_value() {
         let error = NativeBackendKind::from_str("direct-native")
-            .expect_err("direct-native should stay unimplemented in the seam PR");
+            .expect_err("unsupported backend values should be rejected");
         assert!(error.contains("expected generated-rust"));
     }
 }

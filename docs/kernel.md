@@ -25,7 +25,7 @@ This kernel note describes the supported Rust `axiomc` path.
 
 - Packages are checked, built, run, and tested through `axiomc`.
 - `axiomc build` uses the selected native backend to produce a native binary.
-- Today only the `generated-rust` backend is implemented; the backend seam exists as preparatory groundwork for future direct-native work (part of #105).
+- Today only the `generated-rust` backend is implemented; the backend seam is preparatory groundwork for later native-backend expansion, not completion of #105 (part of #105).
 - `axiomc test` discovers `src/**/*_test.ax` entrypoints and compares stdout
   with sibling `*.stdout` files when present.
 - `axiomc check --json`, `build --json`, `test --json`, and `caps --json` emit
