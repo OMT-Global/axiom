@@ -4,7 +4,7 @@ use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
-    binary_path, capability_descriptors, entry_path, generated_rust_path, load_manifest,
+    binary_path_for_target, capability_descriptors, entry_path, generated_rust_path, load_manifest,
     manifest_path, out_dir_path,
 };
 use crate::mir;
@@ -191,6 +191,14 @@ pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
     build_project_with_options(project_root, &BuildOptions::default())
 }
 
+fn resolved_build_target(target: Option<&str>) -> Option<String> {
+    match target {
+        Some("wasm32") | Some("wasm32-wasi") => Some(String::from("wasm32-wasip1")),
+        Some(target) => Some(target.to_string()),
+        None => None,
+    }
+}
+
 pub fn build_project_with_options(
     project_root: &Path,
     options: &BuildOptions,
@@ -204,13 +212,19 @@ pub fn build_project_with_options(
     {
         let analyzed = analyze_package(&graph, &package_root)?;
         let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
-        let binary = binary_path(&package_root, &analyzed.manifest);
+        let resolved_target = resolved_build_target(options.target.as_deref());
+        let binary = binary_path_for_target(
+            &package_root,
+            &analyzed.manifest,
+            resolved_target.as_deref(),
+        );
         let report = build_artifacts(
             &graph,
             &package_root,
             &analyzed,
             &generated_rust,
             &binary,
+            resolved_target.as_deref(),
             options,
         )?;
         packages.push(BuiltPackage {
@@ -226,7 +240,7 @@ pub fn build_project_with_options(
                 .debug
                 .then(|| debug_manifest_path(&generated_rust).display().to_string()),
             statement_count: analyzed.mir.statement_count(),
-            target: options.target.clone(),
+            target: resolved_target.clone(),
             debug: options.debug,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -866,6 +880,7 @@ fn build_artifacts(
     analyzed: &AnalyzedProject,
     generated_rust: &Path,
     binary: &Path,
+    resolved_target: Option<&str>,
     options: &BuildOptions,
 ) -> Result<BuildArtifactReport, Diagnostic> {
     ensure_output_path_stays_inside_package(package_root, generated_rust, "generated Rust output")?;
@@ -899,7 +914,7 @@ fn build_artifacts(
         package_root,
         analyzed,
         &rust_source,
-        options.target.clone(),
+        resolved_target.map(str::to_string),
         options.debug,
     )?;
     let cache_path = build_cache_path(generated_rust);
@@ -922,12 +937,7 @@ fn build_artifacts(
         )
     })?;
     let started = Instant::now();
-    compile_native(
-        generated_rust,
-        binary,
-        options.target.as_deref(),
-        options.debug,
-    )?;
+    compile_native(generated_rust, binary, resolved_target, options.debug)?;
     let compile_ms = started.elapsed().as_millis() as u64;
     if options.debug {
         write_debug_artifacts(generated_rust, binary, analyzed)?;
@@ -1311,6 +1321,7 @@ fn run_test_case(
         &analyzed,
         &generated_rust,
         &binary,
+        None,
         &BuildOptions::default(),
     ) {
         return TestCaseResult {
