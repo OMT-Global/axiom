@@ -29,7 +29,7 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Check a stage1 package or workspace member without building a binary.
+    /// Check a stage1 package or workspace member without building an artifact.
     Check {
         path: PathBuf,
         #[arg(long)]
@@ -37,7 +37,7 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
-    /// Build a stage1 package into generated Rust and a native binary.
+    /// Build a stage1 package into generated Rust and a native or WASM artifact.
     Build {
         path: PathBuf,
         #[arg(long)]
@@ -295,10 +295,14 @@ fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
         lines.push(format!("wrote debug map {debug_map}"));
     }
     if timings {
-        lines.push(format!(
-            "timings total={}ms cache_hits={} cache_misses={}",
-            output.duration_ms, output.cache_hits, output.cache_misses
-        ).trim_end().to_string());
+        lines.push(
+            format!(
+                "timings total={}ms cache_hits={} cache_misses={}",
+                output.duration_ms, output.cache_hits, output.cache_misses
+            )
+            .trim_end()
+            .to_string(),
+        );
         for package in &output.packages {
             lines.push(format!(
                 "timings package={} cache_status={:?} compile={}ms",
@@ -314,6 +318,9 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
         println!("{}", json_contract::error(command, &error));
     } else {
         eprintln!("{error}");
+        for related in &error.related {
+            eprintln!("{related}");
+        }
     }
     1
 }

@@ -1,0 +1,11 @@
+version = 1
+
+[[package]]
+name = "proof-cli"
+version = "0.1.0"
+source = "path"
+
+[[package]]
+name = "proof-cli-core"
+version = "0.1.0"
+source = "path:deps/core"
