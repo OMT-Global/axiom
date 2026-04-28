@@ -101,7 +101,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Build a static hosted package-registry index from package release folders.
+    /// Build a static package-registry index from package release folders.
     RegistryIndex {
         packages_dir: PathBuf,
         #[arg(long)]
@@ -109,7 +109,7 @@ enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Validate a hosted package-registry index JSON file.
+    /// Validate a static package-registry index JSON file.
     RegistryValidate { index: PathBuf },
 }
 
@@ -774,8 +774,8 @@ mod tests {
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
         assert!(help.contains("Start a small stage1 scratch REPL"));
-        assert!(help.contains("Build a static hosted package-registry index"));
-        assert!(help.contains("Validate a hosted package-registry index JSON file"));
+        assert!(help.contains("Build a static package-registry index"));
+        assert!(help.contains("Validate a static package-registry index JSON file"));
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {

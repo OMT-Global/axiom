@@ -30,7 +30,7 @@ The current stage1 examples document the supported manifest surface:
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
 
-## Static Registry Index Tooling
+## Static Registry Index Groundwork
 
 `axiomc registry-index` builds a static JSON index from package release folders laid out as
 `<packages>/<name>/<version>/axiom.toml`. Each release may include:
@@ -39,4 +39,4 @@ contract.
 - `axiom-registry.toml` with `yanked = true` and optional `yank_reason`
 
 The generated index records per-release capability manifests, archive/signature URLs,
-and yanked status so a simple static host can serve lockfile-friendly package metadata. This is groundwork for a future hosted registry service, not the hosted service itself.
+and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.
