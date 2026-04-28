@@ -39,7 +39,7 @@ impl FromStr for NativeBackendKind {
         match value {
             "generated-rust" => Ok(Self::GeneratedRust),
             other => Err(format!(
-                "unsupported backend {other:?}; expected generated-rust"
+                "unsupported backend {other:?}; only generated-rust is implemented in this preparatory seam"
             )),
         }
     }
@@ -62,7 +62,7 @@ mod tests {
     fn rejects_unsupported_backend_value() {
         let error = NativeBackendKind::from_str("direct-native")
             .expect_err("unsupported backend values should be rejected");
-        assert!(error.contains("expected generated-rust"));
+        assert!(error.contains("only generated-rust is implemented in this preparatory seam"));
     }
 }
 
