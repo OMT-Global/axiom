@@ -45,6 +45,27 @@ impl FromStr for NativeBackendKind {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::NativeBackendKind;
+    use std::str::FromStr;
+
+    #[test]
+    fn parses_generated_rust_backend() {
+        assert_eq!(
+            NativeBackendKind::from_str("generated-rust").expect("parse generated-rust"),
+            NativeBackendKind::GeneratedRust
+        );
+    }
+
+    #[test]
+    fn rejects_unimplemented_direct_native_backend() {
+        let error = NativeBackendKind::from_str("direct-native")
+            .expect_err("direct-native should stay unimplemented in the seam PR");
+        assert!(error.contains("expected generated-rust"));
+    }
+}
+
 pub fn render_rust(program: &Program) -> String {
     render_rust_with_debug(program, false)
 }

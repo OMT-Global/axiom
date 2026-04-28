@@ -43,6 +43,7 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        /// Select the native backend seam. Today only `generated-rust` is implemented.
         #[arg(long, default_value_t = NativeBackendKind::GeneratedRust)]
         backend: NativeBackendKind,
         #[arg(long)]
@@ -733,6 +734,14 @@ mod tests {
         assert!(help.contains("Check a stage1 package or workspace member"));
         assert!(help.contains("Build a stage1 package into backend artifacts"));
         assert!(help.contains("Build and run a stage1 package native binary"));
+
+        let mut command = Cli::command();
+        let build_help = command
+            .find_subcommand_mut("build")
+            .expect("build subcommand")
+            .render_long_help()
+            .to_string();
+        assert!(build_help.contains("Today only `generated-rust` is implemented"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
         assert!(help.contains("Format .ax source files"));
