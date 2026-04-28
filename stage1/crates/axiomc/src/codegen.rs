@@ -2326,10 +2326,11 @@ fn compile_generated_rust(
                 .with_path(generated_rust.display().to_string())
         })?;
     if !status.success() {
-        return Err(
-            Diagnostic::new("build", "rustc failed to produce a native binary")
-                .with_path(generated_rust.display().to_string()),
-        );
+        return Err(Diagnostic::new(
+            "build",
+            "rustc failed to produce the requested build artifact",
+        )
+        .with_path(generated_rust.display().to_string()));
     }
     Ok(())
 }
