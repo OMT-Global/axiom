@@ -365,6 +365,9 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
         println!("{}", json_contract::error(command, &error));
     } else {
         eprintln!("{error}");
+        for related in &error.related {
+            eprintln!("{related}");
+        }
     }
     1
 }
