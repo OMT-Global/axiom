@@ -86,6 +86,20 @@ mod tests {
             .expect("host target")
     }
 
+    fn rust_target_installed(target: &str) -> bool {
+        let output = Command::new("rustup")
+            .args(["target", "list", "--installed"])
+            .output()
+            .expect("run rustup target list --installed");
+        assert!(
+            output.status.success(),
+            "rustup target list --installed failed"
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.trim() == target)
+    }
+
     fn rustc_command() -> Command {
         let rustc = trusted_rustc_path();
         // The test harness resolves rustc to a full path before execution; PATH is trusted only
@@ -6012,6 +6026,32 @@ print strlen("hello")
 
         assert_eq!(output.target.as_deref(), Some(target.as_str()));
         assert!(project.join("dist/targeted-build-app").exists());
+    }
+
+    #[test]
+    fn build_project_wasm_alias_emits_wasm_artifact() {
+        if !rust_target_installed("wasm32-wasip1") {
+            eprintln!("skipping wasm build test; wasm32-wasip1 target is not installed");
+            return;
+        }
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("targeted-wasm-build");
+        create_project(&project, Some("targeted-wasm-build-app")).expect("create project");
+
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: Some(String::from("wasm32")),
+                package: None,
+                debug: false,
+            },
+        )
+        .expect("build project with wasm alias");
+
+        assert_eq!(output.target.as_deref(), Some("wasm32-wasip1"));
+        assert!(output.binary.ends_with("targeted-wasm-build-app.wasm"));
+        assert!(project.join("dist/targeted-wasm-build-app.wasm").exists());
     }
 
     #[test]
