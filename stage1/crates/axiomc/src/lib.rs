@@ -27,7 +27,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::{Visibility, parse_program};
+    use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -415,6 +415,63 @@ print fail()
         assert_eq!(error.line, Some(2));
         assert_eq!(error.column, Some(1));
         assert!(error.message.contains("does not support `for` loops yet"));
+    }
+
+    #[test]
+    fn parser_recovery_reports_stable_top_level_errors() {
+        let source = "import math.ax\nlet answer int = 42\nprint answer\nelse {\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should report all top-level parse errors");
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(2), Some(4)]
+        );
+        assert_eq!(
+            diagnostics[0].message,
+            "import must use a quoted relative path"
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+        assert_eq!(diagnostics[2].message, "unexpected else block");
+    }
+
+    #[test]
+    fn parser_recovery_resynchronizes_top_level_statements_from_their_start() {
+        let source =
+            "if true {\nfor value in [1] {\nprint value\n}\n}\nlet answer int = 42\nprint answer\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should skip the failed top-level statement body");
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(6)]
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("does not support `for` loops yet")
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+    }
+
+    #[test]
+    fn parser_error_preserves_related_recovery_diagnostics_for_cli_payloads() {
+        let source = "import math.ax\nlet answer int = 42\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("default parser should fail with primary diagnostic");
+
+        assert_eq!(error.message, "import must use a quoted relative path");
+        assert_eq!(error.related.len(), 1);
+        assert_eq!(error.related[0].message, "let binding is missing ':'");
+        assert_eq!(error.related[0].line, Some(2));
     }
 
     #[test]

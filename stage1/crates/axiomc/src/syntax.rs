@@ -329,6 +329,14 @@ pub enum CompareOp {
 }
 
 pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
+    parse_program_with_recovery(source, path).map_err(|mut diagnostics| {
+        let mut first = diagnostics.remove(0);
+        first.related = diagnostics;
+        first
+    })
+}
+
+pub fn parse_program_with_recovery(source: &str, path: &Path) -> Result<Program, Vec<Diagnostic>> {
     let lines: Vec<&str> = source.lines().collect();
     let mut index = 0;
     let mut imports = Vec::new();
@@ -338,6 +346,7 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
     let mut enums = Vec::new();
     let mut functions = Vec::new();
     let mut stmts = Vec::new();
+    let mut diagnostics = Vec::new();
     while index < lines.len() {
         let line_no = index + 1;
         let trimmed = lines[index].trim();
@@ -347,21 +356,37 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
         }
         match trimmed {
             "}" => {
-                return Err(Diagnostic::new("parse", "unexpected closing brace")
-                    .with_path(path.display().to_string())
-                    .with_span(line_no, 1));
+                diagnostics.push(
+                    Diagnostic::new("parse", "unexpected closing brace")
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, 1),
+                );
+                index += 1;
+                continue;
             }
             "} else {" | "else {" => {
-                return Err(Diagnostic::new("parse", "unexpected else block")
-                    .with_path(path.display().to_string())
-                    .with_span(line_no, 1));
+                diagnostics.push(
+                    Diagnostic::new("parse", "unexpected else block")
+                        .with_path(path.display().to_string())
+                        .with_span(line_no, 1),
+                );
+                index += 1;
+                continue;
             }
             _ => {}
         }
-        if let Some(import) = parse_import(trimmed, path, line_no)? {
-            imports.push(import);
-            index += 1;
-            continue;
+        match parse_import(trimmed, path, line_no) {
+            Ok(Some(import)) => {
+                imports.push(import);
+                index += 1;
+                continue;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                diagnostics.push(error);
+                index += 1;
+                continue;
+            }
         }
         if trimmed.starts_with("pub import ")
             || trimmed.starts_with("pub(pkg) import ")
@@ -369,12 +394,16 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             || trimmed.starts_with("pub(pkg) use ")
             || trimmed.starts_with("export ")
         {
-            return Err(Diagnostic::new(
-                "parse",
-                "stage1 bootstrap does not support re-exports; expose public symbols from their defining module instead",
-            )
-            .with_path(path.display().to_string())
-            .with_span(line_no, 1));
+            diagnostics.push(
+                Diagnostic::new(
+                    "parse",
+                    "stage1 bootstrap does not support re-exports; expose public symbols from their defining module instead",
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1),
+            );
+            index += 1;
+            continue;
         }
         if trimmed.starts_with("fn ")
             || trimmed.starts_with("async fn ")
@@ -386,14 +415,25 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             || trimmed.starts_with("pub(pkg) async fn ")
             || trimmed.starts_with("pub(pkg) extern fn ")
         {
-            functions.push(parse_function(&lines, &mut index, path)?);
+            let start_index = index;
+            match parse_function(&lines, &mut index, path) {
+                Ok(function) => functions.push(function),
+                Err(error) => {
+                    diagnostics.push(error);
+                    index = start_index;
+                    synchronize_top_level(&lines, &mut index);
+                }
+            }
             continue;
         }
         if trimmed.starts_with("const ")
             || trimmed.starts_with("pub const ")
             || trimmed.starts_with("pub(pkg) const ")
         {
-            consts.push(parse_const_decl(trimmed, path, line_no)?);
+            match parse_const_decl(trimmed, path, line_no) {
+                Ok(const_decl) => consts.push(const_decl),
+                Err(error) => diagnostics.push(error),
+            }
             index += 1;
             continue;
         }
@@ -401,7 +441,10 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             || trimmed.starts_with("pub type ")
             || trimmed.starts_with("pub(pkg) type ")
         {
-            type_aliases.push(parse_type_alias(trimmed, path, line_no)?);
+            match parse_type_alias(trimmed, path, line_no) {
+                Ok(type_alias) => type_aliases.push(type_alias),
+                Err(error) => diagnostics.push(error),
+            }
             index += 1;
             continue;
         }
@@ -409,21 +452,56 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
             || trimmed.starts_with("pub struct ")
             || trimmed.starts_with("pub(pkg) struct ")
         {
-            structs.push(parse_struct(&lines, &mut index, path)?);
+            let start_index = index;
+            match parse_struct(&lines, &mut index, path) {
+                Ok(struct_decl) => structs.push(struct_decl),
+                Err(error) => {
+                    diagnostics.push(error);
+                    index = start_index;
+                    synchronize_top_level(&lines, &mut index);
+                }
+            }
             continue;
         }
         if trimmed.starts_with("enum ")
             || trimmed.starts_with("pub enum ")
             || trimmed.starts_with("pub(pkg) enum ")
         {
-            enums.push(parse_enum(&lines, &mut index, path)?);
+            let start_index = index;
+            match parse_enum(&lines, &mut index, path) {
+                Ok(enum_decl) => enums.push(enum_decl),
+                Err(error) => {
+                    diagnostics.push(error);
+                    index = start_index;
+                    synchronize_top_level(&lines, &mut index);
+                }
+            }
             continue;
         }
         if trimmed.starts_with("impl ") {
-            functions.extend(parse_impl(&lines, &mut index, path)?);
+            let start_index = index;
+            match parse_impl(&lines, &mut index, path) {
+                Ok(methods) => functions.extend(methods),
+                Err(error) => {
+                    diagnostics.push(error);
+                    index = start_index;
+                    synchronize_top_level(&lines, &mut index);
+                }
+            }
             continue;
         }
-        stmts.push(parse_stmt(&lines, &mut index, path, false)?);
+        let start_index = index;
+        match parse_stmt(&lines, &mut index, path, false) {
+            Ok(stmt) => stmts.push(stmt),
+            Err(error) => {
+                diagnostics.push(error);
+                index = start_index;
+                synchronize_top_level(&lines, &mut index);
+            }
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
     }
     Ok(Program {
         path: path.display().to_string(),
@@ -435,6 +513,30 @@ pub fn parse_program(source: &str, path: &Path) -> Result<Program, Diagnostic> {
         functions,
         stmts,
     })
+}
+
+fn synchronize_top_level(lines: &[&str], index: &mut usize) {
+    if *index >= lines.len() {
+        return;
+    }
+    let mut depth = brace_delta(lines[*index]);
+    *index += 1;
+    while *index < lines.len() && depth > 0 {
+        depth += brace_delta(lines[*index]);
+        *index += 1;
+    }
+}
+
+fn brace_delta(line: &str) -> i32 {
+    let mut delta = 0;
+    for ch in line.chars() {
+        match ch {
+            '{' => delta += 1,
+            '}' => delta -= 1,
+            _ => {}
+        }
+    }
+    delta
 }
 
 fn parse_import(trimmed: &str, path: &Path, line_no: usize) -> Result<Option<Import>, Diagnostic> {
