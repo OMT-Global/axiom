@@ -1,4 +1,16 @@
+import "std/env.ax"
 import "core/render.ax"
 
-print render_command("status", "3")
-print render_command("run", "7")
+fn proof_mode(): string {
+match get_env("__AXIOM_PROOF_CLI_MODE__") {
+Some(value) {
+return value
+}
+None {
+return "default"
+}
+}
+}
+
+print render_command("status", 3, proof_mode())
+print render_command("run", 7, proof_mode())

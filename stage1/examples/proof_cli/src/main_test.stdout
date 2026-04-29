@@ -1,2 +1,2 @@
-proof-cli status 3
-proof-cli run 7
+{"workload":"proof-cli","command":"status","code":3,"mode":"default"}
+{"workload":"proof-cli","command":"run","code":7,"mode":"default"}
