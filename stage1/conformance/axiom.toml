@@ -1,6 +1,12 @@
 [workspace]
 members = [
   "fail/for_loop_requires_iteration_protocol",
+  "fail/import_cycle",
+  "fail/import_duplicate_export",
+  "fail/import_missing_module",
+  "fail/import_path_escape",
+  "fail/import_reserved_namespace",
+  "fail/import_unsupported_alias",
   "fail/match_guard_not_supported",
   "fail/mutable_borrow_while_shared_live",
   "fail/named_nested_match_pattern_not_supported",

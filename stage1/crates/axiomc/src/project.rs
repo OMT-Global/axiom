@@ -1670,9 +1670,10 @@ fn load_module_recursive(
 ) -> Result<(), Diagnostic> {
     let module_path = normalize_path(module_path);
     if visiting.contains(&module_path) {
+        let relative = relative_diagnostic_path(package_root, &module_path.display().to_string());
         return Err(Diagnostic::new(
             "import",
-            format!("circular import detected at {}", module_path.display()),
+            format!("circular import detected at {relative}"),
         )
         .with_path(module_path.display().to_string()));
     }
@@ -3911,9 +3912,11 @@ fn resolve_import_path(
                 .with_span(import.line, import.column));
             }
             if !candidate.exists() {
+                let relative =
+                    relative_diagnostic_path(&dependency.root, &candidate.display().to_string());
                 return Err(Diagnostic::new(
                     "import",
-                    format!("missing import {}", candidate.display()),
+                    format!("missing import {relative}"),
                 )
                 .with_path(module_path.display().to_string())
                 .with_span(import.line, import.column));
@@ -3940,8 +3943,9 @@ fn resolve_import_path(
         );
     }
     if !candidate.exists() {
+        let relative = relative_diagnostic_path(&package.root, &candidate.display().to_string());
         return Err(
-            Diagnostic::new("import", format!("missing import {}", candidate.display()))
+            Diagnostic::new("import", format!("missing import {relative}"))
                 .with_path(module_path.display().to_string())
                 .with_span(import.line, import.column),
         );

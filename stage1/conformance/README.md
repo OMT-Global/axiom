@@ -37,6 +37,14 @@ message, relative path, line, and column.
 
 Current compile-fail fixtures cover:
 
+- `import_cycle`: import diagnostics for circular module references.
+- `import_duplicate_export`: import diagnostics for colliding public exports
+  from sibling modules.
+- `import_missing_module`: import diagnostics for missing package-local modules.
+- `import_path_escape`: import diagnostics for parent-directory traversal.
+- `import_reserved_namespace`: import diagnostics for incomplete `std`
+  namespace imports.
+- `import_unsupported_alias`: parse diagnostics for unsupported import aliases.
 - `mutable_borrow_while_shared_live`: ownership diagnostics for conflicting
   mutable and shared borrows.
 - `ownership_use_after_move`: ownership diagnostics for reading a moved value.
