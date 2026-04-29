@@ -3,8 +3,8 @@ use axiomc::json_contract;
 use axiomc::new_project::create_project;
 use axiomc::project::{
     BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
-    check_project_with_options, project_capabilities, run_project_tests_with_options,
-    run_project_with_options,
+    check_project_with_options, list_project_tests_with_options, project_capabilities,
+    run_project_tests_with_options, run_project_with_options,
 };
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
@@ -62,6 +62,8 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        list: bool,
         #[arg(long)]
         filter: Option<String>,
         #[arg(short = 'p', long = "package")]
@@ -176,40 +178,63 @@ fn main() {
         Command::Test {
             path,
             json,
+            list,
             filter,
             package,
-        } => match run_project_tests_with_options(
-            &path,
-            &TestOptions {
+        } => {
+            let options = TestOptions {
                 filter: filter.clone(),
                 package: package.clone(),
-            },
-        ) {
-            Ok(output) => {
-                let ok = output.failed == 0;
-                if json {
-                    println!(
-                        "{}",
-                        json_contract::test_success(&path, filter.as_deref(), &output)
-                    );
-                } else {
-                    for case in &output.cases {
-                        let status = if case.ok { "PASS" } else { "FAIL" };
-                        eprintln!("{status} {} ({})", case.name, case.entry);
-                        if let Some(error) = &case.error {
-                            eprintln!("  {}", error);
+            };
+            if list {
+                match list_project_tests_with_options(&path, &options) {
+                    Ok(output) => {
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::test_list_success(&path, filter.as_deref(), &output)
+                            );
+                        } else {
+                            for case in &output.cases {
+                                let package =
+                                    case.package.as_deref().unwrap_or(&case.package_root);
+                                println!("{package}\t{}\t{}", case.name, case.entry);
+                            }
+                            eprintln!("listed: {} test(s)", output.total);
                         }
-                        eprintln!("  duration: {} ms", case.duration_ms);
+                        0
                     }
-                    eprintln!(
-                        "passed: {} failed: {} skipped: {} duration: {} ms",
-                        output.passed, output.failed, output.skipped, output.duration_ms
-                    );
+                    Err(error) => print_error("test", error, json),
                 }
-                if ok { 0 } else { 1 }
+            } else {
+                match run_project_tests_with_options(&path, &options) {
+                    Ok(output) => {
+                        let ok = output.failed == 0;
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::test_success(&path, filter.as_deref(), &output)
+                            );
+                        } else {
+                            for case in &output.cases {
+                                let status = if case.ok { "PASS" } else { "FAIL" };
+                                eprintln!("{status} {} ({})", case.name, case.entry);
+                                if let Some(error) = &case.error {
+                                    eprintln!("  {}", error);
+                                }
+                                eprintln!("  duration: {} ms", case.duration_ms);
+                            }
+                            eprintln!(
+                                "passed: {} failed: {} skipped: {} duration: {} ms",
+                                output.passed, output.failed, output.skipped, output.duration_ms
+                            );
+                        }
+                        if ok { 0 } else { 1 }
+                    }
+                    Err(error) => print_error("test", error, json),
+                }
             }
-            Err(error) => print_error("test", error, json),
-        },
+        }
         Command::Caps { path, json } => {
             let project = path.unwrap_or_else(|| PathBuf::from("."));
             match project_capabilities(&project) {

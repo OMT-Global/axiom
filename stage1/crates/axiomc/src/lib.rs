@@ -24,8 +24,9 @@ mod tests {
     use crate::project::{
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
-        run_project_tests_with_options, run_project_with_options,
+        command_for_build_output, command_for_executable, list_project_tests_with_options,
+        project_capabilities, run_project_tests, run_project_tests_with_options,
+        run_project_with_options,
     };
     use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
@@ -3894,6 +3895,40 @@ print strlen("hello")
             .expect("math test");
         assert_eq!(math_case.stdout, "42\n");
         assert!(math_case.ok);
+    }
+
+    #[test]
+    fn list_project_tests_reports_stable_names_paths_and_packages() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-list");
+        create_project(&project, Some("runner-list-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\nstdout = \"42\\n\"\n",
+                render_manifest("runner-list-app")
+            ),
+        )
+        .expect("write manifest");
+        fs::write(project.join("src/math_test.ax"), "print 42\n").expect("write test");
+
+        let output =
+            list_project_tests_with_options(&project, &TestOptions::default()).expect("list tests");
+
+        assert_eq!(output.total, 2);
+        assert_eq!(output.packages.len(), 1);
+        assert!(output.packages[0].ends_with("runner-list"));
+        assert!(output.cases.iter().any(|case| {
+            case.package.as_deref() == Some("runner-list-app")
+                && case.name == "math-smoke"
+                && case.entry == "src/math_test.ax"
+                && case.expected_stdout
+        }));
+        assert!(output.cases.iter().any(|case| {
+            case.package.as_deref() == Some("runner-list-app")
+                && case.name == "src/main_test"
+                && case.entry == "src/main_test.ax"
+        }));
     }
 
     #[test]
