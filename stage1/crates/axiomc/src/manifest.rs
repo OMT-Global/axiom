@@ -52,6 +52,7 @@ pub struct TestTarget {
     pub name: String,
     pub entry: String,
     pub stdout: Option<String>,
+    pub stderr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -137,6 +138,7 @@ struct RawTestTarget {
     name: Option<String>,
     entry: Option<String>,
     stdout: Option<String>,
+    stderr: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -515,6 +517,7 @@ fn normalize_tests(
             name,
             entry,
             stdout: raw_test.stdout,
+            stderr: raw_test.stderr,
         });
     }
     Ok(tests)
