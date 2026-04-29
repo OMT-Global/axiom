@@ -1,18 +1,29 @@
 import "std/async.ax"
+import "std/json.ax"
+import "state.ax"
 
-async fn process(job: string): string {
-return "processed " + job
+async fn process(queue: string, job: string, processed: int): string {
+return "{" + field_string("workload", "proof-worker") + "," + field_string("queue", queue) + "," + field_string("job", job) + "," + field_int("processed", processed) + "}"
 }
 
 let queue: AsyncChannel<string> = channel<string>()
 let queued: AsyncChannel<string> = await send<string>(queue, "invoice")
 let job: Option<string> = await recv<string>(queued)
+
+match queue_name() {
+Some(queue_name) {
 match job {
-Some(name) {
-let handle: JoinHandle<string> = spawn<string>(process(name))
+Some(payload) {
+let processed: int = processed_count()
+let handle: JoinHandle<string> = spawn<string>(process(queue_name, payload, processed))
 print await join<string>(handle)
 }
 None {
 print "idle"
+}
+}
+}
+None {
+print "unconfigured"
 }
 }
