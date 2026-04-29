@@ -1,6 +1,6 @@
-.PHONY: test smoke docs-python-exit docs-python-exit-test stage1-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
+.PHONY: test smoke docs-python-exit docs-python-exit-test python-exit-readiness stage1-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 
-test: docs-python-exit stage1-test
+test: docs-python-exit python-exit-readiness stage1-test
 
 smoke: stage1-smoke
 
@@ -10,6 +10,9 @@ docs-python-exit:
 
 docs-python-exit-test:
 	bash scripts/ci/test-check-python-exit-docs.sh
+
+python-exit-readiness:
+	bash scripts/ci/check-python-exit-readiness.sh --json
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml

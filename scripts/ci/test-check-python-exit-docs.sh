@@ -71,6 +71,7 @@ setup_case_repo() {
     git init -q
     git config user.name "Ares"
     git config user.email "ares@example.com"
+    git config commit.gpgsign false
     git add docs scripts
     git commit -q -m "fixture"
   )
