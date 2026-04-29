@@ -25,5 +25,17 @@ The current stage1 examples document the supported manifest surface:
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
 
+Local path dependencies may declare a bounded version constraint:
+
+```toml
+[dependencies]
+core = { path = "deps/core", version = "^0.1.0" }
+```
+
+Stage1 currently accepts `*`, exact `MAJOR.MINOR.PATCH`, and caret
+`^MAJOR.MINOR.PATCH` constraints. The compiler validates the constraint against
+the dependency package's `[package].version` while loading the local package
+graph and fails deterministically when the versions are incompatible.
+
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
