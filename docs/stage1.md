@@ -44,8 +44,14 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/pr
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 ```
+
+`axiomc doc --json` emits the same API extraction pass as a versioned machine
+contract, including generated Markdown/HTML paths, documented symbols, comments,
+signatures, simple example notes, declaration kind/visibility, and package
+capability descriptors when the input path is a package root.
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
 as a native artifact, executes it, and compares stdout against a sibling
