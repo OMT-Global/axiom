@@ -38,7 +38,7 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
-    /// Build a stage1 package into backend artifacts and a native or WASM artifact.
+    /// Build a stage1 package through the current generated-Rust backend path into a native or WASM artifact.
     Build {
         path: PathBuf,
         #[arg(long)]
@@ -743,7 +743,9 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("Create a new stage1 package"));
         assert!(help.contains("Check a stage1 package or workspace member"));
-        assert!(help.contains("Build a stage1 package into backend artifacts"));
+        assert!(
+            help.contains("Build a stage1 package through the current generated-Rust backend path")
+        );
         assert!(help.contains("Build and run a stage1 package native binary"));
 
         let mut command = Cli::command();
@@ -754,6 +756,9 @@ mod tests {
             .to_string();
         assert!(build_help.contains(
             "Today only `generated-rust` is implemented; additional native backends remain future work"
+        ));
+        assert!(build_help.contains(
+            "Build a stage1 package through the current generated-Rust backend path into a native or WASM artifact"
         ));
         assert!(!build_help.contains("direct-native"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
