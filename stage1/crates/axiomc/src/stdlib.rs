@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides twenty stdlib modules. Six are thin wrappers over
+//! Today this provides twenty-one stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -69,6 +69,8 @@
 //!   layered over the bootstrap test intrinsics.
 //! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
 //!   fallback unwrap helpers implemented in Axiom.
+//! * `std/encoding.ax` — URL component and path segment percent-encoding
+//!   helpers.
 
 use std::path::{Path, PathBuf};
 
@@ -292,6 +294,19 @@ pub fn serve_once(bind: string, body: string): bool {\nreturn http_serve_once(bi
         "pub fn is_match(pattern: string, text: string): bool {\nreturn regex_is_match(pattern, text)\n}\n\
 pub fn find(pattern: string, text: string): Option<string> {\nreturn regex_find(pattern, text)\n}\n\
 pub fn replace_all(pattern: string, text: string, replacement: string): string {\nreturn regex_replace_all(pattern, text, replacement)\n}\n",
+    ),
+    (
+        "encoding.ax",
+        "pub fn url_component_encode(value: string): string {
+return encoding_url_component_encode(value)
+}
+pub fn url_component_decode(value: string): Option<string> {
+return encoding_url_component_decode(value)
+}
+pub fn path_segment_encode(value: string): string {
+return encoding_path_segment_encode(value)
+}
+",
     ),
     (
         "outcome.ax",
