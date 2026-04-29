@@ -1855,7 +1855,7 @@ fn validate_expr_capabilities(
                 && !capabilities.enabled(kind)
             {
                 let requirement = if kind == CapabilityKind::Env {
-                    String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true")
+                    env_capability_requirement(args)
                 } else {
                     format!("[capabilities].{} = true", kind.name())
                 };
@@ -1924,6 +1924,15 @@ fn validate_expr_capabilities(
             validate_expr_capabilities(module_path, base, capabilities)?;
             validate_expr_capabilities(module_path, index, capabilities)
         }
+    }
+}
+
+fn env_capability_requirement(args: &[syntax::Expr]) -> String {
+    match args.first() {
+        Some(syntax::Expr::Literal(syntax::Literal::String(name))) => {
+            format!("[capabilities].env = [{name:?}] or env_unrestricted = true")
+        }
+        _ => String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true"),
     }
 }
 
