@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
+const TEXT_DOCUMENT_SYNC_KIND_FULL: u8 = 1;
+
 pub fn run_stdio<R, W>(mut input: R, mut output: W) -> Result<(), Diagnostic>
 where
     R: BufRead,
@@ -74,7 +76,7 @@ fn initialize_response(id: Value) -> Value {
             "capabilities": {
                 "textDocumentSync": {
                     "openClose": true,
-                    "change": 1
+                    "change": TEXT_DOCUMENT_SYNC_KIND_FULL
                 }
             }
         }
@@ -110,12 +112,11 @@ fn did_open_diagnostics(message: &Value) -> Option<Value> {
 fn did_change_diagnostics(message: &Value) -> Option<Value> {
     let params = message.get("params")?;
     let uri = params.get("textDocument")?.get("uri")?.as_str()?;
-    let text = params
-        .get("contentChanges")?
-        .as_array()?
-        .first()?
-        .get("text")?
-        .as_str()?;
+    let change = params.get("contentChanges")?.as_array()?.first()?;
+    if change.get("range").is_some() {
+        return None;
+    }
+    let text = change.get("text")?.as_str()?;
     Some(publish_diagnostics(uri, text))
 }
 
@@ -278,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn initialize_advertises_incremental_diagnostics_sync() {
+    fn initialize_advertises_full_document_diagnostics_sync() {
         let response =
             handle_message(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
                 .expect("handle initialize");
@@ -292,7 +293,7 @@ mod tests {
         );
         assert_eq!(
             response.messages[0]["result"]["capabilities"]["textDocumentSync"]["change"],
-            json!(1)
+            json!(TEXT_DOCUMENT_SYNC_KIND_FULL)
         );
     }
 
@@ -350,6 +351,30 @@ mod tests {
 
         assert_eq!(response.messages.len(), 1);
         assert_eq!(response.messages[0]["params"]["diagnostics"], json!([]));
+    }
+
+    #[test]
+    fn did_change_ignores_incremental_range_changes() {
+        let payload = notification(
+            "textDocument/didChange",
+            json!({
+                "textDocument": {
+                    "uri": "file:///tmp/good.ax",
+                    "version": 3
+                },
+                "contentChanges": [{
+                    "range": {
+                        "start": { "line": 1, "character": 0 },
+                        "end": { "line": 1, "character": 0 }
+                    },
+                    "text": "}"
+                }]
+            }),
+        );
+
+        let response = handle_message(&payload).expect("handle didChange");
+
+        assert!(response.messages.is_empty());
     }
 
     #[test]
