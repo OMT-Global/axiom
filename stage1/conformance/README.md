@@ -25,6 +25,8 @@ Current executable fixtures cover:
   control flow.
 - `collection_operations`: standard collection helpers over arrays and
   borrowed slices.
+- `ownership_borrowing`: borrow-safe parameter, aggregate, borrowed-return,
+  projection move, and dependency-boundary execution.
 - `package_local_modules`: nested package-local module imports that execute
   successfully.
 - `package_visibility`: `pub(pkg)` items imported across sibling modules within
