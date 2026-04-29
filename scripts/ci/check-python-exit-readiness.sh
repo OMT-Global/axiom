@@ -2,13 +2,33 @@
 set -euo pipefail
 
 mode="text"
+issue_state_file="${AXIOM_PYTHON_EXIT_ISSUE_STATES_FILE:-}"
+require_issue_states=false
 
-if [[ "${1:-}" == "--json" ]]; then
-  mode="json"
-elif [[ "${1:-}" != "" ]]; then
-  echo "usage: $0 [--json]" >&2
-  exit 2
-fi
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --json)
+      mode="json"
+      shift
+      ;;
+    --issue-state-file)
+      if [[ -z "${2:-}" ]]; then
+        echo "missing value for --issue-state-file" >&2
+        exit 2
+      fi
+      issue_state_file="$2"
+      shift 2
+      ;;
+    --require-issue-states)
+      require_issue_states=true
+      shift
+      ;;
+    *)
+      echo "usage: $0 [--json] [--issue-state-file <path>] [--require-issue-states]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 checks=()
 failures=()
@@ -28,6 +48,33 @@ add_check() {
 has_make_target() {
   local target="$1"
   grep -Eq "^${target}:" Makefile
+}
+
+issue_state_from_file() {
+  local issue="$1"
+  local file="$2"
+  awk -v issue="$issue" '
+    $1 == issue { print toupper($2); found = 1; exit }
+    END { exit found ? 0 : 1 }
+  ' "$file"
+}
+
+issue_state_from_github() {
+  local issue="$1"
+  gh issue view "$issue" --json state --jq '.state' 2>/dev/null | tr '[:lower:]' '[:upper:]'
+}
+
+read_issue_state() {
+  local issue="$1"
+  if [[ -n "$issue_state_file" ]]; then
+    issue_state_from_file "$issue" "$issue_state_file"
+    return
+  fi
+  if command -v gh >/dev/null 2>&1; then
+    issue_state_from_github "$issue"
+    return
+  fi
+  return 1
 }
 
 matrix_has_blocked_rows() {
@@ -123,6 +170,31 @@ for target in stage1-test stage1-conformance stage1-smoke docs-python-exit; do
     add_check "make_${target}" "pass" "Makefile exposes $target"
   else
     add_check "make_${target}" "fail" "Makefile does not expose $target"
+  fi
+done
+
+if [[ -n "$issue_state_file" && ! -f "$issue_state_file" ]]; then
+  add_check "python_exit_issue_state_source" "fail" "issue state file does not exist: $issue_state_file"
+elif [[ -n "$issue_state_file" ]]; then
+  add_check "python_exit_issue_state_source" "pass" "issue states loaded from $issue_state_file"
+elif command -v gh >/dev/null 2>&1; then
+  add_check "python_exit_issue_state_source" "pass" "issue states loaded from GitHub"
+elif [[ "$require_issue_states" == true ]]; then
+  add_check "python_exit_issue_state_source" "fail" "issue states are required but no --issue-state-file was provided and gh is unavailable"
+else
+  add_check "python_exit_issue_state_source" "pass" "issue states not checked; pass --require-issue-states for deletion PRs"
+fi
+
+for issue in 266 267 268 269 270 271; do
+  issue_state=""
+  if issue_state="$(read_issue_state "$issue")" && [[ -n "$issue_state" ]]; then
+    if [[ "$issue_state" == "CLOSED" ]]; then
+      add_check "python_exit_issue_${issue}_closed" "pass" "issue #$issue is CLOSED"
+    else
+      add_check "python_exit_issue_${issue}_closed" "fail" "issue #$issue is $issue_state"
+    fi
+  elif [[ "$require_issue_states" == true ]]; then
+    add_check "python_exit_issue_${issue}_closed" "fail" "issue #$issue state is unavailable"
   fi
 done
 
