@@ -7,8 +7,8 @@ use axiomc::manifest::{entry_path, load_manifest};
 use axiomc::new_project::{WorkloadTemplate, create_project_with_template};
 use axiomc::project::{
     BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
-    check_project_with_options, project_capabilities, run_project_tests_with_options,
-    run_project_with_options,
+    check_project_with_options, package_graph_metadata, project_capabilities,
+    run_project_tests_with_options, run_project_with_options,
 };
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
@@ -109,6 +109,11 @@ enum Command {
         #[command(subcommand)]
         command: InspectCommand,
     },
+    /// Inspect package metadata and resolved local package graph.
+    Pkg {
+        #[command(subcommand)]
+        command: PkgCommand,
+    },
     /// Format .ax source files with the canonical stage1 style.
     Fmt {
         path: PathBuf,
@@ -182,6 +187,16 @@ enum CapsCommand {
 enum InspectCommand {
     /// Emit exported functions, types, consts, imports, and capability use.
     Symbols {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PkgCommand {
+    /// Print resolved packages, members, dependencies, entrypoints, capabilities, and lockfile status.
+    Graph {
         path: PathBuf,
         #[arg(long)]
         json: bool,
@@ -400,6 +415,44 @@ fn main() {
                                 symbol.kind, symbol.name, symbol.span.path, symbol.span.line
                             );
                         }
+                    }
+                    0
+                }
+                Err(error) => print_error("inspect symbols", error, json),
+            },
+        },
+        Command::Pkg { command } => match command {
+            PkgCommand::Graph { path, json } => match package_graph_metadata(&path) {
+                Ok(output) => {
+                    if json {
+                        match serde_json::to_string(&output) {
+                            Ok(output) => {
+                                println!("{output}");
+                                0
+                            }
+                            Err(error) => print_error(
+                                "pkg graph",
+                                Diagnostic::new(
+                                    "json",
+                                    format!("failed to serialize package graph JSON: {error}"),
+                                ),
+                                false,
+                            ),
+                        }
+                    } else {
+                        match json_contract::to_pretty_string(&output) {
+                            Ok(output) => {
+                                println!("{output}");
+                                0
+                            }
+                            Err(error) => print_error("pkg graph", error, false),
+                        }
+                    }
+                }
+                Err(error) => print_error("pkg graph", error, json),
+            },
+        },
+
                     }
                     0
                 }

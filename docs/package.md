@@ -11,7 +11,6 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/h
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
-
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- pkg graph stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
@@ -34,6 +33,12 @@ The current stage1 examples document the supported manifest surface:
 filesystem access is enabled, the `fs` capability includes the manifest-relative
 `configured_root` and canonical `effective_root` so operators can inspect the
 actual package-local filesystem boundary before build or run.
+
+`axiomc pkg graph <path> --json` prints the resolved local package graph without
+mutating manifests or lockfiles. The JSON lists each package root, package
+identity, workspace members, local dependencies, build entrypoint, capabilities,
+and whether that package's `axiom.lock` is current or stale.
+
 Local path dependencies may declare a bounded version constraint:
 
 ```toml
@@ -45,6 +50,7 @@ Stage1 currently accepts `*`, exact `MAJOR.MINOR.PATCH`, and caret
 `^MAJOR.MINOR.PATCH` constraints. The compiler validates the constraint against
 the dependency package's `[package].version` while loading the local package
 graph and fails deterministically when the versions are incompatible.
+
 ## Publish Contract
 
 Remote publishing is not implemented in stage1, but manifests can now declare
@@ -63,14 +69,6 @@ Package identity still comes from `[package].name` and `[package].version`.
 must be relative paths without parent traversal. These fields define the
 manifest contract only; `axiomc` does not publish, upload, or contact a remote
 registry.
-
-See [stage1.md](stage1.md) for the current compiler, package, and capability
-contract.
-
-`axiomc pkg graph <path> --json` prints the resolved local package graph without
-mutating manifests or lockfiles. The JSON lists each package root, package
-identity, workspace members, local dependencies, build entrypoint, capabilities,
-and whether that package's `axiom.lock` is current or stale.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
