@@ -10,6 +10,8 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/b
 
 The checked-in fixture package lives at `stage1/examples/benchmarks`.
 
-This closes the local benchmark-suite foundation. Go and Rust reference
-comparisons should be layered on top of this harness in CI once representative
-workloads are stable enough to treat as performance policy.
+Extended validation now emits a non-blocking Go/Rust/Axiom comparison report for
+the representative reference workloads under `stage1/benchmarks/reference`.
+That report captures build time, run time, binary size, diagnostics JSON shape,
+and capability manifest coverage so performance policy can be calibrated before
+the comparison becomes a required PR gate.

@@ -19,6 +19,7 @@ stage1-conformance:
 
 stage1-bench-gate:
 	python3 scripts/ci/check-stage1-benchmarks.py
+	python3 scripts/ci/report-stage1-reference-comparison.py
 
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
