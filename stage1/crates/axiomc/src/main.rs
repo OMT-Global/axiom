@@ -55,7 +55,7 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
-    /// Build and run a stage1 package native binary.
+    /// Build and run a stage1 package through the current generated-Rust backend path.
     Run {
         path: PathBuf,
         #[arg(short = 'p', long = "package")]
@@ -746,7 +746,9 @@ mod tests {
         assert!(
             help.contains("Build a stage1 package through the current generated-Rust backend path")
         );
-        assert!(help.contains("Build and run a stage1 package native binary"));
+        assert!(help.contains(
+            "Build and run a stage1 package through the current generated-Rust backend path"
+        ));
 
         let mut command = Cli::command();
         let build_help = command
