@@ -27,7 +27,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::{Visibility, parse_program};
+    use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -127,6 +127,11 @@ mod tests {
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
         command_for_executable(path).expect("prepare compiled binary command")
+    }
+
+    fn loopback_socket_bind_available() -> bool {
+        std::net::TcpListener::bind(("127.0.0.1", 0)).is_ok()
+            && std::net::UdpSocket::bind(("127.0.0.1", 0)).is_ok()
     }
 
     #[cfg(unix)]
@@ -418,6 +423,63 @@ print fail()
     }
 
     #[test]
+    fn parser_recovery_reports_stable_top_level_errors() {
+        let source = "import math.ax\nlet answer int = 42\nprint answer\nelse {\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should report all top-level parse errors");
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(2), Some(4)]
+        );
+        assert_eq!(
+            diagnostics[0].message,
+            "import must use a quoted relative path"
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+        assert_eq!(diagnostics[2].message, "unexpected else block");
+    }
+
+    #[test]
+    fn parser_recovery_resynchronizes_top_level_statements_from_their_start() {
+        let source =
+            "if true {\nfor value in [1] {\nprint value\n}\n}\nlet answer int = 42\nprint answer\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should skip the failed top-level statement body");
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(6)]
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("does not support `for` loops yet")
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+    }
+
+    #[test]
+    fn parser_error_preserves_related_recovery_diagnostics_for_cli_payloads() {
+        let source = "import math.ax\nlet answer int = 42\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("default parser should fail with primary diagnostic");
+
+        assert_eq!(error.message, "import must use a quoted relative path");
+        assert_eq!(error.related.len(), 1);
+        assert_eq!(error.related[0].message, "let binding is missing ':'");
+        assert_eq!(error.related[0].line, Some(2));
+    }
+
+    #[test]
     fn parser_rejects_match_arm_guards() {
         let source = "enum OptionInt {\nSome(int)\nNone\n}\n\nfn describe(value: OptionInt): int {\nmatch value {\nSome(n) if n > 0 {\nreturn n\n}\nNone {\nreturn 0\n}\n}\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
@@ -668,6 +730,19 @@ print fail()
         assert!(rendered.contains("fn axiom_resolve_public_socket_addrs("));
         assert!(rendered.contains("Network intrinsics reject private, loopback, link-local,"));
         assert!(rendered.contains("addr.to_ipv4_mapped()"));
+    }
+
+    #[test]
+    fn render_rust_clamps_socket_timeouts_and_bounds_tcp_request_reads() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("timeout_ms.clamp(1, 30_000)"));
+        assert!(rendered.contains("let mut total_read = 0usize;"));
+        assert!(rendered.contains("if total_read >= 65_536"));
+        assert!(rendered.contains("stream.shutdown(std::net::Shutdown::Write).ok()?;"));
     }
 
     #[test]
@@ -2866,18 +2941,19 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\nmatch tcp_listen_loopback_once(\"tcp pong\", 1000) {\nSome(port) {\nmatch tcp_dial(\"127.0.0.1\", port, \"tcp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"tcp none\"\n}\n}\n}\nNone {\nprint \"tcp listen none\"\n}\n}\nmatch udp_bind_loopback_once(\"udp pong\", 1000) {\nSome(port) {\nmatch udp_send_recv(\"127.0.0.1\", port, \"udp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"udp none\"\n}\n}\n}\nNone {\nprint \"udp bind none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout == "true\n" || stdout == "false\n",
-            "unexpected stdout for stdlib_net smoke: {stdout:?}"
-        );
+        let expected = if loopback_socket_bind_available() {
+            "false\ntcp pong\nudp pong\n"
+        } else {
+            "false\ntcp listen none\nudp bind none\n"
+        };
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
     }
 
     #[test]
@@ -2906,7 +2982,7 @@ print strlen("hello")
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_a) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+            "import \"std/net.ax\"\nmatch tcp_listen_loopback_once(\"pong\", 1000) {\nSome(_port) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
         )
         .expect("write source");
 
