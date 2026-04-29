@@ -1954,6 +1954,7 @@ print fail()
             .expect_err("workspace-only run should require package selection");
         assert_eq!(error.kind, "run");
         assert!(error.message.contains("require -p/--package"));
+        assert!(error.message.contains("valid packages: workspace-runner"));
     }
 
     #[test]
