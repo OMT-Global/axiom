@@ -2120,6 +2120,75 @@ print fail()
     }
 
     #[test]
+    fn capability_view_includes_policy_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("caps-policy");
+        create_project(&project, Some("caps-policy-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"caps-policy-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\ndeny_by_default = true\nunsafe_opt_ins = [\"ffi\"]\nowners = { fs = \"platform\", ffi = \"runtime\" }\nrationale = { fs = \"read package fixtures\", ffi = \"native host bridge migration\" }\n",
+        )
+        .expect("write manifest");
+
+        let caps = project_capabilities(&project).expect("project capabilities");
+        let fs_cap = caps
+            .iter()
+            .find(|cap| cap.name == "fs")
+            .expect("fs capability");
+        assert!(fs_cap.enabled);
+        assert!(fs_cap.deny_by_default);
+        assert_eq!(fs_cap.owner.as_deref(), Some("platform"));
+        assert_eq!(fs_cap.rationale.as_deref(), Some("read package fixtures"));
+        assert!(!fs_cap.unsafe_opt_in);
+
+        let ffi_cap = caps
+            .iter()
+            .find(|cap| cap.name == "ffi")
+            .expect("ffi capability");
+        assert!(ffi_cap.unsafe_opt_in);
+        assert_eq!(ffi_cap.owner.as_deref(), Some("runtime"));
+
+        let payload = json_contract::caps_success(&project, &caps);
+        let payload_fs = payload["capabilities"]
+            .as_array()
+            .expect("capabilities array")
+            .iter()
+            .find(|cap| cap["name"] == "fs")
+            .expect("fs capability payload");
+        assert_eq!(payload_fs["deny_by_default"], true);
+        assert_eq!(payload_fs["owner"], "platform");
+        assert_eq!(payload_fs["rationale"], "read package fixtures");
+
+        let payload_ffi = payload["capabilities"]
+            .as_array()
+            .expect("capabilities array")
+            .iter()
+            .find(|cap| cap["name"] == "ffi")
+            .expect("ffi capability payload");
+        assert_eq!(payload_ffi["unsafe_opt_in"], true);
+    }
+
+    #[test]
+    fn capability_policy_metadata_rejects_unknown_capability_names() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("caps-policy-invalid");
+        create_project(&project, Some("caps-policy-invalid-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"caps-policy-invalid-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nunsafe_opt_ins = [\"filesystem\"]\n",
+        )
+        .expect("write manifest");
+
+        let error = load_manifest(&project).expect_err("unknown capability should fail");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
+        );
+    }
+
+    #[test]
     fn check_project_rejects_extern_function_without_ffi_capability() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("ffi-denied");
