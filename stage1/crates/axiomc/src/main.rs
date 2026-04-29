@@ -43,7 +43,7 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
-        /// Select the preparatory native-backend seam. Today only `generated-rust` is implemented; additional native backends remain future work.
+        /// Select the preparatory native-backend plumbing seam. Today only `generated-rust` is implemented; additional native backends remain future work.
         #[arg(long, default_value_t = NativeBackendKind::GeneratedRust)]
         backend: NativeBackendKind,
         #[arg(long)]
@@ -774,10 +774,10 @@ mod tests {
     #[test]
     fn build_rejects_unimplemented_native_backend_values() {
         let error = Cli::try_parse_from(["axiomc", "build", ".", "--backend", "direct-native"])
-            .expect_err("direct-native should remain unavailable in the preparatory seam");
+            .expect_err("direct-native should remain unavailable in the preparatory backend plumbing");
         let rendered = error.to_string();
         assert!(rendered.contains("unsupported backend \"direct-native\""));
-        assert!(rendered.contains("only generated-rust is implemented in this preparatory seam"));
+        assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {

@@ -112,7 +112,7 @@ expectations.
 
 - `stage1/crates/axiomc/`: Rust compiler, CLI, manifest, diagnostics, HIR/MIR,
   stdlib, and the current generated-Rust backend; native backend expansion
-  beyond generated Rust remains future work, and this seam is only preparatory
+  beyond generated Rust remains future work, and this backend plumbing is only preparatory
   groundwork (part of #105).
 - `stage1/examples/`: checked-in package examples for language, package,
   workspace, stdlib, and capability behavior.

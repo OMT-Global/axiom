@@ -130,7 +130,7 @@ pub struct CheckOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
-    /// Preparatory backend seam; `generated-rust` remains the only implemented option today.
+    /// Preparatory backend plumbing; `generated-rust` remains the only implemented option today.
     pub backend: NativeBackendKind,
     pub target: Option<String>,
     pub package: Option<String>,
