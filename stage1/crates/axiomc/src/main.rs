@@ -1,3 +1,4 @@
+use axiomc::diagnostic_catalog::{DiagnosticCodeInfo, diagnostic_code_info};
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::new_project::create_project;
@@ -70,6 +71,12 @@ enum Command {
     /// Inspect manifest capability requirements.
     Caps {
         path: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain a stable diagnostic code.
+    Explain {
+        code: String,
         #[arg(long)]
         json: bool,
     },
@@ -231,6 +238,25 @@ fn main() {
                 Err(error) => print_error("caps", error, json),
             }
         }
+        Command::Explain { code, json } => match diagnostic_code_info(&code) {
+            Some(info) => {
+                if json {
+                    println!(
+                        "{}",
+                        json_contract::to_pretty_string(&explain_payload(info))
+                            .unwrap_or_else(|_| String::from("{}"))
+                    );
+                } else {
+                    println!("{}", explain_text(info));
+                }
+                0
+            }
+            None => print_error(
+                "explain",
+                Diagnostic::new("diagnostic", format!("unknown diagnostic code {code:?}")),
+                json,
+            ),
+        },
         Command::Fmt { path, check } => match format_axiom_sources(&path, check) {
             Ok(report) => {
                 for file in &report.files {
@@ -323,6 +349,27 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
         }
     }
     1
+}
+
+fn explain_payload(info: &DiagnosticCodeInfo) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": json_contract::JSON_SCHEMA_VERSION,
+        "ok": true,
+        "command": "explain",
+        "diagnostic": info,
+    })
+}
+
+fn explain_text(info: &DiagnosticCodeInfo) -> String {
+    format!(
+        "{code} ({kind})\n{title}\n\n{explanation}\n\nExample:\n{example}\n\nSuggested fix:\n{suggested_fix}",
+        code = info.code,
+        kind = info.kind,
+        title = info.title,
+        explanation = info.explanation,
+        example = info.example,
+        suggested_fix = info.suggested_fix,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -730,6 +777,7 @@ mod tests {
         assert!(help.contains("Build and run a stage1 package native binary"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
+        assert!(help.contains("Explain a stable diagnostic code"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
@@ -773,6 +821,29 @@ mod tests {
             build_summary_lines(&build_output(None), false),
             vec![String::from("wrote dist/app")]
         );
+    }
+
+    #[test]
+    fn explain_text_includes_example_and_fix() {
+        let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
+        let text = explain_text(info);
+
+        assert!(text.contains("use_after_move (ownership)"));
+        assert!(text.contains("Example:"));
+        assert!(text.contains("Suggested fix:"));
+    }
+
+    #[test]
+    fn explain_json_payload_is_versioned() {
+        let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
+        let payload = explain_payload(info);
+
+        assert_eq!(
+            payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(payload["command"], "explain");
+        assert_eq!(payload["diagnostic"]["code"], "use_after_move");
     }
 
     #[test]

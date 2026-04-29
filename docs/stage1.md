@@ -42,6 +42,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/ca
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- explain use_after_move --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
@@ -78,6 +79,9 @@ incremental generated-Rust cache.
 Parser diagnostics now preserve additional recovered top-level parse errors in
 the error payload's `related` array when possible, so editor tooling can show
 more than the first syntax error without waiting for full checker recovery.
+Stable diagnostic codes can be queried with `axiomc explain <code>` in text or
+JSON form; the current catalog covers the stable ownership codes emitted by the
+stage1 checker.
 
 ## Current gaps
 
