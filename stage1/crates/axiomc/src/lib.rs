@@ -17,7 +17,8 @@ mod tests {
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{
-        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, render_manifest,
+        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, lockfile_path,
+        render_manifest,
     };
     use crate::mir;
     use crate::new_project::create_project;
@@ -1900,6 +1901,7 @@ print fail()
                 target: None,
                 package: Some(String::from("workspace-app")),
                 debug: false,
+                ..BuildOptions::default()
             },
         )
         .expect("build selected workspace package");
@@ -6002,12 +6004,101 @@ print strlen("hello")
                 target: Some(target.clone()),
                 package: None,
                 debug: false,
+                ..BuildOptions::default()
             },
         )
         .expect("build project with explicit target");
 
         assert_eq!(output.target.as_deref(), Some(target.as_str()));
         assert!(project.join("dist/targeted-build-app").exists());
+    }
+
+    #[test]
+    fn build_project_locked_offline_succeeds_for_local_graph() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("locked-offline-build");
+        create_project(&project, Some("locked-offline-app")).expect("create project");
+
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("build local project in locked offline mode");
+
+        assert!(Path::new(&output.binary).exists());
+    }
+
+    #[test]
+    fn build_project_offline_requires_locked() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("offline-without-locked");
+        create_project(&project, Some("offline-without-locked-app")).expect("create project");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("offline without locked should fail");
+
+        assert_eq!(error.kind, "build");
+        assert!(error.message.contains("offline builds require --locked"));
+    }
+
+    #[test]
+    fn build_project_locked_offline_rejects_missing_lockfile_without_writing_it() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-lockfile");
+        create_project(&project, Some("missing-lockfile-app")).expect("create project");
+        let lockfile = lockfile_path(&project);
+        fs::remove_file(&lockfile).expect("remove lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("missing lockfile should fail");
+
+        assert_eq!(error.kind, "lockfile");
+        assert!(!lockfile.exists());
+    }
+
+    #[test]
+    fn build_project_locked_offline_rejects_stale_lockfile_without_rewriting_it() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stale-lockfile");
+        create_project(&project, Some("stale-lockfile-app")).expect("create project");
+        let lockfile = lockfile_path(&project);
+        let stale_lockfile = fs::read_to_string(&lockfile)
+            .expect("read lockfile")
+            .replace("stale-lockfile-app", "other-app");
+        fs::write(&lockfile, &stale_lockfile).expect("write stale lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("stale lockfile should fail");
+
+        assert_eq!(error.kind, "lockfile");
+        assert_eq!(
+            fs::read_to_string(&lockfile).expect("read stale lockfile"),
+            stale_lockfile
+        );
     }
 
     #[test]
@@ -6027,6 +6118,7 @@ print strlen("hello")
                 target: Some(String::from("wasm32")),
                 package: None,
                 debug: false,
+                ..BuildOptions::default()
             },
         )
         .expect("build project with wasm alias");
@@ -6060,6 +6152,7 @@ print strlen("hello")
                 target: None,
                 package: None,
                 debug: true,
+                ..BuildOptions::default()
             },
         )
         .expect("debug build");
@@ -6096,6 +6189,7 @@ print strlen("hello")
                 target: None,
                 package: None,
                 debug: true,
+                ..BuildOptions::default()
             },
         )
         .expect("cached debug build");
@@ -6231,6 +6325,7 @@ print strlen("hello")
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
+                ..BuildOptions::default()
             },
         )
         .expect("build project");

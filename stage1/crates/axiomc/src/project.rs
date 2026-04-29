@@ -129,6 +129,8 @@ pub struct BuildOptions {
     pub target: Option<String>,
     pub package: Option<String>,
     pub debug: bool,
+    pub locked: bool,
+    pub offline: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -201,6 +203,7 @@ pub fn build_project_with_options(
     project_root: &Path,
     options: &BuildOptions,
 ) -> Result<BuildOutput, Diagnostic> {
+    validate_build_resolution_mode(options)?;
     let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
@@ -271,6 +274,16 @@ pub fn build_project_with_options(
     })
 }
 
+fn validate_build_resolution_mode(options: &BuildOptions) -> Result<(), Diagnostic> {
+    if options.offline && !options.locked {
+        return Err(Diagnostic::new(
+            "build",
+            "offline builds require --locked so axiom.lock is the only dependency resolution source",
+        ));
+    }
+    Ok(())
+}
+
 pub fn run_project(project_root: &Path) -> Result<i32, Diagnostic> {
     run_project_with_options(project_root, &RunOptions::default())
 }
@@ -294,6 +307,7 @@ pub fn run_project_with_options(
             target: None,
             package: options.package.clone(),
             debug: false,
+            ..BuildOptions::default()
         },
     )?;
     let build_output_dir = Path::new(&built.generated_rust).parent().ok_or_else(|| {
