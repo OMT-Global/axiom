@@ -1669,12 +1669,28 @@ fn load_module_recursive(
     visiting: &mut Vec<PathBuf>,
 ) -> Result<(), Diagnostic> {
     let module_path = normalize_path(module_path);
-    if visiting.contains(&module_path) {
+    if let Some(cycle_start) = visiting.iter().position(|path| path == &module_path) {
+        let mut cycle = visiting[cycle_start..].to_vec();
+        cycle.push(module_path.clone());
+        let cycle_path = cycle
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        let related = cycle
+            .iter()
+            .map(|path| {
+                Diagnostic::new("import", "module participates in import cycle")
+                    .with_code("import_cycle_member")
+                    .with_path(path.display().to_string())
+            })
+            .collect();
         return Err(Diagnostic::new(
             "import",
-            format!("circular import detected at {}", module_path.display()),
+            format!("circular import detected: {}", cycle_path.join(" -> ")),
         )
-        .with_path(module_path.display().to_string()));
+        .with_code("import_cycle")
+        .with_path(module_path.display().to_string())
+        .with_related(related));
     }
     if loaded.contains_key(&module_path) {
         return Ok(());

@@ -5859,6 +5859,42 @@ print strlen("hello")
     }
 
     #[test]
+    fn check_project_reports_import_cycle_path_and_stable_code() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("import-cycle");
+        create_project(&project, Some("import-cycle-app")).expect("create project");
+        let main = project.join("src/main.ax");
+        let alpha = project.join("src/alpha.ax");
+        let beta = project.join("src/beta.ax");
+        fs::write(&main, "import \"alpha.ax\"\n\nprint alpha_value()\n").expect("write main");
+        fs::write(
+            &alpha,
+            "import \"beta.ax\"\n\npub fn alpha_value(): int {\nreturn beta_value()\n}\n",
+        )
+        .expect("write alpha");
+        fs::write(
+            &beta,
+            "import \"alpha.ax\"\n\npub fn beta_value(): int {\nreturn 7\n}\n",
+        )
+        .expect("write beta");
+
+        let error = check_project(&project).expect_err("import cycle should fail");
+        assert_eq!(error.kind, "import");
+        assert_eq!(error.code.as_deref(), Some("import_cycle"));
+        assert!(error.message.contains("circular import detected:"));
+        assert!(error.message.contains(&alpha.display().to_string()));
+        assert!(error.message.contains(&beta.display().to_string()));
+        assert!(error.path.as_deref().unwrap().ends_with("src/alpha.ax"));
+        assert_eq!(error.related.len(), 3);
+        assert!(
+            error
+                .related
+                .iter()
+                .all(|related| related.code.as_deref() == Some("import_cycle_member"))
+        );
+    }
+
+    #[test]
     fn build_project_emits_native_binary_from_imported_payload_enums() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("payload-enum-modules");
