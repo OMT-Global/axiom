@@ -18,7 +18,9 @@
 //! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
 //! * `std/fs_write.ax` — write-side helpers on top of `fs_*` write
 //!   intrinsics (fs:write).
-//! * `std/net.ax` — `resolve(host)` on top of `net_resolve` (net).
+//! * `std/net.ax` — `resolve(host)` on top of `net_resolve`, plus a bounded
+//!   loopback-only TCP/UDP socket floor on top of `net_tcp_*` and `net_udp_*`
+//!   intrinsics (net).
 //! * `std/process.ax` — `run_status(command)` on top of `process_status`
 //!   (process).
 //! * `std/crypto_hash.ax` — `sha256(input)` on top of `crypto_sha256` (crypto).
@@ -104,7 +106,11 @@ pub fn replace_file(path: string, content: string): bool {\nreturn fs_replace_fi
     ),
     (
         "net.ax",
-        "pub fn resolve(host: string): Option<string> {\nreturn net_resolve(host)\n}\n",
+        "pub fn resolve(host: string): Option<string> {\nreturn net_resolve(host)\n}\n\
+pub fn tcp_listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
+pub fn tcp_dial(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_tcp_dial(host, port, message, timeout_ms)\n}\n\
+pub fn udp_bind_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_udp_bind_loopback_once(response, timeout_ms)\n}\n\
+pub fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
     ),
     (
         "process.ax",

@@ -1934,6 +1934,10 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "fs_create_file" | "fs_write_file" | "fs_append_file" | "fs_mkdir" | "fs_mkdir_all"
         | "fs_remove_file" | "fs_remove_dir" | "fs_replace_file" => Some(CapabilityKind::FsWrite),
         "net_resolve" => Some(CapabilityKind::Net),
+        "net_tcp_listen_loopback_once" => Some(CapabilityKind::Net),
+        "net_tcp_dial" => Some(CapabilityKind::Net),
+        "net_udp_bind_loopback_once" => Some(CapabilityKind::Net),
+        "net_udp_send_recv" => Some(CapabilityKind::Net),
         "http_get" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),
         "clock_now_ms" => Some(CapabilityKind::Clock),

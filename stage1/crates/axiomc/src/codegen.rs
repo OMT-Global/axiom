@@ -549,6 +549,126 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("        .next()\n");
     out.push_str("        .map(|addr| addr.ip().to_string())\n");
     out.push_str("}\n\n");
+    out.push_str(
+        r#"#[allow(dead_code)]
+fn axiom_net_timeout(timeout_ms: i64) -> Option<std::time::Duration> {
+    Some(std::time::Duration::from_millis(timeout_ms.clamp(1, 30_000) as u64))
+}
+
+#[allow(dead_code)]
+fn axiom_loopback_socket_addr(host: String, port: i64) -> Option<std::net::SocketAddr> {
+    let port = u16::try_from(port).ok()?;
+    let ip = match host.as_str() {
+        "localhost" => std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        _ => host.parse::<std::net::IpAddr>().ok()?,
+    };
+    if !ip.is_loopback() {
+        return None;
+    }
+    Some(std::net::SocketAddr::new(ip, port))
+}
+
+#[allow(dead_code)]
+fn axiom_net_tcp_listen_loopback_once(response: String, timeout_ms: i64) -> Option<i64> {
+    use std::io::{Read, Write};
+    let timeout = axiom_net_timeout(timeout_ms)?;
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
+    listener.set_nonblocking(false).ok()?;
+    let port = listener.local_addr().ok()?.port();
+    std::thread::spawn(move || {
+        let _ = listener.set_nonblocking(true);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _peer)) => {
+                    let _ = stream.set_read_timeout(Some(timeout));
+                    let _ = stream.set_write_timeout(Some(timeout));
+                    let mut total_read = 0usize;
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(read) => {
+                                total_read = total_read.saturating_add(read);
+                                if total_read >= 65_536 {
+                                    break;
+                                }
+                            }
+                            Err(err)
+                                if matches!(
+                                    err.kind(),
+                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                                ) =>
+                            {
+                                break;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    Some(i64::from(port))
+}
+
+#[allow(dead_code)]
+fn axiom_net_tcp_dial(host: String, port: i64, message: String, timeout_ms: i64) -> Option<String> {
+    use std::io::{Read, Write};
+    let timeout = axiom_net_timeout(timeout_ms)?;
+    let addr = axiom_loopback_socket_addr(host, port)?;
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    stream.write_all(message.as_bytes()).ok()?;
+    stream.shutdown(std::net::Shutdown::Write).ok()?;
+    let mut response = Vec::new();
+    stream.take(64 * 1024).read_to_end(&mut response).ok()?;
+    String::from_utf8(response).ok()
+}
+
+#[allow(dead_code)]
+fn axiom_net_udp_bind_loopback_once(response: String, timeout_ms: i64) -> Option<i64> {
+    let timeout = axiom_net_timeout(timeout_ms)?;
+    let socket = std::net::UdpSocket::bind(("127.0.0.1", 0)).ok()?;
+    socket.set_read_timeout(Some(timeout)).ok()?;
+    socket.set_write_timeout(Some(timeout)).ok()?;
+    let port = socket.local_addr().ok()?.port();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        if let Ok((_n, peer)) = socket.recv_from(&mut buf) {
+            let _ = socket.send_to(response.as_bytes(), peer);
+        }
+    });
+    Some(i64::from(port))
+}
+
+#[allow(dead_code)]
+fn axiom_net_udp_send_recv(host: String, port: i64, message: String, timeout_ms: i64) -> Option<String> {
+    let timeout = axiom_net_timeout(timeout_ms)?;
+    let addr = axiom_loopback_socket_addr(host, port)?;
+    let socket = std::net::UdpSocket::bind(("127.0.0.1", 0)).ok()?;
+    socket.set_read_timeout(Some(timeout)).ok()?;
+    socket.set_write_timeout(Some(timeout)).ok()?;
+    socket.send_to(message.as_bytes(), addr).ok()?;
+    let mut response = vec![0u8; 64 * 1024];
+    let (n, _peer) = socket.recv_from(&mut response).ok()?;
+    response.truncate(n);
+    String::from_utf8(response).ok()
+}
+
+"#,
+    );
     if uses_http_get {
         out.push_str(
             r#"#[allow(dead_code)]
@@ -1961,6 +2081,38 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "net_resolve" => {
             format!("axiom_net_resolve({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "net_tcp_listen_loopback_once" => {
+            format!(
+                "axiom_net_tcp_listen_loopback_once({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "net_tcp_dial" => {
+            format!(
+                "axiom_net_tcp_dial({}, {}, {}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "net_udp_bind_loopback_once" => {
+            format!(
+                "axiom_net_udp_bind_loopback_once({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "net_udp_send_recv" => {
+            format!(
+                "axiom_net_udp_send_recv({}, {}, {}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
         }
         Expr::Call { name, args, .. } if name == "process_status" => {
             format!("axiom_process_status({})", render_expr(&args[0]))
