@@ -1888,6 +1888,7 @@ print fail()
             &project,
             &CheckOptions {
                 package: Some(String::from("workspace-app")),
+                include_exports: false,
             },
         )
         .expect("check selected workspace package");
@@ -6218,6 +6219,71 @@ print strlen("hello")
         assert_eq!(payload["command"], "check");
         assert_eq!(payload["ok"], true);
         assert!(payload["packages"].is_array());
+    }
+
+    #[test]
+    fn check_json_can_include_package_public_api_exports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-api-workspace");
+        let core = project.join("deps/core");
+        create_project(&project, Some("public-api-app")).expect("create root project");
+        create_project(&core, Some("public-api-core")).expect("create core project");
+
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"public-api-app\"\nversion = \"0.1.0\"\n\n[workspace]\nmembers = [\"deps/core\"]\n\n[dependencies]\ncore = { path = \"deps/core\" }\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/main.ax\"\n\nprint answer()\n",
+        )
+        .expect("write root source");
+        fs::write(
+            core.join("src/main.ax"),
+            "pub const LIMIT: int = 7\npub type Id = int\n\npub struct Widget {\nlabel: string\n}\n\npub enum Status {\nReady\n}\n\npub fn answer(): int {\nreturn LIMIT\n}\n",
+        )
+        .expect("write core source");
+
+        let core_manifest = load_manifest(&core).expect("load core manifest");
+        fs::write(
+            core.join("axiom.lock"),
+            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
+        )
+        .expect("write core lockfile");
+        let root_manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let output = check_project_with_options(
+            &project,
+            &CheckOptions {
+                package: None,
+                include_exports: true,
+            },
+        )
+        .expect("check public api workspace");
+        let core_package = output
+            .packages
+            .iter()
+            .find(|package| package.package_root.ends_with("deps/core"))
+            .expect("core package exports");
+        let exported = core_package
+            .exports
+            .iter()
+            .map(|export| (export.kind.as_str(), export.name.as_str()))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(exported.contains(&("const", "LIMIT")));
+        assert!(exported.contains(&("type_alias", "Id")));
+        assert!(exported.contains(&("struct", "Widget")));
+        assert!(exported.contains(&("enum", "Status")));
+        assert!(exported.contains(&("function", "answer")));
+
+        let payload = json_contract::check_success(&project, &output);
+        assert!(payload["packages"][1]["exports"].is_array());
     }
 
     #[test]

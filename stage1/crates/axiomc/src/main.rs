@@ -34,6 +34,8 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        exports: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
@@ -115,11 +117,13 @@ fn main() {
         Command::Check {
             path,
             json,
+            exports,
             package,
         } => match check_project_with_options(
             &path,
             &CheckOptions {
                 package: package.clone(),
+                include_exports: exports,
             },
         ) {
             Ok(output) => {
