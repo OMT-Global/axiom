@@ -98,6 +98,9 @@ Stage1 also enforces the current capability-gated runtime surface for `clock`,
 `std/crypto_hash.ax`. Additional ungated or shared-capability wrappers live in
 `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/sync.ax`,
 `std/async.ax`, and `std/http.ax`.
+The `std/net.ax` socket floor is deliberately bounded to one-shot loopback TCP
+and UDP helpers under `[capabilities].net` so examples and tests stay
+deterministic and avoid external network access.
 
 See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and
 [docs/stage1.md](docs/stage1.md) for more detail.

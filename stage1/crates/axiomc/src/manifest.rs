@@ -209,7 +209,19 @@ pub fn out_dir_path(project_root: &Path, manifest: &Manifest) -> PathBuf {
 }
 
 pub fn binary_path(project_root: &Path, manifest: &Manifest) -> PathBuf {
-    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    binary_path_for_target(project_root, manifest, None)
+}
+
+pub fn binary_path_for_target(
+    project_root: &Path,
+    manifest: &Manifest,
+    target: Option<&str>,
+) -> PathBuf {
+    let suffix = match target {
+        Some(target) if target.starts_with("wasm32") => ".wasm",
+        _ if cfg!(windows) => ".exe",
+        _ => "",
+    };
     let package = manifest
         .package
         .as_ref()
