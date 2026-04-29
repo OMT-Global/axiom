@@ -42,6 +42,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/ca
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- inspect graph stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
@@ -78,6 +79,9 @@ incremental generated-Rust cache.
 Parser diagnostics now preserve additional recovered top-level parse errors in
 the error payload's `related` array when possible, so editor tooling can show
 more than the first syntax error without waiting for full checker recovery.
+`axiomc inspect graph --json` emits package metadata, lockfile resolution,
+package-local module imports, stdlib module names, detected local import cycles,
+and import errors for agent dependency-graph checks.
 
 ## Current gaps
 
