@@ -24,6 +24,9 @@ carry the 1.0 package model.
 ## Commands
 
 ```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- new /tmp/axiom-cli --template cli
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- new /tmp/axiom-worker --template worker
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- new /tmp/axiom-service --template service
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --timings
@@ -46,6 +49,12 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hel
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 ```
+
+`axiomc new` defaults to the `cli` starter and also accepts `--template worker`
+and `--template service`. Each starter writes `axiom.toml`, `axiom.lock`,
+`src/main.ax`, `src/main_test.ax`, and `src/main_test.stdout`; the generated
+project is expected to pass `axiomc check`, `axiomc build`, and `axiomc test`
+without manual edits.
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
 as a native artifact, executes it, and compares stdout against a sibling

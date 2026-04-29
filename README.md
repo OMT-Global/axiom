@@ -43,6 +43,9 @@ if ready {
 git clone https://github.com/OMT-Global/axiom.git
 cd axiom
 
+# Create a starter cli, worker, or service workload
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- new /tmp/axiom-worker --template worker
+
 # Check a package
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 
