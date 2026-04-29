@@ -29,6 +29,8 @@ Current executable fixtures cover:
   successfully.
 - `package_visibility`: `pub(pkg)` items imported across sibling modules within
   the same package.
+- `type_system_aggregates`: typed aggregate coverage for generic wrappers,
+  structs, enums, tuples, arrays, maps, `Option`, and `Result`.
 
 Packages under `fail/` are compile-fail fixtures. Each package is a complete
 stage1 project with `axiom.toml`, `axiom.lock`, source, and
