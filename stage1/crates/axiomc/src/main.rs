@@ -56,6 +56,8 @@ enum Command {
         path: PathBuf,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Discover, build, and run package test entrypoints.
     Test {
@@ -164,10 +166,15 @@ fn main() {
                 Err(error) => print_error("build", error, json),
             }
         }
-        Command::Run { path, package } => match run_project_with_options(
+        Command::Run {
+            path,
+            package,
+            args,
+        } => match run_project_with_options(
             &path,
             &RunOptions {
                 package: package.clone(),
+                args: args.clone(),
             },
         ) {
             Ok(code) => code,

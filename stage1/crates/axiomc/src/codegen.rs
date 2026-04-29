@@ -338,6 +338,21 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    axiom_json_escape_string(&value)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_cli_args() -> Vec<String> {\n");
+    out.push_str("    std::env::args().skip(1).collect()\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_cli_arg_count() -> i64 {\n");
+    out.push_str("    std::env::args().skip(1).count() as i64\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_cli_arg(index: i64) -> Option<String> {\n");
+    out.push_str("    if index < 0 {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    std::env::args().skip(1).nth(index as usize)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
     out.push_str(
@@ -1915,6 +1930,11 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "json_stringify_string" => {
             format!("axiom_json_stringify_string({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, .. } if name == "cli_args" => String::from("axiom_cli_args()"),
+        Expr::Call { name, .. } if name == "cli_arg_count" => String::from("axiom_cli_arg_count()"),
+        Expr::Call { name, args, .. } if name == "cli_arg" => {
+            format!("axiom_cli_arg({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))

@@ -4451,6 +4451,46 @@ fn lower_expr_with_expected(
                     ty: Type::String,
                 });
             }
+            if name == "cli_args" || name == "cli_arg_count" {
+                if !args.is_empty() {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 0 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: Vec::new(),
+                    ty: if name == "cli_args" {
+                        Type::Array(Box::new(Type::String))
+                    } else {
+                        Type::Int
+                    },
+                });
+            }
+            if name == "cli_arg" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("cli_arg expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                if lowered.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("cli_arg expects an int argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
             if name == "fs_read" {
                 require_capability(ctx.capabilities, CapabilityKind::Fs, name, *line, *column)?;
                 if args.len() != 1 {

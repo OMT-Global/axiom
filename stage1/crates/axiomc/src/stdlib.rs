@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides fourteen stdlib modules. Six are thin wrappers over
+//! Today this provides fifteen stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -36,7 +36,7 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth through fourteenth modules are stdlib surfaces not tied to a
+//! The eighth through fifteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -54,6 +54,7 @@
 //!   nonblocking channels.
 //! * `std/async.ax` — deterministic task, join, channel, timeout,
 //!   cancellation, and select wrappers over the stage1 async runtime values.
+//! * `std/cli.ax` — access to process arguments forwarded by `axiomc run`.
 
 use std::path::{Path, PathBuf};
 
@@ -194,6 +195,12 @@ pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_sel
     (
         "http.ax",
         "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
+    ),
+    (
+        "cli.ax",
+        "pub fn args(): [string] {\nreturn cli_args()\n}\n\
+pub fn arg_count(): int {\nreturn cli_arg_count()\n}\n\
+pub fn arg(index: int): Option<string> {\nreturn cli_arg(index)\n}\n",
     ),
 ];
 
