@@ -119,6 +119,47 @@ pub struct TestOutput {
     pub duration_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageGraphOutput {
+    pub manifest: String,
+    pub packages: Vec<PackageGraphPackage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageGraphPackage {
+    pub root: String,
+    pub manifest: String,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub workspace_only: bool,
+    pub entrypoint: Option<String>,
+    pub capabilities: Vec<CapabilityDescriptor>,
+    pub dependencies: Vec<PackageGraphDependency>,
+    pub members: Vec<PackageGraphMember>,
+    pub lockfile: PackageGraphLockfile,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageGraphDependency {
+    pub name: String,
+    pub path: String,
+    pub package: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageGraphMember {
+    pub path: String,
+    pub package: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackageGraphLockfile {
+    pub path: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CheckOptions {
     pub package: Option<String>,
@@ -497,6 +538,96 @@ fn load_package_expected_output(project_root: &Path) -> Result<Option<String>, D
 pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescriptor>, Diagnostic> {
     let manifest = load_manifest(project_root)?;
     Ok(capability_descriptors(&manifest.capabilities))
+}
+
+pub fn package_graph_metadata(project_root: &Path) -> Result<PackageGraphOutput, Diagnostic> {
+    let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
+    let graph = load_package_graph(&project_root)?;
+    let mut roots = graph
+        .packages
+        .keys()
+        .filter(|root| **root != stdlib::stdlib_root())
+        .cloned()
+        .collect::<Vec<_>>();
+    roots.sort();
+    let mut packages = Vec::new();
+    for root in roots {
+        let package = graph.context(&root)?;
+        let name = package
+            .manifest
+            .package
+            .as_ref()
+            .map(|package| package.name.clone());
+        let version = package
+            .manifest
+            .package
+            .as_ref()
+            .map(|package| package.version.clone());
+        let entrypoint = package
+            .manifest
+            .package
+            .as_ref()
+            .map(|_| entry_path(&root, &package.manifest).display().to_string());
+        let dependencies = package
+            .dependencies
+            .iter()
+            .map(|(name, dependency_root)| {
+                let dependency = graph.context(dependency_root)?;
+                Ok(PackageGraphDependency {
+                    name: name.clone(),
+                    path: dependency_root.display().to_string(),
+                    package: dependency
+                        .manifest
+                        .package
+                        .as_ref()
+                        .map(|package| package.name.clone()),
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let members = package
+            .workspace_members
+            .iter()
+            .map(|member_root| {
+                let member = graph.context(member_root)?;
+                Ok(PackageGraphMember {
+                    path: member_root.display().to_string(),
+                    package: member
+                        .manifest
+                        .package
+                        .as_ref()
+                        .map(|package| package.name.clone()),
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?;
+        let lockfile = match validate_lockfile(&root, &package.manifest) {
+            Ok(()) => PackageGraphLockfile {
+                path: crate::manifest::lockfile_path(&root).display().to_string(),
+                status: String::from("current"),
+                message: None,
+            },
+            Err(error) => PackageGraphLockfile {
+                path: crate::manifest::lockfile_path(&root).display().to_string(),
+                status: String::from("stale"),
+                message: Some(error.message),
+            },
+        };
+        packages.push(PackageGraphPackage {
+            root: root.display().to_string(),
+            manifest: manifest_path(&root).display().to_string(),
+            name,
+            version,
+            workspace_only: package.manifest.is_workspace_only(),
+            entrypoint,
+            capabilities: capability_descriptors(&package.manifest.capabilities),
+            dependencies,
+            members,
+            lockfile,
+        });
+    }
+    Ok(PackageGraphOutput {
+        manifest: manifest_path(&project_root).display().to_string(),
+        packages,
+    })
 }
 
 #[derive(Debug, Clone)]

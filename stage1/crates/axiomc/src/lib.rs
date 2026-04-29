@@ -24,8 +24,9 @@ mod tests {
     use crate::project::{
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
-        run_project_tests_with_options, run_project_with_options,
+        command_for_build_output, command_for_executable, package_graph_metadata,
+        project_capabilities, run_project_tests, run_project_tests_with_options,
+        run_project_with_options,
     };
     use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
@@ -1928,6 +1929,76 @@ print fail()
         )
         .expect("run selected workspace package");
         assert_eq!(exit, 0);
+    }
+
+    #[test]
+    fn package_graph_metadata_lists_workspace_packages() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("workspace-graph-root");
+        let app = project.join("members/app");
+        let core = project.join("members/core");
+        fs::create_dir_all(project.join("members")).expect("create workspace members dir");
+        create_project(&app, Some("workspace-graph-app")).expect("create app member");
+        create_project(&core, Some("workspace-graph-core")).expect("create core member");
+
+        fs::write(
+            app.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"../core\" }}\n",
+                render_manifest("workspace-graph-app")
+            ),
+        )
+        .expect("write app manifest");
+        let app_manifest = load_manifest(&app).expect("load app manifest");
+        fs::write(
+            app.join("axiom.lock"),
+            render_lockfile_for_project(&app, &app_manifest).expect("app lockfile"),
+        )
+        .expect("write app lockfile");
+        let core_manifest = load_manifest(&core).expect("load core manifest");
+        fs::write(
+            core.join("axiom.lock"),
+            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
+        )
+        .expect("write core lockfile");
+        fs::write(
+            project.join("axiom.toml"),
+            "[workspace]\nmembers = [\"members/app\", \"members/core\"]\n",
+        )
+        .expect("write workspace-only manifest");
+        let root_manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let graph = package_graph_metadata(&project).expect("load package graph metadata");
+        assert_eq!(graph.packages.len(), 3);
+        let root = graph
+            .packages
+            .iter()
+            .find(|package| package.workspace_only)
+            .expect("workspace-only package");
+        assert_eq!(root.members.len(), 2);
+        assert_eq!(root.lockfile.status, "current");
+        let app = graph
+            .packages
+            .iter()
+            .find(|package| package.name.as_deref() == Some("workspace-graph-app"))
+            .expect("app package");
+        assert_eq!(app.dependencies.len(), 1);
+        assert_eq!(app.dependencies[0].name, "core");
+        assert_eq!(
+            app.dependencies[0].package.as_deref(),
+            Some("workspace-graph-core")
+        );
+        assert!(
+            app.entrypoint
+                .as_deref()
+                .unwrap_or("")
+                .ends_with("src/main.ax")
+        );
     }
 
     #[test]
