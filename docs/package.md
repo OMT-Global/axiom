@@ -25,5 +25,24 @@ The current stage1 examples document the supported manifest surface:
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
 
+## Publish Contract
+
+Remote publishing is not implemented in stage1, but manifests can now declare
+the package metadata that future registry tooling will inspect:
+
+```toml
+[publish]
+registry = "https://registry.example.test/index"
+checksum = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+include = ["src", "axiom.toml", "axiom.lock"]
+```
+
+Package identity still comes from `[package].name` and `[package].version`.
+`[publish].registry` is validated as an `https://` or `file:` registry source,
+`[publish].checksum` must use `sha256:<64 hex characters>`, and include entries
+must be relative paths without parent traversal. These fields define the
+manifest contract only; `axiomc` does not publish, upload, or contact a remote
+registry.
+
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
