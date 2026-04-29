@@ -187,6 +187,21 @@ fn load_release(
         .with_path(manifest_path.display().to_string()));
     }
     let metadata = load_registry_metadata(version_dir)?;
+    let yanked = metadata.yanked.unwrap_or(false);
+    if metadata.yank_reason.is_some() && !yanked {
+        return Err(Diagnostic::new(
+            "registry",
+            format!(
+                "registry release {package_name}@{version} declares yank_reason but is not yanked"
+            ),
+        )
+        .with_path(
+            version_dir
+                .join(REGISTRY_METADATA_FILENAME)
+                .display()
+                .to_string(),
+        ));
+    }
     let archive_file = match metadata.archive {
         Some(value) => Some(value),
         None => version_dir
@@ -220,7 +235,7 @@ fn load_release(
             .map(|file| format!("{}/{}/{}/{}", base_url, package_name, version, file)),
         signature: signature_file
             .map(|file| format!("{}/{}/{}/{}", base_url, package_name, version, file)),
-        yanked: metadata.yanked.unwrap_or(false),
+        yanked,
         yank_reason: metadata.yank_reason,
         capabilities: capability_descriptors(&manifest.capabilities)
             .into_iter()
@@ -375,6 +390,33 @@ mod tests {
             .expect_err("unsigned archive should fail");
         assert_eq!(error.kind, "registry");
         assert!(error.message.contains("archive but no signature"));
+    }
+
+    #[test]
+    fn rejects_yank_reason_without_yanked_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let release = write_release(
+            dir.path(),
+            "core",
+            "1.0.0",
+            "[package]\nname = \"core\"\nversion = \"1.0.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        );
+        fs::write(
+            release.join("axiom-registry.toml"),
+            "yank_reason = \"metadata drift\"\n",
+        )
+        .expect("write metadata");
+
+        let error = build_registry_index(dir.path(), "https://packages.example.test")
+            .expect_err("yank_reason without yanked should fail");
+        assert_eq!(error.kind, "registry");
+        assert!(error.message.contains("yank_reason but is not yanked"));
+        assert!(
+            error
+                .path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("axiom-registry.toml"))
+        );
     }
 
     #[test]
