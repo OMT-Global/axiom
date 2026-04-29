@@ -25,5 +25,10 @@ The current stage1 examples document the supported manifest surface:
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
 
+`axiomc caps <package> --json` reports the declared capability surface. When
+filesystem access is enabled, the `fs` capability includes the manifest-relative
+`configured_root` and canonical `effective_root` so operators can inspect the
+actual package-local filesystem boundary before build or run.
+
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
