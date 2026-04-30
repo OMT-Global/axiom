@@ -1,3 +1,4 @@
+use crate::borrowck::{self, BorrowKind};
 use crate::diagnostics::{Diagnostic, message_with_suggestion};
 use crate::manifest::{CapabilityConfig, CapabilityKind};
 use crate::syntax;
@@ -291,12 +292,6 @@ enum BorrowOrigin {
     Local,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BorrowKind {
-    Shared,
-    Mutable,
-}
-
 struct LowerContext<'a> {
     structs: &'a HashMap<String, StructDef>,
     enums: &'a HashMap<String, EnumDef>,
@@ -315,14 +310,6 @@ struct VariantInfo {
     payload_tys: Vec<Type>,
     payload_names: Vec<String>,
 }
-
-const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
-const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str = "borrow_return_requires_param_origin";
-const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
-const OWNERSHIP_USE_AFTER_MOVE: &str = "use_after_move";
-const OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE: &str = "shared_borrow_while_mutable_live";
-const OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE: &str = "mutable_borrow_while_mutable_live";
-const OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE: &str = "mutable_borrow_while_shared_live";
 
 fn function_symbol_name(function: &syntax::Function) -> String {
     match &function.impl_target {
@@ -405,7 +392,6 @@ pub fn lower_with_capabilities(
         stmts,
     })
 }
-
 
 fn reachable_function_names(program: &syntax::Program) -> HashSet<String> {
     let functions_by_name: HashMap<&str, &syntax::Function> = program
@@ -2749,10 +2735,6 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
     }
 }
 
-fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
-    Diagnostic::new("ownership", message).with_code(code)
-}
-
 impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
@@ -3074,7 +3056,7 @@ fn collect_function_signatures(
         } else {
             return_ty.clone()
         };
-        let borrow_return_params = classify_borrow_return(
+        let borrow_return_params = borrowck::classify_borrow_return(
             &params,
             &signature_return_ty,
             structs,
@@ -3242,7 +3224,7 @@ fn lower_function(
                 ty: ty.clone(),
                 moved: false,
                 moved_projections: HashSet::new(),
-                borrow_kind: borrow_kind_for_type(&ty, structs, enums),
+                borrow_kind: borrowck::borrow_kind_for_type(&ty, structs, enums),
                 borrow_origin: binding_borrow_origin(&ty, Some("self"), structs, enums),
                 borrowed_owners: HashSet::new(),
                 active_borrow_count: 0,
@@ -3278,7 +3260,7 @@ fn lower_function(
                 ty: ty.clone(),
                 moved: false,
                 moved_projections: HashSet::new(),
-                borrow_kind: borrow_kind_for_type(&ty, structs, enums),
+                borrow_kind: borrowck::borrow_kind_for_type(&ty, structs, enums),
                 borrow_origin: binding_borrow_origin(&ty, Some(&param.name), structs, enums),
                 borrowed_owners: HashSet::new(),
                 active_borrow_count: 0,
@@ -3404,7 +3386,9 @@ fn lower_stmt(
             }
             let borrowed_owners =
                 binding_borrowed_owners_from_expr(&expected, &lowered_expr, env, ctx);
-            if let Some(borrow_kind) = borrow_kind_for_type(&expected, ctx.structs, ctx.enums) {
+            if let Some(borrow_kind) =
+                borrowck::borrow_kind_for_type(&expected, ctx.structs, ctx.enums)
+            {
                 increment_active_borrows(&borrowed_owners, env, borrow_kind, *line, *column)?;
             }
             if !actual.is_copy() {
@@ -3416,7 +3400,7 @@ fn lower_stmt(
                     ty: expected.clone(),
                     moved: false,
                     moved_projections: HashSet::new(),
-                    borrow_kind: borrow_kind_for_type(&expected, ctx.structs, ctx.enums),
+                    borrow_kind: borrowck::borrow_kind_for_type(&expected, ctx.structs, ctx.enums),
                     borrow_origin: binding_borrow_origin_from_expr(
                         &expected,
                         &lowered_expr,
@@ -3629,8 +3613,8 @@ fn lower_stmt(
                             .iter()
                             .any(|projection| !pre_binding.moved_projections.contains(projection));
                         if post_binding.moved || moved_projection_in_body {
-                            return Err(ownership_error(
-                                OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY,
+                            return Err(borrowck::ownership_error(
+                                borrowck::LOOP_MOVE_OUTER_NON_COPY,
                                 format!(
                                     "cannot move non-copy value `{}` inside loop body — \
                                      value would not be available on subsequent iterations",
@@ -3660,7 +3644,8 @@ fn lower_stmt(
         } => {
             let lowered_expr = lower_expr(expr, env, ctx)?;
             let match_borrowed_owners = expr_borrowed_owners(&lowered_expr, env, ctx);
-            let match_borrow_kind = borrow_kind_for_type(lowered_expr.ty(), ctx.structs, ctx.enums);
+            let match_borrow_kind =
+                borrowck::borrow_kind_for_type(lowered_expr.ty(), ctx.structs, ctx.enums);
             let reuse_existing_match_binding =
                 matches!(lowered_expr, Expr::VarRef { .. }) && !match_borrowed_owners.is_empty();
             if let Some(borrow_kind) = match_borrow_kind
@@ -3812,7 +3797,11 @@ fn lower_stmt(
                             ty: payload_ty.clone(),
                             moved: false,
                             moved_projections: HashSet::new(),
-                            borrow_kind: borrow_kind_for_type(payload_ty, ctx.structs, ctx.enums),
+                            borrow_kind: borrowck::borrow_kind_for_type(
+                                payload_ty,
+                                ctx.structs,
+                                ctx.enums,
+                            ),
                             borrow_origin: match_binding_borrow_origin(
                                 &lowered_expr,
                                 &arm.variant,
@@ -3905,7 +3894,7 @@ fn lower_stmt(
                 )
                 .with_span(*line, *column));
             }
-            if contains_borrowed_slice_type(expected, ctx.structs, ctx.enums)
+            if borrowck::contains_borrowed_slice_type(expected, ctx.structs, ctx.enums)
                 && !ctx.current_borrow_return_params.is_empty()
             {
                 match expr_borrow_origin(&lowered_expr, env, ctx) {
@@ -3913,8 +3902,8 @@ fn lower_stmt(
                     Some(BorrowOrigin::Param(origin))
                         if ctx.current_borrow_return_params.contains(&origin) => {}
                     _ => {
-                        return Err(ownership_error(
-                            OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN,
+                        return Err(borrowck::ownership_error(
+                            borrowck::BORROW_RETURN_REQUIRES_PARAM_ORIGIN,
                             format!(
                                 "returning borrowed values requires data derived from one of the borrowed parameters in stage1"
                             ),
@@ -4194,15 +4183,15 @@ fn lower_expr_with_expected(
         syntax::Expr::VarRef { name, line, column } => {
             if let Some(binding) = env.get(name) {
                 if binding.moved {
-                    return Err(ownership_error(
-                        OWNERSHIP_USE_AFTER_MOVE,
+                    return Err(borrowck::ownership_error(
+                        borrowck::USE_AFTER_MOVE,
                         format!("use of moved value {name:?}"),
                     )
                     .with_span(*line, *column));
                 }
                 if !binding.moved_projections.is_empty() {
-                    return Err(ownership_error(
-                        OWNERSHIP_USE_AFTER_MOVE,
+                    return Err(borrowck::ownership_error(
+                        borrowck::USE_AFTER_MOVE,
                         format!("use of partially moved value {name:?}"),
                     )
                     .with_span(*line, *column));
@@ -6626,8 +6615,8 @@ fn lower_projection_base_expr(
                 return lower_expr(expr, env, ctx);
             };
             if binding.moved {
-                return Err(ownership_error(
-                    OWNERSHIP_USE_AFTER_MOVE,
+                return Err(borrowck::ownership_error(
+                    borrowck::USE_AFTER_MOVE,
                     format!("use of moved value {name:?}"),
                 )
                 .with_span(*line, *column));
@@ -6976,14 +6965,14 @@ fn mark_projection_moved(
         )
     })?;
     if binding.active_borrow_count > 0 {
-        return Err(ownership_error(
-            OWNERSHIP_MOVE_WHILE_BORROWED,
+        return Err(borrowck::ownership_error(
+            borrowck::MOVE_WHILE_BORROWED,
             format!("cannot move value {name:?} while borrowed slices are still live"),
         ));
     }
     if projection_is_unavailable(binding, &projection) {
-        return Err(ownership_error(
-            OWNERSHIP_USE_AFTER_MOVE,
+        return Err(borrowck::ownership_error(
+            borrowck::USE_AFTER_MOVE,
             format!(
                 "use of moved value {:?}",
                 format_projected_name(name, &projection)
@@ -7009,8 +6998,8 @@ fn ensure_lowered_projection_traversable(
         return Ok(());
     };
     if projection_has_moved_ancestor(binding, &projection) {
-        return Err(ownership_error(
-            OWNERSHIP_USE_AFTER_MOVE,
+        return Err(borrowck::ownership_error(
+            borrowck::USE_AFTER_MOVE,
             format!(
                 "use of moved value {:?}",
                 format_projected_name(name, &projection)
@@ -7100,7 +7089,7 @@ fn binding_borrow_origin(
     structs: &HashMap<String, StructDef>,
     enums: &HashMap<String, EnumDef>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(ty, structs, enums) {
+    if !borrowck::contains_borrowed_slice_type(ty, structs, enums) {
         return None;
     }
     Some(match param_name {
@@ -7115,7 +7104,7 @@ fn binding_borrow_origin_from_expr(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
+    if !borrowck::contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
         return None;
     }
     expr_borrow_origin(expr, env, ctx)
@@ -7127,7 +7116,7 @@ fn binding_borrowed_owners_from_expr(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> HashSet<String> {
-    if !contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
+    if !borrowck::contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
         return HashSet::new();
     }
     expr_borrowed_owners(expr, env, ctx)
@@ -7138,7 +7127,7 @@ fn expr_borrow_origin(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
+    if !borrowck::contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
         return None;
     }
     match expr {
@@ -7249,7 +7238,7 @@ fn match_binding_borrow_origin(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Option<BorrowOrigin> {
-    if !contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
+    if !borrowck::contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
         return None;
     }
     if let Some(payload_expr) =
@@ -7269,7 +7258,7 @@ fn match_binding_borrowed_owners(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> HashSet<String> {
-    if !contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
+    if !borrowck::contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
         return HashSet::new();
     }
     if let Some(payload_expr) =
@@ -7285,7 +7274,7 @@ fn expr_borrowed_owners(
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> HashSet<String> {
-    if !contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
+    if !borrowck::contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
         return HashSet::new();
     }
     match expr {
@@ -7360,281 +7349,6 @@ fn owned_borrow_root(expr: &Expr) -> Option<String> {
     }
 }
 
-fn contains_borrowed_slice_type(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-) -> bool {
-    contains_borrowed_slice_type_inner(ty, structs, enums, &mut HashSet::new(), &mut HashSet::new())
-}
-
-fn contains_mut_borrowed_slice_type(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-) -> bool {
-    contains_mut_borrowed_slice_type_inner(
-        ty,
-        structs,
-        enums,
-        &mut HashSet::new(),
-        &mut HashSet::new(),
-    )
-}
-
-fn contains_borrowed_slice_type_inner(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    visiting_structs: &mut HashSet<String>,
-    visiting_enums: &mut HashSet<String>,
-) -> bool {
-    match ty {
-        Type::Slice(_) | Type::MutSlice(_) => true,
-        Type::Option(inner) => contains_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Result(ok, err) => {
-            contains_borrowed_slice_type_inner(ok, structs, enums, visiting_structs, visiting_enums)
-                || contains_borrowed_slice_type_inner(
-                    err,
-                    structs,
-                    enums,
-                    visiting_structs,
-                    visiting_enums,
-                )
-        }
-        Type::Tuple(elements) => elements.iter().any(|element| {
-            contains_borrowed_slice_type_inner(
-                element,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }),
-        Type::Map(key, value) => {
-            contains_borrowed_slice_type_inner(
-                key,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            ) || contains_borrowed_slice_type_inner(
-                value,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Array(inner)
-        | Type::Task(inner)
-        | Type::JoinHandle(inner)
-        | Type::AsyncChannel(inner)
-        | Type::SelectResult(inner) => contains_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Struct(name) => {
-            if !visiting_structs.insert(name.clone()) {
-                return false;
-            }
-            let contains = structs.get(name).is_some_and(|struct_def| {
-                struct_def.fields.iter().any(|field| {
-                    contains_borrowed_slice_type_inner(
-                        &field.ty,
-                        structs,
-                        enums,
-                        visiting_structs,
-                        visiting_enums,
-                    )
-                })
-            });
-            visiting_structs.remove(name);
-            contains
-        }
-        Type::Enum(name) => {
-            if !visiting_enums.insert(name.clone()) {
-                return false;
-            }
-            let contains = enums.get(name).is_some_and(|enum_def| {
-                enum_def.variants.iter().any(|variant| {
-                    variant.payload_tys.iter().any(|payload_ty| {
-                        contains_borrowed_slice_type_inner(
-                            payload_ty,
-                            structs,
-                            enums,
-                            visiting_structs,
-                            visiting_enums,
-                        )
-                    })
-                })
-            });
-            visiting_enums.remove(name);
-            contains
-        }
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
-    }
-}
-
-fn contains_mut_borrowed_slice_type_inner(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    visiting_structs: &mut HashSet<String>,
-    visiting_enums: &mut HashSet<String>,
-) -> bool {
-    match ty {
-        Type::MutSlice(_) => true,
-        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
-        Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Result(ok, err) => {
-            contains_mut_borrowed_slice_type_inner(
-                ok,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            ) || contains_mut_borrowed_slice_type_inner(
-                err,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Tuple(elements) => elements.iter().any(|element| {
-            contains_mut_borrowed_slice_type_inner(
-                element,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }),
-        Type::Map(key, value) => {
-            contains_mut_borrowed_slice_type_inner(
-                key,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            ) || contains_mut_borrowed_slice_type_inner(
-                value,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Array(inner)
-        | Type::Task(inner)
-        | Type::JoinHandle(inner)
-        | Type::AsyncChannel(inner)
-        | Type::SelectResult(inner) => contains_mut_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Struct(name) => {
-            if !visiting_structs.insert(name.clone()) {
-                return false;
-            }
-            let contains = structs.get(name).is_some_and(|struct_def| {
-                struct_def.fields.iter().any(|field| {
-                    contains_mut_borrowed_slice_type_inner(
-                        &field.ty,
-                        structs,
-                        enums,
-                        visiting_structs,
-                        visiting_enums,
-                    )
-                })
-            });
-            visiting_structs.remove(name);
-            contains
-        }
-        Type::Enum(name) => {
-            if !visiting_enums.insert(name.clone()) {
-                return false;
-            }
-            let contains = enums.get(name).is_some_and(|enum_def| {
-                enum_def.variants.iter().any(|variant| {
-                    variant.payload_tys.iter().any(|payload_ty| {
-                        contains_mut_borrowed_slice_type_inner(
-                            payload_ty,
-                            structs,
-                            enums,
-                            visiting_structs,
-                            visiting_enums,
-                        )
-                    })
-                })
-            });
-            visiting_enums.remove(name);
-            contains
-        }
-    }
-}
-
-fn classify_borrow_return(
-    params: &[Type],
-    return_ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    line: usize,
-    column: usize,
-) -> Result<Vec<usize>, Diagnostic> {
-    if !contains_borrowed_slice_type(return_ty, structs, enums) {
-        return Ok(Vec::new());
-    }
-    let matches = params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, ty)| contains_borrowed_slice_type(ty, structs, enums).then_some(index))
-        .collect::<Vec<_>>();
-    if matches.is_empty() {
-        return Err(Diagnostic::new(
-            "type",
-            "borrowed return functions must take at least one borrowed parameter in stage1",
-        )
-        .with_span(line, column));
-    }
-    Ok(matches)
-}
-
-fn borrow_kind_for_type(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-) -> Option<BorrowKind> {
-    if contains_mut_borrowed_slice_type(ty, structs, enums) {
-        Some(BorrowKind::Mutable)
-    } else if contains_borrowed_slice_type(ty, structs, enums) {
-        Some(BorrowKind::Shared)
-    } else {
-        None
-    }
-}
-
 fn increment_active_borrows(
     owner_names: &HashSet<String>,
     env: &mut HashMap<String, Binding>,
@@ -7649,35 +7363,15 @@ fn increment_active_borrows(
                 format!("internal error: missing borrow owner {owner_name:?}"),
             )
         })?;
-        match borrow_kind {
-            BorrowKind::Shared if binding.active_mut_borrow_count > 0 => {
-                return Err(ownership_error(
-                    OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE,
-                    format!(
-                        "cannot create shared borrow of value {owner_name:?} while a mutable borrow is still live"
-                    ),
-                )
-                .with_span(line, column));
-            }
-            BorrowKind::Mutable if binding.active_mut_borrow_count > 0 => {
-                return Err(ownership_error(
-                    OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE,
-                    format!(
-                        "cannot create mutable borrow of value {owner_name:?} while another mutable borrow is still live"
-                    ),
-                )
-                .with_span(line, column));
-            }
-            BorrowKind::Mutable if binding.active_borrow_count > 0 => {
-                return Err(ownership_error(
-                    OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE,
-                    format!(
-                        "cannot create mutable borrow of value {owner_name:?} while a shared borrow is still live"
-                    ),
-                )
-                .with_span(line, column));
-            }
-            _ => {}
+        if let Some(diagnostic) = borrowck::borrow_conflict_error(
+            owner_name,
+            borrow_kind,
+            binding.active_borrow_count,
+            binding.active_mut_borrow_count,
+            line,
+            column,
+        ) {
+            return Err(diagnostic);
         }
         binding.active_borrow_count += 1;
         if matches!(borrow_kind, BorrowKind::Mutable) {
@@ -7694,7 +7388,8 @@ fn record_temporary_borrows(
     temporary_borrows: &mut Vec<(HashSet<String>, BorrowKind)>,
 ) -> Result<(), Diagnostic> {
     let owners = expr_borrowed_owners(expr, env, ctx);
-    let Some(borrow_kind) = borrow_kind_for_type(expr.ty(), ctx.structs, ctx.enums) else {
+    let Some(borrow_kind) = borrowck::borrow_kind_for_type(expr.ty(), ctx.structs, ctx.enums)
+    else {
         return Ok(());
     };
     increment_active_borrows(&owners, env, borrow_kind, 0, 0)?;
