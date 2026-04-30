@@ -4747,17 +4747,61 @@ print is_match(\"[a-z]+\", true)
     }
 
     #[test]
-    fn check_project_rejects_generic_call_without_type_args() {
+    fn check_project_infers_generic_call_from_argument_type() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("generic-missing-type-args");
-        create_project(&project, Some("generic-missing-type-args-app")).expect("create project");
+        let project = dir.path().join("generic-inferred-arg");
+        create_project(&project, Some("generic-inferred-arg-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "fn identity<T>(value: T): T {\nreturn value\n}\n\nprint identity(42)\n",
         )
         .expect("write source");
-        let error = check_project(&project).expect_err("generic calls require type args");
-        assert!(error.message.contains("requires explicit type arguments"));
+        let output = check_project(&project).expect("generic call should infer type args");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_lowers_inferred_generic_calls_to_monomorphized_copies() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nlet answer: int = identity(42)\nlet label: string = identity<string>(\"stage1\")\nprint answer\nprint label\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn identity__int(value: i64) -> i64 {"));
+        assert!(rendered.contains("fn identity__string(value: String) -> String {"));
+        assert!(rendered.contains("let answer: i64 = identity__int(42);"));
+        assert!(
+            rendered.contains("let label: String = identity__string(String::from(\"stage1\"));")
+        );
+    }
+
+    #[test]
+    fn check_project_infers_generic_call_from_return_context() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inferred-return");
+        create_project(&project, Some("generic-inferred-return-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn none<T>(): Option<T> {\nreturn None\n}\n\nlet missing: Option<int> = none()\n",
+        )
+        .expect("write source");
+        let output = check_project(&project).expect("generic call should infer from expected type");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn check_project_reports_generic_inference_constraint_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inference-mismatch");
+        create_project(&project, Some("generic-inference-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn first<T>(values: [T]): T {\nreturn values[0]\n}\n\nprint first(42)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("argument constraint should fail");
+        assert!(error.message.contains("argument 1 constraint failed"));
+        assert!(error.message.contains("expected generic constraint"));
         assert_eq!(error.kind, "type");
     }
 
