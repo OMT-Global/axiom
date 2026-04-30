@@ -99,6 +99,14 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_collections --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_collections
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_collections --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_string_builder --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_string_builder --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_string_builder
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_string_builder --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_log --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_log --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_log
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_log --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_sync --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_sync --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_sync

@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides twelve stdlib modules. Six are thin wrappers over
+//! Today this provides fifteen stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -16,13 +16,18 @@
 //!   `clock_elapsed_ms`, and `clock_sleep_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
 //! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
-//! * `std/net.ax` — `resolve(host)` on top of `net_resolve` (net).
+//! * `std/net.ax` — `resolve(host)` on top of `net_resolve`, plus a bounded
+//!   loopback-only TCP/UDP socket floor on top of `net_tcp_*` and `net_udp_*`
+//!   intrinsics (net).
 //! * `std/process.ax` — `run_status(command)` on top of `process_status`
 //!   (process).
 //! * `std/crypto_hash.ax` — `sha256(input)` on top of `crypto_sha256` (crypto).
 //!   (This is the stage1 spelling of the `std.crypto.hash` module from the
 //!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
 //!   separator issues in the virtual stdlib table.)
+//! * `std/crypto_mac.ax` — `hmac_sha256(key, message)` and
+//!   `constant_time_eq(left, right)` on top of `crypto_hmac_sha256` and
+//!   `crypto_constant_time_eq` (crypto).
 //!
 //! The seventh module shares an existing capability class with a peer
 //! wrapper, demonstrating that the `std.*` surface is not limited to one
@@ -34,7 +39,7 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth, ninth, tenth, eleventh, and twelfth modules are stdlib surfaces not tied to a
+//! The eighth through fourteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -43,6 +48,10 @@
 //!   top of new ungated `json_parse_*` / `json_stringify_*` intrinsics.
 //! * `std/collections.ax` — generic borrowed-slice helpers built on the
 //!   existing polymorphic collection primitives and AG2 generic functions.
+//! * `std/string_builder.ax` — an owned string accumulator implemented with
+//!   stage1 strings.
+//! * `std/log.ax` — deterministic JSON-line logging helpers over ambient
+//!   stderr.
 //! * `std/sync.ax` — ownership-shaped synchronization primitives implemented
 //!   in Axiom: move-only mutex guards, one-shot cells, and single-slot
 //!   nonblocking channels.
@@ -87,7 +96,11 @@ pub fn sleep(duration: Duration): int {\nreturn clock_sleep_ms(duration.ms)\n}\n
     ),
     (
         "net.ax",
-        "pub fn resolve(host: string): Option<string> {\nreturn net_resolve(host)\n}\n",
+        "pub fn resolve(host: string): Option<string> {\nreturn net_resolve(host)\n}\n\
+pub fn tcp_listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
+pub fn tcp_dial(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_tcp_dial(host, port, message, timeout_ms)\n}\n\
+pub fn udp_bind_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_udp_bind_loopback_once(response, timeout_ms)\n}\n\
+pub fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
     ),
     (
         "process.ax",
@@ -96,6 +109,11 @@ pub fn sleep(duration: Duration): int {\nreturn clock_sleep_ms(duration.ms)\n}\n
     (
         "crypto_hash.ax",
         "pub fn sha256(input: string): string {\nreturn crypto_sha256(input)\n}\n",
+    ),
+    (
+        "crypto_mac.ax",
+        "pub fn hmac_sha256(key: string, message: string): string {\nreturn crypto_hmac_sha256(key, message)\n}\n\
+pub fn constant_time_eq(left: string, right: string): bool {\nreturn crypto_constant_time_eq(left, right)\n}\n",
     ),
     (
         "io.ax",
@@ -108,7 +126,13 @@ pub fn parse_bool(text: string): Option<bool> {\nreturn json_parse_bool(text)\n}
 pub fn parse_string(text: string): Option<string> {\nreturn json_parse_string(text)\n}\n\
 pub fn stringify_int(value: int): string {\nreturn json_stringify_int(value)\n}\n\
 pub fn stringify_bool(value: bool): string {\nreturn json_stringify_bool(value)\n}\n\
-pub fn stringify_string(value: string): string {\nreturn json_stringify_string(value)\n}\n",
+pub fn stringify_string(value: string): string {\nreturn json_stringify_string(value)\n}\n\
+pub fn field_string(key: string, value: string): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_string(value)\n}\n\
+pub fn field_int(key: string, value: int): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_int(value)\n}\n\
+pub fn field_bool(key: string, value: bool): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_bool(value)\n}\n\
+pub fn object1(field: string): string {\nreturn \"{\" + field + \"}\"\n}\n\
+pub fn object2(first_field: string, second_field: string): string {\nreturn \"{\" + first_field + \",\" + second_field + \"}\"\n}\n\
+pub fn object3(first_field: string, second_field: string, third_field: string): string {\nreturn \"{\" + first_field + \",\" + second_field + \",\" + third_field + \"}\"\n}\n",
     ),
     (
         "collections.ax",
@@ -118,6 +142,29 @@ pub fn has_items<T>(values: &[T]): bool {\nreturn len(values) > 0\n}\n\
 pub fn skip<T>(values: &[T], count: int): &[T] {\nreturn values[count:]\n}\n\
 pub fn take<T>(values: &[T], count: int): &[T] {\nreturn values[:count]\n}\n\
 pub fn window<T>(values: &[T], start: int, end: int): &[T] {\nreturn values[start:end]\n}\n",
+    ),
+    (
+        "string_builder.ax",
+        "pub struct StringBuilder {\nvalue: string\n}\n\
+pub fn builder(): StringBuilder {\nreturn StringBuilder { value: \"\" }\n}\n\
+pub fn from_string(value: string): StringBuilder {\nreturn StringBuilder { value: value }\n}\n\
+pub fn push_str(builder: StringBuilder, text: string): StringBuilder {\nreturn StringBuilder { value: builder.value + text }\n}\n\
+pub fn push_line(builder: StringBuilder, text: string): StringBuilder {\nreturn StringBuilder { value: builder.value + text + \"\\n\" }\n}\n\
+pub fn finish(builder: StringBuilder): string {\nreturn builder.value\n}\n",
+    ),
+    (
+        "log.ax",
+        "pub fn field_string(key: string, value: string): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_string(value)\n}\n\
+pub fn field_int(key: string, value: int): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_int(value)\n}\n\
+pub fn field_bool(key: string, value: bool): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_bool(value)\n}\n\
+pub fn fields2(first_field: string, second_field: string): string {\nreturn first_field + \",\" + second_field\n}\n\
+pub fn fields3(first_field: string, second_field: string, third_field: string): string {\nreturn first_field + \",\" + second_field + \",\" + third_field\n}\n\
+pub fn event(level: string, message: string, attributes: string): string {\nreturn \"{\\\"level\\\":\" + json_stringify_string(level) + \",\\\"message\\\":\" + json_stringify_string(message) + \",\\\"attributes\\\":{\" + attributes + \"}}\"\n}\n\
+pub fn debug(message: string): int {\nreturn io_eprintln(event(\"debug\", message, \"\"))\n}\n\
+pub fn info(message: string): int {\nreturn io_eprintln(event(\"info\", message, \"\"))\n}\n\
+pub fn warn(message: string): int {\nreturn io_eprintln(event(\"warn\", message, \"\"))\n}\n\
+pub fn error(message: string): int {\nreturn io_eprintln(event(\"error\", message, \"\"))\n}\n\
+pub fn info_attrs(message: string, attributes: string): int {\nreturn io_eprintln(event(\"info\", message, attributes))\n}\n",
     ),
     (
         "sync.ax",
@@ -191,4 +238,8 @@ pub(crate) fn stdlib_has_module(import_remainder: &Path) -> bool {
         return false;
     };
     STDLIB_SOURCES.iter().any(|(name, _)| *name == key)
+}
+
+pub(crate) fn stdlib_module_names() -> impl Iterator<Item = &'static str> {
+    STDLIB_SOURCES.iter().map(|(name, _)| *name)
 }
