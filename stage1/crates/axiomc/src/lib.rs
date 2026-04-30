@@ -3,16 +3,18 @@ pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
 pub mod lockfile;
+pub mod lsp;
 pub mod manifest;
 pub mod mir;
 pub mod new_project;
 pub mod project;
+pub mod registry;
 pub mod stdlib;
 pub mod syntax;
 
 #[cfg(test)]
 mod tests {
-    use crate::codegen::render_rust;
+    use crate::codegen::{NativeBackendKind, render_rust};
     use crate::hir;
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
@@ -123,6 +125,14 @@ mod tests {
             .join("..")
             .join("..")
             .join("conformance")
+    }
+
+    fn checked_in_example_fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join(name)
     }
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
@@ -1897,6 +1907,7 @@ print fail()
         let built = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: Some(String::from("workspace-app")),
                 debug: false,
@@ -2906,6 +2917,91 @@ print strlen("hello")
         fs::write(
             project.join("src/main.ax"),
             "import \"std/crypto_hash.ax\"\nprint sha256(\"abc\")\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message
+                .contains("requires [capabilities].crypto = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_crypto_mac_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-crypto-mac-app");
+        create_project(&project, Some("stdlib-crypto-mac-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-crypto-mac-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/crypto_mac.ax\"\nprint hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\")\nprint constant_time_eq(hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\"), \"f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\")\nprint constant_time_eq(hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nprint constant_time_eq(\"short\", \"shorter\")\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\ntrue\nfalse\nfalse\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\ntrue\nfalse\nfalse\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_crypto_mac_without_crypto_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-crypto-mac-denied");
+        create_project(&project, Some("stdlib-crypto-mac-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-crypto-mac-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/crypto_mac.ax\"\nprint hmac_sha256(\"key\", \"message\")\n",
         )
         .expect("write source");
 
@@ -3948,6 +4044,35 @@ print strlen("hello")
                 "fixture {case}: {:?}",
                 error.message
             );
+        }
+    }
+
+    #[test]
+    fn checked_in_proof_workload_examples_build_run_and_test() {
+        for example in ["proof_cli", "proof_worker", "proof_http_service"] {
+            let project = checked_in_example_fixture(example);
+            check_project(&project).expect("check checked-in proof workload example");
+
+            let built = build_project(&project).expect("build checked-in proof workload example");
+            let output = compiled_binary_command(&built.binary)
+                .output()
+                .expect("run checked-in proof workload example");
+            let expected = fs::read_to_string(project.join("src/main_test.stdout"))
+                .expect("read expected stdout");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "example {example}"
+            );
+
+            let tests =
+                run_project_tests(&project).expect("test checked-in proof workload example");
+            let expected_passed = match example {
+                "proof_cli" => 2,
+                _ => 1,
+            };
+            assert_eq!(tests.passed, expected_passed, "example {example}");
+            assert_eq!(tests.failed, 0, "example {example}");
         }
     }
 
@@ -5999,6 +6124,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(target.clone()),
                 package: None,
                 debug: false,
@@ -6024,6 +6150,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(String::from("wasm32")),
                 package: None,
                 debug: false,
@@ -6057,6 +6184,7 @@ print strlen("hello")
         let debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6093,6 +6221,7 @@ print strlen("hello")
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6228,6 +6357,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
@@ -6241,6 +6371,7 @@ print strlen("hello")
             json_contract::JSON_SCHEMA_VERSION
         );
         assert_eq!(payload["command"], "build");
+        assert_eq!(payload["backend"], "generated-rust");
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
