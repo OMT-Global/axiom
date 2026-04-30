@@ -1,29 +1,24 @@
 import "std/async.ax"
-import "std/json.ax"
-import "state.ax"
+import "std/env.ax"
+import "std/time.ax"
+import "jobs.ax"
 
-async fn process(queue: string, job: string, processed: int): string {
-return "{" + field_string("workload", "proof-worker") + "," + field_string("queue", queue) + "," + field_string("job", job) + "," + field_int("processed", processed) + "}"
+async fn run_once(queue: AsyncChannel<string>): string {
+let next: Option<string> = await recv<string>(queue)
+match next {
+Some(job) {
+return handle(job)
+}
+None {
+return "idle"
+}
+}
 }
 
+let name: string = worker_name(get_env("AXIOM_STAGE1_WORKER"))
 let queue: AsyncChannel<string> = channel<string>()
-let queued: AsyncChannel<string> = await send<string>(queue, "invoice")
-let job: Option<string> = await recv<string>(queued)
-
-match queue_name() {
-Some(queue_name) {
-match job {
-Some(payload) {
-let processed: int = processed_count()
-let handle: JoinHandle<string> = spawn<string>(process(queue_name, payload, processed))
-print await join<string>(handle)
-}
-None {
-print "idle"
-}
-}
-}
-None {
-print "unconfigured"
-}
-}
+let queued: AsyncChannel<string> = await send<string>(queue, "reconcile")
+let task: JoinHandle<string> = spawn<string>(run_once(queued))
+print name
+print await join<string>(task)
+print sleep(duration_ms(0)) == 0
