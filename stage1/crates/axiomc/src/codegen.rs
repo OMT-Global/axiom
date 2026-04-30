@@ -373,6 +373,101 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    }\n");
     out.push_str("    Some(out)\n");
     out.push_str("}\n\n");
+
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_skip_ws(text: &str, mut index: usize) -> usize {\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    while index < bytes.len() && bytes[index].is_ascii_whitespace() {\n");
+    out.push_str("        index += 1;\n");
+    out.push_str("    }\n");
+    out.push_str("    index\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_scan_string_end(text: &str, start: usize) -> Option<usize> {\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    if bytes.get(start).copied()? != b'\\\"' {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut index = start + 1;\n");
+    out.push_str("    while index < bytes.len() {\n");
+    out.push_str("        match bytes[index] {\n");
+    out.push_str("            b'\\\\' => index += 2,\n");
+    out.push_str("            b'\\\"' => return Some(index + 1),\n");
+    out.push_str("            _ => index += 1,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    None\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_scan_value_end(text: &str, start: usize) -> Option<usize> {\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    if start >= bytes.len() {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    if bytes[start] == b'\\\"' {\n");
+    out.push_str("        return axiom_json_scan_string_end(text, start);\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut index = start;\n");
+    out.push_str("    let mut depth = 0i64;\n");
+    out.push_str("    while index < bytes.len() {\n");
+    out.push_str("        match bytes[index] {\n");
+    out.push_str("            b'\\\"' => index = axiom_json_scan_string_end(text, index)?,\n");
+    out.push_str("            b'{' | b'[' => { depth += 1; index += 1; }\n");
+    out.push_str("            b'}' | b']' if depth > 0 => { depth -= 1; index += 1; }\n");
+    out.push_str("            b',' | b'}' if depth == 0 => return Some(index),\n");
+    out.push_str("            _ => index += 1,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    Some(index)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_object_field(text: String, key: String) -> Option<String> {\n");
+    out.push_str("    let text = text.trim();\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    if bytes.first().copied()? != b'{' || bytes.last().copied()? != b'}' {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut index = 1usize;\n");
+    out.push_str("    loop {\n");
+    out.push_str("        index = axiom_json_skip_ws(text, index);\n");
+    out.push_str("        if index >= bytes.len() || bytes[index] == b'}' {\n");
+    out.push_str("            return None;\n");
+    out.push_str("        }\n");
+    out.push_str("        let key_end = axiom_json_scan_string_end(text, index)?;\n");
+    out.push_str(
+        "        let found_key = axiom_json_parse_string(text[index..key_end].to_string())?;\n",
+    );
+    out.push_str("        index = axiom_json_skip_ws(text, key_end);\n");
+    out.push_str("        if bytes.get(index).copied()? != b':' {\n");
+    out.push_str("            return None;\n");
+    out.push_str("        }\n");
+    out.push_str("        let value_start = axiom_json_skip_ws(text, index + 1);\n");
+    out.push_str("        let value_end = axiom_json_scan_value_end(text, value_start)?;\n");
+    out.push_str("        if found_key == key {\n");
+    out.push_str("            return Some(text[value_start..value_end].trim().to_string());\n");
+    out.push_str("        }\n");
+    out.push_str("        index = axiom_json_skip_ws(text, value_end);\n");
+    out.push_str("        match bytes.get(index).copied()? {\n");
+    out.push_str("            b',' => index += 1,\n");
+    out.push_str("            b'}' => return None,\n");
+    out.push_str("            _ => return None,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_field_int(text: String, key: String) -> Option<i64> {\n");
+    out.push_str("    axiom_json_parse_int(axiom_json_object_field(text, key)?)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_field_bool(text: String, key: String) -> Option<bool> {\n");
+    out.push_str("    axiom_json_parse_bool(axiom_json_object_field(text, key)?)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
+        "fn axiom_json_parse_field_string(text: String, key: String) -> Option<String> {\n",
+    );
+    out.push_str("    axiom_json_parse_string(axiom_json_object_field(text, key)?)\n");
+    out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_json_escape_string(value: &str) -> String {\n");
     out.push_str("    let mut out = String::from(\"\\\"\");\n");
@@ -404,6 +499,287 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("fn axiom_json_stringify_string(value: String) -> String {\n");
     out.push_str("    axiom_json_escape_string(&value)\n");
     out.push_str("}\n\n");
+    out.push_str(r#"#[derive(Clone, Debug, PartialEq, Eq)]
+enum AxiomRegexAtom {
+    Literal(char),
+    Any,
+    Class { ranges: Vec<(char, char)>, negated: bool },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AxiomRegexQuantifier {
+    One,
+    ZeroOrOne,
+    ZeroOrMore,
+    OneOrMore,
+}
+
+#[derive(Clone, Debug)]
+struct AxiomRegexToken {
+    atom: AxiomRegexAtom,
+    quantifier: AxiomRegexQuantifier,
+}
+
+#[derive(Clone, Debug)]
+struct AxiomRegexProgram {
+    tokens: Vec<AxiomRegexToken>,
+    start_anchor: bool,
+    end_anchor: bool,
+}
+
+fn axiom_regex_escape_char(ch: char) -> char {
+    match ch {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        other => other,
+    }
+}
+
+fn axiom_regex_parse_atom(chars: &[char], pos: &mut usize) -> Option<AxiomRegexAtom> {
+    if *pos >= chars.len() {
+        return None;
+    }
+    let ch = chars[*pos];
+    *pos += 1;
+    match ch {
+        '.' => Some(AxiomRegexAtom::Any),
+        '\\' => {
+            if *pos >= chars.len() {
+                Some(AxiomRegexAtom::Literal('\\'))
+            } else {
+                let escaped = axiom_regex_escape_char(chars[*pos]);
+                *pos += 1;
+                Some(AxiomRegexAtom::Literal(escaped))
+            }
+        }
+        '[' => {
+            let mut negated = false;
+            if *pos < chars.len() && chars[*pos] == '^' {
+                negated = true;
+                *pos += 1;
+            }
+            let mut ranges = Vec::new();
+            let mut first = true;
+            while *pos < chars.len() {
+                if chars[*pos] == ']' && !first {
+                    *pos += 1;
+                    return Some(AxiomRegexAtom::Class { ranges, negated });
+                }
+                first = false;
+                let start = if chars[*pos] == '\\' {
+                    *pos += 1;
+                    if *pos >= chars.len() { return None; }
+                    let escaped = axiom_regex_escape_char(chars[*pos]);
+                    *pos += 1;
+                    escaped
+                } else {
+                    let value = chars[*pos];
+                    *pos += 1;
+                    value
+                };
+                if *pos + 1 < chars.len() && chars[*pos] == '-' && chars[*pos + 1] != ']' {
+                    *pos += 1;
+                    let end = if chars[*pos] == '\\' {
+                        *pos += 1;
+                        if *pos >= chars.len() { return None; }
+                        let escaped = axiom_regex_escape_char(chars[*pos]);
+                        *pos += 1;
+                        escaped
+                    } else {
+                        let value = chars[*pos];
+                        *pos += 1;
+                        value
+                    };
+                    if start <= end {
+                        ranges.push((start, end));
+                    } else {
+                        ranges.push((end, start));
+                    }
+                } else {
+                    ranges.push((start, start));
+                }
+            }
+            None
+        }
+        '(' | ')' | '|' => None,
+        other => Some(AxiomRegexAtom::Literal(other)),
+    }
+}
+
+fn axiom_regex_parse(pattern: &str) -> Option<AxiomRegexProgram> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut pos = 0usize;
+    let mut start_anchor = false;
+    let mut end_anchor = false;
+    if pos < chars.len() && chars[pos] == '^' {
+        start_anchor = true;
+        pos += 1;
+    }
+    let mut parse_end = chars.len();
+    if parse_end > pos && chars[parse_end - 1] == '$' {
+        let escaped = parse_end >= 2 && chars[parse_end - 2] == '\\';
+        if !escaped {
+            end_anchor = true;
+            parse_end -= 1;
+        }
+    }
+    let mut tokens = Vec::new();
+    while pos < parse_end {
+        let mut atom_pos = pos;
+        let atom = axiom_regex_parse_atom(&chars[..parse_end], &mut atom_pos)?;
+        pos = atom_pos;
+        let quantifier = if pos < parse_end {
+            match chars[pos] {
+                '?' => { pos += 1; AxiomRegexQuantifier::ZeroOrOne }
+                '*' => { pos += 1; AxiomRegexQuantifier::ZeroOrMore }
+                '+' => { pos += 1; AxiomRegexQuantifier::OneOrMore }
+                _ => AxiomRegexQuantifier::One,
+            }
+        } else {
+            AxiomRegexQuantifier::One
+        };
+        tokens.push(AxiomRegexToken { atom, quantifier });
+    }
+    Some(AxiomRegexProgram { tokens, start_anchor, end_anchor })
+}
+
+fn axiom_regex_atom_matches(atom: &AxiomRegexAtom, ch: char) -> bool {
+    match atom {
+        AxiomRegexAtom::Literal(expected) => *expected == ch,
+        AxiomRegexAtom::Any => true,
+        AxiomRegexAtom::Class { ranges, negated } => {
+            let found = ranges.iter().any(|(start, end)| *start <= ch && ch <= *end);
+            if *negated { !found } else { found }
+        }
+    }
+}
+
+fn axiom_regex_add_state(program: &AxiomRegexProgram, states: &mut Vec<usize>, state: usize) {
+    if states.contains(&state) {
+        return;
+    }
+    states.push(state);
+    if state >= program.tokens.len() {
+        return;
+    }
+    match program.tokens[state].quantifier {
+        AxiomRegexQuantifier::ZeroOrOne | AxiomRegexQuantifier::ZeroOrMore => {
+            axiom_regex_add_state(program, states, state + 1);
+        }
+        AxiomRegexQuantifier::One | AxiomRegexQuantifier::OneOrMore => {}
+    }
+}
+
+fn axiom_regex_accepts(program: &AxiomRegexProgram, states: &[usize], at_text_end: bool) -> bool {
+    states.iter().any(|state| {
+        *state == program.tokens.len() && (!program.end_anchor || at_text_end)
+    })
+}
+
+fn axiom_regex_match_from(program: &AxiomRegexProgram, text: &[char], start: usize) -> Option<usize> {
+    let mut states = Vec::new();
+    axiom_regex_add_state(program, &mut states, 0);
+    let mut last_accept = if axiom_regex_accepts(program, &states, start == text.len()) {
+        Some(start)
+    } else {
+        None
+    };
+    let mut pos = start;
+    while pos < text.len() {
+        let ch = text[pos];
+        let mut next = Vec::new();
+        for state in states.iter().copied() {
+            if state >= program.tokens.len() {
+                continue;
+            }
+            let token = &program.tokens[state];
+            if !axiom_regex_atom_matches(&token.atom, ch) {
+                continue;
+            }
+            match token.quantifier {
+                AxiomRegexQuantifier::One | AxiomRegexQuantifier::ZeroOrOne => {
+                    axiom_regex_add_state(program, &mut next, state + 1);
+                }
+                AxiomRegexQuantifier::ZeroOrMore => {
+                    axiom_regex_add_state(program, &mut next, state);
+                    axiom_regex_add_state(program, &mut next, state + 1);
+                }
+                AxiomRegexQuantifier::OneOrMore => {
+                    axiom_regex_add_state(program, &mut next, state);
+                    axiom_regex_add_state(program, &mut next, state + 1);
+                }
+            }
+        }
+        pos += 1;
+        if axiom_regex_accepts(program, &next, pos == text.len()) {
+            last_accept = Some(pos);
+        }
+        states = next;
+        if states.is_empty() {
+            return last_accept;
+        }
+    }
+    last_accept
+}
+
+fn axiom_regex_find_span(pattern: &str, text: &str) -> Option<(usize, usize)> {
+    let program = axiom_regex_parse(pattern)?;
+    let chars: Vec<char> = text.chars().collect();
+    let byte_offsets: Vec<usize> = text.char_indices().map(|(idx, _)| idx).chain(std::iter::once(text.len())).collect();
+    let starts: Box<dyn Iterator<Item = usize>> = if program.start_anchor {
+        Box::new(std::iter::once(0))
+    } else {
+        Box::new(0..=chars.len())
+    };
+    for start in starts {
+        if let Some(end) = axiom_regex_match_from(&program, &chars, start) {
+            return Some((byte_offsets[start], byte_offsets[end]));
+        }
+    }
+    None
+}
+
+#[allow(dead_code)]
+fn axiom_regex_is_match(pattern: String, text: String) -> bool {
+    axiom_regex_find_span(&pattern, &text).is_some()
+}
+
+#[allow(dead_code)]
+fn axiom_regex_find(pattern: String, text: String) -> Option<String> {
+    let (start, end) = axiom_regex_find_span(&pattern, &text)?;
+    Some(text[start..end].to_string())
+}
+
+#[allow(dead_code)]
+fn axiom_regex_replace_all(pattern: String, text: String, replacement: String) -> String {
+    if axiom_regex_parse(&pattern).is_none() {
+        return text;
+    }
+    let mut remaining = text.as_str();
+    let mut out = String::new();
+    loop {
+        let Some((start, end)) = axiom_regex_find_span(&pattern, remaining) else {
+            out.push_str(remaining);
+            break;
+        };
+        out.push_str(&remaining[..start]);
+        out.push_str(&replacement);
+        if end == 0 {
+            if let Some(ch) = remaining.chars().next() {
+                out.push(ch);
+                remaining = &remaining[ch.len_utf8()..];
+            } else {
+                break;
+            }
+        } else {
+            remaining = &remaining[end..];
+        }
+    }
+    out
+}
+
+"#);
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
@@ -2330,6 +2706,27 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Call { name, args, .. } if name == "json_parse_string" => {
             format!("axiom_json_parse_string({})", render_expr(&args[0]))
         }
+        Expr::Call { name, args, .. } if name == "json_parse_field_int" => {
+            format!(
+                "axiom_json_parse_field_int({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_field_bool" => {
+            format!(
+                "axiom_json_parse_field_bool({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_field_string" => {
+            format!(
+                "axiom_json_parse_field_string({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
         Expr::Call { name, args, .. } if name == "json_stringify_int" => {
             format!("axiom_json_stringify_int({})", render_expr(&args[0]))
         }
@@ -2338,6 +2735,28 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "json_stringify_string" => {
             format!("axiom_json_stringify_string({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "regex_is_match" => {
+            format!(
+                "axiom_regex_is_match({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "regex_find" => {
+            format!(
+                "axiom_regex_find({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "regex_replace_all" => {
+            format!(
+                "axiom_regex_replace_all({}, {}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2])
+            )
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))

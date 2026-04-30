@@ -4462,6 +4462,47 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if matches!(
+                name.as_str(),
+                "json_parse_field_int" | "json_parse_field_bool" | "json_parse_field_string"
+            ) {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let text = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if text.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string JSON argument, got {}", text.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let key = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if key.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string key argument, got {}", key.ty()),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&text, env)?;
+                move_lowered_value(&key, env)?;
+                let ty = match name.as_str() {
+                    "json_parse_field_int" => Type::Option(Box::new(Type::Int)),
+                    "json_parse_field_bool" => Type::Option(Box::new(Type::Bool)),
+                    "json_parse_field_string" => Type::Option(Box::new(Type::String)),
+                    _ => unreachable!(),
+                };
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![text, key],
+                    ty,
+                });
+            }
             if name == "json_stringify_int" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
@@ -4541,6 +4582,48 @@ fn lower_expr_with_expected(
                     name: name.clone(),
                     args: vec![lowered],
                     ty: Type::String,
+                });
+            }
+            if name == "regex_is_match" || name == "regex_find" || name == "regex_replace_all" {
+                let expected_len = if name == "regex_replace_all" { 3 } else { 2 };
+                if args.len() != expected_len {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects {expected_len} arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let mut lowered_args = Vec::new();
+                for (idx, arg) in args.iter().enumerate() {
+                    let lowered = lower_expr_with_expected(arg, Some(&Type::String), env, ctx)?;
+                    if lowered.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "{name} expects argument {} type string, got {}",
+                                idx + 1,
+                                lowered.ty()
+                            ),
+                        )
+                        .with_span(arg.line(), arg.column()));
+                    }
+                    move_lowered_value(&lowered, env)?;
+                    lowered_args.push(lowered);
+                }
+                let ty = if name == "regex_is_match" {
+                    Type::Bool
+                } else if name == "regex_find" {
+                    Type::Option(Box::new(Type::String))
+                } else {
+                    Type::String
+                };
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
+                    ty,
                 });
             }
             if name == "fs_read" {

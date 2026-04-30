@@ -3235,12 +3235,74 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nprint object3(field_string(\"name\", \"agent\"), field_int(\"retries\", 3), field_bool(\"ready\", true))\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        let source = r#"import "std/json.ax"
+
+match parse_int("42") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+match parse_string("\"agent\"") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+print stringify_bool(true)
+print stringify_int(7)
+print stringify_string("agent")
+print object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+
+let payload_name: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_string(payload_name, "name") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+let payload_retries: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_int(payload_retries, "retries") {
+Some(value) {
+print value
+}
+None {
+print 0
+}
+}
+let payload_ready: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_bool(payload_ready, "ready") {
+Some(value) {
+print value
+}
+None {
+print false
+}
+}
+print schema_object3(schema_field_string("name"), schema_field_int("retries"), schema_field_bool("ready"))
+
+match parse_bool("123") {
+Some(_value) {
+print "bad"
+}
+None {
+print "none"
+}
+}
+"#;
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n",
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nagent\n3\ntrue\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"retries\":{\"type\":\"integer\"},\"ready\":{\"type\":\"boolean\"}}}\nnone\n",
         )
         .expect("write golden");
 
@@ -3250,7 +3312,84 @@ print strlen("hello")
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n"
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nagent\n3\ntrue\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"retries\":{\"type\":\"integer\"},\"ready\":{\"type\":\"boolean\"}}}\nnone\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_regex_module() {
+        // `std/regex.ax` stays ungated in stage1: matching runs inside the
+        // deterministic generated runtime and does not cross a host capability
+        // boundary. The engine uses NFA-state simulation rather than
+        // backtracking so agent-provided patterns stay DoS-safe.
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-regex-app");
+        create_project(&project, Some("stdlib-regex-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-regex-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/regex.ax\"
+print is_match(\"^h.llo$\", \"hello\")
+print is_match(\"^[a-z]+$\", \"agent\")
+print is_match(\"^[^0-9]+$\", \"agent7\")
+match find(\"[0-9]+\", \"issue-238-ready\") {
+Some(value) {
+print value
+}
+None {
+print \"none\"
+}
+}
+print replace_all(\"[0-9]+\", \"issue-238-ready\", \"#\")
+print is_match(\"a*a\", \"aaaaaaaaaaaaaaaa\")
+";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true
+true
+false
+238
+issue-#-ready
+true
+",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true
+true
+false
+238
+issue-#-ready
+true
+"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3537,6 +3676,46 @@ print strlen("hello")
         .expect("write source");
 
         let err = check_project(&project).expect_err("expected json type error");
+        assert!(
+            err.message
+                .contains("expects argument type string, got bool"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_regex_with_wrong_argument_type() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-regex-bad-arg");
+        create_project(&project, Some("stdlib-regex-bad-arg")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-regex-bad-arg",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/regex.ax\"
+print is_match(\"[a-z]+\", true)
+",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected regex type error");
         assert!(
             err.message
                 .contains("expects argument type string, got bool"),
