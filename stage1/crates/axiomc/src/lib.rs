@@ -4429,16 +4429,6 @@ print is_match(\"[a-z]+\", true)
 
     #[test]
     fn checked_in_proof_workload_examples_build_run_and_test() {
-        std::thread::Builder::new()
-            .name(String::from("proof-workload-examples"))
-            .stack_size(8 * 1024 * 1024)
-            .spawn(checked_in_proof_workload_examples_build_run_and_test_inner)
-            .expect("spawn proof workload test")
-            .join()
-            .expect("proof workload test should not panic");
-    }
-
-    fn checked_in_proof_workload_examples_build_run_and_test_inner() {
         for example in ["proof_cli", "proof_worker", "proof_http_service"] {
             let project = checked_in_example_fixture(example);
             check_project(&project).expect("check checked-in proof workload example");
