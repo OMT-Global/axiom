@@ -9,7 +9,16 @@ import sys
 from pathlib import Path
 
 
-BOOL_KEYS = {"fs", "net", "process", "env_unrestricted", "clock", "crypto", "ffi"}
+BOOL_KEYS = {
+    "fs",
+    "fs:write",
+    "net",
+    "process",
+    "env_unrestricted",
+    "clock",
+    "crypto",
+    "ffi",
+}
 KNOWN_KEYS = BOOL_KEYS | {"fs_root", "env"}
 
 
@@ -62,7 +71,7 @@ def read_capabilities_table(path: Path) -> dict[str, object] | None:
         if "=" not in line:
             raise ValueError(f"{line_number}: expected key = value")
         key, raw_value = line.split("=", 1)
-        key = key.strip()
+        key = parse_key(key.strip(), line_number)
         if key in values:
             raise ValueError(f"{line_number}: duplicate [capabilities] key {key!r}")
         values[key] = parse_value(raw_value.strip(), line_number)
@@ -95,6 +104,18 @@ def parse_value(raw_value: str, line_number: int) -> object:
         except (SyntaxError, ValueError) as exc:
             raise ValueError(f"{line_number}: invalid capability value {raw_value!r}: {exc}") from exc
     raise ValueError(f"{line_number}: unsupported capability value {raw_value!r}")
+
+
+def parse_key(raw_key: str, line_number: int) -> str:
+    if raw_key.startswith('"'):
+        try:
+            key = ast.literal_eval(raw_key)
+        except (SyntaxError, ValueError) as exc:
+            raise ValueError(f"{line_number}: invalid capability key {raw_key!r}: {exc}") from exc
+        if not isinstance(key, str):
+            raise ValueError(f"{line_number}: capability key must be a string")
+        return key
+    return raw_key
 
 
 def validate_fs_root(path: Path, value: object, errors: list[str]) -> None:
