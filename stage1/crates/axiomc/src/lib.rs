@@ -2091,10 +2091,10 @@ print fail()
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-        assert_eq!(caps.len(), 7);
+        assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
-        assert_eq!(project_caps.len(), 7);
+        assert_eq!(project_caps.len(), caps.len());
     }
 
     #[test]
@@ -2118,10 +2118,15 @@ print fail()
         assert!(!env.unsafe_unrestricted);
 
         let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][3]["name"], "env");
-        assert_eq!(payload["capabilities"][3]["allowed"][0], "FOO");
-        assert_eq!(payload["capabilities"][3]["allowed"][1], "LOG_LEVEL");
-        assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
+        let payload_env = payload["capabilities"]
+            .as_array()
+            .expect("capability payload array")
+            .iter()
+            .find(|cap| cap["name"] == "env")
+            .expect("env capability payload");
+        assert_eq!(payload_env["allowed"][0], "FOO");
+        assert_eq!(payload_env["allowed"][1], "LOG_LEVEL");
+        assert!(payload_env["unsafe_unrestricted"].is_null());
     }
 
     #[test]
