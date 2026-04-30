@@ -370,7 +370,7 @@ pub fn lower_with_capabilities(
     let reachable_functions = reachable_function_names(&program);
     let mut lowered_functions = Vec::new();
     for function in &program.functions {
-        if !reachable_functions.contains(&function.name) {
+        if function.name.starts_with("std_fs_") && !reachable_functions.contains(&function.name) {
             continue;
         }
         lowered_functions.push(lower_function(
