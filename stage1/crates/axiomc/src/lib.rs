@@ -3185,6 +3185,83 @@ print strlen("hello")
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_regex_module() {
+        // `std/regex.ax` stays ungated in stage1: matching runs inside the
+        // deterministic generated runtime and does not cross a host capability
+        // boundary. The engine uses NFA-state simulation rather than
+        // backtracking so agent-provided patterns stay DoS-safe.
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-regex-app");
+        create_project(&project, Some("stdlib-regex-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-regex-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/regex.ax\"
+print is_match(\"^h.llo$\", \"hello\")
+print is_match(\"^[a-z]+$\", \"agent\")
+print is_match(\"^[^0-9]+$\", \"agent7\")
+match find(\"[0-9]+\", \"issue-238-ready\") {
+Some(value) {
+print value
+}
+None {
+print \"none\"
+}
+}
+print replace_all(\"[0-9]+\", \"issue-238-ready\", \"#\")
+print is_match(\"a*a\", \"aaaaaaaaaaaaaaaa\")
+";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true
+true
+false
+238
+issue-#-ready
+true
+",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true
+true
+false
+238
+issue-#-ready
+true
+"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
     fn stage1_project_imports_synthetic_stdlib_collections_module() {
         // `std/collections.ax` is ungated: it is implemented entirely in Axiom
         // on top of AG2 generic functions and existing collection primitives.
@@ -3463,6 +3540,46 @@ print strlen("hello")
         .expect("write source");
 
         let err = check_project(&project).expect_err("expected json type error");
+        assert!(
+            err.message
+                .contains("expects argument type string, got bool"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_regex_with_wrong_argument_type() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-regex-bad-arg");
+        create_project(&project, Some("stdlib-regex-bad-arg")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-regex-bad-arg",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/regex.ax\"
+print is_match(\"[a-z]+\", true)
+",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected regex type error");
         assert!(
             err.message
                 .contains("expects argument type string, got bool"),
