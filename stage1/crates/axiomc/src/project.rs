@@ -5,9 +5,9 @@ use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
-    BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
-    binary_path_for_target, capability_descriptors, entry_path, generated_rust_path, load_manifest,
-    manifest_path, out_dir_path,
+    BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, ExpectedDiagnostic,
+    Manifest, PackageSection, binary_path_for_target, capability_descriptors, entry_path,
+    generated_rust_path, load_manifest, manifest_path, out_dir_path,
 };
 use crate::mir;
 use crate::stdlib;
@@ -96,20 +96,12 @@ pub struct TestCaseResult {
     pub stdout: String,
     pub stderr: String,
     pub expected_stdout: Option<String>,
+    pub required_capabilities: Vec<CapabilityKind>,
+    pub selected_package: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_error: Option<ExpectedDiagnostic>,
     pub duration_ms: u64,
     pub error: Option<Diagnostic>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExpectedDiagnostic {
-    pub kind: String,
-    pub code: Option<String>,
-    pub message: String,
-    pub path: String,
-    pub line: usize,
-    pub column: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -487,6 +479,9 @@ fn collect_discovered_tests(
             name: relative.with_extension("").display().to_string(),
             entry: relative.display().to_string(),
             stdout,
+            expected_error: None,
+            capabilities: Vec::new(),
+            package: None,
         });
     }
     Ok(())
@@ -1190,6 +1185,17 @@ fn run_test_case(
 ) -> TestCaseResult {
     let started = Instant::now();
     let entry_path = project_root.join(&test.entry);
+    if let Some(expected) = &test.expected_error {
+        return run_manifest_compile_fail_case(
+            project_root,
+            graph,
+            manifest,
+            test,
+            &entry_path,
+            expected,
+            started,
+        );
+    }
     let generated_rust = match test_generated_rust_path(project_root, manifest, &test.name) {
         Ok(path) => path,
         Err(error) => {
@@ -1235,6 +1241,8 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
+            required_capabilities: test.capabilities.clone(),
+            selected_package: test.package.clone(),
             expected_error: None,
             duration_ms: started.elapsed().as_millis() as u64,
             error: Some(error),
@@ -1300,6 +1308,8 @@ fn run_test_case(
                 stdout,
                 stderr,
                 expected_stdout: test.stdout.clone(),
+                required_capabilities: test.capabilities.clone(),
+                selected_package: test.package.clone(),
                 expected_error: None,
                 duration_ms: started.elapsed().as_millis() as u64,
                 error,
@@ -1316,6 +1326,8 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
+            required_capabilities: test.capabilities.clone(),
+            selected_package: test.package.clone(),
             expected_error: None,
             duration_ms: started.elapsed().as_millis() as u64,
             error: Some(
@@ -1326,6 +1338,70 @@ fn run_test_case(
                 .with_path(entry_path.display().to_string()),
             ),
         },
+    }
+}
+
+fn run_manifest_compile_fail_case(
+    project_root: &Path,
+    graph: &PackageGraph,
+    manifest: &Manifest,
+    test: &crate::manifest::TestTarget,
+    entry_path: &Path,
+    expected: &ExpectedDiagnostic,
+    started: Instant,
+) -> TestCaseResult {
+    let actual = match analyze_entry(
+        graph,
+        project_root,
+        manifest.clone(),
+        entry_path.to_path_buf(),
+    ) {
+        Ok(_) => {
+            return TestCaseResult {
+                package_root: project_root.display().to_string(),
+                name: test.name.clone(),
+                entry: test.entry.clone(),
+                ok: false,
+                binary: None,
+                generated_rust: None,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                expected_stdout: test.stdout.clone(),
+                required_capabilities: test.capabilities.clone(),
+                selected_package: test.package.clone(),
+                expected_error: Some(expected.clone()),
+                duration_ms: started.elapsed().as_millis() as u64,
+                error: Some(
+                    Diagnostic::new(
+                        "test",
+                        format!("compile-fail fixture {:?} checked successfully", test.name),
+                    )
+                    .with_path(entry_path.display().to_string()),
+                ),
+            };
+        }
+        Err(error) => diagnostic_with_default_path(error, entry_path),
+    };
+    let mismatch = expected_error_mismatch(project_root, expected, &actual);
+    TestCaseResult {
+        package_root: project_root.display().to_string(),
+        name: test.name.clone(),
+        entry: test.entry.clone(),
+        ok: mismatch.is_none(),
+        binary: None,
+        generated_rust: None,
+        exit_code: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        expected_stdout: test.stdout.clone(),
+        required_capabilities: test.capabilities.clone(),
+        selected_package: test.package.clone(),
+        expected_error: Some(expected.clone()),
+        duration_ms: started.elapsed().as_millis() as u64,
+        error: mismatch.map(|message| {
+            Diagnostic::new("test", message).with_path(entry_path.display().to_string())
+        }),
     }
 }
 
@@ -1350,6 +1426,8 @@ fn run_compile_fail_case(
                 stdout: String::new(),
                 stderr: String::new(),
                 expected_stdout: None,
+                required_capabilities: Vec::new(),
+                selected_package: None,
                 expected_error: None,
                 duration_ms: started.elapsed().as_millis() as u64,
                 error: Some(error),
@@ -1370,6 +1448,8 @@ fn run_compile_fail_case(
                 stdout: String::new(),
                 stderr: String::new(),
                 expected_stdout: None,
+                required_capabilities: Vec::new(),
+                selected_package: None,
                 expected_error: Some(expected),
                 duration_ms: started.elapsed().as_millis() as u64,
                 error: Some(
@@ -1395,6 +1475,8 @@ fn run_compile_fail_case(
         stdout: String::new(),
         stderr: String::new(),
         expected_stdout: None,
+        required_capabilities: Vec::new(),
+        selected_package: None,
         expected_error: Some(expected),
         duration_ms: started.elapsed().as_millis() as u64,
         error: mismatch.map(|message| {
@@ -1529,6 +1611,8 @@ fn failed_test_case_result(
         stdout: String::new(),
         stderr: String::new(),
         expected_stdout: test.stdout.clone(),
+        required_capabilities: test.capabilities.clone(),
+        selected_package: test.package.clone(),
         expected_error: None,
         duration_ms: started.elapsed().as_millis() as u64,
         error: Some(error),
