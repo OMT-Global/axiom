@@ -4945,6 +4945,99 @@ fn lower_expr_with_expected(
                     ty: Type::String,
                 });
             }
+            if name == "crypto_hmac_sha256" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Crypto,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("crypto_hmac_sha256 expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let key = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if key.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_hmac_sha256 expects a string key, got {}",
+                            key.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&key, env)?;
+                let message = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if message.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_hmac_sha256 expects a string message, got {}",
+                            message.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&message, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![key, message],
+                    ty: Type::String,
+                });
+            }
+            if name == "crypto_constant_time_eq" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Crypto,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_constant_time_eq expects 2 arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let left = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if left.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_constant_time_eq expects a string left argument, got {}",
+                            left.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&left, env)?;
+                let right = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if right.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_constant_time_eq expects a string right argument, got {}",
+                            right.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&right, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![left, right],
+                    ty: Type::Bool,
+                });
+            }
             if name == "first" || name == "last" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
