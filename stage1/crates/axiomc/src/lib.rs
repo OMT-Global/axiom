@@ -375,6 +375,24 @@ print answer
     }
 
     #[test]
+    fn parser_does_not_substitute_macro_parameters_inside_template_strings() {
+        let source = r#"macro_rules! label {
+($value:expr) => {
+print "$value"
+}
+}
+
+label!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("$value"));
+        assert!(!rendered.contains("41"));
+    }
+
+    #[test]
     fn parser_bounds_recursive_declarative_macro_expansion() {
         let source = r#"macro_rules! spin {
 () => {

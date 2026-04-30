@@ -859,10 +859,37 @@ fn is_identifier_char(ch: char) -> bool {
 fn render_macro_expansion(template: &str, params: &[String], args: &[&str]) -> String {
     let mut output = String::new();
     let mut chars = template.char_indices().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
     while let Some((index, ch)) = chars.next() {
-        if ch != '$' {
+        if in_string {
             output.push(ch);
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
             continue;
+        }
+        match ch {
+            '"' => {
+                in_string = true;
+                output.push(ch);
+                continue;
+            }
+            '#' => {
+                output.push_str(&template[index..]);
+                break;
+            }
+            '$' => {}
+            _ => {
+                output.push(ch);
+                continue;
+            }
         }
         let name_start = index + ch.len_utf8();
         let Some((_, first)) = chars.peek().copied() else {
