@@ -1,4 +1,4 @@
-.PHONY: test smoke docs-python-exit docs-python-exit-test stage1-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
+.PHONY: test smoke docs-python-exit docs-python-exit-test stage1-test stage1-conformance stage1-smoke stage1-bench stage1-bench-gate stage1-run
 
 test: docs-python-exit stage1-test
 
@@ -19,6 +19,9 @@ stage1-conformance:
 
 stage1-bench-gate:
 	python3 scripts/ci/check-stage1-benchmarks.py
+
+stage1-bench:
+	python3 scripts/ci/run-stage1-bench-harness.py --output .axiom-build/reports/stage1-bench.json
 
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
