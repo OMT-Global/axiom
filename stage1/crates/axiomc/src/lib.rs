@@ -2142,15 +2142,24 @@ print fail()
             .expect("canonical fs root")
             .to_string_lossy()
             .into_owned();
+        let canonical_project = fs::canonicalize(&project)
+            .expect("canonical package root")
+            .to_string_lossy()
+            .into_owned();
         assert_eq!(
             fs_capability.effective_root.as_deref(),
             Some(canonical_data.as_str())
+        );
+        assert_eq!(
+            fs_capability.package_root.as_deref(),
+            Some(canonical_project.as_str())
         );
 
         let payload = json_contract::caps_success(&project, &caps);
         assert_eq!(payload["capabilities"][0]["name"], "fs");
         assert_eq!(payload["capabilities"][0]["configured_root"], "data");
         assert_eq!(payload["capabilities"][0]["effective_root"], canonical_data);
+        assert_eq!(payload["capabilities"][0]["package_root"], canonical_project);
     }
 
     #[test]
@@ -2517,6 +2526,32 @@ print strlen("hello")
             "inside ok\nabsolute denied\ntraversal denied\nsymlink denied\nlarge denied\n",
         )
         .expect("write golden");
+        let caps = project_capabilities(&project).expect("project capabilities");
+        let fs_capability = caps
+            .iter()
+            .find(|cap| cap.name == "fs")
+            .expect("fs capability");
+        let canonical_data = fs::canonicalize(&data)
+            .expect("canonical fs root")
+            .to_string_lossy()
+            .into_owned();
+        let canonical_project = fs::canonicalize(&project)
+            .expect("canonical package root")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(fs_capability.configured_root.as_deref(), Some("data"));
+        assert_eq!(
+            fs_capability.effective_root.as_deref(),
+            Some(canonical_data.as_str())
+        );
+        assert_eq!(
+            fs_capability.package_root.as_deref(),
+            Some(canonical_project.as_str())
+        );
+        assert!(
+            canonical_data.starts_with(&canonical_project),
+            "reported fs root must stay within reported package root"
+        );
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)

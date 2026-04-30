@@ -93,6 +93,8 @@ pub struct CapabilityDescriptor {
     pub configured_root: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_root: Option<String>,
     #[serde(skip_serializing_if = "is_false")]
     pub unsafe_unrestricted: bool,
 }
@@ -242,6 +244,7 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             },
             configured_root: None,
             effective_root: None,
+            package_root: None,
             unsafe_unrestricted: *kind == CapabilityKind::Env && config.env_unrestricted,
         })
         .collect()

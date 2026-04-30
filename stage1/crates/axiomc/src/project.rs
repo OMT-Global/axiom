@@ -503,6 +503,13 @@ pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescrip
             .fs_root
             .clone()
             .unwrap_or_else(|| String::from("."));
+        let package_root = fs::canonicalize(project_root).map_err(|err| {
+            Diagnostic::new(
+                "manifest",
+                format!("failed to canonicalize package root: {err}"),
+            )
+            .with_path(project_root.display().to_string())
+        })?;
         let effective_root = fs_root_path_for_package(project_root, &manifest)?;
         if let Some(fs) = capabilities
             .iter_mut()
@@ -510,6 +517,7 @@ pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescrip
         {
             fs.configured_root = Some(configured_root);
             fs.effective_root = Some(effective_root.display().to_string());
+            fs.package_root = Some(package_root.display().to_string());
         }
     }
     Ok(capabilities)
