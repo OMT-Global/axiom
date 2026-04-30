@@ -1623,17 +1623,18 @@ fn axiom_http_response_with_status(status: &str, body: &str) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-fn axiom_http_loopback_bind_addr(bind: &str) -> Option<std::net::SocketAddr> {
-    let addr: std::net::SocketAddr = bind.parse().ok()?;
-    if !addr.ip().is_loopback() {
-        return None;
-    }
-    Some(addr)
+fn axiom_http_response(body: &str) -> Vec<u8> {
+    axiom_http_response_with_status("200 OK", body)
 }
 
 #[allow(dead_code)]
-fn axiom_http_response(body: &str) -> Vec<u8> {
-    axiom_http_response_with_status("200 OK", body)
+fn axiom_http_loopback_bind_addr(bind: &str) -> Option<std::net::SocketAddr> {
+    use std::net::ToSocketAddrs;
+    let addrs: Vec<std::net::SocketAddr> = bind.to_socket_addrs().ok()?.collect();
+    if addrs.is_empty() || addrs.iter().any(|addr| !addr.ip().is_loopback()) {
+        return None;
+    }
+    addrs.into_iter().next()
 }
 
 #[allow(dead_code)]
@@ -1646,12 +1647,9 @@ fn axiom_http_serve_route(bind: String, route_path: String, body: String, max_re
         axiom_runtime_report("net", "http server max_requests must be between 1 and 1024");
         return false;
     }
-    let addr = match axiom_http_loopback_bind_addr(bind.as_str()) {
-        Some(addr) => addr,
-        None => {
-            axiom_runtime_report("net", "http server bind address must be loopback");
-            return false;
-        }
+    let Some(addr) = axiom_http_loopback_bind_addr(bind.as_str()) else {
+        axiom_runtime_report("net", "http server bind address must resolve only to loopback");
+        return false;
     };
     let listener = match TcpListener::bind(addr) {
         Ok(listener) => listener,
@@ -1696,7 +1694,6 @@ fn axiom_http_serve_route(bind: String, route_path: String, body: String, max_re
     }
     ok
 }
-}
 
 #[allow(dead_code)]
 fn axiom_http_serve_once(bind: String, body: String) -> bool {
@@ -1704,12 +1701,9 @@ fn axiom_http_serve_once(bind: String, body: String) -> bool {
     use std::net::TcpListener;
     use std::time::Duration;
 
-    let addr = match axiom_http_loopback_bind_addr(bind.as_str()) {
-        Some(addr) => addr,
-        None => {
-            axiom_runtime_report("net", "http server bind address must be loopback");
-            return false;
-        }
+    let Some(addr) = axiom_http_loopback_bind_addr(bind.as_str()) else {
+        axiom_runtime_report("net", "http server bind address must resolve only to loopback");
+        return false;
     };
     let listener = match TcpListener::bind(addr) {
         Ok(listener) => listener,

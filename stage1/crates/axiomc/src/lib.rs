@@ -979,6 +979,30 @@ print fail()
     }
 
     #[test]
+    fn render_rust_restricts_http_server_binds_to_loopback() {
+        let source = "print http_serve_once(\"127.0.0.1:0\", \"ok\")\nprint http_serve_route(\"127.0.0.1:0\", \"/\", \"ok\", 1)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower_with_capabilities(
+            &parsed,
+            &CapabilityConfig {
+                net: true,
+                ..CapabilityConfig::default()
+            },
+        )
+        .expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn axiom_http_loopback_bind_addr("));
+        assert!(rendered.contains("addr.ip().is_loopback()"));
+        assert_eq!(
+            rendered
+                .matches("axiom_http_loopback_bind_addr(bind.as_str())")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
     fn render_rust_keeps_http_response_size_guards() {
         let source = "match http_get(\"http://example.com/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -4362,12 +4386,12 @@ print serve_once("127.0.0.1:{port}", "hello from axiom")
         assert_eq!(String::from_utf8_lossy(&output.stderr), "");
     }
 
-
     #[test]
     fn stage1_stdlib_http_service_rejects_non_loopback_bind() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-http-service-non-loopback-denied");
-        create_project(&project, Some("stdlib-http-service-non-loopback-denied")).expect("create project");
+        create_project(&project, Some("stdlib-http-service-non-loopback-denied"))
+            .expect("create project");
         fs::write(
             project.join("axiom.toml"),
             render_manifest_with_capabilities(
@@ -4399,23 +4423,30 @@ print serve_once("0.0.0.0:18080", "hello")
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert!(output.status.success(), "service process failed: {output:?}");
+        assert!(
+            output.status.success(),
+            "service process failed: {output:?}"
+        );
         assert_eq!(String::from_utf8_lossy(&output.stdout), "false\n");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("http server bind address must be loopback"),
+                .contains("http server bind address must resolve only to loopback"),
             "unexpected stderr: {:?}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
 
-
     #[test]
     fn stage1_stdlib_http_routed_service_rejects_non_loopback_bind() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stdlib-http-routed-service-non-loopback-denied");
-        create_project(&project, Some("stdlib-http-routed-service-non-loopback-denied"))
-            .expect("create project");
+        let project = dir
+            .path()
+            .join("stdlib-http-routed-service-non-loopback-denied");
+        create_project(
+            &project,
+            Some("stdlib-http-routed-service-non-loopback-denied"),
+        )
+        .expect("create project");
         fs::write(
             project.join("axiom.toml"),
             render_manifest_with_capabilities(
@@ -4448,11 +4479,14 @@ print serve("0.0.0.0:18080", selected_route, 1)
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert!(output.status.success(), "service process failed: {output:?}");
+        assert!(
+            output.status.success(),
+            "service process failed: {output:?}"
+        );
         assert_eq!(String::from_utf8_lossy(&output.stdout), "false\n");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("http server bind address must be loopback"),
+                .contains("http server bind address must resolve only to loopback"),
             "unexpected stderr: {:?}",
             String::from_utf8_lossy(&output.stderr)
         );

@@ -39,8 +39,9 @@
 //!   shares the `net` capability surface because any code that can open a raw
 //!   TCP socket could implement HTTP itself, so a separate `http` manifest flag
 //!   would not add meaningful isolation in stage1. The stage1 client supports
-//!   both http:// and https:// URLs; the server helpers are loopback-only,
-//!   blocking HTTP/1.0 primitives.
+//!   both http:// and https:// URLs; the server helpers bind loopback-only
+//!   sockets and serve blocking HTTP/1.0 responses.
+
 //!
 //! The eighth through fourteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:

@@ -282,8 +282,10 @@ Work packages:
     `get(url: string): Option<string>` and the intermediate loopback-only
     `serve_once(bind: string, body: string): bool` smoke primitive plus
     `route(path: string, body: string): HttpRoute` and
+
+    `route(path: string, body: string): HttpRoute` and
     `serve(bind: string, selected_route: HttpRoute, max_requests: int): bool`
-    on top of the `http_get`, `http_serve_once`, and `http_serve_route`
+    on top of the `http_get`, `http_serve_once`, and loopback-only `http_serve_route`
     intrinsics. The client path implements a blocking
 
     HTTP/1.0 fetch for `http://` and `https://` URLs in the generated Rust
