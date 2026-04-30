@@ -1,0 +1,3 @@
+pub fn render_command(name: string, code: string): string {
+return "proof-cli " + name + " " + code
+}

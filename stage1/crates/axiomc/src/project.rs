@@ -1,10 +1,12 @@
-use crate::codegen::{compile_native, render_rust_for_package_with_capabilities};
+use crate::codegen::{
+    NativeBackendKind, compile_native, render_rust_for_package_with_capabilities,
+};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
-    binary_path, capability_descriptors, entry_path, generated_rust_path, load_manifest,
+    binary_path_for_target, capability_descriptors, entry_path, generated_rust_path, load_manifest,
     manifest_path, out_dir_path,
 };
 use crate::mir;
@@ -44,6 +46,7 @@ pub struct CheckOutput {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuiltPackage {
+    pub backend: NativeBackendKind,
     pub package_root: String,
     pub manifest: String,
     pub entry: String,
@@ -59,6 +62,7 @@ pub struct BuiltPackage {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildOutput {
+    pub backend: NativeBackendKind,
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -126,6 +130,8 @@ pub struct CheckOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
+    /// Preparatory backend plumbing; `generated-rust` remains the only implemented option today.
+    pub backend: NativeBackendKind,
     pub target: Option<String>,
     pub package: Option<String>,
     pub debug: bool,
@@ -189,6 +195,14 @@ pub fn build_project(project_root: &Path) -> Result<BuildOutput, Diagnostic> {
     build_project_with_options(project_root, &BuildOptions::default())
 }
 
+fn resolved_build_target(target: Option<&str>) -> Option<String> {
+    match target {
+        Some("wasm32") | Some("wasm32-wasi") => Some(String::from("wasm32-wasip1")),
+        Some(target) => Some(target.to_string()),
+        None => None,
+    }
+}
+
 pub fn build_project_with_options(
     project_root: &Path,
     options: &BuildOptions,
@@ -202,16 +216,23 @@ pub fn build_project_with_options(
     {
         let analyzed = analyze_package(&graph, &package_root)?;
         let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
-        let binary = binary_path(&package_root, &analyzed.manifest);
+        let resolved_target = resolved_build_target(options.target.as_deref());
+        let binary = binary_path_for_target(
+            &package_root,
+            &analyzed.manifest,
+            resolved_target.as_deref(),
+        );
         let report = build_artifacts(
             &graph,
             &package_root,
             &analyzed,
             &generated_rust,
             &binary,
+            resolved_target.as_deref(),
             options,
         )?;
         packages.push(BuiltPackage {
+            backend: options.backend,
             package_root: package_root.display().to_string(),
             manifest: manifest_path(&package_root).display().to_string(),
             entry: analyzed.entry_path.display().to_string(),
@@ -221,7 +242,7 @@ pub fn build_project_with_options(
                 .debug
                 .then(|| debug_source_map_path(&generated_rust).display().to_string()),
             statement_count: analyzed.mir.statement_count(),
-            target: options.target.clone(),
+            target: resolved_target.clone(),
             debug: options.debug,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -242,6 +263,7 @@ pub fn build_project_with_options(
         .count();
     let cache_misses = packages.len().saturating_sub(cache_hits);
     Ok(BuildOutput {
+        backend: options.backend,
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -277,6 +299,7 @@ pub fn run_project_with_options(
     let built = build_project_with_options(
         &project_root,
         &BuildOptions {
+            backend: NativeBackendKind::GeneratedRust,
             target: None,
             package: options.package.clone(),
             debug: false,
@@ -837,6 +860,7 @@ struct BuildArtifactReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct BuildCacheFile {
     version: u32,
+    backend: NativeBackendKind,
     compiler: String,
     target: Option<String>,
     debug: bool,
@@ -860,6 +884,7 @@ fn build_artifacts(
     analyzed: &AnalyzedProject,
     generated_rust: &Path,
     binary: &Path,
+    resolved_target: Option<&str>,
     options: &BuildOptions,
 ) -> Result<BuildArtifactReport, Diagnostic> {
     ensure_output_path_stays_inside_package(package_root, generated_rust, "generated Rust output")?;
@@ -893,7 +918,8 @@ fn build_artifacts(
         package_root,
         analyzed,
         &rust_source,
-        options.target.clone(),
+        options.backend,
+        resolved_target.map(str::to_string),
         options.debug,
     )?;
     let cache_path = build_cache_path(generated_rust);
@@ -920,9 +946,10 @@ fn build_artifacts(
     }
     let started = Instant::now();
     compile_native(
+        options.backend,
         generated_rust,
         binary,
-        options.target.as_deref(),
+        resolved_target,
         options.debug,
     )?;
     let compile_ms = started.elapsed().as_millis() as u64;
@@ -1056,12 +1083,14 @@ fn build_cache_file(
     package_root: &Path,
     analyzed: &AnalyzedProject,
     rust_source: &str,
+    backend: NativeBackendKind,
     target: Option<String>,
     debug: bool,
 ) -> Result<BuildCacheFile, Diagnostic> {
     Ok(BuildCacheFile {
         version: BUILD_CACHE_VERSION,
-        compiler: BUILD_CACHE_COMPILER.to_string(),
+        backend,
+        compiler: format!("{}-{}", BUILD_CACHE_COMPILER, backend),
         target,
         debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
@@ -1191,6 +1220,7 @@ fn run_test_case(
         &analyzed,
         &generated_rust,
         &binary,
+        None,
         &BuildOptions::default(),
     ) {
         return TestCaseResult {
@@ -1920,6 +1950,10 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
         "net_resolve" => Some(CapabilityKind::Net),
+        "net_tcp_listen_loopback_once" => Some(CapabilityKind::Net),
+        "net_tcp_dial" => Some(CapabilityKind::Net),
+        "net_udp_bind_loopback_once" => Some(CapabilityKind::Net),
+        "net_udp_send_recv" => Some(CapabilityKind::Net),
         "http_get" => Some(CapabilityKind::Net),
         "http_serve_once" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),
@@ -1928,6 +1962,8 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "clock_sleep_ms" => Some(CapabilityKind::Clock),
         "env_get" => Some(CapabilityKind::Env),
         "crypto_sha256" => Some(CapabilityKind::Crypto),
+        "crypto_hmac_sha256" => Some(CapabilityKind::Crypto),
+        "crypto_constant_time_eq" => Some(CapabilityKind::Crypto),
         _ => None,
     }
 }
@@ -3857,9 +3893,14 @@ fn resolve_import_path(
                 .with_span(import.line, import.column));
             }
             if !stdlib::stdlib_has_module(&remainder) {
+                let module_name = remainder.to_string_lossy();
                 return Err(Diagnostic::new(
                     "import",
-                    format!("unknown stdlib module {:?}", import.path),
+                    crate::diagnostics::message_with_suggestion(
+                        format!("unknown stdlib module {:?}", import.path),
+                        &module_name,
+                        stdlib::stdlib_module_names(),
+                    ),
                 )
                 .with_path(module_path.display().to_string())
                 .with_span(import.line, import.column));

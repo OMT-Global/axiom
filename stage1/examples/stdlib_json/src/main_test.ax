@@ -21,6 +21,7 @@ print "none"
 print stringify_bool(true)
 print stringify_int(7)
 print stringify_string("agent")
+print object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
 
 match parse_bool("123") {
 Some(_value) {

@@ -1,0 +1,12 @@
+import "std/string_builder.ax"
+
+let empty: StringBuilder = builder()
+let greeting: StringBuilder = push_str(empty, "hello")
+let spaced: StringBuilder = push_str(greeting, " ")
+let finished: StringBuilder = push_str(spaced, "stdlib")
+print finish(finished)
+
+let seeded: StringBuilder = from_string("first")
+let second: StringBuilder = push_line(seeded, " line")
+let third: StringBuilder = push_str(second, "second line")
+print finish(third)

@@ -55,8 +55,9 @@ exhaustiveness is checked for enum variants.
 ## 6. Capabilities
 
 Runtime effects are manifest-gated. A package that imports `std/fs.ax`,
-`std/net.ax`, `std/process.ax`, `std/env.ax`, `std/time.ax`, or
-`std/crypto_hash.ax` must declare the matching capability in `axiom.toml`.
+`std/net.ax`, `std/process.ax`, `std/env.ax`, `std/time.ax`,
+`std/crypto_hash.ax`, or `std/crypto_mac.ax` must declare the matching
+capability in `axiom.toml`.
 
 Inspect capabilities with:
 

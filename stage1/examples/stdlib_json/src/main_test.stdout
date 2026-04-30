@@ -3,4 +3,5 @@ agent
 true
 7
 "agent"
+{"name":"agent","retries":3,"ready":true}
 none

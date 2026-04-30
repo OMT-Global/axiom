@@ -1,8 +1,11 @@
-.PHONY: test smoke docs-python-exit docs-python-exit-test stage1-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
+.PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 
 test: docs-python-exit stage1-test
 
 smoke: stage1-smoke
+
+supply-chain:
+	bash scripts/ci/run-toolchain-supply-chain.sh
 
 docs-python-exit:
 	bash scripts/ci/check-python-exit-docs.sh
@@ -13,6 +16,11 @@ docs-python-exit-test:
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
+	$(MAKE) stage1-proof-test
+
+stage1-proof-test:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
 
 stage1-conformance:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
@@ -99,6 +107,14 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_collections --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_collections
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_collections --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_string_builder --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_string_builder --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_string_builder
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_string_builder --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_log --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_log --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_log
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_log --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_sync --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_sync --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_sync
@@ -110,6 +126,18 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_http --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_http --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_http
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/proof_cli --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/proof_cli --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/proof_cli
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/proof_worker --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/proof_worker --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/proof_worker
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/proof_http_service --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/proof_http_service --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/proof_http_service
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_http_service --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --out-dir .axiom-build/docs/hello
