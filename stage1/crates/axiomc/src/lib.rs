@@ -4064,7 +4064,11 @@ print strlen("hello")
 
             let tests =
                 run_project_tests(&project).expect("test checked-in proof workload example");
-            assert_eq!(tests.passed, 1, "example {example}");
+            let expected_passed = match example {
+                "proof_cli" => 2,
+                _ => 1,
+            };
+            assert_eq!(tests.passed, expected_passed, "example {example}");
             assert_eq!(tests.failed, 0, "example {example}");
         }
     }
