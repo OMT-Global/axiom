@@ -4009,7 +4009,7 @@ fn fs_root_path_for_package(
     package_root: &Path,
     manifest: &Manifest,
 ) -> Result<PathBuf, Diagnostic> {
-    let configured = if manifest.capabilities.fs {
+    let configured = if manifest.capabilities.fs || manifest.capabilities.fs_write {
         manifest.capabilities.fs_root.as_deref().unwrap_or(".")
     } else {
         "."

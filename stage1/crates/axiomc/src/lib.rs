@@ -2730,6 +2730,61 @@ print strlen("hello")
     }
 
     #[test]
+    fn build_project_scopes_fs_write_to_manifest_root_without_read_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("scoped-fs-write-only");
+        create_project(&project, Some("scoped-fs-write-only-app")).expect("create project");
+        fs::create_dir_all(project.join("data")).expect("create data dir");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "scoped-fs-write-only-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+"fs:write" = true
+fs_root = "data"
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"print fs_write("data/inside.txt", "inside") == 0
+print fs_write("outside.txt", "outside") == -1
+print fs_write("data/../outside.txt", "traversal") == -1
+"#,
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\ntrue\n");
+        assert_eq!(
+            fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
+            "inside",
+        );
+        assert!(!project.join("outside.txt").exists());
+    }
+
+    #[test]
     fn stage1_project_imports_stdlib_fs_read_without_write_capability() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-fs-read-only-app");
