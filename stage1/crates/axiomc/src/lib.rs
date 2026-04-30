@@ -1935,9 +1935,55 @@ print fail()
             &project,
             &RunOptions {
                 package: Some(String::from("workspace-app")),
+                args: Vec::new(),
             },
         )
         .expect("run selected workspace package");
+        assert_eq!(exit, 0);
+    }
+
+    #[test]
+    fn run_project_forwards_cli_args_to_stdlib_cli() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("cli-args");
+        create_project(&project, Some("cli-args-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/cli.ax\"\n\
+print arg_count()\n\
+match arg(0) {\n\
+Some(value) {\n\
+print value\n\
+}\n\
+None {\n\
+print \"missing\"\n\
+}\n\
+}\n\
+let values: [string] = args()\n\
+print first(values)\n",
+        )
+        .expect("write cli args program");
+
+        let built = build_project(&project).expect("build cli args project");
+        let build_output_dir = Path::new(&built.generated_rust)
+            .parent()
+            .expect("build output directory");
+        let output = command_for_build_output(&built.binary, build_output_dir)
+            .expect("binary command")
+            .args(["alpha", "beta"])
+            .output()
+            .expect("run binary with args");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\nalpha\n");
+
+        let exit = run_project_with_options(
+            &project,
+            &RunOptions {
+                package: None,
+                args: vec![String::from("alpha"), String::from("beta")],
+            },
+        )
+        .expect("run project with forwarded args");
         assert_eq!(exit, 0);
     }
 
