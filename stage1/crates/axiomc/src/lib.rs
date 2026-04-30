@@ -51,7 +51,7 @@ mod tests {
         crypto: bool,
     ) -> String {
         format!(
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
+            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
         )
     }
 
@@ -1821,6 +1821,12 @@ print fail()
         let project = dir.path().join("package-visible-async-module");
         create_project(&project, Some("package-visible-async-module-app")).expect("create project");
         fs::write(
+            project.join("axiom.toml"),
+            render_manifest("package-visible-async-module-app")
+                .replace("async = false", "async = true"),
+        )
+        .expect("write async-enabled manifest");
+        fs::write(
             project.join("src/main.ax"),
             "import \"std/async.ax\"\nimport \"shared.ax\"\n\nlet task: Task<int> = helper(41)\nprint await task\n",
         )
@@ -1905,6 +1911,14 @@ print fail()
         let dependency = project.join("deps/core");
         create_project(&project, Some(case_name)).expect("create root");
         create_project(&dependency, Some("package-visible-core")).expect("create dependency");
+        if dependency_source.contains("async fn") || main_source.contains("std/async.ax") {
+            fs::write(
+                dependency.join("axiom.toml"),
+                render_manifest("package-visible-core")
+                    .replace("async = false", "async = true"),
+            )
+            .expect("write async-enabled dependency manifest");
+        }
 
         fs::write(dependency.join("src/shared.ax"), dependency_source).expect("write dependency");
         let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
@@ -1919,7 +1933,11 @@ print fail()
             project.join("axiom.toml"),
             format!(
                 "{}\n[dependencies]\ncore = {{ path = \"deps/core\" }}\n",
-                render_manifest(case_name)
+                if dependency_source.contains("async fn") || main_source.contains("std/async.ax") {
+                    render_manifest(case_name).replace("async = false", "async = true")
+                } else {
+                    render_manifest(case_name)
+                }
             ),
         )
         .expect("write root manifest");
@@ -2429,6 +2447,7 @@ crypto = false
         let caps = capability_descriptors(&manifest.capabilities);
         assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
+        assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 8);
     }
@@ -4051,7 +4070,8 @@ true
                 false,
                 false,
                 false,
-            ),
+            )
+            .replace("async = false", "async = true"),
         )
         .expect("write manifest");
         let manifest = load_manifest(&project).expect("load manifest");
@@ -4077,10 +4097,41 @@ true
             String::from_utf8_lossy(&output.stdout),
             "41\n7\ntrue\n6\nmessage\n1\nright\n"
         );
+        let host_output = compiled_binary_command(&built.binary)
+            .env("AXIOM_ASYNC_EXECUTOR", "host")
+            .output()
+            .expect("run compiled binary with host async executor");
+        assert_eq!(
+            String::from_utf8_lossy(&host_output.stdout),
+            "41\n7\ntrue\n6\nmessage\n1\nright\n"
+        );
 
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_async_runtime_without_async_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-async-denied");
+        create_project(&project, Some("stdlib-async-denied")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/async.ax\"
+let task: Task<int> = ready<int>(1)
+print await task
+",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected async capability denial");
+        assert_eq!(err.kind, "capability");
+        assert!(
+            err.message.contains("requires [capabilities].async = true"),
+            "unexpected message: {}",
+            err.message
+        );
     }
 
     #[test]

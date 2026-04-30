@@ -165,6 +165,10 @@ pub fn render_rust_for_package_with_capabilities(
         "const AXIOM_ENV_UNRESTRICTED: bool = {};\n",
         capabilities.env_unrestricted
     ));
+    out.push_str(&format!(
+        "const AXIOM_ASYNC_CAPABILITY: bool = {};\n",
+        capabilities.async_runtime
+    ));
     out.push_str("const AXIOM_ENV_ALLOWLIST: &[&str] = &[\n");
     for name in &capabilities.env_vars {
         out.push_str(&format!("    {name:?},\n"));
@@ -180,9 +184,10 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    canceled: bool,\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str("#[derive(Debug, PartialEq)]\n");
+    out.push_str("#[derive(Debug)]\n");
     out.push_str("struct AxiomJoinHandle<T> {\n");
-    out.push_str("    task: AxiomTask<T>,\n");
+    out.push_str("    task: Option<AxiomTask<T>>,\n");
+    out.push_str("    worker: Option<std::thread::JoinHandle<AxiomTask<T>>>,\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("#[derive(Debug, PartialEq)]\n");
@@ -228,6 +233,71 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    }\n");
     out.push_str("    task.value\n");
     out.push_str("}\n\n");
+    out.push_str(r#"#[allow(dead_code)]
+fn axiom_async_host_enabled() -> bool {
+    AXIOM_ASYNC_CAPABILITY
+        && std::env::var("AXIOM_ASYNC_EXECUTOR")
+            .map(|value| value.eq_ignore_ascii_case("host"))
+            .unwrap_or(false)
+}
+
+#[allow(dead_code)]
+fn axiom_async_spawn<T: Send + 'static>(task: AxiomTask<T>) -> AxiomJoinHandle<T> {
+    if axiom_async_host_enabled() {
+        AxiomJoinHandle {
+            task: None,
+            worker: Some(std::thread::spawn(move || task)),
+        }
+    } else {
+        AxiomJoinHandle {
+            task: Some(task),
+            worker: None,
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_async_join<T: Send + 'static>(handle: AxiomJoinHandle<T>) -> AxiomTask<T> {
+    match (handle.task, handle.worker) {
+        (Some(task), None) => task,
+        (None, Some(worker)) => worker
+            .join()
+            .unwrap_or_else(|_| axiom_runtime_error("async", "host async worker panicked")),
+        _ => axiom_runtime_error("async", "invalid join handle state"),
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_async_cancel<T>(task: AxiomTask<T>) -> AxiomTask<T> {
+    AxiomTask { value: task.value, canceled: true }
+}
+
+#[allow(dead_code)]
+fn axiom_async_timeout<T: Send + 'static>(task: AxiomTask<T>, timeout_ms: i64) -> AxiomTask<Option<T>> {
+    if task.canceled {
+        return AxiomTask { value: None, canceled: false };
+    }
+    if axiom_async_host_enabled() {
+        let handle = std::thread::spawn(move || task.value);
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+        while !handle.is_finished() {
+            if std::time::Instant::now() >= deadline {
+                return AxiomTask { value: None, canceled: false };
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let value = handle
+            .join()
+            .unwrap_or_else(|_| axiom_runtime_error("async", "host async timeout worker panicked"));
+        AxiomTask { value: Some(value), canceled: false }
+    } else {
+        let _timeout_ms = timeout_ms;
+        AxiomTask { value: Some(task.value), canceled: false }
+    }
+}
+
+"#);
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_array_get<T: Copy>(values: &[T], index: i64) -> T {\n");
     out.push_str("    if index < 0 {\n");
@@ -2869,23 +2939,20 @@ fn render_expr(expr: &Expr) -> String {
             format!("axiom_task_ready({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "async_spawn" => {
-            format!("AxiomJoinHandle {{ task: {} }}", render_expr(&args[0]))
+            format!("axiom_async_spawn({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "async_join" => {
-            format!("({}).task", render_expr(&args[0]))
+            format!("axiom_async_join({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "async_cancel" => {
-            format!(
-                "{{ let task = {}; AxiomTask {{ value: task.value, canceled: true }} }}",
-                render_expr(&args[0])
-            )
+            format!("axiom_async_cancel({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "async_is_canceled" => {
             format!("({}).canceled", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "async_timeout" => {
             format!(
-                "{{ let task = {}; let _timeout_ms = {}; AxiomTask {{ value: if task.canceled {{ None }} else {{ Some(task.value) }}, canceled: false }} }}",
+                "axiom_async_timeout({}, {})",
                 render_expr(&args[0]),
                 render_expr(&args[1])
             )

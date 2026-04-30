@@ -743,6 +743,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             clock: true,
             crypto: true,
             ffi: false,
+            async_runtime: true,
         },
     };
     graph.packages.insert(
