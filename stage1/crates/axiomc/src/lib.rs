@@ -2776,7 +2776,10 @@ print fs_write("data/../outside.txt", "traversal") == -1
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\ntrue\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\n"
+        );
         assert_eq!(
             fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
             "inside",
@@ -5028,6 +5031,25 @@ print is_match(\"[a-z]+\", true)
         let error = check_project(&project).expect_err("missing import should fail");
         assert!(error.message.contains("missing import"));
         assert_eq!(error.kind, "import");
+    }
+
+    #[test]
+    fn build_project_if_let_fallback_ignores_unmatched_named_payloads() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("if-let-named-fallback");
+        create_project(&project, Some("if-let-named-fallback-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Choice {\nPicked(int)\nIgnored { render: string }\n}\nfn render(): int {\nreturn 7\n}\nlet choice: Choice = Ignored { render: \"skip\" }\nif let Picked(value) = choice {\nprint value\n} else {\nprint \"fallback\"\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "fallback\n");
     }
 
     #[test]

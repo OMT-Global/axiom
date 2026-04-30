@@ -3858,20 +3858,10 @@ fn lower_stmt(
             let fallback_body = else_block.clone().unwrap_or_default();
             for candidate in variant_defs {
                 if candidate.name != *variant {
-                    let (bindings, is_named) = if candidate.payload_names.is_empty() {
-                        (
-                            (0..candidate.payload_tys.len())
-                                .map(|index| format!("__if_let_ignored_{index}"))
-                                .collect(),
-                            false,
-                        )
-                    } else {
-                        (candidate.payload_names.clone(), true)
-                    };
                     arms.push(syntax::MatchArm {
                         variant: candidate.name.clone(),
-                        bindings,
-                        is_named,
+                        bindings: Vec::new(),
+                        is_named: !candidate.payload_names.is_empty(),
                         body: fallback_body.clone(),
                         line: *line,
                         column: *column,
@@ -3954,7 +3944,9 @@ fn lower_stmt(
                         )
                         .with_span(arm.line, arm.column));
                     }
-                    if arm.bindings.len() != variant_def.payload_names.len() {
+                    if arm.bindings.is_empty() {
+                        Vec::new()
+                    } else if arm.bindings.len() != variant_def.payload_names.len() {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -3965,37 +3957,38 @@ fn lower_stmt(
                             ),
                         )
                         .with_span(arm.line, arm.column));
-                    }
-                    let mut seen_named = HashMap::new();
-                    let mut payload_tys = Vec::new();
-                    for binding in &arm.bindings {
-                        let Some(position) = variant_def
-                            .payload_names
-                            .iter()
-                            .position(|name| name == binding)
-                        else {
-                            return Err(Diagnostic::new(
-                                "type",
-                                format!(
-                                    "match arm {:?} has no named payload {:?}",
-                                    arm.variant, binding
-                                ),
-                            )
-                            .with_span(arm.line, arm.column));
-                        };
-                        if seen_named.insert(binding.clone(), ()).is_some() {
-                            return Err(Diagnostic::new(
-                                "type",
-                                format!(
-                                    "match arm {:?} repeats named payload {:?}",
-                                    arm.variant, binding
-                                ),
-                            )
-                            .with_span(arm.line, arm.column));
+                    } else {
+                        let mut seen_named = HashMap::new();
+                        let mut payload_tys = Vec::new();
+                        for binding in &arm.bindings {
+                            let Some(position) = variant_def
+                                .payload_names
+                                .iter()
+                                .position(|name| name == binding)
+                            else {
+                                return Err(Diagnostic::new(
+                                    "type",
+                                    format!(
+                                        "match arm {:?} has no named payload {:?}",
+                                        arm.variant, binding
+                                    ),
+                                )
+                                .with_span(arm.line, arm.column));
+                            };
+                            if seen_named.insert(binding.clone(), ()).is_some() {
+                                return Err(Diagnostic::new(
+                                    "type",
+                                    format!(
+                                        "match arm {:?} repeats named payload {:?}",
+                                        arm.variant, binding
+                                    ),
+                                )
+                                .with_span(arm.line, arm.column));
+                            }
+                            payload_tys.push(variant_def.payload_tys[position].clone());
                         }
-                        payload_tys.push(variant_def.payload_tys[position].clone());
+                        payload_tys
                     }
-                    payload_tys
                 } else {
                     if !variant_def.payload_names.is_empty() {
                         return Err(Diagnostic::new(
@@ -4007,7 +4000,9 @@ fn lower_stmt(
                         )
                         .with_span(arm.line, arm.column));
                     }
-                    if arm.bindings.len() != variant_def.payload_tys.len() {
+                    if arm.bindings.is_empty() {
+                        Vec::new()
+                    } else if arm.bindings.len() != variant_def.payload_tys.len() {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -4018,8 +4013,9 @@ fn lower_stmt(
                             ),
                         )
                         .with_span(arm.line, arm.column));
+                    } else {
+                        variant_def.payload_tys.clone()
                     }
-                    variant_def.payload_tys.clone()
                 };
                 for (binding_index, (binding, payload_ty)) in
                     arm.bindings.iter().zip(binding_tys.iter()).enumerate()

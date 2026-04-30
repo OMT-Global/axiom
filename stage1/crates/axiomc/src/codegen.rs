@@ -2574,7 +2574,27 @@ fn render_match_arm(
 ) {
     let pad = "    ".repeat(indent);
     if arm.bindings.is_empty() {
-        out.push_str(&format!("{pad}{}::{} => {{\n", arm.enum_name, arm.variant));
+        let variant = type_context
+            .enums
+            .get(arm.enum_name.as_str())
+            .and_then(|enum_def| {
+                enum_def
+                    .variants
+                    .iter()
+                    .find(|variant| variant.name == arm.variant)
+            });
+        let pattern = if let Some(variant) = variant {
+            if variant.payload_tys.is_empty() {
+                format!("{}::{}", arm.enum_name, arm.variant)
+            } else if !variant.payload_names.is_empty() {
+                format!("{}::{} {{ .. }}", arm.enum_name, arm.variant)
+            } else {
+                format!("{}::{}(..)", arm.enum_name, arm.variant)
+            }
+        } else {
+            format!("{}::{}", arm.enum_name, arm.variant)
+        };
+        out.push_str(&format!("{pad}{pattern} => {{\n"));
     } else if arm.is_named {
         out.push_str(&format!(
             "{pad}{}::{} {{ {} }} => {{\n",
