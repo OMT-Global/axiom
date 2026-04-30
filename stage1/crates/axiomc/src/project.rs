@@ -2453,11 +2453,7 @@ fn format_type_name(ty: &syntax::TypeName) -> String {
                 .join(", ")
         ),
         syntax::TypeName::Map(key, value) => {
-            format!(
-                "{{{}: {}}}",
-                format_type_name(key),
-                format_type_name(value)
-            )
+            format!("{{{}: {}}}", format_type_name(key), format_type_name(value))
         }
         syntax::TypeName::Array(inner) => format!("[{}]", format_type_name(inner)),
     }
