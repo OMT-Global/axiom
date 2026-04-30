@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::codegen::NativeBackendKind;
 use crate::project::{BuildOptions, build_project_with_options};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -157,6 +158,10 @@ pub fn serve_dap<R: Read, W: Write>(reader: R, mut writer: W) -> Result<(), Diag
     Ok(())
 }
 
+pub fn run_stdio<R: BufRead, W: Write>(reader: R, writer: W) -> Result<(), Diagnostic> {
+    serve_dap(reader, writer)
+}
+
 fn launch(adapter: &mut DebugAdapter, arguments: &Value) -> Result<Value, Diagnostic> {
     adapter.session = None;
     let program = arguments
@@ -170,6 +175,7 @@ fn launch(adapter: &mut DebugAdapter, arguments: &Value) -> Result<Value, Diagno
     let output = build_project_with_options(
         Path::new(program),
         &BuildOptions {
+            backend: NativeBackendKind::GeneratedRust,
             target: None,
             package: package.clone(),
             debug: true,

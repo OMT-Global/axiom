@@ -4,16 +4,18 @@ pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
 pub mod lockfile;
+pub mod lsp;
 pub mod manifest;
 pub mod mir;
 pub mod new_project;
 pub mod project;
+pub mod registry;
 pub mod stdlib;
 pub mod syntax;
 
 #[cfg(test)]
 mod tests {
-    use crate::codegen::render_rust;
+    use crate::codegen::{NativeBackendKind, render_rust};
     use crate::dap::{DebugAdapter, handle_request, serve_dap};
     use crate::hir;
     use crate::json_contract;
@@ -1899,6 +1901,7 @@ print fail()
         let built = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: Some(String::from("workspace-app")),
                 debug: false,
@@ -6001,6 +6004,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(target.clone()),
                 package: None,
                 debug: false,
@@ -6026,6 +6030,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(String::from("wasm32")),
                 package: None,
                 debug: false,
@@ -6059,6 +6064,7 @@ print strlen("hello")
         let debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6095,6 +6101,7 @@ print strlen("hello")
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6420,6 +6427,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
