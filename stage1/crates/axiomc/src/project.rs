@@ -672,6 +672,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
         tests: Vec::new(),
         capabilities: CapabilityConfig {
             fs: true,
+            fs_write: true,
             fs_root: None,
             net: true,
             process: true,
@@ -1949,6 +1950,8 @@ fn validate_expr_capabilities(
 fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
+        "fs_write" | "fs_create" | "fs_append" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file"
+        | "fs_remove_dir" | "fs_replace" => Some(CapabilityKind::FsWrite),
         "net_resolve" => Some(CapabilityKind::Net),
         "net_tcp_listen_loopback_once" => Some(CapabilityKind::Net),
         "net_tcp_dial" => Some(CapabilityKind::Net),
@@ -4006,7 +4009,7 @@ fn fs_root_path_for_package(
     package_root: &Path,
     manifest: &Manifest,
 ) -> Result<PathBuf, Diagnostic> {
-    let configured = if manifest.capabilities.fs {
+    let configured = if manifest.capabilities.fs || manifest.capabilities.fs_write {
         manifest.capabilities.fs_root.as_deref().unwrap_or(".")
     } else {
         "."

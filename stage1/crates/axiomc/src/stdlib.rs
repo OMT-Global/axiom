@@ -15,7 +15,7 @@
 //!   `elapsed_ms(start)`, and `sleep(duration)` on top of `clock_now_ms`,
 //!   `clock_elapsed_ms`, and `clock_sleep_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
-//! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
+//! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs) plus write-side helpers behind `fs:write`.
 //! * `std/net.ax` — `resolve(host)` on top of `net_resolve`, plus a bounded
 //!   loopback-only TCP/UDP socket floor on top of `net_tcp_*` and `net_udp_*`
 //!   intrinsics (net).
@@ -96,7 +96,42 @@ pub fn sleep(duration: Duration): int {\nreturn clock_sleep_ms(duration.ms)\n}\n
     ),
     (
         "fs.ax",
-        "pub fn read_file(path: string): Option<string> {\nreturn fs_read(path)\n}\n",
+        "pub fn read_file(path: string): Option<string> {
+return fs_read(path)
+}
+\
+pub fn write_file(path: string, content: string): int {
+return fs_write(path, content)
+}
+\
+pub fn create_file(path: string): int {
+return fs_create(path)
+}
+\
+pub fn append_file(path: string, content: string): int {
+return fs_append(path, content)
+}
+\
+pub fn mkdir(path: string): int {
+return fs_mkdir(path)
+}
+\
+pub fn mkdir_all(path: string): int {
+return fs_mkdir_all(path)
+}
+\
+pub fn remove_file(path: string): int {
+return fs_remove_file(path)
+}
+\
+pub fn remove_dir(path: string): int {
+return fs_remove_dir(path)
+}
+\
+pub fn replace_file(path: string, content: string): int {
+return fs_replace(path, content)
+}
+",
     ),
     (
         "net.ax",

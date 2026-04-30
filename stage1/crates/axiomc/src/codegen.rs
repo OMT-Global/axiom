@@ -66,7 +66,11 @@ mod tests {
     fn rejects_unsupported_backend_value() {
         let error = NativeBackendKind::from_str("direct-native")
             .expect_err("unsupported backend values should be rejected");
-        assert!(error.contains("only generated-rust is implemented in this preparatory backend plumbing"));
+        assert!(
+            error.contains(
+                "only generated-rust is implemented in this preparatory backend plumbing"
+            )
+        );
     }
 }
 
@@ -166,7 +170,8 @@ pub fn render_rust_for_package_with_capabilities(
         out.push_str(&format!("    {name:?},\n"));
     }
     out.push_str("];\n");
-    out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n\n");
+    out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n");
+    out.push_str("const AXIOM_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("#[derive(Debug, PartialEq)]\n");
@@ -808,6 +813,190 @@ fn axiom_regex_replace_all(pattern: String, text: String, replacement: String) -
     out.push_str("    }\n");
     out.push_str("    Some(content)\n");
     out.push_str("}\n\n");
+    out.push_str(
+        r#"#[allow(dead_code)]
+fn axiom_fs_candidate(path: &str, allow_missing_ancestors: bool) -> Option<std::path::PathBuf> {
+    let canonical_package_root = std::fs::canonicalize(AXIOM_PACKAGE_ROOT).ok()?;
+    let canonical_fs_root = std::fs::canonicalize(AXIOM_FS_ROOT).ok()?;
+    if !canonical_fs_root.starts_with(&canonical_package_root) {
+        return None;
+    }
+    let requested = std::path::Path::new(path);
+    if requested.as_os_str().is_empty() {
+        return None;
+    }
+    if requested
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        canonical_package_root.join(requested)
+    };
+    if let Ok(canonical_candidate) = std::fs::canonicalize(&candidate) {
+        if canonical_candidate.starts_with(&canonical_fs_root) {
+            return Some(canonical_candidate);
+        }
+        return None;
+    }
+    let parent = candidate.parent()?;
+    if !allow_missing_ancestors {
+        let canonical_parent = std::fs::canonicalize(parent).ok()?;
+        if !canonical_parent.starts_with(&canonical_fs_root) {
+            return None;
+        }
+        let file_name = candidate.file_name()?;
+        return Some(canonical_parent.join(file_name));
+    }
+    let mut ancestor = parent;
+    while !ancestor.exists() {
+        ancestor = ancestor.parent()?;
+    }
+    let canonical_ancestor = std::fs::canonicalize(ancestor).ok()?;
+    if !canonical_ancestor.starts_with(&canonical_fs_root) {
+        return None;
+    }
+    Some(candidate)
+}
+
+#[allow(dead_code)]
+fn axiom_fs_write(path: String, content: String) -> i64 {
+    if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
+        return -1;
+    }
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => match std::fs::write(candidate, content) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_create(path: String) -> i64 {
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(candidate)
+        {
+            Ok(_) => 0,
+            Err(_) => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_append(path: String, content: String) -> i64 {
+    if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
+        return -1;
+    }
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => match std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(candidate)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                match file.write_all(content.as_bytes()) {
+                    Ok(()) => 0,
+                    Err(_) => -1,
+                }
+            }
+            Err(_) => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_mkdir(path: String) -> i64 {
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => match std::fs::create_dir(candidate) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_mkdir_all(path: String) -> i64 {
+    match axiom_fs_candidate(&path, true) {
+        Some(candidate) => match std::fs::create_dir_all(candidate) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_remove_file(path: String) -> i64 {
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => match std::fs::remove_file(candidate) {
+                Ok(()) => 0,
+                Err(_) => -1,
+            },
+            _ => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_remove_dir(path: String) -> i64 {
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_dir() => match std::fs::remove_dir(candidate) {
+                Ok(()) => 0,
+                Err(_) => -1,
+            },
+            _ => -1,
+        },
+        None => -1,
+    }
+}
+
+#[allow(dead_code)]
+fn axiom_fs_replace(path: String, content: String) -> i64 {
+    if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
+        return -1;
+    }
+    match axiom_fs_candidate(&path, false) {
+        Some(candidate) => {
+            let Some(parent) = candidate.parent() else {
+                return -1;
+            };
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0);
+            let temp = parent.join(format!(".axiom-replace-{}-{stamp}.tmp", std::process::id()));
+            match std::fs::write(&temp, content) {
+                Ok(()) => match std::fs::rename(&temp, &candidate) {
+                    Ok(()) => 0,
+                    Err(_) => {
+                        let _ = std::fs::remove_file(&temp);
+                        -1
+                    }
+                },
+                Err(_) => -1,
+            }
+        }
+        None => -1,
+    }
+}
+
+"#,
+    );
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_is_blocked_network_ip(ip: std::net::IpAddr) -> bool {\n");
     out.push_str("    match ip {\n");
@@ -2571,6 +2760,42 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_write" => {
+            format!(
+                "axiom_fs_write({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "fs_create" => {
+            format!("axiom_fs_create({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_append" => {
+            format!(
+                "axiom_fs_append({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "fs_mkdir" => {
+            format!("axiom_fs_mkdir({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_mkdir_all" => {
+            format!("axiom_fs_mkdir_all({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_remove_file" => {
+            format!("axiom_fs_remove_file({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_remove_dir" => {
+            format!("axiom_fs_remove_dir({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "fs_replace" => {
+            format!(
+                "axiom_fs_replace({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
         }
         Expr::Call { name, args, .. } if name == "http_get" => {
             format!("axiom_http_get({})", render_expr(&args[0]))

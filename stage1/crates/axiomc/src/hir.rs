@@ -367,8 +367,12 @@ pub fn lower_with_capabilities(
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_enums = enums.values().cloned().collect::<Vec<_>>();
     lowered_enums.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    let reachable_functions = reachable_function_names(&program);
     let mut lowered_functions = Vec::new();
     for function in &program.functions {
+        if function.name.starts_with("std_fs_") && !reachable_functions.contains(&function.name) {
+            continue;
+        }
         lowered_functions.push(lower_function(
             function,
             &structs,
@@ -400,6 +404,129 @@ pub fn lower_with_capabilities(
         functions: lowered_functions,
         stmts,
     })
+}
+
+
+fn reachable_function_names(program: &syntax::Program) -> HashSet<String> {
+    let functions_by_name: HashMap<&str, &syntax::Function> = program
+        .functions
+        .iter()
+        .map(|function| (function.name.as_str(), function))
+        .collect();
+    let mut reachable = HashSet::new();
+    let mut queue = VecDeque::new();
+    for stmt in &program.stmts {
+        collect_stmt_calls(stmt, &mut queue);
+    }
+    while let Some(name) = queue.pop_front() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(function) = functions_by_name.get(name.as_str()) {
+            for stmt in &function.body {
+                collect_stmt_calls(stmt, &mut queue);
+            }
+        }
+    }
+    reachable
+}
+
+fn collect_stmt_calls(stmt: &syntax::Stmt, calls: &mut VecDeque<String>) {
+    match stmt {
+        syntax::Stmt::Let { expr, .. }
+        | syntax::Stmt::Print { expr, .. }
+        | syntax::Stmt::Panic { expr, .. }
+        | syntax::Stmt::Defer { expr, .. }
+        | syntax::Stmt::Return { expr, .. } => collect_expr_calls(expr, calls),
+        syntax::Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_expr_calls(cond, calls);
+            for stmt in then_block {
+                collect_stmt_calls(stmt, calls);
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    collect_stmt_calls(stmt, calls);
+                }
+            }
+        }
+        syntax::Stmt::While { cond, body, .. } => {
+            collect_expr_calls(cond, calls);
+            for stmt in body {
+                collect_stmt_calls(stmt, calls);
+            }
+        }
+        syntax::Stmt::Match { expr, arms, .. } => {
+            collect_expr_calls(expr, calls);
+            for arm in arms {
+                for stmt in &arm.body {
+                    collect_stmt_calls(stmt, calls);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expr_calls(expr: &syntax::Expr, calls: &mut VecDeque<String>) {
+    match expr {
+        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => {}
+        syntax::Expr::Call { name, args, .. } => {
+            calls.push_back(name.clone());
+            for arg in args {
+                collect_expr_calls(arg, calls);
+            }
+        }
+        syntax::Expr::MethodCall { base, args, .. } => {
+            collect_expr_calls(base, calls);
+            for arg in args {
+                collect_expr_calls(arg, calls);
+            }
+        }
+        syntax::Expr::BinaryAdd { lhs, rhs, .. } | syntax::Expr::BinaryCompare { lhs, rhs, .. } => {
+            collect_expr_calls(lhs, calls);
+            collect_expr_calls(rhs, calls);
+        }
+        syntax::Expr::Try { expr, .. } | syntax::Expr::Await { expr, .. } => {
+            collect_expr_calls(expr, calls);
+        }
+        syntax::Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_expr_calls(&field.expr, calls);
+            }
+        }
+        syntax::Expr::FieldAccess { base, .. } | syntax::Expr::TupleIndex { base, .. } => {
+            collect_expr_calls(base, calls);
+        }
+        syntax::Expr::TupleLiteral { elements, .. }
+        | syntax::Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_expr_calls(element, calls);
+            }
+        }
+        syntax::Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                collect_expr_calls(&entry.key, calls);
+                collect_expr_calls(&entry.value, calls);
+            }
+        }
+        syntax::Expr::Slice { base, start, end, .. } => {
+            collect_expr_calls(base, calls);
+            if let Some(start) = start {
+                collect_expr_calls(start, calls);
+            }
+            if let Some(end) = end {
+                collect_expr_calls(end, calls);
+            }
+        }
+        syntax::Expr::Index { base, index, .. } => {
+            collect_expr_calls(base, calls);
+            collect_expr_calls(index, calls);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -4650,6 +4777,81 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if matches!(name.as_str(), "fs_write" | "fs_append" | "fs_replace") {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let path = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if path.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects argument 1 type string, got {}", path.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let content = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if content.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects argument 2 type string, got {}",
+                            content.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&path, env)?;
+                move_lowered_value(&content, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![path, content],
+                    ty: Type::Int,
+                });
+            }
+            if matches!(
+                name.as_str(),
+                "fs_create" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file" | "fs_remove_dir"
+            ) {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let path = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if path.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects argument 1 type string, got {}", path.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&path, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![path],
+                    ty: Type::Int,
+                });
+            }
             if name == "net_resolve" {
                 require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
                 if args.len() != 1 {
@@ -4689,8 +4891,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let response =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let response = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if response.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -4732,7 +4933,10 @@ fn lower_expr_with_expected(
                 if host.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("net_tcp_dial expects argument 1 type string, got {}", host.ty()),
+                        format!(
+                            "net_tcp_dial expects argument 1 type string, got {}",
+                            host.ty()
+                        ),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
@@ -4740,7 +4944,10 @@ fn lower_expr_with_expected(
                 if port.ty() != &Type::Int {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("net_tcp_dial expects argument 2 type int, got {}", port.ty()),
+                        format!(
+                            "net_tcp_dial expects argument 2 type int, got {}",
+                            port.ty()
+                        ),
                     )
                     .with_span(args[1].line(), args[1].column()));
                 }
@@ -4786,8 +4993,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let response =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let response = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if response.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -5099,10 +5305,7 @@ fn lower_expr_with_expected(
                 if key.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!(
-                            "crypto_hmac_sha256 expects a string key, got {}",
-                            key.ty()
-                        ),
+                        format!("crypto_hmac_sha256 expects a string key, got {}", key.ty()),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
