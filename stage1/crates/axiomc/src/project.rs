@@ -2026,6 +2026,7 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "net_udp_send_recv" => Some(CapabilityKind::Net),
         "http_get" => Some(CapabilityKind::Net),
         "http_serve_once" => Some(CapabilityKind::Net),
+        "http_serve_route" => Some(CapabilityKind::Net),
         "process_status" => Some(CapabilityKind::Process),
         "clock_now_ms" => Some(CapabilityKind::Clock),
         "clock_elapsed_ms" => Some(CapabilityKind::Clock),

@@ -280,8 +280,11 @@ Work packages:
     `stage1_project_rejects_stdlib_json_with_wrong_argument_type`).
   - `std.http` — **partially landed** as `std/http.ax` exposing
     `get(url: string): Option<string>` and the intermediate loopback-only
-    `serve_once(bind: string, body: string): bool` smoke primitive on top of
-    the `http_get` and `http_serve_once` intrinsics. The client path implements a blocking
+    `serve_once(bind: string, body: string): bool` smoke primitive plus
+    `route(path: string, body: string): HttpRoute` and
+    `serve(bind: string, selected_route: HttpRoute, max_requests: int): bool`
+    on top of the `http_get`, `http_serve_once`, and `http_serve_route`
+    intrinsics. The client path implements a blocking
 
     HTTP/1.0 fetch for `http://` and `https://` URLs in the generated Rust
     runtime; TLS failures return `None` and emit a structured `net`
@@ -300,8 +303,10 @@ Work packages:
     `stage1_stdlib_http_service_rejects_non_loopback_bind`,
     `stage1_project_rejects_stdlib_http_without_net_capability`, and
     `stage1_project_rejects_stdlib_http_service_without_net_capability`).
-    This does **not** close #97: server lifecycle controls, request routing,
-    response APIs, and async concurrent request handling remain AG4.3 work.
+    This remains an intermediate #97 slice: it covers simple request routing,
+    response helpers, bounded lifecycle behavior, loopback bind enforcement,
+    and native threaded request fan-out, but the final async-runtime
+    listen/accept/respond API remains AG4.3 work.
 
   - `std.collections` — **landed** as `std/collections.ax` exposing generic
     borrowed-slice helpers (`count`, `is_empty`, `has_items`, `skip`, `take`,

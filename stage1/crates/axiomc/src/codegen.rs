@@ -107,6 +107,7 @@ pub fn render_rust_for_package_with_capabilities(
     let type_context = TypeContext::new(program);
     let uses_http_get = program_uses_call(program, "http_get");
     let uses_http_serve_once = program_uses_call(program, "http_serve_once");
+    let uses_http_serve_route = program_uses_call(program, "http_serve_route");
     let uses_ffi = program.functions.iter().any(|function| function.is_extern);
     let uses_ffi_cstring = program
         .functions
@@ -1176,7 +1177,7 @@ fn axiom_net_udp_send_recv(host: String, port: i64, message: String, timeout_ms:
 
 "#,
     );
-    if uses_http_get || uses_http_serve_once {
+    if uses_http_get || uses_http_serve_once || uses_http_serve_route {
         out.push_str(
             r#"#[allow(dead_code)]
 fn axiom_http_strip_crlf(value: &str) -> String {
@@ -1582,7 +1583,7 @@ fn axiom_http_get(url: String) -> Option<String> {
 }
 
 #[allow(dead_code)]
-fn axiom_http_read_request<R: std::io::Read>(reader: &mut R) -> Option<()> {
+fn axiom_http_read_request<R: std::io::Read>(reader: &mut R) -> Option<String> {
     const MAX_HEADER_BYTES: usize = 64 * 1024;
     let mut raw = Vec::new();
     let mut buf = [0u8; 4096];
@@ -1593,7 +1594,15 @@ fn axiom_http_read_request<R: std::io::Read>(reader: &mut R) -> Option<()> {
         }
         raw.extend_from_slice(&buf[..n]);
         if raw.windows(4).any(|w| w == b"\r\n\r\n") {
-            return Some(());
+            let request = String::from_utf8_lossy(&raw);
+            let request_line = request.lines().next()?;
+            let mut parts = request_line.split_whitespace();
+            let method = parts.next()?;
+            let path = parts.next()?;
+            if method != "GET" && method != "HEAD" {
+                return Some(String::from(""));
+            }
+            return Some(axiom_http_strip_crlf(path));
         }
         if raw.len() > MAX_HEADER_BYTES {
             return None;
@@ -1602,10 +1611,10 @@ fn axiom_http_read_request<R: std::io::Read>(reader: &mut R) -> Option<()> {
 }
 
 #[allow(dead_code)]
-fn axiom_http_response(body: &str) -> Vec<u8> {
+fn axiom_http_response_with_status(status: &str, body: &str) -> Vec<u8> {
     let body_bytes = body.as_bytes();
     let headers = format!(
-        "HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.0 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body_bytes.len()
     );
     let mut response = headers.into_bytes();
@@ -1620,6 +1629,73 @@ fn axiom_http_loopback_bind_addr(bind: &str) -> Option<std::net::SocketAddr> {
         return None;
     }
     Some(addr)
+}
+
+#[allow(dead_code)]
+fn axiom_http_response(body: &str) -> Vec<u8> {
+    axiom_http_response_with_status("200 OK", body)
+}
+
+#[allow(dead_code)]
+fn axiom_http_serve_route(bind: String, route_path: String, body: String, max_requests: i64) -> bool {
+    use std::io::Write;
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    if max_requests <= 0 || max_requests > 1024 {
+        axiom_runtime_report("net", "http server max_requests must be between 1 and 1024");
+        return false;
+    }
+    let addr = match axiom_http_loopback_bind_addr(bind.as_str()) {
+        Some(addr) => addr,
+        None => {
+            axiom_runtime_report("net", "http server bind address must be loopback");
+            return false;
+        }
+    };
+    let listener = match TcpListener::bind(addr) {
+        Ok(listener) => listener,
+        Err(err) => {
+            axiom_runtime_report("net", &format!("http server bind failed: {err}"));
+            return false;
+        }
+    };
+    let mut handles = Vec::new();
+    for _ in 0..max_requests {
+        let (mut stream, _) = match listener.accept() {
+            Ok(pair) => pair,
+            Err(err) => {
+                axiom_runtime_report("net", &format!("http server accept failed: {err}"));
+                return false;
+            }
+        };
+        let route_path = route_path.clone();
+        let body = body.clone();
+        handles.push(std::thread::spawn(move || -> bool {
+            if stream.set_read_timeout(Some(Duration::from_secs(5))).is_err() {
+                return false;
+            }
+            if stream.set_write_timeout(Some(Duration::from_secs(5))).is_err() {
+                return false;
+            }
+            let request_path = match axiom_http_read_request(&mut stream) {
+                Some(path) => path,
+                None => return false,
+            };
+            let response = if request_path == route_path {
+                axiom_http_response(body.as_str())
+            } else {
+                axiom_http_response_with_status("404 Not Found", "not found")
+            };
+            stream.write_all(&response).is_ok()
+        }));
+    }
+    let mut ok = true;
+    for handle in handles {
+        ok = handle.join().unwrap_or(false) && ok;
+    }
+    ok
+}
 }
 
 #[allow(dead_code)]
@@ -2894,6 +2970,15 @@ fn render_expr(expr: &Expr) -> String {
                 "axiom_http_serve_once({}, {})",
                 render_expr(&args[0]),
                 render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "http_serve_route" => {
+            format!(
+                "axiom_http_serve_route({}, {}, {}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
             )
         }
         Expr::Call { name, args, .. } if name == "net_resolve" => {
