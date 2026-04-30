@@ -1,4 +1,5 @@
 pub mod codegen;
+pub mod diagnostic_catalog;
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
