@@ -297,6 +297,24 @@ print answer
     }
 
     #[test]
+    fn parser_does_not_expand_macro_text_inside_string_literals() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+print "add_one!(41)"
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("add_one!(41)"));
+        assert!(!rendered.contains("41 + 1"));
+    }
+
+    #[test]
     fn parser_bounds_recursive_declarative_macro_expansion() {
         let source = r#"macro_rules! spin {
 () => {

@@ -727,7 +727,7 @@ fn expand_macro_line_once(
     let mut first_match: Option<(usize, usize, &MacroRule)> = None;
     for rule in macros.values() {
         let needle = format!("{}!(", rule.name);
-        if let Some(start) = line.find(&needle) {
+        if let Some(start) = find_macro_invocation(line, &needle) {
             let open = start + rule.name.len() + 1;
             if let Some(close) = find_matching_paren(line, open) {
                 if first_match.is_none_or(|(existing, _, _)| start < existing) {
@@ -807,6 +807,36 @@ fn expand_macro_line_once(
         vec![format!("{}{}{}", before, expansion.trim(), after)],
         true,
     ))
+}
+
+
+fn find_macro_invocation(line: &str, needle: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, ch) in line.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '#' => return None,
+            _ => {
+                if line[index..].starts_with(needle) {
+                    return Some(index);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn synchronize_top_level(lines: &[&str], index: &mut usize) {
