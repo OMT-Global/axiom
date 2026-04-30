@@ -25,6 +25,9 @@
 //!   (This is the stage1 spelling of the `std.crypto.hash` module from the
 //!   AG4.1 plan; stage1 uses a flat filename to avoid cross-platform path
 //!   separator issues in the virtual stdlib table.)
+//! * `std/crypto_mac.ax` — `hmac_sha256(key, message)` and
+//!   `constant_time_eq(left, right)` on top of `crypto_hmac_sha256` and
+//!   `crypto_constant_time_eq` (crypto).
 //!
 //! The seventh module shares an existing capability class with a peer
 //! wrapper, demonstrating that the `std.*` surface is not limited to one
@@ -108,6 +111,11 @@ pub fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int):
     (
         "crypto_hash.ax",
         "pub fn sha256(input: string): string {\nreturn crypto_sha256(input)\n}\n",
+    ),
+    (
+        "crypto_mac.ax",
+        "pub fn hmac_sha256(key: string, message: string): string {\nreturn crypto_hmac_sha256(key, message)\n}\n\
+pub fn constant_time_eq(left: string, right: string): bool {\nreturn crypto_constant_time_eq(left, right)\n}\n",
     ),
     (
         "io.ax",
