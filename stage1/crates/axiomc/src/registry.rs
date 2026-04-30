@@ -89,7 +89,9 @@ pub fn publish_package(
         Diagnostic::new("publish", "published packages require a [package] section")
             .with_path(manifest_path(&project_root).display().to_string())
     })?;
-    let release_dir = registry_root.join(&package.name).join(&package.version);
+    let package_segment = safe_registry_path_segment("package name", &package.name)?;
+    let version_segment = safe_registry_path_segment("package version", &package.version)?;
+    let release_dir = registry_root.join(package_segment).join(version_segment);
     if release_dir.exists() && !options.allow_overwrite {
         return Err(Diagnostic::new(
             "publish",
@@ -522,6 +524,26 @@ fn normalize_base_url(base_url: &str, packages_root: &Path) -> Result<String, Di
     Ok(trimmed.to_string())
 }
 
+fn safe_registry_path_segment(kind: &str, value: &str) -> Result<String, Diagnostic> {
+    let trimmed = value.trim();
+    let invalid = trimmed.is_empty()
+        || trimmed != value
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || Path::new(trimmed)
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)));
+    if invalid {
+        return Err(Diagnostic::new(
+            "publish",
+            format!("registry {kind} must be a safe path segment: {value:?}"),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
 fn registry_error(path: Option<&Path>, message: impl Into<String>) -> Diagnostic {
     let diagnostic = Diagnostic::new("registry", message.into());
     if let Some(path) = path {
@@ -617,6 +639,35 @@ mod tests {
 
         assert_eq!(error.kind, "publish");
         assert!(error.message.contains("already exists"));
+    }
+
+    #[test]
+    fn publish_rejects_traversal_package_name() {
+        let dir = tempdir().expect("tempdir");
+        let project = write_publishable_project(dir.path(), "../escaped-publish", "1.0.0");
+        let registry = dir.path().join("registry");
+
+        let error = publish_package(&project, &registry, &PublishOptions::default())
+            .expect_err("traversal package name should fail");
+
+        assert_eq!(error.kind, "publish");
+        assert!(error.message.contains("package name"));
+        assert!(!dir.path().join("escaped-publish").exists());
+    }
+
+    #[test]
+    fn publish_rejects_traversal_package_version() {
+        let dir = tempdir().expect("tempdir");
+        let project = write_publishable_project(dir.path(), "core", "../escaped-version");
+        let registry = dir.path().join("registry");
+
+        let error = publish_package(&project, &registry, &PublishOptions::default())
+            .expect_err("traversal package version should fail");
+
+        assert_eq!(error.kind, "publish");
+        assert!(error.message.contains("package version"));
+        assert!(!dir.path().join("registry").join("escaped-version").exists());
+        assert!(!dir.path().join("escaped-version").exists());
     }
 
     #[test]
