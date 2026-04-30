@@ -3,6 +3,7 @@ pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
 pub mod lockfile;
+pub mod lsp;
 pub mod manifest;
 pub mod mir;
 pub mod new_project;
