@@ -2008,6 +2008,7 @@ fn expr_uses_call(expr: &Expr, name: &str) -> bool {
             expr_uses_call(base, name) || expr_uses_call(index, name)
         }
         Expr::Literal(_) | Expr::VarRef { .. } => false,
+        Expr::StringBorrow { expr, .. } => expr_uses_call(expr, name),
     }
 }
 
@@ -2052,6 +2053,7 @@ impl<'a> TypeContext<'a> {
     ) -> bool {
         match ty {
             Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+            Type::Str => true,
             Type::Slice(_) | Type::MutSlice(_) => true,
             Type::Struct(name) => {
                 if !visiting_structs.insert(name.clone()) {
@@ -2625,6 +2627,8 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Literal(LiteralValue::Int(value)) => value.to_string(),
         Expr::Literal(LiteralValue::Bool(value)) => value.to_string(),
         Expr::Literal(LiteralValue::String(value)) => format!("String::from({value:?})"),
+        Expr::Literal(LiteralValue::Str(value)) => format!("{value:?}"),
+        Expr::StringBorrow { expr, .. } => format!("{}.as_str()", render_expr(expr)),
         Expr::VarRef { name, .. } if name == "self" => String::from("self_"),
         Expr::VarRef { name, .. } => name.clone(),
         Expr::Call { name, args, .. } if name == "assert_true" => {
@@ -2931,7 +2935,7 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::BinaryAdd { lhs, rhs, ty } => match ty {
             Type::Int => format!("{} + {}", render_expr(lhs), render_expr(rhs)),
-            Type::String => format!(
+            Type::String | Type::Str => format!(
                 "format!(\"{{}}{{}}\", {}, {})",
                 render_expr(lhs),
                 render_expr(rhs)
@@ -3136,6 +3140,10 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
         Type::Int => String::from("i64"),
         Type::Bool => String::from("bool"),
         Type::String => String::from("String"),
+        Type::Str => match lifetime {
+            Some(lifetime) => format!("&{lifetime} str"),
+            None => String::from("&str"),
+        },
         Type::Struct(name) => {
             if type_context.struct_uses_borrowed_slice(name) {
                 format!("{name}<{}>", lifetime.unwrap_or("'_"))
