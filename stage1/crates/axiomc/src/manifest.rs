@@ -145,6 +145,7 @@ struct RawTestTarget {
 #[derive(Debug, Default, Deserialize)]
 struct RawCapabilityConfig {
     fs: Option<bool>,
+    #[serde(rename = "fs:write")]
     fs_write: Option<bool>,
     fs_root: Option<String>,
     net: Option<bool>,
@@ -247,7 +248,7 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
 
 pub fn render_manifest(name: &str) -> String {
     format!(
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nfs_write = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
+        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
     )
 }
 
@@ -302,7 +303,7 @@ impl CapabilityKind {
 
     pub fn description(self) -> &'static str {
         match self {
-            CapabilityKind::Fs => "filesystem access",
+            CapabilityKind::Fs => "filesystem read access",
             CapabilityKind::FsWrite => "filesystem write access",
             CapabilityKind::Net => "network access",
             CapabilityKind::Process => "child process execution",
