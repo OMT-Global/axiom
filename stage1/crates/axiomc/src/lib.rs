@@ -14,7 +14,7 @@ pub mod syntax;
 
 #[cfg(test)]
 mod tests {
-    use crate::codegen::render_rust;
+    use crate::codegen::{NativeBackendKind, render_rust};
     use crate::hir;
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
@@ -1899,6 +1899,7 @@ print fail()
         let built = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: Some(String::from("workspace-app")),
                 debug: false,
@@ -6086,6 +6087,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(target.clone()),
                 package: None,
                 debug: false,
@@ -6111,6 +6113,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(String::from("wasm32")),
                 package: None,
                 debug: false,
@@ -6144,6 +6147,7 @@ print strlen("hello")
         let debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6180,6 +6184,7 @@ print strlen("hello")
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6315,6 +6320,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
@@ -6328,6 +6334,7 @@ print strlen("hello")
             json_contract::JSON_SCHEMA_VERSION
         );
         assert_eq!(payload["command"], "build");
+        assert_eq!(payload["backend"], "generated-rust");
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());

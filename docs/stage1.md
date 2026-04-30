@@ -116,6 +116,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Backend and tooling gaps
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
+- The backend-selection surface is only preparatory backend plumbing for later native-backend expansion; today `generated-rust` is the only implemented backend, so this branch is part of #105 rather than closure for it.
 - Generated-Rust builds now use a persistent per-artifact cache keyed by
   compiler version, target, debug mode, manifest/lockfile hash, rendered Rust,
   module source hashes, and dependency imports. Cache hits skip `rustc`, cache

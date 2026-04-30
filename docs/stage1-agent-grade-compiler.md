@@ -12,6 +12,8 @@ AG0 is the current entry floor and must remain intact before any downstream work
   `test`, and `caps`.
 - The backend is still generated Rust plus `rustc`. That is acceptable for the
   agent-grade milestone as long as the public workflow is fully `axiomc`-driven.
+- The new backend-selection seam is preparatory plumbing only; it does not yet
+  satisfy or close #105 on its own.
 - The current language floor includes multi-file modules, structs, enums,
   arrays, maps, tuples, borrowed slices, `Option<T>`, `Result<T, E>`, and the
   ownership/bootstrap work captured by `stage1/examples/borrowed_shapes`.
