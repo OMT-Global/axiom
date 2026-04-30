@@ -8,6 +8,7 @@ pub mod manifest;
 pub mod mir;
 pub mod new_project;
 pub mod project;
+pub mod registry;
 pub mod stdlib;
 pub mod syntax;
 

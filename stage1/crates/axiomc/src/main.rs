@@ -8,6 +8,7 @@ use axiomc::project::{
     run_project_tests_with_options, run_project_with_options, BuildOptions, BuildOutput,
     CheckOptions, RunOptions, TestOptions,
 };
+use axiomc::registry::{load_registry_index, render_registry_index};
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -105,8 +106,19 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Build a static package-registry index from package release folders.
+    RegistryIndex {
+        packages_dir: PathBuf,
+        #[arg(long)]
+        base_url: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Validate a static package-registry index JSON file.
+    RegistryValidate { index: PathBuf },
     /// Start the bounded axiom-analyzer Language Server Protocol endpoint.
     Lsp,
+
 }
 
 fn main() {
@@ -302,9 +314,46 @@ fn main() {
             Ok(()) => 0,
             Err(error) => print_error("repl", error, json),
         },
+        Command::RegistryIndex {
+            packages_dir,
+            base_url,
+            out,
+        } => match render_registry_index(&packages_dir, &base_url) {
+            Ok(index) => {
+                if let Some(path) = out {
+                    match fs::write(&path, index) {
+                        Ok(()) => {
+                            eprintln!("wrote {}", path.display());
+                            0
+                        }
+                        Err(err) => print_error(
+                            "registry-index",
+                            Diagnostic::new(
+                                "registry",
+                                format!("failed to write {}: {err}", path.display()),
+                            )
+                            .with_path(path.display().to_string()),
+                            false,
+                        ),
+                    }
+                } else {
+                    println!("{index}");
+                    0
+                }
+            }
+            Err(error) => print_error("registry-index", error, false),
+        },
+        Command::RegistryValidate { index } => match load_registry_index(&index) {
+            Ok(_) => {
+                eprintln!("OK");
+                0
+            }
+            Err(error) => print_error("registry-validate", error, false),
+        },
         Command::Lsp => match lsp::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("lsp", error, false),
+
         },
     };
     std::process::exit(code);
@@ -776,6 +825,8 @@ mod tests {
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
         assert!(help.contains("Start a small stage1 scratch REPL"));
+        assert!(help.contains("Build a static package-registry index"));
+        assert!(help.contains("Validate a static package-registry index JSON file"));
     }
 
     #[test]
