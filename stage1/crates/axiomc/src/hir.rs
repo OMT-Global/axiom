@@ -4462,6 +4462,47 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if matches!(
+                name.as_str(),
+                "json_parse_field_int" | "json_parse_field_bool" | "json_parse_field_string"
+            ) {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let text = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if text.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string JSON argument, got {}", text.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let key = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if key.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string key argument, got {}", key.ty()),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&text, env)?;
+                move_lowered_value(&key, env)?;
+                let ty = match name.as_str() {
+                    "json_parse_field_int" => Type::Option(Box::new(Type::Int)),
+                    "json_parse_field_bool" => Type::Option(Box::new(Type::Bool)),
+                    "json_parse_field_string" => Type::Option(Box::new(Type::String)),
+                    _ => unreachable!(),
+                };
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![text, key],
+                    ty,
+                });
+            }
             if name == "json_stringify_int" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(

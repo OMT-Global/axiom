@@ -368,6 +368,101 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    }\n");
     out.push_str("    Some(out)\n");
     out.push_str("}\n\n");
+
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_skip_ws(text: &str, mut index: usize) -> usize {\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    while index < bytes.len() && bytes[index].is_ascii_whitespace() {\n");
+    out.push_str("        index += 1;\n");
+    out.push_str("    }\n");
+    out.push_str("    index\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_scan_string_end(text: &str, start: usize) -> Option<usize> {\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    if bytes.get(start).copied()? != b'\\\"' {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut index = start + 1;\n");
+    out.push_str("    while index < bytes.len() {\n");
+    out.push_str("        match bytes[index] {\n");
+    out.push_str("            b'\\\\' => index += 2,\n");
+    out.push_str("            b'\\\"' => return Some(index + 1),\n");
+    out.push_str("            _ => index += 1,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    None\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_scan_value_end(text: &str, start: usize) -> Option<usize> {\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    if start >= bytes.len() {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    if bytes[start] == b'\\\"' {\n");
+    out.push_str("        return axiom_json_scan_string_end(text, start);\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut index = start;\n");
+    out.push_str("    let mut depth = 0i64;\n");
+    out.push_str("    while index < bytes.len() {\n");
+    out.push_str("        match bytes[index] {\n");
+    out.push_str("            b'\\\"' => index = axiom_json_scan_string_end(text, index)?,\n");
+    out.push_str("            b'{' | b'[' => { depth += 1; index += 1; }\n");
+    out.push_str("            b'}' | b']' if depth > 0 => { depth -= 1; index += 1; }\n");
+    out.push_str("            b',' | b'}' if depth == 0 => return Some(index),\n");
+    out.push_str("            _ => index += 1,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("    Some(index)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_object_field(text: String, key: String) -> Option<String> {\n");
+    out.push_str("    let text = text.trim();\n");
+    out.push_str("    let bytes = text.as_bytes();\n");
+    out.push_str("    if bytes.first().copied()? != b'{' || bytes.last().copied()? != b'}' {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    let mut index = 1usize;\n");
+    out.push_str("    loop {\n");
+    out.push_str("        index = axiom_json_skip_ws(text, index);\n");
+    out.push_str("        if index >= bytes.len() || bytes[index] == b'}' {\n");
+    out.push_str("            return None;\n");
+    out.push_str("        }\n");
+    out.push_str("        let key_end = axiom_json_scan_string_end(text, index)?;\n");
+    out.push_str(
+        "        let found_key = axiom_json_parse_string(text[index..key_end].to_string())?;\n",
+    );
+    out.push_str("        index = axiom_json_skip_ws(text, key_end);\n");
+    out.push_str("        if bytes.get(index).copied()? != b':' {\n");
+    out.push_str("            return None;\n");
+    out.push_str("        }\n");
+    out.push_str("        let value_start = axiom_json_skip_ws(text, index + 1);\n");
+    out.push_str("        let value_end = axiom_json_scan_value_end(text, value_start)?;\n");
+    out.push_str("        if found_key == key {\n");
+    out.push_str("            return Some(text[value_start..value_end].trim().to_string());\n");
+    out.push_str("        }\n");
+    out.push_str("        index = axiom_json_skip_ws(text, value_end);\n");
+    out.push_str("        match bytes.get(index).copied()? {\n");
+    out.push_str("            b',' => index += 1,\n");
+    out.push_str("            b'}' => return None,\n");
+    out.push_str("            _ => return None,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_field_int(text: String, key: String) -> Option<i64> {\n");
+    out.push_str("    axiom_json_parse_int(axiom_json_object_field(text, key)?)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_json_parse_field_bool(text: String, key: String) -> Option<bool> {\n");
+    out.push_str("    axiom_json_parse_bool(axiom_json_object_field(text, key)?)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
+        "fn axiom_json_parse_field_string(text: String, key: String) -> Option<String> {\n",
+    );
+    out.push_str("    axiom_json_parse_string(axiom_json_object_field(text, key)?)\n");
+    out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_json_escape_string(value: &str) -> String {\n");
     out.push_str("    let mut out = String::from(\"\\\"\");\n");
@@ -2421,6 +2516,27 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "json_parse_string" => {
             format!("axiom_json_parse_string({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_field_int" => {
+            format!(
+                "axiom_json_parse_field_int({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_field_bool" => {
+            format!(
+                "axiom_json_parse_field_bool({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "json_parse_field_string" => {
+            format!(
+                "axiom_json_parse_field_string({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
         }
         Expr::Call { name, args, .. } if name == "json_stringify_int" => {
             format!("axiom_json_stringify_int({})", render_expr(&args[0]))

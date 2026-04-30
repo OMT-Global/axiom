@@ -3161,12 +3161,74 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nprint object3(field_string(\"name\", \"agent\"), field_int(\"retries\", 3), field_bool(\"ready\", true))\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        let source = r#"import "std/json.ax"
+
+match parse_int("42") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+match parse_string("\"agent\"") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+print stringify_bool(true)
+print stringify_int(7)
+print stringify_string("agent")
+print object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+
+let payload_name: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_string(payload_name, "name") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+let payload_retries: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_int(payload_retries, "retries") {
+Some(value) {
+print value
+}
+None {
+print 0
+}
+}
+let payload_ready: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_bool(payload_ready, "ready") {
+Some(value) {
+print value
+}
+None {
+print false
+}
+}
+print schema_object3(schema_field_string("name"), schema_field_int("retries"), schema_field_bool("ready"))
+
+match parse_bool("123") {
+Some(_value) {
+print "bad"
+}
+None {
+print "none"
+}
+}
+"#;
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n",
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nagent\n3\ntrue\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"retries\":{\"type\":\"integer\"},\"ready\":{\"type\":\"boolean\"}}}\nnone\n",
         )
         .expect("write golden");
 
@@ -3176,7 +3238,7 @@ print strlen("hello")
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n"
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nagent\n3\ntrue\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"retries\":{\"type\":\"integer\"},\"ready\":{\"type\":\"boolean\"}}}\nnone\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
