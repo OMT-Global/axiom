@@ -1,4 +1,5 @@
 {
+  "backend": "generated-rust",
   "binary": "<project>/dist/contract-app",
   "cache_hits": 0,
   "cache_misses": 1,
@@ -12,6 +13,7 @@
   "ok": true,
   "packages": [
     {
+      "backend": "generated-rust",
       "binary": "<project>/dist/contract-app",
       "cache_status": "miss",
       "compile_ms": 0,

@@ -1,9 +1,14 @@
 {
   "capabilities": [
     {
-      "description": "filesystem access",
+      "description": "filesystem read access",
       "enabled": false,
       "name": "fs"
+    },
+    {
+      "description": "filesystem write access",
+      "enabled": false,
+      "name": "fs:write"
     },
     {
       "description": "network access",
