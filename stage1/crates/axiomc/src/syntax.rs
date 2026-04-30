@@ -554,14 +554,23 @@ fn collect_macro_rules(
     let mut macros = std::collections::HashMap::new();
     let mut kept = Vec::new();
     let mut index = 0usize;
+    let mut top_level_depth = 0i32;
     while index < lines.len() {
         let trimmed = lines[index].trim_start();
         if !trimmed.starts_with("macro_rules! ") {
             kept.push(lines[index].to_string());
+            top_level_depth += brace_delta(lines[index]);
             index += 1;
             continue;
         }
         let start_line = index + 1;
+        if top_level_depth != 0 {
+            return Err(vec![
+                Diagnostic::new("parse", "macro_rules! definitions are only supported at top level")
+                    .with_path(path.display().to_string())
+                    .with_span(start_line, 1),
+            ]);
+        }
         let mut definition = String::new();
         let mut depth = 0i32;
         loop {

@@ -337,6 +337,25 @@ let answer: int = myadd!(41)
     }
 
     #[test]
+    fn parser_rejects_nested_macro_rules_definitions() {
+        let source = r#"fn compute(): int {
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn parser_bounds_recursive_declarative_macro_expansion() {
         let source = r#"macro_rules! spin {
 () => {
