@@ -1,4 +1,6 @@
-use crate::codegen::{compile_native, render_rust_for_package_with_capabilities};
+use crate::codegen::{
+    NativeBackendKind, compile_native, render_rust_for_package_with_capabilities,
+};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
@@ -44,6 +46,7 @@ pub struct CheckOutput {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuiltPackage {
+    pub backend: NativeBackendKind,
     pub package_root: String,
     pub manifest: String,
     pub entry: String,
@@ -59,6 +62,7 @@ pub struct BuiltPackage {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildOutput {
+    pub backend: NativeBackendKind,
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -126,6 +130,8 @@ pub struct CheckOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
+    /// Preparatory backend plumbing; `generated-rust` remains the only implemented option today.
+    pub backend: NativeBackendKind,
     pub target: Option<String>,
     pub package: Option<String>,
     pub debug: bool,
@@ -226,6 +232,7 @@ pub fn build_project_with_options(
             options,
         )?;
         packages.push(BuiltPackage {
+            backend: options.backend,
             package_root: package_root.display().to_string(),
             manifest: manifest_path(&package_root).display().to_string(),
             entry: analyzed.entry_path.display().to_string(),
@@ -256,6 +263,7 @@ pub fn build_project_with_options(
         .count();
     let cache_misses = packages.len().saturating_sub(cache_hits);
     Ok(BuildOutput {
+        backend: options.backend,
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -291,6 +299,7 @@ pub fn run_project_with_options(
     let built = build_project_with_options(
         &project_root,
         &BuildOptions {
+            backend: NativeBackendKind::GeneratedRust,
             target: None,
             package: options.package.clone(),
             debug: false,
@@ -663,6 +672,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
         tests: Vec::new(),
         capabilities: CapabilityConfig {
             fs: true,
+            fs_write: true,
             fs_root: None,
             net: true,
             process: true,
@@ -851,6 +861,7 @@ struct BuildArtifactReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct BuildCacheFile {
     version: u32,
+    backend: NativeBackendKind,
     compiler: String,
     target: Option<String>,
     debug: bool,
@@ -908,6 +919,7 @@ fn build_artifacts(
         package_root,
         analyzed,
         &rust_source,
+        options.backend,
         resolved_target.map(str::to_string),
         options.debug,
     )?;
@@ -934,7 +946,13 @@ fn build_artifacts(
         write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
     }
     let started = Instant::now();
-    compile_native(generated_rust, binary, resolved_target, options.debug)?;
+    compile_native(
+        options.backend,
+        generated_rust,
+        binary,
+        resolved_target,
+        options.debug,
+    )?;
     let compile_ms = started.elapsed().as_millis() as u64;
     let mut cache = cache;
     cache.binary_hash = Some(hash_file_bytes(binary)?);
@@ -1066,12 +1084,14 @@ fn build_cache_file(
     package_root: &Path,
     analyzed: &AnalyzedProject,
     rust_source: &str,
+    backend: NativeBackendKind,
     target: Option<String>,
     debug: bool,
 ) -> Result<BuildCacheFile, Diagnostic> {
     Ok(BuildCacheFile {
         version: BUILD_CACHE_VERSION,
-        compiler: BUILD_CACHE_COMPILER.to_string(),
+        backend,
+        compiler: format!("{}-{}", BUILD_CACHE_COMPILER, backend),
         target,
         debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
@@ -1946,6 +1966,8 @@ fn validate_expr_capabilities(
 fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
+        "fs_write" | "fs_create" | "fs_append" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file"
+        | "fs_remove_dir" | "fs_replace" => Some(CapabilityKind::FsWrite),
         "net_resolve" => Some(CapabilityKind::Net),
         "net_tcp_listen_loopback_once" => Some(CapabilityKind::Net),
         "net_tcp_dial" => Some(CapabilityKind::Net),
@@ -1958,6 +1980,8 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "clock_sleep_ms" => Some(CapabilityKind::Clock),
         "env_get" => Some(CapabilityKind::Env),
         "crypto_sha256" => Some(CapabilityKind::Crypto),
+        "crypto_hmac_sha256" => Some(CapabilityKind::Crypto),
+        "crypto_constant_time_eq" => Some(CapabilityKind::Crypto),
         _ => None,
     }
 }
@@ -4001,7 +4025,7 @@ fn fs_root_path_for_package(
     package_root: &Path,
     manifest: &Manifest,
 ) -> Result<PathBuf, Diagnostic> {
-    let configured = if manifest.capabilities.fs {
+    let configured = if manifest.capabilities.fs || manifest.capabilities.fs_write {
         manifest.capabilities.fs_root.as_deref().unwrap_or(".")
     } else {
         "."
