@@ -2730,6 +2730,57 @@ print strlen("hello")
     }
 
     #[test]
+    fn stage1_project_imports_stdlib_fs_read_without_write_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-fs-read-only-app");
+        create_project(&project, Some("stdlib-fs-read-only-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-fs-read-only-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = true
+"fs:write" = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(project.join("src/fixture.txt"), "read only\n").expect("write fixture");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/fs.ax"
+match read_file("src/fixture.txt") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+"#,
+        )
+        .expect("write source");
+
+        check_project(&project).expect("read-only std/fs import should not require fs:write");
+    }
+
+    #[test]
     fn stage1_project_imports_synthetic_stdlib_fs_write_helpers() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-fs-write-app");
