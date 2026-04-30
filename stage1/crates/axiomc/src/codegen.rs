@@ -2070,6 +2070,25 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(&args[2])
             )
         }
+        Expr::Call { name, args, .. } if name == "assert_property" => {
+            format!(
+                "{{ let name = {}; let holds = {}; if holds {{ 0i64 }} else {{ axiom_assert_fail(format!(\"property {{:?}} failed\", name), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_snapshot" => {
+            format!(
+                "{{ let name = {}; let actual = {}; let expected = {}; if actual == expected {{ 0i64 }} else {{ axiom_assert_fail(format!(\"snapshot {{:?}} mismatch: expected {{:?}}, got {{:?}}\", name, expected, actual), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3]),
+                render_expr(&args[4])
+            )
+        }
         Expr::Call { name, args, .. } if name == "assert_contains" => {
             format!(
                 "{{ let haystack = {}; let needle = {}; if haystack.contains(&needle) {{ 0i64 }} else {{ axiom_assert_fail(format!(\"expected {{:?}} to contain {{:?}}\", haystack, needle), {}, {}) }} }}",
@@ -2086,6 +2105,16 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(&args[1]),
                 render_expr(&args[2]),
                 render_expr(&args[3])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "assert_case_eq" => {
+            format!(
+                "{{ let name = {}; let left = {}; let right = {}; if left == right {{ 0i64 }} else {{ axiom_assert_fail(format!(\"table case {{:?}} failed: expected {{:?}}, got {{:?}}\", name, right, left), {}, {}) }} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2]),
+                render_expr(&args[3]),
+                render_expr(&args[4])
             )
         }
         Expr::Call { name, args, .. } if name == "assert_ne" => {

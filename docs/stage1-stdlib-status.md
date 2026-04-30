@@ -20,7 +20,7 @@ complete.
 | #234 net sockets | Only DNS resolution and HTTP client GET exist. | Raw sockets need host:port capability policy and async integration. |
 | #236 crypto | Only `std/crypto_hash.ax sha256` exists. | HMAC, AEAD, Ed25519, RNG, and constant-time helpers need real audited implementations. |
 | #238 regex | No regex stdlib module exists. | A linear-time engine should be selected and integrated deliberately. |
-| #240 richer testing | `axiomc test` discovers `*_test.ax`, golden stdout, and assertion helpers. | Table tests, property tests, snapshot helpers, and benchmark framework integration need a separate test-harness design. |
+| #240 richer testing | `axiomc test` discovers `*_test.ax`, golden stdout, assertion helpers, and `std/testing.ax` table/property/snapshot helpers; `axiomc bench` is the benchmark harness. | Richer randomized generation and benchmark CI policy remain future harness design work. |
 | #97 HTTP server | `std/http.ax get` is client-only. | Server lifecycle, routing, response APIs, capability policy, and concurrent handling remain AG4.3 work. |
 
 ## Verification handles

@@ -3927,6 +3927,26 @@ print strlen("hello")
     }
 
     #[test]
+    fn run_project_tests_supports_std_testing_helpers() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-std-testing");
+        create_project(&project, Some("runner-std-testing-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/testing.ax\"\nlet int_case: int = table_int(\"double two\", 2 + 2, 4)\nlet bool_case: int = table_bool(\"bool equality\", true, true)\nlet string_case: int = table_string(\"greeting\", \"hello\" + \" world\", \"hello world\")\nlet property_case: int = property(\"addition identity\", 40 + 2 == 42)\nlet snapshot_case: int = snapshot(\"json line\", \"{\\\"ok\\\":true}\", \"{\\\"ok\\\":true}\")\nprint int_case + bool_case + string_case + property_case + snapshot_case\n",
+        )
+        .expect("write std testing test");
+        fs::write(project.join("src/main_test.stdout"), "0\n").expect("write golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 1);
+        assert_eq!(output.failed, 0);
+        let case = output.cases.first().expect("test case");
+        assert_eq!(case.stdout, "0\n");
+        assert!(case.ok);
+    }
+
+    #[test]
     fn run_project_tests_reports_assertion_failure_details() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner-assertion-fail");
