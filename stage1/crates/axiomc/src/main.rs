@@ -1,6 +1,7 @@
 use axiomc::codegen::NativeBackendKind;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
+use axiomc::lsp;
 use axiomc::new_project::create_project;
 use axiomc::project::{
     build_project_with_options, check_project_with_options, project_capabilities,
@@ -104,6 +105,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Start the bounded axiom-analyzer Language Server Protocol endpoint.
+    Lsp,
 }
 
 fn main() {
@@ -298,6 +301,10 @@ fn main() {
         Command::Repl { json } => match run_repl(io::stdin().lock(), io::stdout(), json) {
             Ok(()) => 0,
             Err(error) => print_error("repl", error, json),
+        },
+        Command::Lsp => match lsp::run_stdio(io::stdin().lock(), io::stdout()) {
+            Ok(()) => 0,
+            Err(error) => print_error("lsp", error, false),
         },
     };
     std::process::exit(code);
