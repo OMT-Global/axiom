@@ -67,7 +67,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/ca
 
 ## 7. Tests And Conformance
 
-Package tests are `src/*_test.ax` files and can use sibling stdout golden files.
+Package tests are `src/*_test.ax` files and can use sibling stdout golden files. `std/testing.ax` adds table-case, property, and snapshot assertion helpers for richer package tests.
 
 ```bash
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json

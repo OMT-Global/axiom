@@ -206,6 +206,7 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Type {
+    Error,
     Int,
     Bool,
     String,
@@ -347,12 +348,30 @@ pub fn lower_with_capabilities(
     program: &syntax::Program,
     capabilities: &CapabilityConfig,
 ) -> Result<Program, Diagnostic> {
-    let program = monomorphize_program(program)?;
+    lower_with_capabilities_recovery(program, capabilities).map_err(primary_diagnostic)
+}
+
+pub fn lower_with_capabilities_recovery(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+) -> Result<Program, Vec<Diagnostic>> {
+    lower_with_capabilities_impl(program, capabilities, true)
+}
+
+fn lower_with_capabilities_impl(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+    recover: bool,
+) -> Result<Program, Vec<Diagnostic>> {
+    let program = monomorphize_program(program).map_err(single_diagnostic)?;
     let (struct_names, enum_names, aliases) =
-        collect_type_names(&program.structs, &program.enums, &program.type_aliases)?;
+        collect_type_names(&program.structs, &program.enums, &program.type_aliases)
+            .map_err(single_diagnostic)?;
     let (enums, variants) =
-        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)?;
-    let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)?;
+        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)
+            .map_err(single_diagnostic)?;
+    let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)
+        .map_err(single_diagnostic)?;
     validate_recursive_type_cycles(
         &program,
         &structs,
@@ -360,16 +379,24 @@ pub fn lower_with_capabilities(
         &struct_names,
         &enum_names,
         &aliases,
-    )?;
-    let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)?;
-    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)?;
+    )
+    .map_err(single_diagnostic)?;
+    let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)
+        .map_err(single_diagnostic)?;
+    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)
+        .map_err(single_diagnostic)?;
+    let mut diagnostics = Vec::new();
     let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_enums = enums.values().cloned().collect::<Vec<_>>();
     lowered_enums.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+    let reachable_functions = reachable_function_names(&program);
     let mut lowered_functions = Vec::new();
     for function in &program.functions {
-        lowered_functions.push(lower_function(
+        if function.name.starts_with("std_fs_") && !reachable_functions.contains(&function.name) {
+            continue;
+        }
+        match lower_function(
             function,
             &structs,
             &enums,
@@ -378,7 +405,11 @@ pub fn lower_with_capabilities(
             &functions,
             &methods,
             capabilities,
-        )?);
+        ) {
+            Ok(function) => lowered_functions.push(function),
+            Err(error) if recover => append_diagnostic(&mut diagnostics, error),
+            Err(error) => return Err(single_diagnostic(error)),
+        }
     }
     let ctx = LowerContext {
         structs: &structs,
@@ -392,7 +423,20 @@ pub fn lower_with_capabilities(
         current_borrow_return_params: HashSet::new(),
     };
     let mut env = HashMap::new();
-    let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
+    let stmts = if recover {
+        let (stmts, mut block_diagnostics, _) =
+            lower_block_recovering(&program.stmts, &mut env, &ctx);
+        diagnostics.append(&mut block_diagnostics);
+        stmts
+    } else {
+        lower_block(&program.stmts, &mut env, &ctx)
+            .map_err(single_diagnostic)?
+            .0
+    };
+    if !diagnostics.is_empty() {
+        sort_diagnostics(&mut diagnostics);
+        return Err(diagnostics);
+    }
     Ok(Program {
         path: program.path.clone(),
         structs: lowered_structs,
@@ -400,6 +444,157 @@ pub fn lower_with_capabilities(
         functions: lowered_functions,
         stmts,
     })
+}
+
+fn primary_diagnostic(mut diagnostics: Vec<Diagnostic>) -> Diagnostic {
+    sort_diagnostics(&mut diagnostics);
+    let mut first = diagnostics.remove(0);
+    first.related = diagnostics;
+    first
+}
+
+fn single_diagnostic(diagnostic: Diagnostic) -> Vec<Diagnostic> {
+    vec![diagnostic]
+}
+
+fn append_diagnostic(diagnostics: &mut Vec<Diagnostic>, mut diagnostic: Diagnostic) {
+    diagnostics.append(&mut diagnostic.related);
+    diagnostics.push(diagnostic);
+}
+
+fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.column.cmp(&right.column))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+}
+
+fn reachable_function_names(program: &syntax::Program) -> HashSet<String> {
+    let functions_by_name: HashMap<&str, &syntax::Function> = program
+        .functions
+        .iter()
+        .map(|function| (function.name.as_str(), function))
+        .collect();
+    let mut reachable = HashSet::new();
+    let mut queue = VecDeque::new();
+    for stmt in &program.stmts {
+        collect_stmt_calls(stmt, &mut queue);
+    }
+    while let Some(name) = queue.pop_front() {
+        if !reachable.insert(name.clone()) {
+            continue;
+        }
+        if let Some(function) = functions_by_name.get(name.as_str()) {
+            for stmt in &function.body {
+                collect_stmt_calls(stmt, &mut queue);
+            }
+        }
+    }
+    reachable
+}
+
+fn collect_stmt_calls(stmt: &syntax::Stmt, calls: &mut VecDeque<String>) {
+    match stmt {
+        syntax::Stmt::Let { expr, .. }
+        | syntax::Stmt::Print { expr, .. }
+        | syntax::Stmt::Panic { expr, .. }
+        | syntax::Stmt::Defer { expr, .. }
+        | syntax::Stmt::Return { expr, .. } => collect_expr_calls(expr, calls),
+        syntax::Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_expr_calls(cond, calls);
+            for stmt in then_block {
+                collect_stmt_calls(stmt, calls);
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    collect_stmt_calls(stmt, calls);
+                }
+            }
+        }
+        syntax::Stmt::While { cond, body, .. } => {
+            collect_expr_calls(cond, calls);
+            for stmt in body {
+                collect_stmt_calls(stmt, calls);
+            }
+        }
+        syntax::Stmt::Match { expr, arms, .. } => {
+            collect_expr_calls(expr, calls);
+            for arm in arms {
+                for stmt in &arm.body {
+                    collect_stmt_calls(stmt, calls);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expr_calls(expr: &syntax::Expr, calls: &mut VecDeque<String>) {
+    match expr {
+        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => {}
+        syntax::Expr::Call { name, args, .. } => {
+            calls.push_back(name.clone());
+            for arg in args {
+                collect_expr_calls(arg, calls);
+            }
+        }
+        syntax::Expr::MethodCall { base, args, .. } => {
+            collect_expr_calls(base, calls);
+            for arg in args {
+                collect_expr_calls(arg, calls);
+            }
+        }
+        syntax::Expr::BinaryAdd { lhs, rhs, .. } | syntax::Expr::BinaryCompare { lhs, rhs, .. } => {
+            collect_expr_calls(lhs, calls);
+            collect_expr_calls(rhs, calls);
+        }
+        syntax::Expr::Try { expr, .. } | syntax::Expr::Await { expr, .. } => {
+            collect_expr_calls(expr, calls);
+        }
+        syntax::Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_expr_calls(&field.expr, calls);
+            }
+        }
+        syntax::Expr::FieldAccess { base, .. } | syntax::Expr::TupleIndex { base, .. } => {
+            collect_expr_calls(base, calls);
+        }
+        syntax::Expr::TupleLiteral { elements, .. }
+        | syntax::Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_expr_calls(element, calls);
+            }
+        }
+        syntax::Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                collect_expr_calls(&entry.key, calls);
+                collect_expr_calls(&entry.value, calls);
+            }
+        }
+        syntax::Expr::Slice {
+            base, start, end, ..
+        } => {
+            collect_expr_calls(base, calls);
+            if let Some(start) = start {
+                collect_expr_calls(start, calls);
+            }
+            if let Some(end) = end {
+                collect_expr_calls(end, calls);
+            }
+        }
+        syntax::Expr::Index { base, index, .. } => {
+            collect_expr_calls(base, calls);
+            collect_expr_calls(index, calls);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -478,7 +673,9 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -2627,9 +2824,18 @@ fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic
 }
 
 impl Type {
+    fn is_error(&self) -> bool {
+        matches!(self, Type::Error)
+    }
+
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool | Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) => true,
+            Type::Error
+            | Type::Int
+            | Type::Bool
+            | Type::Ptr(_)
+            | Type::MutPtr(_)
+            | Type::Slice(_) => true,
             Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
@@ -2650,7 +2856,8 @@ impl Type {
         match self {
             Type::Int | Type::Bool | Type::String => true,
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
-            Type::Struct(_)
+            Type::Error
+            | Type::Struct(_)
             | Type::Enum(_)
             | Type::Ptr(_)
             | Type::MutPtr(_)
@@ -3181,7 +3388,12 @@ fn lower_function(
     let (body, _, guaranteed_return) = if function.is_extern {
         (Vec::new(), env.clone(), true)
     } else {
-        lower_block(&function.body, &mut env, &ctx)?
+        let (body, diagnostics, guaranteed_return) =
+            lower_block_recovering(&function.body, &mut env, &ctx);
+        if !diagnostics.is_empty() {
+            return Err(primary_diagnostic(diagnostics));
+        }
+        (body, env.clone(), guaranteed_return)
     };
     if !guaranteed_return {
         return Err(Diagnostic::new(
@@ -3238,6 +3450,61 @@ fn lower_block(
     Ok((lowered, after, guaranteed_return))
 }
 
+fn lower_block_recovering(
+    block: &[syntax::Stmt],
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> (Vec<Stmt>, Vec<Diagnostic>, bool) {
+    let scope_names = env.keys().cloned().collect::<HashSet<_>>();
+    let mut lowered = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut guaranteed_return = false;
+    for stmt in block {
+        if guaranteed_return {
+            diagnostics.push(
+                Diagnostic::new(
+                    "control",
+                    "unreachable statements after a terminating control-flow statement are not yet supported in stage1",
+                )
+                .with_span(stmt.line(), stmt.column()),
+            );
+            continue;
+        }
+        let mut candidate_env = env.clone();
+        match lower_stmt(stmt, &mut candidate_env, ctx) {
+            Ok(lowered_stmt) => {
+                guaranteed_return = lowered_stmt.always_returns();
+                *env = candidate_env;
+                lowered.push(lowered_stmt);
+            }
+            Err(error) => {
+                insert_type_error_binding_for_failed_stmt(stmt, env);
+                diagnostics.push(error);
+            }
+        }
+    }
+    release_scope_borrows(env, &scope_names);
+    (lowered, diagnostics, guaranteed_return)
+}
+
+fn insert_type_error_binding_for_failed_stmt(
+    stmt: &syntax::Stmt,
+    env: &mut HashMap<String, Binding>,
+) {
+    if let syntax::Stmt::Let { name, .. } = stmt {
+        env.entry(name.clone()).or_insert_with(|| Binding {
+            ty: Type::Error,
+            moved: false,
+            moved_projections: HashSet::new(),
+            borrow_kind: None,
+            borrow_origin: None,
+            borrowed_owners: HashSet::new(),
+            active_borrow_count: 0,
+            active_mut_borrow_count: 0,
+        });
+    }
+}
+
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -3268,7 +3535,7 @@ fn lower_stmt(
             let expected = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
-            if actual != expected {
+            if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -3313,7 +3580,10 @@ fn lower_stmt(
         }
         syntax::Stmt::Print { expr, line, column } => {
             let lowered = lower_expr(expr, env, ctx)?;
-            if !matches!(lowered.ty(), Type::Int | Type::Bool | Type::String) {
+            if !matches!(
+                lowered.ty(),
+                Type::Error | Type::Int | Type::Bool | Type::String
+            ) {
                 return Err(Diagnostic::new(
                     "type",
                     format!("print expects int, bool, or string, got {}", lowered.ty()),
@@ -4166,6 +4436,74 @@ fn lower_expr_with_expected(
                     ty: Type::Int,
                 });
             }
+            if name == "assert_property" {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_property expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let label = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if label.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_property expects a string name, got {}", label.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let holds = lower_expr_with_expected(&args[1], Some(&Type::Bool), env, ctx)?;
+                if holds.ty() != &Type::Bool {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "assert_property expects a bool condition, got {}",
+                            holds.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&label, env)?;
+                move_lowered_value(&holds, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![label, holds], *line, *column),
+                    ty: Type::Int,
+                });
+            }
+            if name == "assert_snapshot" {
+                if args.len() != 3 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_snapshot expects 3 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let label = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let actual = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                let expected = lower_expr_with_expected(&args[2], Some(&Type::String), env, ctx)?;
+                for (expr, role) in [
+                    (&label, "name"),
+                    (&actual, "actual"),
+                    (&expected, "expected"),
+                ] {
+                    if expr.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("assert_snapshot expects string {role}, got {}", expr.ty()),
+                        )
+                        .with_span(*line, *column));
+                    }
+                }
+                move_lowered_value(&label, env)?;
+                move_lowered_value(&actual, env)?;
+                move_lowered_value(&expected, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![label, actual, expected], *line, *column),
+                    ty: Type::Int,
+                });
+            }
             if name == "assert_contains" {
                 if args.len() != 2 {
                     return Err(Diagnostic::new(
@@ -4204,15 +4542,36 @@ fn lower_expr_with_expected(
                     ty: Type::Int,
                 });
             }
-            if name == "assert_eq" || name == "assert_ne" {
-                if args.len() != 2 {
+            if name == "assert_eq" || name == "assert_ne" || name == "assert_case_eq" {
+                let has_label = name == "assert_case_eq";
+                let expected_args = if has_label { 3 } else { 2 };
+                if args.len() != expected_args {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("{name} expects 2 arguments, got {}", args.len()),
+                        format!(
+                            "{name} expects {expected_args} arguments, got {}",
+                            args.len()
+                        ),
                     )
                     .with_span(*line, *column));
                 }
-                let lhs = lower_expr(&args[0], env, ctx)?;
+                let mut lowered_args = Vec::new();
+                let value_start = if has_label {
+                    let label = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                    if label.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("{name} expects a string case name, got {}", label.ty()),
+                        )
+                        .with_span(args[0].line(), args[0].column()));
+                    }
+                    move_lowered_value(&label, env)?;
+                    lowered_args.push(label);
+                    1
+                } else {
+                    0
+                };
+                let lhs = lower_expr(&args[value_start], env, ctx)?;
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
                         "type",
@@ -4223,19 +4582,22 @@ fn lower_expr_with_expected(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
-                let rhs = lower_expr_with_expected(&args[1], Some(lhs.ty()), env, ctx)?;
+                let rhs =
+                    lower_expr_with_expected(&args[value_start + 1], Some(lhs.ty()), env, ctx)?;
                 if rhs.ty() != lhs.ty() {
                     return Err(Diagnostic::new(
                         "type",
                         format!("{name} requires both arguments to share one type"),
                     )
-                    .with_span(args[1].line(), args[1].column()));
+                    .with_span(args[value_start + 1].line(), args[value_start + 1].column()));
                 }
                 move_lowered_value(&lhs, env)?;
                 move_lowered_value(&rhs, env)?;
+                lowered_args.push(lhs);
+                lowered_args.push(rhs);
                 return Ok(Expr::Call {
                     name: name.clone(),
-                    args: with_assert_location(vec![lhs, rhs], *line, *column),
+                    args: with_assert_location(lowered_args, *line, *column),
                     ty: Type::Int,
                 });
             }
@@ -4370,6 +4732,47 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if matches!(
+                name.as_str(),
+                "json_parse_field_int" | "json_parse_field_bool" | "json_parse_field_string"
+            ) {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let text = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if text.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string JSON argument, got {}", text.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let key = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if key.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string key argument, got {}", key.ty()),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&text, env)?;
+                move_lowered_value(&key, env)?;
+                let ty = match name.as_str() {
+                    "json_parse_field_int" => Type::Option(Box::new(Type::Int)),
+                    "json_parse_field_bool" => Type::Option(Box::new(Type::Bool)),
+                    "json_parse_field_string" => Type::Option(Box::new(Type::String)),
+                    _ => unreachable!(),
+                };
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![text, key],
+                    ty,
+                });
+            }
             if name == "json_stringify_int" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(
@@ -4451,6 +4854,48 @@ fn lower_expr_with_expected(
                     ty: Type::String,
                 });
             }
+            if name == "regex_is_match" || name == "regex_find" || name == "regex_replace_all" {
+                let expected_len = if name == "regex_replace_all" { 3 } else { 2 };
+                if args.len() != expected_len {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects {expected_len} arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let mut lowered_args = Vec::new();
+                for (idx, arg) in args.iter().enumerate() {
+                    let lowered = lower_expr_with_expected(arg, Some(&Type::String), env, ctx)?;
+                    if lowered.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "{name} expects argument {} type string, got {}",
+                                idx + 1,
+                                lowered.ty()
+                            ),
+                        )
+                        .with_span(arg.line(), arg.column()));
+                    }
+                    move_lowered_value(&lowered, env)?;
+                    lowered_args.push(lowered);
+                }
+                let ty = if name == "regex_is_match" {
+                    Type::Bool
+                } else if name == "regex_find" {
+                    Type::Option(Box::new(Type::String))
+                } else {
+                    Type::String
+                };
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: lowered_args,
+                    ty,
+                });
+            }
             if name == "fs_read" {
                 require_capability(ctx.capabilities, CapabilityKind::Fs, name, *line, *column)?;
                 if args.len() != 1 {
@@ -4473,6 +4918,81 @@ fn lower_expr_with_expected(
                     name: name.clone(),
                     args: vec![lowered],
                     ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if matches!(name.as_str(), "fs_write" | "fs_append" | "fs_replace") {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let path = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if path.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects argument 1 type string, got {}", path.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let content = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if content.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects argument 2 type string, got {}",
+                            content.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&path, env)?;
+                move_lowered_value(&content, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![path, content],
+                    ty: Type::Int,
+                });
+            }
+            if matches!(
+                name.as_str(),
+                "fs_create" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file" | "fs_remove_dir"
+            ) {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let path = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if path.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects argument 1 type string, got {}", path.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&path, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![path],
+                    ty: Type::Int,
                 });
             }
             if name == "net_resolve" {
@@ -4514,8 +5034,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let response =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let response = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if response.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -4557,7 +5076,10 @@ fn lower_expr_with_expected(
                 if host.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("net_tcp_dial expects argument 1 type string, got {}", host.ty()),
+                        format!(
+                            "net_tcp_dial expects argument 1 type string, got {}",
+                            host.ty()
+                        ),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
@@ -4565,7 +5087,10 @@ fn lower_expr_with_expected(
                 if port.ty() != &Type::Int {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("net_tcp_dial expects argument 2 type int, got {}", port.ty()),
+                        format!(
+                            "net_tcp_dial expects argument 2 type int, got {}",
+                            port.ty()
+                        ),
                     )
                     .with_span(args[1].line(), args[1].column()));
                 }
@@ -4611,8 +5136,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let response =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let response = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if response.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -4924,10 +5448,7 @@ fn lower_expr_with_expected(
                 if key.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!(
-                            "crypto_hmac_sha256 expects a string key, got {}",
-                            key.ty()
-                        ),
+                        format!("crypto_hmac_sha256 expects a string key, got {}", key.ty()),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
@@ -7103,7 +7624,9 @@ fn contains_borrowed_slice_type_inner(
             visiting_enums.remove(name);
             contains
         }
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
     }
 }
 
@@ -7116,9 +7639,13 @@ fn contains_mut_borrowed_slice_type_inner(
 ) -> bool {
     match ty {
         Type::MutSlice(_) => true,
-        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
+        Type::Error
+        | Type::Slice(_)
+        | Type::Int
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
         Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
             inner,
             structs,
@@ -7766,6 +8293,7 @@ impl CompareOp {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Error => write!(f, "<type-error>"),
             Type::Int => write!(f, "int"),
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
