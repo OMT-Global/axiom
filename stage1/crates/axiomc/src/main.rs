@@ -440,8 +440,8 @@ fn format_axiom_source(source: &str) -> String {
 }
 
 fn format_edits(original: &str, formatted: &str) -> Vec<FormatEdit> {
-    let original_lines: Vec<&str> = original.lines().collect();
-    let formatted_lines: Vec<&str> = formatted.lines().collect();
+    let original_lines: Vec<&str> = original.split_inclusive('\n').collect();
+    let formatted_lines: Vec<&str> = formatted.split_inclusive('\n').collect();
     let max_len = original_lines.len().max(formatted_lines.len());
     let mut edits = Vec::new();
     for index in 0..max_len {
@@ -449,25 +449,31 @@ fn format_edits(original: &str, formatted: &str) -> Vec<FormatEdit> {
             (Some(before), Some(after)) if before != after => edits.push(FormatEdit {
                 action: String::from("replace_line"),
                 line: index + 1,
-                before: Some((*before).to_string()),
-                after: Some((*after).to_string()),
+                before: Some(trim_line_ending(before).to_string()),
+                after: Some(trim_line_ending(after).to_string()),
             }),
             (Some(before), None) => edits.push(FormatEdit {
                 action: String::from("delete_line"),
                 line: index + 1,
-                before: Some((*before).to_string()),
+                before: Some(trim_line_ending(before).to_string()),
                 after: None,
             }),
             (None, Some(after)) => edits.push(FormatEdit {
                 action: String::from("insert_line"),
                 line: index + 1,
                 before: None,
-                after: Some((*after).to_string()),
+                after: Some(trim_line_ending(after).to_string()),
             }),
             _ => {}
         }
     }
     edits
+}
+
+fn trim_line_ending(line: &str) -> &str {
+    line.strip_suffix('\n')
+        .and_then(|line| line.strip_suffix('\r').or(Some(line)))
+        .unwrap_or(line)
 }
 
 #[derive(Debug, Clone)]
@@ -884,6 +890,24 @@ mod tests {
             fs::read_to_string(&source).expect("read source"),
             "fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n"
         );
+    }
+
+    #[test]
+    fn formatter_check_reports_missing_final_newline_edit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src/main.ax");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("mkdir");
+        fs::write(&source, "fn main() {}").expect("write source");
+
+        let report = format_axiom_sources(dir.path(), true).expect("format report");
+
+        assert_eq!(report.changed, 1);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].edits.len(), 1);
+        assert_eq!(report.files[0].edits[0].action, "replace_line");
+        assert_eq!(report.files[0].edits[0].line, 1);
+        assert_eq!(report.files[0].edits[0].before.as_deref(), Some("fn main() {}"));
+        assert_eq!(report.files[0].edits[0].after.as_deref(), Some("fn main() {}"));
     }
 
     #[test]
