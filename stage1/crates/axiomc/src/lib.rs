@@ -226,6 +226,92 @@ mod tests {
     }
 
     #[test]
+    fn parser_expands_declarative_statement_macros_before_lowering() {
+        let source = r#"macro_rules! answer {
+($value:expr) => {
+return $value + 1
+}
+}
+
+fn compute(): int {
+answer!(41)
+}
+
+print compute()
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.functions.len(), 1);
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("return 41 + 1;"));
+        assert!(!rendered.contains("answer!"));
+    }
+
+    #[test]
+    fn parser_expands_declarative_expression_macros_before_lowering() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn check_project_expands_declarative_macros_before_typecheck() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("axiom.toml"), render_manifest("macro-demo"))
+            .expect("write manifest");
+        let manifest = load_manifest(dir.path()).expect("load manifest");
+        fs::write(
+            dir.path().join("axiom.lock"),
+            render_lockfile_for_project(dir.path(), &manifest).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::create_dir_all(dir.path().join("src")).expect("create src");
+        fs::write(
+            dir.path().join("src/main.ax"),
+            r#"macro_rules! keep_int {
+($value:expr) => {
+$value
+}
+}
+
+let answer: int = keep_int!(42)
+print answer
+"#,
+        )
+        .expect("write source");
+
+        let checked = check_project(dir.path()).expect("check project");
+        assert_eq!(checked.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_bounds_recursive_declarative_macro_expansion() {
+        let source = r#"macro_rules! spin {
+() => {
+spin!()
+}
+}
+
+spin!()
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("recursive macro expansion should be bounded");
+        assert!(error.message.contains("exceeded bounded depth"));
+    }
+
+    #[test]
     fn parser_lowers_panic_statement() {
         let source = "fn fail(): int {\npanic(\"boom\")\n}\n\nprint 0\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2776,7 +2862,10 @@ print fs_write("data/../outside.txt", "traversal") == -1
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\ntrue\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\n"
+        );
         assert_eq!(
             fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
             "inside",
