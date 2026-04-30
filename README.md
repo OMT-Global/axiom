@@ -94,8 +94,9 @@ structs, enums, tuple types, arrays, maps, borrowed slices, `Option<T>`,
 
 Stage1 also enforces the current capability-gated runtime surface for `clock`,
 `env`, `fs`, `net`, `process`, and `crypto`, with stdlib wrappers in
-`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, and
-`std/crypto_hash.ax`. Additional ungated or shared-capability wrappers live in
+`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`,
+`std/crypto_hash.ax`, and `std/crypto_mac.ax`. Additional ungated or
+shared-capability wrappers live in
 `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/sync.ax`,
 `std/async.ax`, and `std/http.ax`.
 The `std/net.ax` socket floor is deliberately bounded to one-shot loopback TCP
