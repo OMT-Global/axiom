@@ -566,9 +566,12 @@ fn collect_macro_rules(
         let start_line = index + 1;
         if top_level_depth != 0 {
             return Err(vec![
-                Diagnostic::new("parse", "macro_rules! definitions are only supported at top level")
-                    .with_path(path.display().to_string())
-                    .with_span(start_line, 1),
+                Diagnostic::new(
+                    "parse",
+                    "macro_rules! definitions are only supported at top level",
+                )
+                .with_path(path.display().to_string())
+                .with_span(start_line, 1),
             ]);
         }
         let mut definition = String::new();
@@ -815,7 +818,6 @@ fn expand_macro_line_once(
     ))
 }
 
-
 fn find_macro_invocation(line: &str, needle: &str) -> Option<usize> {
     let mut in_string = false;
     let mut escaped = false;
@@ -850,11 +852,9 @@ fn find_macro_invocation(line: &str, needle: &str) -> Option<usize> {
     None
 }
 
-
 fn is_identifier_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
-
 
 fn render_macro_expansion(template: &str, params: &[String], args: &[&str]) -> String {
     let mut output = String::new();
@@ -934,8 +934,24 @@ fn synchronize_top_level(lines: &[&str], index: &mut usize) {
 
 fn brace_delta(line: &str) -> i32 {
     let mut delta = 0;
+    let mut in_string = false;
+    let mut escaped = false;
     for ch in line.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
         match ch {
+            '"' => in_string = true,
+            '#' => break,
             '{' => delta += 1,
             '}' => delta -= 1,
             _ => {}

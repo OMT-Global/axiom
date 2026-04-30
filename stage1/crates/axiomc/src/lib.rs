@@ -393,6 +393,45 @@ label!(41)
     }
 
     #[test]
+    fn parser_ignores_string_braces_when_collecting_top_level_macros() {
+        let source = r#"print "{"
+
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_even_after_string_close_brace() {
+        let source = r#"fn compute(): int {
+print "}"
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn parser_bounds_recursive_declarative_macro_expansion() {
         let source = r#"macro_rules! spin {
 () => {
