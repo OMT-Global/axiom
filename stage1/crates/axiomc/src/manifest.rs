@@ -63,6 +63,8 @@ pub struct CapabilityConfig {
     pub env: bool,
     pub env_vars: Vec<String>,
     pub env_unrestricted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unsafe_rationale: Option<String>,
     #[serde(skip_serializing)]
     pub env_legacy_unrestricted: bool,
     pub clock: bool,
@@ -91,6 +93,8 @@ pub struct CapabilityDescriptor {
     pub allowed: Vec<String>,
     #[serde(skip_serializing_if = "is_false")]
     pub unsafe_unrestricted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unsafe_rationale: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,6 +151,7 @@ struct RawCapabilityConfig {
     process: Option<bool>,
     env: Option<RawEnvCapability>,
     env_unrestricted: Option<bool>,
+    unsafe_rationale: Option<String>,
     clock: Option<bool>,
     crypto: Option<bool>,
     ffi: Option<bool>,
@@ -237,6 +242,9 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
                 Vec::new()
             },
             unsafe_unrestricted: *kind == CapabilityKind::Env && config.env_unrestricted,
+            unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
+                .then(|| config.unsafe_rationale.clone())
+                .flatten(),
         })
         .collect()
 }
@@ -335,6 +343,8 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
         capabilities.env,
         capabilities.env_unrestricted.unwrap_or(false),
     )?;
+    let unsafe_rationale =
+        normalize_unsafe_rationale(path, capabilities.unsafe_rationale, env_unrestricted)?;
     Ok(Manifest {
         package,
         dependencies,
@@ -349,6 +359,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             env,
             env_vars,
             env_unrestricted,
+            unsafe_rationale,
             env_legacy_unrestricted,
             clock: capabilities.clock.unwrap_or(false),
             crypto: capabilities.crypto.unwrap_or(false),
@@ -374,6 +385,26 @@ fn normalize_env_capability(
             Ok((true, vars, env_unrestricted, false))
         }
         None => Ok((env_unrestricted, Vec::new(), env_unrestricted, false)),
+    }
+}
+
+fn normalize_unsafe_rationale(
+    path: &Path,
+    rationale: Option<String>,
+    env_unrestricted: bool,
+) -> Result<Option<String>, Diagnostic> {
+    let rationale = rationale.map(|value| value.trim().to_string());
+    if env_unrestricted {
+        match rationale {
+            Some(value) if !value.is_empty() => Ok(Some(value)),
+            _ => Err(Diagnostic::new(
+                "manifest",
+                "capabilities.unsafe_rationale is required when unrestricted environment access is enabled",
+            )
+            .with_path(path.display().to_string())),
+        }
+    } else {
+        Ok(rationale.filter(|value| !value.is_empty()))
     }
 }
 
