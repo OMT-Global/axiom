@@ -343,8 +343,11 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
         capabilities.env,
         capabilities.env_unrestricted.unwrap_or(false),
     )?;
-    let unsafe_rationale =
-        normalize_unsafe_rationale(path, capabilities.unsafe_rationale, env_unrestricted)?;
+    let unsafe_rationale = normalize_unsafe_rationale(
+        path,
+        capabilities.unsafe_rationale,
+        env_unrestricted && !env_legacy_unrestricted,
+    )?;
     Ok(Manifest {
         package,
         dependencies,
