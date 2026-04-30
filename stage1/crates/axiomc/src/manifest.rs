@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
-pub const KNOWN_CAPABILITIES: [CapabilityKind; 7] = [
+pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
+    CapabilityKind::FsWrite,
     CapabilityKind::Net,
     CapabilityKind::Process,
     CapabilityKind::Env,
@@ -57,6 +58,7 @@ pub struct TestTarget {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
 pub struct CapabilityConfig {
     pub fs: bool,
+    pub fs_write: bool,
     pub fs_root: Option<String>,
     pub net: bool,
     pub process: bool,
@@ -74,6 +76,7 @@ pub struct CapabilityConfig {
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityKind {
     Fs,
+    FsWrite,
     Net,
     Process,
     Env,
@@ -142,6 +145,8 @@ struct RawTestTarget {
 #[derive(Debug, Default, Deserialize)]
 struct RawCapabilityConfig {
     fs: Option<bool>,
+    #[serde(rename = "fs:write")]
+    fs_write: Option<bool>,
     fs_root: Option<String>,
     net: Option<bool>,
     process: Option<bool>,
@@ -243,7 +248,7 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
 
 pub fn render_manifest(name: &str) -> String {
     format!(
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
+        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
     )
 }
 
@@ -251,6 +256,7 @@ impl CapabilityConfig {
     pub fn enabled(&self, kind: CapabilityKind) -> bool {
         match kind {
             CapabilityKind::Fs => self.fs,
+            CapabilityKind::FsWrite => self.fs_write,
             CapabilityKind::Net => self.net,
             CapabilityKind::Process => self.process,
             CapabilityKind::Env => self.env,
@@ -285,6 +291,7 @@ impl CapabilityKind {
     pub fn name(self) -> &'static str {
         match self {
             CapabilityKind::Fs => "fs",
+            CapabilityKind::FsWrite => "fs:write",
             CapabilityKind::Net => "net",
             CapabilityKind::Process => "process",
             CapabilityKind::Env => "env",
@@ -296,7 +303,8 @@ impl CapabilityKind {
 
     pub fn description(self) -> &'static str {
         match self {
-            CapabilityKind::Fs => "filesystem access",
+            CapabilityKind::Fs => "filesystem read access",
+            CapabilityKind::FsWrite => "filesystem write access",
             CapabilityKind::Net => "network access",
             CapabilityKind::Process => "child process execution",
             CapabilityKind::Env => "environment variable access",
@@ -343,6 +351,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
         tests,
         capabilities: CapabilityConfig {
             fs: capabilities.fs.unwrap_or(false),
+            fs_write: capabilities.fs_write.unwrap_or(false),
             fs_root,
             net: capabilities.net.unwrap_or(false),
             process: capabilities.process.unwrap_or(false),
