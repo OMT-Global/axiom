@@ -1,5 +1,5 @@
 [package]
-name = "proof-worker"
+name = "proof-http-service"
 version = "0.1.0"
 
 [build]
@@ -10,7 +10,6 @@ out_dir = "dist"
 fs = false
 net = false
 process = false
-env = ["AXIOM_STAGE1_WORKER"]
+env = ["REQUEST_METHOD", "REQUEST_PATH"]
 clock = true
 crypto = false
-ffi = false

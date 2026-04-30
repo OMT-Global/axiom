@@ -4,9 +4,71 @@ use crate::mir::{
     EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, Stmt, StructDef,
     StructField, Type,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::path::Path;
 use std::process::Command;
+use std::str::FromStr;
+
+/// Preparatory selector for native-build backend plumbing.
+///
+/// Stage1 currently implements only the generated-Rust path; additional
+/// native backends remain follow-on work under #105.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NativeBackendKind {
+    #[default]
+    GeneratedRust,
+}
+
+impl NativeBackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GeneratedRust => "generated-rust",
+        }
+    }
+}
+
+impl fmt::Display for NativeBackendKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for NativeBackendKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "generated-rust" => Ok(Self::GeneratedRust),
+            other => Err(format!(
+                "unsupported backend {other:?}; only generated-rust is implemented in this preparatory backend plumbing"
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NativeBackendKind;
+    use std::str::FromStr;
+
+    #[test]
+    fn parses_generated_rust_backend() {
+        assert_eq!(
+            NativeBackendKind::from_str("generated-rust").expect("parse generated-rust"),
+            NativeBackendKind::GeneratedRust
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_backend_value() {
+        let error = NativeBackendKind::from_str("direct-native")
+            .expect_err("unsupported backend values should be rejected");
+        assert!(error.contains("only generated-rust is implemented in this preparatory backend plumbing"));
+    }
+}
 
 pub fn render_rust(program: &Program) -> String {
     render_rust_with_debug(program, false)
@@ -2551,6 +2613,20 @@ impl crate::mir::CompareOp {
 }
 
 pub fn compile_native(
+    backend: NativeBackendKind,
+    generated_rust: &Path,
+    binary_path: &Path,
+    target: Option<&str>,
+    debug: bool,
+) -> Result<(), Diagnostic> {
+    match backend {
+        NativeBackendKind::GeneratedRust => {
+            compile_generated_rust(generated_rust, binary_path, target, debug)
+        }
+    }
+}
+
+fn compile_generated_rust(
     generated_rust: &Path,
     binary_path: &Path,
     target: Option<&str>,

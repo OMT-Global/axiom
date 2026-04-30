@@ -8,12 +8,13 @@ pub mod manifest;
 pub mod mir;
 pub mod new_project;
 pub mod project;
+pub mod registry;
 pub mod stdlib;
 pub mod syntax;
 
 #[cfg(test)]
 mod tests {
-    use crate::codegen::render_rust;
+    use crate::codegen::{NativeBackendKind, render_rust};
     use crate::hir;
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
@@ -124,6 +125,14 @@ mod tests {
             .join("..")
             .join("..")
             .join("conformance")
+    }
+
+    fn checked_in_example_fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join(name)
     }
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
@@ -1898,6 +1907,7 @@ print fail()
         let built = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: Some(String::from("workspace-app")),
                 debug: false,
@@ -4084,6 +4094,35 @@ print strlen("hello")
     }
 
     #[test]
+    fn checked_in_proof_workload_examples_build_run_and_test() {
+        for example in ["proof_cli", "proof_worker", "proof_http_service"] {
+            let project = checked_in_example_fixture(example);
+            check_project(&project).expect("check checked-in proof workload example");
+
+            let built = build_project(&project).expect("build checked-in proof workload example");
+            let output = compiled_binary_command(&built.binary)
+                .output()
+                .expect("run checked-in proof workload example");
+            let expected = fs::read_to_string(project.join("src/main_test.stdout"))
+                .expect("read expected stdout");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "example {example}"
+            );
+
+            let tests =
+                run_project_tests(&project).expect("test checked-in proof workload example");
+            let expected_passed = match example {
+                "proof_cli" => 2,
+                _ => 1,
+            };
+            assert_eq!(tests.passed, expected_passed, "example {example}");
+            assert_eq!(tests.failed, 0, "example {example}");
+        }
+    }
+
+    #[test]
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
@@ -6131,6 +6170,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(target.clone()),
                 package: None,
                 debug: false,
@@ -6156,6 +6196,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(String::from("wasm32")),
                 package: None,
                 debug: false,
@@ -6189,6 +6230,7 @@ print strlen("hello")
         let debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6225,6 +6267,7 @@ print strlen("hello")
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: None,
                 package: None,
                 debug: true,
@@ -6360,6 +6403,7 @@ print strlen("hello")
         let output = build_project_with_options(
             &project,
             &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
@@ -6373,6 +6417,7 @@ print strlen("hello")
             json_contract::JSON_SCHEMA_VERSION
         );
         assert_eq!(payload["command"], "build");
+        assert_eq!(payload["backend"], "generated-rust");
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
