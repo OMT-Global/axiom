@@ -4166,6 +4166,74 @@ fn lower_expr_with_expected(
                     ty: Type::Int,
                 });
             }
+            if name == "assert_property" {
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_property expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let label = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if label.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_property expects a string name, got {}", label.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let holds = lower_expr_with_expected(&args[1], Some(&Type::Bool), env, ctx)?;
+                if holds.ty() != &Type::Bool {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "assert_property expects a bool condition, got {}",
+                            holds.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&label, env)?;
+                move_lowered_value(&holds, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![label, holds], *line, *column),
+                    ty: Type::Int,
+                });
+            }
+            if name == "assert_snapshot" {
+                if args.len() != 3 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("assert_snapshot expects 3 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let label = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let actual = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                let expected = lower_expr_with_expected(&args[2], Some(&Type::String), env, ctx)?;
+                for (expr, role) in [
+                    (&label, "name"),
+                    (&actual, "actual"),
+                    (&expected, "expected"),
+                ] {
+                    if expr.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("assert_snapshot expects string {role}, got {}", expr.ty()),
+                        )
+                        .with_span(*line, *column));
+                    }
+                }
+                move_lowered_value(&label, env)?;
+                move_lowered_value(&actual, env)?;
+                move_lowered_value(&expected, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: with_assert_location(vec![label, actual, expected], *line, *column),
+                    ty: Type::Int,
+                });
+            }
             if name == "assert_contains" {
                 if args.len() != 2 {
                     return Err(Diagnostic::new(
@@ -4204,15 +4272,36 @@ fn lower_expr_with_expected(
                     ty: Type::Int,
                 });
             }
-            if name == "assert_eq" || name == "assert_ne" {
-                if args.len() != 2 {
+            if name == "assert_eq" || name == "assert_ne" || name == "assert_case_eq" {
+                let has_label = name == "assert_case_eq";
+                let expected_args = if has_label { 3 } else { 2 };
+                if args.len() != expected_args {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("{name} expects 2 arguments, got {}", args.len()),
+                        format!(
+                            "{name} expects {expected_args} arguments, got {}",
+                            args.len()
+                        ),
                     )
                     .with_span(*line, *column));
                 }
-                let lhs = lower_expr(&args[0], env, ctx)?;
+                let mut lowered_args = Vec::new();
+                let value_start = if has_label {
+                    let label = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                    if label.ty() != &Type::String {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!("{name} expects a string case name, got {}", label.ty()),
+                        )
+                        .with_span(args[0].line(), args[0].column()));
+                    }
+                    move_lowered_value(&label, env)?;
+                    lowered_args.push(label);
+                    1
+                } else {
+                    0
+                };
+                let lhs = lower_expr(&args[value_start], env, ctx)?;
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
                         "type",
@@ -4223,19 +4312,22 @@ fn lower_expr_with_expected(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
-                let rhs = lower_expr_with_expected(&args[1], Some(lhs.ty()), env, ctx)?;
+                let rhs =
+                    lower_expr_with_expected(&args[value_start + 1], Some(lhs.ty()), env, ctx)?;
                 if rhs.ty() != lhs.ty() {
                     return Err(Diagnostic::new(
                         "type",
                         format!("{name} requires both arguments to share one type"),
                     )
-                    .with_span(args[1].line(), args[1].column()));
+                    .with_span(args[value_start + 1].line(), args[value_start + 1].column()));
                 }
                 move_lowered_value(&lhs, env)?;
                 move_lowered_value(&rhs, env)?;
+                lowered_args.push(lhs);
+                lowered_args.push(rhs);
                 return Ok(Expr::Call {
                     name: name.clone(),
-                    args: with_assert_location(vec![lhs, rhs], *line, *column),
+                    args: with_assert_location(lowered_args, *line, *column),
                     ty: Type::Int,
                 });
             }

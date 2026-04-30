@@ -59,6 +59,8 @@
 //!   cancellation, and select wrappers over the stage1 async runtime values.
 //! * `std/regex.ax` — linear-time regular-expression helpers (`is_match`,
 //!   `find`, `replace_all`) over a stage1-safe NFA engine.
+//! * `std/testing.ax` — table-case, property, and snapshot assertion helpers
+//!   layered over the bootstrap test intrinsics.
 
 use std::path::{Path, PathBuf};
 
@@ -200,6 +202,14 @@ pub fn recv<T>(channel: AsyncChannel<T>): Task<Option<T>> {\nreturn async_recv<T
 pub fn select<T>(left: Task<Option<T>>, right: Task<Option<T>>): Task<SelectResult<T>> {\nreturn async_select<T>(left, right)\n}\n\
 pub fn selected<T>(result: SelectResult<T>): int {\nreturn async_selected<T>(result)\n}\n\
 pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_selected_value<T>(result)\n}\n",
+    ),
+    (
+        "testing.ax",
+        "pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+pub fn table_bool(name: string, actual: bool, expected: bool): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+pub fn table_string(name: string, actual: string, expected: string): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+pub fn property(name: string, holds: bool): int {\nreturn assert_property(name, holds)\n}\n\
+pub fn snapshot(name: string, actual: string, expected: string): int {\nreturn assert_snapshot(name, actual, expected)\n}\n",
     ),
     (
         "http.ax",
