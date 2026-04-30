@@ -1043,8 +1043,14 @@ mod tests {
         assert_eq!(report.files[0].edits.len(), 1);
         assert_eq!(report.files[0].edits[0].action, "replace_line");
         assert_eq!(report.files[0].edits[0].line, 1);
-        assert_eq!(report.files[0].edits[0].before.as_deref(), Some("fn main() {}"));
-        assert_eq!(report.files[0].edits[0].after.as_deref(), Some("fn main() {}"));
+        assert_eq!(
+            report.files[0].edits[0].before.as_deref(),
+            Some("fn main() {}")
+        );
+        assert_eq!(
+            report.files[0].edits[0].after.as_deref(),
+            Some("fn main() {}")
+        );
     }
 
     #[test]
