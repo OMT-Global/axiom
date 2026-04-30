@@ -11,6 +11,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/h
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- pkg graph stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
 ```
@@ -26,6 +27,11 @@ The current stage1 examples document the supported manifest surface:
 - `stage1/examples/workspace_only`: workspace-only roots with
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
+
+`axiomc pkg graph <path> --json` prints the resolved local package graph without
+mutating manifests or lockfiles. The JSON lists each package root, package
+identity, workspace members, local dependencies, build entrypoint, capabilities,
+and whether that package's `axiom.lock` is current or stale.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
