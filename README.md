@@ -68,6 +68,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 ```
 
 ## Useful Commands
@@ -105,8 +106,9 @@ The `std/net.ax` socket floor is deliberately bounded to one-shot loopback TCP
 and UDP helpers under `[capabilities].net` so examples and tests stay
 deterministic and avoid external network access.
 
-See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md), and
-[docs/stage1.md](docs/stage1.md) for more detail.
+See [docs/grammar.md](docs/grammar.md), [docs/kernel.md](docs/kernel.md),
+[docs/stage1.md](docs/stage1.md), and
+[docs/stage1-lsp.md](docs/stage1-lsp.md) for more detail.
 Start with [docs/book.md](docs/book.md) for the tutorial path and
 [docs/style.md](docs/style.md) for canonical source style.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and validation
@@ -115,7 +117,9 @@ expectations.
 ## Repo Map
 
 - `stage1/crates/axiomc/`: Rust compiler, CLI, manifest, diagnostics, HIR/MIR,
-  stdlib, and generated-Rust backend.
+  stdlib, and the current generated-Rust backend; native backend expansion
+  beyond generated Rust remains future work, and this backend plumbing is only preparatory
+  groundwork (part of #105).
 - `stage1/examples/`: checked-in package examples for language, package,
   workspace, stdlib, and capability behavior.
 - `stage1/conformance/`: Rust-run pass/fail conformance fixtures.
