@@ -1,4 +1,5 @@
 use axiomc::codegen::NativeBackendKind;
+use axiomc::dap;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
@@ -128,6 +129,8 @@ enum Command {
     RegistryValidate { index: PathBuf },
     /// Start the bounded axiom-analyzer Language Server Protocol endpoint.
     Lsp,
+    /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
+    Dap,
 
 }
 
@@ -387,6 +390,10 @@ fn main() {
         Command::Lsp => match lsp::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("lsp", error, false),
+        },
+        Command::Dap => match dap::run_stdio(io::stdin().lock(), io::stdout()) {
+            Ok(()) => 0,
+            Err(error) => print_error("dap", error, false),
 
         },
     };
