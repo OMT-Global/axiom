@@ -4567,6 +4567,81 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if matches!(name.as_str(), "fs_write" | "fs_append" | "fs_replace") {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let path = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if path.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects argument 1 type string, got {}", path.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let content = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if content.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects argument 2 type string, got {}",
+                            content.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&path, env)?;
+                move_lowered_value(&content, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![path, content],
+                    ty: Type::Int,
+                });
+            }
+            if matches!(
+                name.as_str(),
+                "fs_create" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file" | "fs_remove_dir"
+            ) {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::FsWrite,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let path = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if path.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects argument 1 type string, got {}", path.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&path, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![path],
+                    ty: Type::Int,
+                });
+            }
             if name == "net_resolve" {
                 require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
                 if args.len() != 1 {
@@ -4606,8 +4681,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let response =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let response = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if response.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -4649,7 +4723,10 @@ fn lower_expr_with_expected(
                 if host.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("net_tcp_dial expects argument 1 type string, got {}", host.ty()),
+                        format!(
+                            "net_tcp_dial expects argument 1 type string, got {}",
+                            host.ty()
+                        ),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
@@ -4657,7 +4734,10 @@ fn lower_expr_with_expected(
                 if port.ty() != &Type::Int {
                     return Err(Diagnostic::new(
                         "type",
-                        format!("net_tcp_dial expects argument 2 type int, got {}", port.ty()),
+                        format!(
+                            "net_tcp_dial expects argument 2 type int, got {}",
+                            port.ty()
+                        ),
                     )
                     .with_span(args[1].line(), args[1].column()));
                 }
@@ -4703,8 +4783,7 @@ fn lower_expr_with_expected(
                     )
                     .with_span(*line, *column));
                 }
-                let response =
-                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                let response = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
                 if response.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
@@ -5016,10 +5095,7 @@ fn lower_expr_with_expected(
                 if key.ty() != &Type::String {
                     return Err(Diagnostic::new(
                         "type",
-                        format!(
-                            "crypto_hmac_sha256 expects a string key, got {}",
-                            key.ty()
-                        ),
+                        format!("crypto_hmac_sha256 expects a string key, got {}", key.ty()),
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
