@@ -2338,19 +2338,18 @@ fn public_api_exports(modules: &[LoadedModule], package_root: &Path) -> Vec<ApiE
             .iter()
             .filter(|function| function.visibility.is_public())
         {
-            let params = function
-                .params
-                .iter()
-                .map(|param| format!("{}: {}", param.name, format_type_name(&param.ty)))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let params = format_function_params(function);
+            let display_name = function
+                .impl_target
+                .as_ref()
+                .map(|target| format!("{target}.{}", function.name))
+                .unwrap_or_else(|| function.name.clone());
             exports.push(ApiExport {
                 kind: String::from("function"),
                 name: function.name.clone(),
                 module: module_path.clone(),
                 signature: Some(format!(
-                    "fn {}({params}): {}",
-                    function.name,
+                    "fn {display_name}({params}): {}",
                     format_type_name(&function.return_ty)
                 )),
             });
@@ -2380,6 +2379,20 @@ fn public_api_exports(modules: &[LoadedModule], package_root: &Path) -> Vec<ApiE
             .then_with(|| left.name.cmp(&right.name))
     });
     exports
+}
+
+fn format_function_params(function: &syntax::Function) -> String {
+    let mut params = Vec::new();
+    if function.receiver.is_some() {
+        params.push(String::from("self"));
+    }
+    params.extend(
+        function
+            .params
+            .iter()
+            .map(|param| format!("{}: {}", param.name, format_type_name(&param.ty))),
+    );
+    params.join(", ")
 }
 
 fn format_type_name(ty: &syntax::TypeName) -> String {
@@ -2417,7 +2430,7 @@ fn format_type_name(ty: &syntax::TypeName) -> String {
         ),
         syntax::TypeName::Map(key, value) => {
             format!(
-                "Map<{}, {}>",
+                "{{{}: {}}}",
                 format_type_name(key),
                 format_type_name(value)
             )
