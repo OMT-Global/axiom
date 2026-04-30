@@ -1,16 +1,8 @@
 import "std/env.ax"
-import "core/render.ax"
+import "std/time.ax"
+import "core/command.ax"
+import "ui/render.ax"
 
-fn proof_mode(): string {
-match get_env("__AXIOM_PROOF_CLI_MODE__") {
-Some(value) {
-return value
-}
-None {
-return "default"
-}
-}
-}
-
-print render_command("status", 3, proof_mode())
-print render_command("run", 7, proof_mode())
+print headline("axiom")
+print describe(requested_mode(get_env("AXIOM_STAGE1_CLI_MODE")), plan(requested_mode(get_env("AXIOM_STAGE1_CLI_MODE"))))
+print now_ms() > 0
