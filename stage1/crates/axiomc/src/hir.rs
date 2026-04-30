@@ -1130,7 +1130,7 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
         | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
         | syntax::TypeName::Option(inner)
-        | syntax::TypeName::Array(inner) => collect_type_params(inner, type_params, found),
+        | syntax::TypeName::Array(inner, _) => collect_type_params(inner, type_params, found),
         syntax::TypeName::Result(ok, err) | syntax::TypeName::Map(ok, err) => {
             collect_type_params(ok, type_params, found);
             collect_type_params(err, type_params, found);
@@ -1515,8 +1515,8 @@ fn rewrite_aggregate_type_name(
                 column,
             )?),
         ),
-        syntax::TypeName::Array(inner) => {
-            syntax::TypeName::Array(Box::new(rewrite_aggregate_type_name(
+        syntax::TypeName::Array(inner, len) => syntax::TypeName::Array(
+            Box::new(rewrite_aggregate_type_name(
                 inner,
                 generic_structs,
                 generic_enums,
@@ -1524,8 +1524,9 @@ fn rewrite_aggregate_type_name(
                 queued,
                 line,
                 column,
-            )?))
-        }
+            )?),
+            len.clone(),
+        ),
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Bool => syntax::TypeName::Bool,
         syntax::TypeName::String => syntax::TypeName::String,
@@ -2728,9 +2729,10 @@ fn substitute_type_name(
             Box::new(substitute_type_name(key, type_bindings)),
             Box::new(substitute_type_name(value, type_bindings)),
         ),
-        syntax::TypeName::Array(inner) => {
-            syntax::TypeName::Array(Box::new(substitute_type_name(inner, type_bindings)))
-        }
+        syntax::TypeName::Array(inner, len) => syntax::TypeName::Array(
+            Box::new(substitute_type_name(inner, type_bindings)),
+            len.clone(),
+        ),
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Bool => syntax::TypeName::Bool,
         syntax::TypeName::String => syntax::TypeName::String,
@@ -2815,8 +2817,21 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
             type_name_monomorph_suffix(key),
             type_name_monomorph_suffix(value)
         ),
-        syntax::TypeName::Array(inner) => format!("array_{}", type_name_monomorph_suffix(inner)),
+        syntax::TypeName::Array(inner, len) => match len {
+            Some(len) => format!(
+                "array_{}_{}",
+                type_name_monomorph_suffix(inner),
+                sanitize_symbol_suffix(len)
+            ),
+            None => format!("array_{}", type_name_monomorph_suffix(inner)),
+        },
     }
+}
+
+fn sanitize_symbol_suffix(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect()
 }
 
 fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
@@ -8076,7 +8091,7 @@ fn lower_type_inner<T, U>(
                 )?),
             ))
         }
-        syntax::TypeName::Array(inner) => Ok(Type::Array(Box::new(lower_type_inner(
+        syntax::TypeName::Array(inner, _) => Ok(Type::Array(Box::new(lower_type_inner(
             inner, structs, enums, aliases, resolving, line, column,
         )?))),
     }

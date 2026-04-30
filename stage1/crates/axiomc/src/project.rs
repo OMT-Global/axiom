@@ -3572,14 +3572,17 @@ fn rewrite_type_name(
                 column,
             )?),
         )),
-        syntax::TypeName::Array(inner) => Ok(syntax::TypeName::Array(Box::new(rewrite_type_name(
-            inner,
-            visible_types,
-            private_imported_types,
-            module_path,
-            line,
-            column,
-        )?))),
+        syntax::TypeName::Array(inner, len) => Ok(syntax::TypeName::Array(
+            Box::new(rewrite_type_name(
+                inner,
+                visible_types,
+                private_imported_types,
+                module_path,
+                line,
+                column,
+            )?),
+            len.clone(),
+        )),
     }
 }
 
