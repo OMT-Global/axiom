@@ -22,7 +22,7 @@ Current executable fixtures cover:
 - `struct_field_access`: struct construction, field access, and passing a
   struct through a function.
 - `outcome_control_flow`: `Option` and `Result` construction plus `match`
-  control flow.
+  and `if let` control flow, including ignored fallback payloads.
 - `collection_operations`: standard collection helpers over arrays and
   borrowed slices.
 - `package_local_modules`: nested package-local module imports that execute
