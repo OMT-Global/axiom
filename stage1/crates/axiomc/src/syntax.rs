@@ -830,13 +830,23 @@ fn find_macro_invocation(line: &str, needle: &str) -> Option<usize> {
             '"' => in_string = true,
             '#' => return None,
             _ => {
-                if line[index..].starts_with(needle) {
+                if line[index..].starts_with(needle)
+                    && line[..index]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|previous| !is_identifier_char(previous))
+                {
                     return Some(index);
                 }
             }
         }
     }
     None
+}
+
+
+fn is_identifier_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
 }
 
 fn synchronize_top_level(lines: &[&str], index: &mut usize) {

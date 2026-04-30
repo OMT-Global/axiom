@@ -315,6 +315,28 @@ print "add_one!(41)"
     }
 
     #[test]
+    fn parser_does_not_expand_macro_suffix_of_longer_invocation_name() {
+        let source = r#"macro_rules! add {
+($value:expr) => {
+$value + 1
+}
+}
+
+let my41: int = 10
+let answer: int = myadd!(41)
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .and_then(|parsed| hir::lower(&parsed))
+            .expect_err("longer macro invocation name should not match add! suffix");
+        assert!(
+            error.message.contains("unknown function")
+                || error.message.contains("unknown value")
+                || error.message.contains("invalid identifier"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn parser_bounds_recursive_declarative_macro_expansion() {
         let source = r#"macro_rules! spin {
 () => {
