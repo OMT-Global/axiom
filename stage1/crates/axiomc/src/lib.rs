@@ -216,13 +216,36 @@ mod tests {
         assert_eq!(mir.statement_count(), 11);
         let rendered = render_rust(&mir);
         assert!(rendered.contains("fn banner(name: String) -> String {"));
-        assert!(rendered.contains("return format!(\"{}{}\", String::from(\"hello \"), name);"));
+        assert!(rendered.contains("return format!(\"{}{}\", \"hello \", name);"));
         assert!(rendered.contains("let answer: i64 = lucky(40);"));
         assert!(rendered.contains("let ready: bool = is_ready(answer);"));
         assert!(rendered.contains("while false {"));
         assert!(rendered.contains("if ready {"));
         assert!(rendered.contains("println!(\"{}\", banner(String::from(\"from stage1\")));"));
         assert!(rendered.contains("println!(\"{}\", ready);"));
+    }
+
+    #[test]
+    fn parser_distinguishes_owned_string_from_borrowed_str() {
+        let source = r#"fn read(label: &str): int {
+print label
+return 1
+}
+
+let literal: &str = "borrowed"
+let owned: String = "owned"
+print read(literal)
+print read(owned)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn read<'a>(label: &'a str) -> i64 {"));
+        assert!(rendered.contains(r#"let literal: &str = "borrowed";"#));
+        assert!(rendered.contains(r#"let owned: String = String::from("owned");"#));
+        assert!(rendered.contains(r#"println!("{}", read(literal));"#));
+        assert!(rendered.contains(r#"println!("{}", read(owned.as_str()));"#));
     }
 
     #[test]
@@ -2776,7 +2799,10 @@ print fs_write("data/../outside.txt", "traversal") == -1
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\ntrue\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\n"
+        );
         assert_eq!(
             fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
             "inside",
@@ -3784,7 +3810,7 @@ true
         let err = check_project(&project).expect_err("expected json type error");
         assert!(
             err.message
-                .contains("expects argument type string, got bool"),
+                .contains("expects argument type String, got bool"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -3824,7 +3850,7 @@ print is_match(\"[a-z]+\", true)
         let err = check_project(&project).expect_err("expected regex type error");
         assert!(
             err.message
-                .contains("expects argument type string, got bool"),
+                .contains("expects argument type String, got bool"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -4518,7 +4544,7 @@ print is_match(\"[a-z]+\", true)
         fs::write(project.join("src/main.ax"), "let count: int = \"nope\"\n")
             .expect("write source");
         let error = check_project(&project).expect_err("type mismatch should fail");
-        assert!(error.message.contains("expects int, got string"));
+        assert!(error.message.contains("expects int, got &str"));
         assert_eq!(error.kind, "type");
     }
 
@@ -4566,7 +4592,7 @@ print is_match(\"[a-z]+\", true)
         assert!(
             error
                 .message
-                .contains("expects argument type int, got string")
+                .contains("expects argument type int, got &str")
         );
         assert_eq!(error.kind, "type");
     }
@@ -4584,7 +4610,7 @@ print is_match(\"[a-z]+\", true)
         .expect("write source");
         let error = check_project(&project)
             .expect_err("borrowed generic wrapper instantiation should enforce type args");
-        assert!(error.message.contains("field \"view\" expects &[string]"));
+        assert!(error.message.contains("field \"view\" expects &[String]"));
         assert!(error.message.contains("got &[int]"));
         assert_eq!(error.kind, "type");
     }
@@ -4686,7 +4712,7 @@ print is_match(\"[a-z]+\", true)
         assert!(
             error
                 .message
-                .contains("Option::Some expects payload type int, got string")
+                .contains("Option::Some expects payload type int, got &str")
         );
         assert_eq!(error.kind, "type");
     }
@@ -4705,7 +4731,7 @@ print is_match(\"[a-z]+\", true)
         assert!(
             error
                 .message
-                .contains("Result::Err expects payload type string, got int")
+                .contains("Result::Err expects payload type String, got int")
         );
         assert_eq!(error.kind, "type");
     }
@@ -4799,7 +4825,7 @@ print is_match(\"[a-z]+\", true)
         )
         .expect("write source");
         let error = check_project(&project).expect_err("return mismatch should fail");
-        assert!(error.message.contains("return expects int, got string"));
+        assert!(error.message.contains("return expects int, got &str"));
         assert_eq!(error.kind, "type");
     }
 
@@ -4837,7 +4863,7 @@ print is_match(\"[a-z]+\", true)
         assert!(
             error
                 .message
-                .contains("`?` cannot propagate Result error type string")
+                .contains("`?` cannot propagate Result error type String")
         );
     }
 
@@ -6087,7 +6113,7 @@ print is_match(\"[a-z]+\", true)
         assert!(
             error
                 .message
-                .contains("map index expects key type string, got int")
+                .contains("map index expects key type String, got int")
         );
         assert_eq!(error.kind, "type");
     }
@@ -6270,7 +6296,7 @@ print is_match(\"[a-z]+\", true)
         )
         .expect("write source");
         let error = check_project(&project).expect_err("payload constructor should typecheck");
-        assert!(error.message.contains("expects payload type string"));
+        assert!(error.message.contains("expects payload type String"));
         assert_eq!(error.kind, "type");
     }
 
