@@ -1,8 +1,11 @@
-.PHONY: test smoke docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
+.PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 
 test: docs-python-exit stage1-test
 
 smoke: stage1-smoke
+
+supply-chain:
+	bash scripts/ci/run-toolchain-supply-chain.sh
 
 docs-python-exit:
 	bash scripts/ci/check-python-exit-docs.sh
