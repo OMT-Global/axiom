@@ -7,6 +7,8 @@ trap 'rm -rf "$tmpdir"' EXIT
 all_closed="$tmpdir/issues-closed.txt"
 one_open="$tmpdir/issues-open.txt"
 missing_state="$tmpdir/issues-missing.txt"
+shadow_makefile="$tmpdir/Makefile"
+original_makefile="$tmpdir/Makefile.original"
 
 cat > "$all_closed" <<'STATES'
 266 CLOSED
@@ -74,6 +76,18 @@ assert_failure_contains one_open "issue #268 is OPEN" \
 assert_failure_contains missing_state "issue #271 state is unavailable" \
   bash scripts/ci/check-python-exit-readiness.sh --json \
     --issue-state-file "$missing_state" \
+    --require-issue-states
+
+cp Makefile "$original_makefile"
+cp Makefile "$shadow_makefile"
+sed '/^stage1-test:/d' "$original_makefile" > "$shadow_makefile"
+printf '\nstage1-test-fast:\n\t@true\n' >> "$shadow_makefile"
+cp "$shadow_makefile" Makefile
+trap 'cp "$original_makefile" Makefile; rm -rf "$tmpdir"' EXIT
+
+assert_failure_contains exact_make_target "Makefile does not expose stage1-test" \
+  bash scripts/ci/check-python-exit-readiness.sh --json \
+    --issue-state-file "$all_closed" \
     --require-issue-states
 
 echo "check-python-exit-readiness regression cases passed"

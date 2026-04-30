@@ -47,7 +47,7 @@ add_check() {
 
 has_make_target() {
   local target="$1"
-  grep -Eq "^${target}:" Makefile
+  grep -Eq "^${target}[[:space:]]*:" Makefile
 }
 
 issue_state_from_file() {
@@ -101,7 +101,9 @@ else
   add_check "vm_disposition_present" "fail" "docs/python-exit-vm-disposition.md is missing"
 fi
 
-if [[ -f docs/python-exit-parity-gate.md ]] && matrix_has_blocked_rows; then
+if [[ ! -f docs/python-exit-parity-gate.md ]]; then
+  add_check "parity_matrix_unblocked" "fail" "Python exit parity matrix is unavailable because docs/python-exit-parity-gate.md is missing"
+elif matrix_has_blocked_rows; then
   add_check "parity_matrix_unblocked" "fail" "Python exit parity matrix still contains blocked rows"
 else
   add_check "parity_matrix_unblocked" "pass" "Python exit parity matrix has no blocked rows"
