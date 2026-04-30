@@ -39,7 +39,7 @@
 //!   manifest flag would not add meaningful isolation in stage1. The
 //!   stage1 client supports both http:// and https:// URLs.
 //!
-//! The eighth through fourteenth modules are stdlib surfaces not tied to a
+//! The eighth through fifteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -57,6 +57,8 @@
 //!   nonblocking channels.
 //! * `std/async.ax` — deterministic task, join, channel, timeout,
 //!   cancellation, and select wrappers over the stage1 async runtime values.
+//! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
+//!   fallback unwrap helpers implemented in Axiom.
 
 use std::path::{Path, PathBuf};
 
@@ -202,6 +204,15 @@ pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_sel
     (
         "http.ax",
         "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
+    ),
+    (
+        "outcome.ax",
+        "pub fn option_is_some<T>(value: Option<T>): bool {\nmatch value {\nSome(_inner) {\nreturn true\n}\nNone {\nreturn false\n}\n}\n}\n\
+pub fn option_is_none<T>(value: Option<T>): bool {\nmatch value {\nSome(_inner) {\nreturn false\n}\nNone {\nreturn true\n}\n}\n}\n\
+pub fn option_unwrap_or<T>(value: Option<T>, fallback: T): T {\nmatch value {\nSome(inner) {\nreturn inner\n}\nNone {\nreturn fallback\n}\n}\n}\n\
+pub fn result_is_ok<T, E>(value: Result<T, E>): bool {\nmatch value {\nOk(_inner) {\nreturn true\n}\nErr(_error) {\nreturn false\n}\n}\n}\n\
+pub fn result_is_err<T, E>(value: Result<T, E>): bool {\nmatch value {\nOk(_inner) {\nreturn false\n}\nErr(_error) {\nreturn true\n}\n}\n}\n\
+pub fn result_unwrap_or<T, E>(value: Result<T, E>, fallback: T): T {\nmatch value {\nOk(inner) {\nreturn inner\n}\nErr(_error) {\nreturn fallback\n}\n}\n}\n",
     ),
 ];
 
