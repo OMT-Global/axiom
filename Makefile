@@ -1,4 +1,4 @@
-.PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
+.PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 
 test: docs-python-exit stage1-test
 
@@ -16,6 +16,11 @@ docs-python-exit-test:
 
 stage1-test:
 	cargo test --manifest-path stage1/Cargo.toml
+	$(MAKE) stage1-proof-test
+
+stage1-proof-test:
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
+	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
 
 stage1-conformance:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/conformance --json
