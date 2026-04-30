@@ -27,7 +27,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::{Visibility, parse_program};
+    use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -86,6 +86,20 @@ mod tests {
             .expect("host target")
     }
 
+    fn rust_target_installed(target: &str) -> bool {
+        let output = Command::new("rustup")
+            .args(["target", "list", "--installed"])
+            .output()
+            .expect("run rustup target list --installed");
+        assert!(
+            output.status.success(),
+            "rustup target list --installed failed"
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.trim() == target)
+    }
+
     fn rustc_command() -> Command {
         let rustc = trusted_rustc_path();
         // The test harness resolves rustc to a full path before execution; PATH is trusted only
@@ -113,6 +127,11 @@ mod tests {
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
         command_for_executable(path).expect("prepare compiled binary command")
+    }
+
+    fn loopback_socket_bind_available() -> bool {
+        std::net::TcpListener::bind(("127.0.0.1", 0)).is_ok()
+            && std::net::UdpSocket::bind(("127.0.0.1", 0)).is_ok()
     }
 
     #[cfg(unix)]
@@ -404,6 +423,63 @@ print fail()
     }
 
     #[test]
+    fn parser_recovery_reports_stable_top_level_errors() {
+        let source = "import math.ax\nlet answer int = 42\nprint answer\nelse {\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should report all top-level parse errors");
+
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(2), Some(4)]
+        );
+        assert_eq!(
+            diagnostics[0].message,
+            "import must use a quoted relative path"
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+        assert_eq!(diagnostics[2].message, "unexpected else block");
+    }
+
+    #[test]
+    fn parser_recovery_resynchronizes_top_level_statements_from_their_start() {
+        let source =
+            "if true {\nfor value in [1] {\nprint value\n}\n}\nlet answer int = 42\nprint answer\n";
+        let diagnostics = parse_program_with_recovery(source, Path::new("main.ax"))
+            .expect_err("recovering parser should skip the failed top-level statement body");
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.line)
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(6)]
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("does not support `for` loops yet")
+        );
+        assert_eq!(diagnostics[1].message, "let binding is missing ':'");
+    }
+
+    #[test]
+    fn parser_error_preserves_related_recovery_diagnostics_for_cli_payloads() {
+        let source = "import math.ax\nlet answer int = 42\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("default parser should fail with primary diagnostic");
+
+        assert_eq!(error.message, "import must use a quoted relative path");
+        assert_eq!(error.related.len(), 1);
+        assert_eq!(error.related[0].message, "let binding is missing ':'");
+        assert_eq!(error.related[0].line, Some(2));
+    }
+
+    #[test]
     fn parser_rejects_match_arm_guards() {
         let source = "enum OptionInt {\nSome(int)\nNone\n}\n\nfn describe(value: OptionInt): int {\nmatch value {\nSome(n) if n > 0 {\nreturn n\n}\nNone {\nreturn 0\n}\n}\n}\n";
         let error = parse_program(source, Path::new("main.ax"))
@@ -654,6 +730,19 @@ print fail()
         assert!(rendered.contains("fn axiom_resolve_public_socket_addrs("));
         assert!(rendered.contains("Network intrinsics reject private, loopback, link-local,"));
         assert!(rendered.contains("addr.to_ipv4_mapped()"));
+    }
+
+    #[test]
+    fn render_rust_clamps_socket_timeouts_and_bounds_tcp_request_reads() {
+        let source = "print true\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("timeout_ms.clamp(1, 30_000)"));
+        assert!(rendered.contains("let mut total_read = 0usize;"));
+        assert!(rendered.contains("if total_read >= 65_536"));
+        assert!(rendered.contains("stream.shutdown(std::net::Shutdown::Write).ok()?;"));
     }
 
     #[test]
@@ -2443,8 +2532,11 @@ print strlen("hello")
             "import \"std/time.ax\"\nlet start: Instant = now()\nlet pause: Duration = duration_ms(0)\nprint start.ms > 0\nprint now_ms() > 0\nprint sleep(pause) == 0\nlet elapsed: int = elapsed_ms(start)\nprint elapsed == elapsed\n",
         )
         .expect("write test");
-        fs::write(project.join("src/main_test.stdout"), "true\ntrue\ntrue\ntrue\n")
-            .expect("write golden");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\ntrue\ntrue\n",
+        )
+        .expect("write golden");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
@@ -2826,6 +2918,91 @@ print strlen("hello")
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_crypto_mac_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-crypto-mac-app");
+        create_project(&project, Some("stdlib-crypto-mac-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-crypto-mac-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/crypto_mac.ax\"\nprint hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\")\nprint constant_time_eq(hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\"), \"f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\")\nprint constant_time_eq(hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nprint constant_time_eq(\"short\", \"shorter\")\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\ntrue\nfalse\nfalse\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\ntrue\nfalse\nfalse\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_crypto_mac_without_crypto_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-crypto-mac-denied");
+        create_project(&project, Some("stdlib-crypto-mac-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-crypto-mac-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/crypto_mac.ax\"\nprint hmac_sha256(\"key\", \"message\")\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message
+                .contains("requires [capabilities].crypto = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_imports_synthetic_stdlib_net_module() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-net-app");
@@ -2849,18 +3026,19 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\n";
+        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\nmatch tcp_listen_loopback_once(\"tcp pong\", 1000) {\nSome(port) {\nmatch tcp_dial(\"127.0.0.1\", port, \"tcp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"tcp none\"\n}\n}\n}\nNone {\nprint \"tcp listen none\"\n}\n}\nmatch udp_bind_loopback_once(\"udp pong\", 1000) {\nSome(port) {\nmatch udp_send_recv(\"127.0.0.1\", port, \"udp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"udp none\"\n}\n}\n}\nNone {\nprint \"udp bind none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout == "true\n" || stdout == "false\n",
-            "unexpected stdout for stdlib_net smoke: {stdout:?}"
-        );
+        let expected = if loopback_socket_bind_available() {
+            "false\ntcp pong\nudp pong\n"
+        } else {
+            "false\ntcp listen none\nudp bind none\n"
+        };
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
     }
 
     #[test]
@@ -2889,7 +3067,7 @@ print strlen("hello")
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_a) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+            "import \"std/net.ax\"\nmatch tcp_listen_loopback_once(\"pong\", 1000) {\nSome(_port) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
         )
         .expect("write source");
 
@@ -2971,12 +3149,12 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nprint object3(field_string(\"name\", \"agent\"), field_int(\"retries\", 3), field_bool(\"ready\", true))\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "42\nagent\ntrue\n7\n\"agent\"\nnone\n",
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n",
         )
         .expect("write golden");
 
@@ -2986,7 +3164,7 @@ print strlen("hello")
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "42\nagent\ntrue\n7\n\"agent\"\nnone\n"
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3036,6 +3214,108 @@ print strlen("hello")
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
             "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_string_builder_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-string-builder-app");
+        create_project(&project, Some("stdlib-string-builder-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-string-builder-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/string_builder.ax\"\nlet empty: StringBuilder = builder()\nlet greeting: StringBuilder = push_str(empty, \"hello\")\nlet spaced: StringBuilder = push_str(greeting, \" \")\nlet finished: StringBuilder = push_str(spaced, \"stdlib\")\nprint finish(finished)\nlet seeded: StringBuilder = from_string(\"first\")\nlet second: StringBuilder = push_line(seeded, \" line\")\nlet third: StringBuilder = push_str(second, \"second line\")\nprint finish(third)\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "hello stdlib\nfirst line\nsecond line\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "hello stdlib\nfirst line\nsecond line\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_log_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-log-app");
+        create_project(&project, Some("stdlib-log-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-log-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/log.ax\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nprint event(\"info\", \"started\", attrs)\nlet attrs_for_log: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nlet written: int = info_attrs(\"started\", attrs_for_log)\nprint written > 0\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/log.ax\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nprint event(\"info\", \"started\", attrs)\n",
+        )
+        .expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\ntrue\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3455,6 +3735,23 @@ print strlen("hello")
             err.message.contains("unknown stdlib module"),
             "unexpected diagnostic: {err:?}",
         );
+    }
+
+    #[test]
+    fn stage1_project_suggests_similar_stdlib_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-suggestion");
+        create_project(&project, Some("stdlib-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/tmie.ax\"\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected unknown stdlib module error");
+        assert!(err.message.contains("unknown stdlib module"));
+        assert!(err.message.contains("did you mean \"time.ax\"?"));
+        assert_eq!(err.kind, "import");
     }
 
     #[test]
@@ -4036,6 +4333,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("missing function should fail");
         assert!(error.message.contains("undefined function"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_local_for_undefined_variable() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-variable-suggestion");
+        create_project(&project, Some("missing-variable-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let answer: int = 42\nprint anwser\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("missing variable should fail");
+        assert!(error.message.contains("undefined variable \"anwser\""));
+        assert!(error.message.contains("did you mean \"answer\"?"));
         assert_eq!(error.kind, "type");
     }
 
@@ -4732,6 +5046,23 @@ print strlen("hello")
         .expect("write source");
         let error = check_project(&project).expect_err("missing field should fail");
         assert!(error.message.contains("is missing field"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_suggests_similar_struct_field() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("struct-field-suggestion");
+        create_project(&project, Some("struct-field-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct User {\nname: string\ncount: int\n}\n\nlet user: User = User { name: \"agent\", count: 1 }\nprint user.naem\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("unknown field should fail");
+        assert!(error.message.contains("has no field \"naem\""));
+        assert!(error.message.contains("did you mean \"name\"?"));
         assert_eq!(error.kind, "type");
     }
 
@@ -5461,6 +5792,23 @@ print strlen("hello")
     }
 
     #[test]
+    fn check_project_suggests_similar_match_variant() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("match-variant-suggestion");
+        create_project(&project, Some("match-variant-suggestion-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Status {\nReady\nFailed\n}\n\nfn label(status: Status): string {\nmatch status {\nReday {\nreturn \"ready\"\n}\nFailed {\nreturn \"failed\"\n}\n}\n}\n\nprint \"skip\"\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("match should reject unknown variant");
+        assert!(error.message.contains("has no variant \"Reday\""));
+        assert!(error.message.contains("did you mean \"Ready\"?"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn check_project_rejects_missing_payload_match_binding() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-payload-binding");
@@ -5745,6 +6093,32 @@ print strlen("hello")
 
         assert_eq!(output.target.as_deref(), Some(target.as_str()));
         assert!(project.join("dist/targeted-build-app").exists());
+    }
+
+    #[test]
+    fn build_project_wasm_alias_emits_wasm_artifact() {
+        if !rust_target_installed("wasm32-wasip1") {
+            eprintln!("skipping wasm build test; wasm32-wasip1 target is not installed");
+            return;
+        }
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("targeted-wasm-build");
+        create_project(&project, Some("targeted-wasm-build-app")).expect("create project");
+
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                target: Some(String::from("wasm32")),
+                package: None,
+                debug: false,
+            },
+        )
+        .expect("build project with wasm alias");
+
+        assert_eq!(output.target.as_deref(), Some("wasm32-wasip1"));
+        assert!(output.binary.ends_with("targeted-wasm-build-app.wasm"));
+        assert!(project.join("dist/targeted-wasm-build-app.wasm").exists());
     }
 
     #[test]

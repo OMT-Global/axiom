@@ -1,4 +1,4 @@
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{Diagnostic, message_with_suggestion};
 use crate::manifest::{CapabilityConfig, CapabilityKind};
 use crate::syntax;
 use serde::Serialize;
@@ -3566,7 +3566,11 @@ fn lower_stmt(
                     .ok_or_else(|| {
                         Diagnostic::new(
                             "type",
-                            format!("enum {enum_name:?} has no variant {:?}", arm.variant),
+                            message_with_suggestion(
+                                format!("enum {enum_name:?} has no variant {:?}", arm.variant),
+                                &arm.variant,
+                                variant_defs.iter().map(|variant| variant.name.as_str()),
+                            ),
                         )
                         .with_span(arm.line, arm.column)
                     })?;
@@ -4115,10 +4119,11 @@ fn lower_expr_with_expected(
                     ty: Type::Enum(variant.enum_name.clone()),
                 });
             }
-            Err(
-                Diagnostic::new("type", format!("undefined variable {name:?}"))
-                    .with_span(*line, *column),
+            Err(Diagnostic::new(
+                "type",
+                message_with_suggestion(format!("undefined variable {name:?}"), name, env.keys()),
             )
+            .with_span(*line, *column))
         }
         syntax::Expr::Call {
             name,
@@ -4497,6 +4502,206 @@ fn lower_expr_with_expected(
                     ty: Type::Option(Box::new(Type::String)),
                 });
             }
+            if name == "net_tcp_listen_loopback_once" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_tcp_listen_loopback_once expects 2 arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let response =
+                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if response.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_tcp_listen_loopback_once expects argument 1 type string, got {}",
+                            response.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let timeout = lower_expr_with_expected(&args[1], Some(&Type::Int), env, ctx)?;
+                if timeout.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_tcp_listen_loopback_once expects argument 2 type int, got {}",
+                            timeout.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&response, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![response, timeout],
+                    ty: Type::Option(Box::new(Type::Int)),
+                });
+            }
+            if name == "net_tcp_dial" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 4 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("net_tcp_dial expects 4 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let host = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if host.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("net_tcp_dial expects argument 1 type string, got {}", host.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let port = lower_expr_with_expected(&args[1], Some(&Type::Int), env, ctx)?;
+                if port.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("net_tcp_dial expects argument 2 type int, got {}", port.ty()),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                let message = lower_expr_with_expected(&args[2], Some(&Type::String), env, ctx)?;
+                if message.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_tcp_dial expects argument 3 type string, got {}",
+                            message.ty()
+                        ),
+                    )
+                    .with_span(args[2].line(), args[2].column()));
+                }
+                let timeout = lower_expr_with_expected(&args[3], Some(&Type::Int), env, ctx)?;
+                if timeout.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_tcp_dial expects argument 4 type int, got {}",
+                            timeout.ty()
+                        ),
+                    )
+                    .with_span(args[3].line(), args[3].column()));
+                }
+                move_lowered_value(&host, env)?;
+                move_lowered_value(&message, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![host, port, message, timeout],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
+            if name == "net_udp_bind_loopback_once" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_bind_loopback_once expects 2 arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let response =
+                    lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if response.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_bind_loopback_once expects argument 1 type string, got {}",
+                            response.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let timeout = lower_expr_with_expected(&args[1], Some(&Type::Int), env, ctx)?;
+                if timeout.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_bind_loopback_once expects argument 2 type int, got {}",
+                            timeout.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&response, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![response, timeout],
+                    ty: Type::Option(Box::new(Type::Int)),
+                });
+            }
+            if name == "net_udp_send_recv" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 4 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("net_udp_send_recv expects 4 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let host = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if host.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_send_recv expects argument 1 type string, got {}",
+                            host.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let port = lower_expr_with_expected(&args[1], Some(&Type::Int), env, ctx)?;
+                if port.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_send_recv expects argument 2 type int, got {}",
+                            port.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                let message = lower_expr_with_expected(&args[2], Some(&Type::String), env, ctx)?;
+                if message.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_send_recv expects argument 3 type string, got {}",
+                            message.ty()
+                        ),
+                    )
+                    .with_span(args[2].line(), args[2].column()));
+                }
+                let timeout = lower_expr_with_expected(&args[3], Some(&Type::Int), env, ctx)?;
+                if timeout.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "net_udp_send_recv expects argument 4 type int, got {}",
+                            timeout.ty()
+                        ),
+                    )
+                    .with_span(args[3].line(), args[3].column()));
+                }
+                move_lowered_value(&host, env)?;
+                move_lowered_value(&message, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![host, port, message, timeout],
+                    ty: Type::Option(Box::new(Type::String)),
+                });
+            }
             if name == "http_get" {
                 // HTTP GET shares the `net` capability surface: any code that
                 // can open a raw TCP socket could implement HTTP itself, so a
@@ -4698,6 +4903,99 @@ fn lower_expr_with_expected(
                     name: name.clone(),
                     args: vec![lowered],
                     ty: Type::String,
+                });
+            }
+            if name == "crypto_hmac_sha256" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Crypto,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("crypto_hmac_sha256 expects 2 arguments, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let key = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if key.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_hmac_sha256 expects a string key, got {}",
+                            key.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&key, env)?;
+                let message = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if message.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_hmac_sha256 expects a string message, got {}",
+                            message.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&message, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![key, message],
+                    ty: Type::String,
+                });
+            }
+            if name == "crypto_constant_time_eq" {
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Crypto,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 2 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_constant_time_eq expects 2 arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let left = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if left.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_constant_time_eq expects a string left argument, got {}",
+                            left.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&left, env)?;
+                let right = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                if right.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "crypto_constant_time_eq expects a string right argument, got {}",
+                            right.ty()
+                        ),
+                    )
+                    .with_span(args[1].line(), args[1].column()));
+                }
+                move_lowered_value(&right, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![left, right],
+                    ty: Type::Bool,
                 });
             }
             if name == "first" || name == "last" {
@@ -4905,10 +5203,17 @@ fn lower_expr_with_expected(
             if let Some(variant) = resolve_variant(name, expected, ctx, *line, *column)? {
                 return lower_variant_constructor(name, args, *line, *column, variant, env, ctx);
             }
-            Err(
-                Diagnostic::new("type", format!("undefined function {name:?}"))
-                    .with_span(*line, *column),
+            Err(Diagnostic::new(
+                "type",
+                message_with_suggestion(
+                    format!("undefined function {name:?}"),
+                    name,
+                    ctx.functions
+                        .keys()
+                        .map(|candidate| candidate.rsplit("__").next().unwrap_or(candidate)),
+                ),
             )
+            .with_span(*line, *column))
         }
         syntax::Expr::MethodCall {
             base,
@@ -5276,7 +5581,11 @@ fn lower_expr_with_expected(
                 let expected = field_defs.get(&field.name).ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {concrete_name:?} has no field {:?}", field.name),
+                        message_with_suggestion(
+                            format!("struct {concrete_name:?} has no field {:?}", field.name),
+                            &field.name,
+                            field_defs.keys(),
+                        ),
                     )
                     .with_span(field.line, field.column)
                 })?;
@@ -5408,7 +5717,11 @@ fn lower_expr_with_expected(
                 .ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {struct_name:?} has no field {field:?}"),
+                        message_with_suggestion(
+                            format!("struct {struct_name:?} has no field {field:?}"),
+                            field,
+                            struct_def.fields.iter().map(|entry| entry.name.as_str()),
+                        ),
                     )
                     .with_span(*line, *column)
                 })?;
@@ -5978,7 +6291,11 @@ fn lower_projection_base_expr(
                 .ok_or_else(|| {
                     Diagnostic::new(
                         "type",
-                        format!("struct {struct_name:?} has no field {field:?}"),
+                        message_with_suggestion(
+                            format!("struct {struct_name:?} has no field {field:?}"),
+                            field,
+                            struct_def.fields.iter().map(|entry| entry.name.as_str()),
+                        ),
                     )
                     .with_span(*line, *column)
                 })?;
