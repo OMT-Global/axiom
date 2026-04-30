@@ -3529,12 +3529,12 @@ true
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/collections.ax\"\nlet numbers: [int] = [4, 5, 6, 7]\nprint count<int>(numbers[:])\nprint is_empty<int>(numbers[:])\nprint has_items<int>(numbers[:])\nlet middle: &[int] = window<int>(numbers[:], 1, 3)\nprint count<int>(middle)\nprint first(middle)\nprint last(middle)\nlet prefix: &[int] = take<int>(numbers[:], 2)\nprint last(prefix)\nlet suffix: &[int] = skip<int>(numbers[:], 2)\nprint first(suffix)\nlet words: [string] = [\"build\", \"test\", \"ship\"]\nprint count<string>(words[:])\nlet empty_words: &[string] = take<string>(words[:], 0)\nprint is_empty<string>(empty_words)\n";
+        let source = "import \"std/collections.ax\"\nlet numbers: [int] = [4, 5, 6, 7]\nprint count_mut<int>(numbers[:])\nprint count<int>(numbers[:])\nprint is_empty<int>(numbers[:])\nprint has_items<int>(numbers[:])\nlet middle: &[int] = window<int>(numbers[:], 1, 3)\nprint count<int>(middle)\nprint first(middle)\nprint last(middle)\nlet prefix: &[int] = take<int>(numbers[:], 2)\nprint last(prefix)\nlet suffix: &[int] = skip<int>(numbers[:], 2)\nprint first(suffix)\nlet words: [string] = [\"build\", \"test\", \"ship\"]\nprint count<string>(words[:])\nlet empty_words: &[string] = take<string>(words[:], 0)\nprint is_empty<string>(empty_words)\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n",
+            "4\n4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n",
         )
         .expect("write golden");
 
@@ -3544,7 +3544,7 @@ true
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
+            "4\n4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -4404,6 +4404,16 @@ print is_match(\"[a-z]+\", true)
             (
                 "mutable_borrow_while_shared_live",
                 "mutable_borrow_while_shared_live",
+                "cannot create mutable borrow of value",
+            ),
+            (
+                "shared_borrow_while_mutable_live",
+                "shared_borrow_while_mutable_live",
+                "cannot create shared borrow of value",
+            ),
+            (
+                "double_mutable_borrow",
+                "mutable_borrow_while_mutable_live",
                 "cannot create mutable borrow of value",
             ),
             (
