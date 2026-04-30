@@ -69,6 +69,16 @@ def parse_json(text: str) -> dict[str, Any]:
         return {}
 
 
+def parse_json_result(text: str) -> tuple[bool, dict[str, Any]]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return False, {}
+    if not isinstance(payload, dict):
+        return False, {}
+    return True, payload
+
+
 def file_size(path: Path) -> int | None:
     if path.exists():
         return path.stat().st_size
@@ -89,7 +99,7 @@ def diagnostics_quality(payload: dict[str, Any], returncode: int) -> dict[str, A
     }
 
 
-def capability_manifest_coverage(payload: dict[str, Any]) -> dict[str, Any]:
+def capability_manifest_coverage(payload: dict[str, Any], *, json_valid: bool) -> dict[str, Any]:
     capabilities = payload.get("capabilities", {})
     if isinstance(capabilities, list):
         declared = [entry.get("name") for entry in capabilities if isinstance(entry, dict) and entry.get("name")]
@@ -99,22 +109,26 @@ def capability_manifest_coverage(payload: dict[str, Any]) -> dict[str, Any]:
             if isinstance(entry, dict) and entry.get("name") and entry.get("enabled")
         ]
         return {
-            "json": True,
+            "json": json_valid,
             "declared": sorted(declared),
             "enabled": sorted(enabled),
             "enabled_count": len(enabled),
             "declared_count": len(declared),
         }
     if not isinstance(capabilities, dict):
-        return {"json": bool(payload), "declared": [], "enabled": []}
+        return {"json": json_valid, "declared": [], "enabled": []}
     enabled = [name for name, value in capabilities.items() if value]
     return {
-        "json": True,
+        "json": json_valid,
         "declared": sorted(capabilities),
         "enabled": sorted(enabled),
         "enabled_count": len(enabled),
         "declared_count": len(capabilities),
     }
+
+
+def output_matches(left: subprocess.CompletedProcess[str], right: subprocess.CompletedProcess[str]) -> bool:
+    return left.returncode == right.returncode and left.stdout == right.stdout
 
 
 def build_axiomc() -> None:
@@ -154,6 +168,7 @@ def compare_workload(workload: Workload, temp_dir: Path) -> dict[str, Any]:
 
     check_ms, check = run_timed([str(AXIOMC_BIN), "check", str(workload.project), "--json"], cwd=REPO_ROOT)
     caps_ms, caps = run_timed([str(AXIOMC_BIN), "caps", str(workload.project), "--json"], cwd=REPO_ROOT)
+    caps_json_valid, caps_payload = parse_json_result(caps.stdout)
 
     return {
         "kind": workload.kind,
@@ -179,11 +194,11 @@ def compare_workload(workload: Workload, temp_dir: Path) -> dict[str, Any]:
         "capability_manifest_coverage": {
             "elapsed_ms": caps_ms,
             "returncode": caps.returncode,
-            **capability_manifest_coverage(parse_json(caps.stdout)),
+            **capability_manifest_coverage(caps_payload, json_valid=caps_json_valid),
         },
         "stdout_match": {
-            "axiom_go": axiom_run.stdout == go_run.stdout,
-            "axiom_rust": axiom_run.stdout == rust_run.stdout,
+            "axiom_go": output_matches(axiom_run, go_run),
+            "axiom_rust": output_matches(axiom_run, rust_run),
         },
     }
 
