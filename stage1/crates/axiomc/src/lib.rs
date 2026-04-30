@@ -356,6 +356,25 @@ return add_one!(41)
     }
 
     #[test]
+    fn parser_expands_macro_parameters_with_shared_prefixes() {
+        let source = r#"macro_rules! pick_second {
+($a:expr, $ab:expr) => {
+$ab
+}
+}
+
+let answer: int = pick_second!(1, 2)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 2;"));
+        assert!(!rendered.contains("1b;"));
+    }
+
+    #[test]
     fn parser_bounds_recursive_declarative_macro_expansion() {
         let source = r#"macro_rules! spin {
 () => {

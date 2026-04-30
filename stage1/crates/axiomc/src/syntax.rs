@@ -778,10 +778,7 @@ fn expand_macro_line_once(
             .with_span(line_no, start + 1),
         ]);
     }
-    let mut expansion = rule.template.clone();
-    for (param, arg) in rule.params.iter().zip(args) {
-        expansion = expansion.replace(&format!("${param}"), arg);
-    }
+    let expansion = render_macro_expansion(&rule.template, &rule.params, &args);
     let before = &line[..start];
     let after = &line[close + 1..];
     let invocation_is_statement = before.trim().is_empty() && after.trim().is_empty();
@@ -856,6 +853,44 @@ fn find_macro_invocation(line: &str, needle: &str) -> Option<usize> {
 
 fn is_identifier_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+
+fn render_macro_expansion(template: &str, params: &[String], args: &[&str]) -> String {
+    let mut output = String::new();
+    let mut chars = template.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if ch != '$' {
+            output.push(ch);
+            continue;
+        }
+        let name_start = index + ch.len_utf8();
+        let Some((_, first)) = chars.peek().copied() else {
+            output.push(ch);
+            continue;
+        };
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            output.push(ch);
+            continue;
+        }
+        let mut name_end = name_start;
+        while let Some((next_index, next_ch)) = chars.peek().copied() {
+            if is_identifier_char(next_ch) {
+                name_end = next_index + next_ch.len_utf8();
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        let name = &template[name_start..name_end];
+        if let Some(position) = params.iter().position(|param| param == name) {
+            output.push_str(args[position]);
+        } else {
+            output.push('$');
+            output.push_str(name);
+        }
+    }
+    output
 }
 
 fn synchronize_top_level(lines: &[&str], index: &mut usize) {
