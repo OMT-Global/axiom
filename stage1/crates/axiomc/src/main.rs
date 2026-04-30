@@ -262,16 +262,26 @@ fn main() {
             json,
             command,
         } => match command {
-            Some(CapsCommand::Diff { old, new }) => match diff_caps_files(&old, &new) {
-                Ok(report) => match json_contract::to_pretty_string(&report) {
-                    Ok(output) => {
-                        println!("{output}");
-                        if report.escalated { 1 } else { 0 }
+            Some(CapsCommand::Diff { old, new }) => {
+                if path.is_some() {
+                    print_error(
+                        "caps",
+                        Diagnostic::new("caps", "`caps diff` does not accept PATH"),
+                        json,
+                    )
+                } else {
+                    match diff_caps_files(&old, &new) {
+                        Ok(report) => match json_contract::to_pretty_string(&report) {
+                            Ok(output) => {
+                                println!("{output}");
+                                if report.escalated { 1 } else { 0 }
+                            }
+                            Err(error) => print_error("caps", error, false),
+                        },
+                        Err(error) => print_error("caps", error, json),
                     }
-                    Err(error) => print_error("caps", error, false),
-                },
-                Err(error) => print_error("caps", error, json),
-            },
+                }
+            }
             None => {
                 let project = path.unwrap_or_else(|| PathBuf::from("."));
                 match project_capabilities(&project) {
@@ -1088,6 +1098,32 @@ mod tests {
                 assert_eq!(new, PathBuf::from("new-caps.json"));
             }
             other => panic!("expected caps diff command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn caps_diff_cli_retains_path_for_runtime_rejection() {
+        let cli = Cli::try_parse_from([
+            "axiomc",
+            "caps",
+            "my-project",
+            "diff",
+            "old-caps.json",
+            "new-caps.json",
+        ])
+        .expect("parse caps diff command with path");
+
+        match cli.command {
+            Command::Caps {
+                path,
+                command: Some(CapsCommand::Diff { old, new }),
+                ..
+            } => {
+                assert_eq!(path, Some(PathBuf::from("my-project")));
+                assert_eq!(old, PathBuf::from("old-caps.json"));
+                assert_eq!(new, PathBuf::from("new-caps.json"));
+            }
+            other => panic!("expected caps diff command with path, got {other:?}"),
         }
     }
 
