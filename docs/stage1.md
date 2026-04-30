@@ -164,6 +164,9 @@ Current proof points:
 - `stage1/examples/stdlib_string_builder` extends AG4.1 with `import "std/string_builder.ax"`, bringing an owned string accumulator into scope without claiming growable generic vectors or hash maps.
 - `stage1/examples/stdlib_log` extends AG4.1 with `import "std/log.ax"`, bringing deterministic JSON-line event formatting and stderr logging into scope without host logging sinks or replay buffers.
 - `stage1/examples/stdlib_http` extends AG4.1 with `import "std/http.ax"`, bringing `get(url)` into scope on top of a new blocking HTTP/1.0 client for `http://` and `https://` URLs; it shares the importing package's `[capabilities] net` flag with `std/net.ax` and keeps its smoke deterministic by pointing at a closed local port so the `None` branch always fires.
+- `stage1/examples/proof_cli` closes the first AG5.3 proof workload with a multi-package CLI fixture that pulls command and render helpers from separate local packages while staying fully inside the `axiomc` workflow and exercising capability-gated `std/env.ax` and `std/time.ax`.
+- `stage1/examples/proof_worker` closes the queue-style AG5.3 proof workload with a deterministic worker fixture built on `std/async.ax`, `std/env.ax`, and `std/time.ax`.
+- `stage1/examples/proof_http_service` closes the small-service AG5.3 proof workload with a checked-in HTTP response fixture that routes request metadata from `std/env.ax`, stamps liveness with `std/time.ax`, and renders the response body through `std/json.ax`.
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,
