@@ -61,6 +61,11 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/mo
 # Inspect capability requirements
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 
+# Publish to a local static registry tree and build/validate its index
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
+
 # Format source, generate docs, and run benchmark entrypoints
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
