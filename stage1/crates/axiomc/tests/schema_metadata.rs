@@ -31,6 +31,15 @@ fn editor_metadata_schemas_are_parseable_and_current() {
         compiler_schema["$id"],
         "https://axiom.omt.global/schemas/axiom.stage1.v1.schema.json"
     );
+    let commands = compiler_schema["properties"]["command"]["enum"]
+        .as_array()
+        .expect("compiler schema command enum");
+    for command in ["check", "build", "test", "caps", "bench", "repl"] {
+        assert!(
+            commands.iter().any(|value| value == command),
+            "compiler schema includes {command} command envelopes"
+        );
+    }
     assert_eq!(
         manifest_schema["$id"],
         "https://axiom.omt.global/schemas/axiom.toml.schema.json"

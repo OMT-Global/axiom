@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://axiom.omt.global/schemas/axiom.stage1.v1.schema.json",
   "title": "Axiom stage1 compiler JSON envelope",
-  "description": "Versioned machine-readable output emitted by axiomc check, build, test, and caps with --json.",
+  "description": "Versioned machine-readable output emitted by axiomc commands with --json.",
   "type": "object",
   "required": [
     "schema_version",
@@ -21,7 +21,9 @@
         "check",
         "build",
         "test",
-        "caps"
+        "caps",
+        "bench",
+        "repl"
       ]
     },
     "project": {
