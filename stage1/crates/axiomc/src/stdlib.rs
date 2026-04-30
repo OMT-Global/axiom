@@ -126,12 +126,21 @@ pub fn constant_time_eq(left: string, right: string): bool {\nreturn crypto_cons
         "pub fn parse_int(text: string): Option<int> {\nreturn json_parse_int(text)\n}\n\
 pub fn parse_bool(text: string): Option<bool> {\nreturn json_parse_bool(text)\n}\n\
 pub fn parse_string(text: string): Option<string> {\nreturn json_parse_string(text)\n}\n\
+pub fn parse_field_int(text: string, key: string): Option<int> {\nreturn json_parse_field_int(text, key)\n}\n\
+pub fn parse_field_bool(text: string, key: string): Option<bool> {\nreturn json_parse_field_bool(text, key)\n}\n\
+pub fn parse_field_string(text: string, key: string): Option<string> {\nreturn json_parse_field_string(text, key)\n}\n\
 pub fn stringify_int(value: int): string {\nreturn json_stringify_int(value)\n}\n\
 pub fn stringify_bool(value: bool): string {\nreturn json_stringify_bool(value)\n}\n\
 pub fn stringify_string(value: string): string {\nreturn json_stringify_string(value)\n}\n\
 pub fn field_string(key: string, value: string): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_string(value)\n}\n\
 pub fn field_int(key: string, value: int): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_int(value)\n}\n\
 pub fn field_bool(key: string, value: bool): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_bool(value)\n}\n\
+pub fn schema_field_string(key: string): string {\nreturn json_stringify_string(key) + \":{\\\"type\\\":\\\"string\\\"}\"\n}\n\
+pub fn schema_field_int(key: string): string {\nreturn json_stringify_string(key) + \":{\\\"type\\\":\\\"integer\\\"}\"\n}\n\
+pub fn schema_field_bool(key: string): string {\nreturn json_stringify_string(key) + \":{\\\"type\\\":\\\"boolean\\\"}\"\n}\n\
+pub fn schema_object1(field: string): string {\nreturn \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\" + field + \"}}\"\n}\n\
+pub fn schema_object2(first_field: string, second_field: string): string {\nreturn \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\" + first_field + \",\" + second_field + \"}}\"\n}\n\
+pub fn schema_object3(first_field: string, second_field: string, third_field: string): string {\nreturn \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\" + first_field + \",\" + second_field + \",\" + third_field + \"}}\"\n}\n\
 pub fn object1(field: string): string {\nreturn \"{\" + field + \"}\"\n}\n\
 pub fn object2(first_field: string, second_field: string): string {\nreturn \"{\" + first_field + \",\" + second_field + \"}\"\n}\n\
 pub fn object3(first_field: string, second_field: string, third_field: string): string {\nreturn \"{\" + first_field + \",\" + second_field + \",\" + third_field + \"}\"\n}\n",
