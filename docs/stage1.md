@@ -45,6 +45,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 ```
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
@@ -115,6 +116,7 @@ still far from the stated 1.0 target for service and agent workloads.
 ### Backend and tooling gaps
 
 - Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
+- The backend-selection surface is only preparatory backend plumbing for later native-backend expansion; today `generated-rust` is the only implemented backend, so this branch is part of #105 rather than closure for it.
 - Generated-Rust builds now use a persistent per-artifact cache keyed by
   compiler version, target, debug mode, manifest/lockfile hash, rendered Rust,
   module source hashes, and dependency imports. Cache hits skip `rustc`, cache
@@ -124,9 +126,12 @@ still far from the stated 1.0 target for service and agent workloads.
   emits generated Rust source markers, and writes a JSON source-map sidecar for
   Axiom file/line/column positions; full Axiom-native debugger stepping remains
   a direct-backend follow-on.
-- `axiomc fmt`, `axiomc bench`, `axiomc doc`, and the stage1 scratch `repl`
-  now exist as bootstrap-grade toolchain commands. Publisher, full LSP, and
-  debugger surfaces remain open.
+- `axiomc fmt`, `axiomc bench`, `axiomc doc`, the stage1 scratch `repl`, and a
+  bounded `axiomc lsp` analyzer now exist as bootstrap-grade toolchain
+  commands. The LSP endpoint currently serves compiler-backed diagnostics over
+  JSON-RPC stdio; hover, goto-definition, completion, rename, code actions, and
+  full package-graph analysis remain open. See [Stage1 LSP analyzer](stage1-lsp.md).
+  Publisher, full LSP, and debugger surfaces remain open.
 - Diagnostics are still intentionally minimal: useful JSON now includes stable ownership codes and top-level parser recovery, but checker recovery, span quality, and note richness are still limited.
 - Extended validation now carries a small performance regression gate: stage1 `axiomc build` is benchmarked across representative compute (`hello`), I/O/capability (`capabilities`), and concurrency (`stdlib_async`) workloads against checked-in Go and Rust reference builds, with separate cold-build and warm-cache budget multipliers to catch obvious compiler-path regressions without making PR fast CI noisy.
 
