@@ -1,6 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::manifest::CapabilityDescriptor;
-use crate::project::{BuildOutput, CheckOutput, TestOutput};
+use crate::project::{BuildOutput, CheckOutput, TestListOutput, TestOutput};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -57,6 +57,21 @@ pub fn test_success(project: &Path, filter: Option<&str>, output: &TestOutput) -
         "failed": output.failed,
         "skipped": output.skipped,
         "duration_ms": output.duration_ms,
+        "cases": output.cases,
+    })
+}
+
+pub fn test_list_success(project: &Path, filter: Option<&str>, output: &TestListOutput) -> Value {
+    json!({
+        "schema_version": JSON_SCHEMA_VERSION,
+        "ok": true,
+        "command": "test",
+        "mode": "list",
+        "project": project.display().to_string(),
+        "manifest": output.manifest,
+        "packages": output.packages,
+        "filter": filter,
+        "total": output.total,
         "cases": output.cases,
     })
 }

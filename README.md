@@ -57,6 +57,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hel
 
 # Run discovered package tests
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --list --json
 
 # Inspect capability requirements
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json

@@ -58,9 +58,12 @@ location plus expected/actual detail on failure. Projects that need explicit
 naming or inline expectations can still declare `[[tests]]` entries in
 `axiom.toml`. The command now also accepts `--filter <pattern>` to run a subset
 of discovered tests by test name or entry path, and the default CLI summary now
-prints `passed` / `failed` / `skipped` counts. Workspace-only roots are now
-supported as long as build/run commands select a concrete member package with
-`-p/--package`.
+prints `passed` / `failed` / `skipped` counts. `axiomc test --list` exposes the
+same discovery pass without building or running the tests; text output emits
+package, test name, and entry path columns, while `--json` adds stable package
+membership plus golden-output and compile-fail markers for automation. Workspace
+only roots are now supported as long as build/run commands select a concrete
+member package with `-p/--package`.
 
 ## JSON contract
 
