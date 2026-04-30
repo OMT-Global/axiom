@@ -54,8 +54,13 @@ as a native artifact, executes it, and compares stdout against a sibling
 helpers `assert_eq`, `assert_ne`, `assert_true`, and `assert_contains`; they
 return `0` on success so they fit in the current statement-only bootstrap
 surface via ordinary `let` bindings, and they abort the test with a source
-location plus expected/actual detail on failure. Projects that need explicit
-naming or inline expectations can still declare `[[tests]]` entries in
+location plus expected/actual detail on failure. For richer stdlib-oriented
+coverage, `import "std/testing.ax"` exposes table-case helpers
+(`table_int` / `table_bool` / `table_string`), a named `property(name, holds)`
+helper for QuickCheck-style sampled checks expressed as deterministic loops or
+fixtures, and `snapshot(name, actual, expected)` for inline golden assertions.
+Projects that need explicit naming or inline expectations can still declare
+`[[tests]]` entries in
 `axiom.toml`. The command now also accepts `--filter <pattern>` to run a subset
 of discovered tests by test name or entry path, and the default CLI summary now
 prints `passed` / `failed` / `skipped` counts. Workspace-only roots are now
