@@ -104,7 +104,7 @@ still far from the stated 1.0 target for service and agent workloads.
 
 - `axiom.toml` and `axiom.lock` now support deterministic local path dependency graphs, package-root workspace members, workspace-only roots, and `-p/--package` selection for member-targeted build/run/test flows.
 - The current import model is still intentionally small: package-local relative path imports plus dependency-prefixed imports like `core/math.ax`, direct `pub struct` / `pub enum` / `pub fn` exports only, and explicit parser diagnostics for unsupported aliases, re-exports, and namespace-qualified calls.
-- There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape.
+- There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape. Registry and publish manifest fields are reserved and rejected until `axiomc publish` and remote package resolution are implemented.
 
 ### Runtime and standard library gaps
 
