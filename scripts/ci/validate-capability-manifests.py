@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import sys
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python < 3.11.
+    import tomli as tomllib
 
 
 BOOL_KEYS = {
@@ -54,68 +58,17 @@ def validate_manifest(path: Path) -> list[str]:
 
 
 def read_capabilities_table(path: Path) -> dict[str, object] | None:
-    in_capabilities = False
-    found = False
-    values: dict[str, object] = {}
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = strip_comment(raw_line).strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            table = line.strip("[]").strip()
-            in_capabilities = table == "capabilities"
-            found = found or in_capabilities
-            continue
-        if not in_capabilities:
-            continue
-        if "=" not in line:
-            raise ValueError(f"{line_number}: expected key = value")
-        key, raw_value = line.split("=", 1)
-        key = parse_key(key.strip(), line_number)
-        if key in values:
-            raise ValueError(f"{line_number}: duplicate [capabilities] key {key!r}")
-        values[key] = parse_value(raw_value.strip(), line_number)
-    return values if found else None
+    try:
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(str(exc)) from exc
 
-
-def strip_comment(line: str) -> str:
-    in_string = False
-    escaped = False
-    for index, char in enumerate(line):
-        if char == "\\" and in_string:
-            escaped = not escaped
-            continue
-        if char == '"' and not escaped:
-            in_string = not in_string
-        if char == "#" and not in_string:
-            return line[:index]
-        escaped = False
-    return line
-
-
-def parse_value(raw_value: str, line_number: int) -> object:
-    if raw_value == "true":
-        return True
-    if raw_value == "false":
-        return False
-    if raw_value.startswith('"') or raw_value.startswith("["):
-        try:
-            return ast.literal_eval(raw_value)
-        except (SyntaxError, ValueError) as exc:
-            raise ValueError(f"{line_number}: invalid capability value {raw_value!r}: {exc}") from exc
-    raise ValueError(f"{line_number}: unsupported capability value {raw_value!r}")
-
-
-def parse_key(raw_key: str, line_number: int) -> str:
-    if raw_key.startswith('"'):
-        try:
-            key = ast.literal_eval(raw_key)
-        except (SyntaxError, ValueError) as exc:
-            raise ValueError(f"{line_number}: invalid capability key {raw_key!r}: {exc}") from exc
-        if not isinstance(key, str):
-            raise ValueError(f"{line_number}: capability key must be a string")
-        return key
-    return raw_key
+    capabilities = manifest.get("capabilities")
+    if capabilities is None:
+        return None
+    if not isinstance(capabilities, dict):
+        raise ValueError("[capabilities] must be a table")
+    return capabilities
 
 
 def validate_fs_root(path: Path, value: object, errors: list[str]) -> None:
