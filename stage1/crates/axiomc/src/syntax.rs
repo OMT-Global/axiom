@@ -257,7 +257,6 @@ pub enum TypeName {
     Numeric(NumericType),
     Bool,
     String,
-    Str,
     Named(String, Vec<TypeName>),
     Ptr(Box<TypeName>),
     MutPtr(Box<TypeName>),
@@ -2485,8 +2484,7 @@ fn parse_type_name(
     match raw {
         "int" => Ok(TypeName::Int),
         "bool" => Ok(TypeName::Bool),
-        "string" | "String" => Ok(TypeName::String),
-        "&str" => Ok(TypeName::Str),
+        "string" => Ok(TypeName::String),
         name => {
             if let Some(numeric) = NumericType::parse(name) {
                 return Ok(TypeName::Numeric(numeric));
@@ -2518,6 +2516,7 @@ fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             line: line_no,
             column,
         });
+    }
     }
     if let Some((op, split_index)) = find_compare_operator(raw) {
         let lhs_raw = raw[..split_index].trim();
@@ -2571,13 +2570,6 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
 
     if let Some(literal) = parse_numeric_literal(raw) {
         return Ok(Expr::Literal(literal));
-    }
-    if looks_like_invalid_numeric_literal(raw) {
-        return Err(
-            Diagnostic::new("parse", format!("invalid numeric literal {raw:?}"))
-                .with_path(path.display().to_string())
-                .with_span(line_no, column),
-        );
     }
     if raw.ends_with('?') {
         let inner = raw[..raw.len() - 1].trim_end();
@@ -2809,131 +2801,6 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
     })
 }
 
-const NUMERIC_LITERAL_SUFFIXES: &[&str] = &[
-    "isize", "usize", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
-];
-
-fn parse_numeric_literal(raw: &str) -> Option<Literal> {
-    for suffix in NUMERIC_LITERAL_SUFFIXES {
-        let Some(number) = raw.strip_suffix(*suffix) else {
-            continue;
-        };
-        if number.is_empty() || number == "." {
-            return None;
-        }
-        let ty = NumericType::parse(suffix)?;
-        if numeric_literal_fits(number, ty) {
-            return Some(Literal::Numeric {
-                raw: number.to_string(),
-                ty,
-            });
-        }
-    }
-    None
-}
-
-fn looks_like_invalid_numeric_literal(raw: &str) -> bool {
-    NUMERIC_LITERAL_SUFFIXES.iter().any(|suffix| {
-        let Some(number) = raw.strip_suffix(suffix) else {
-            return false;
-        };
-        !number.is_empty()
-            && (number.parse::<f64>().is_ok()
-                || number
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ch.is_ascii_digit() || ch == '-' || ch == '.'))
-    })
-}
-
-fn numeric_literal_fits(number: &str, ty: NumericType) -> bool {
-    match ty {
-        NumericType::F32 => float_literal_fits_f32(number),
-        NumericType::F64 => float_literal_fits_f64(number),
-        NumericType::I8 => integer_literal_in_range(number, i8::MIN as i128, i8::MAX as i128),
-        NumericType::I16 => integer_literal_in_range(number, i16::MIN as i128, i16::MAX as i128),
-        NumericType::I32 => integer_literal_in_range(number, i32::MIN as i128, i32::MAX as i128),
-        NumericType::I64 | NumericType::Isize => {
-            integer_literal_in_range(number, i64::MIN as i128, i64::MAX as i128)
-        }
-        NumericType::U8 => unsigned_integer_literal_in_range(number, u8::MAX as u128),
-        NumericType::U16 => unsigned_integer_literal_in_range(number, u16::MAX as u128),
-        NumericType::U32 => unsigned_integer_literal_in_range(number, u32::MAX as u128),
-        NumericType::U64 | NumericType::Usize => {
-            unsigned_integer_literal_in_range(number, u64::MAX as u128)
-        }
-    }
-}
-
-fn float_literal_has_rust_number_shape(number: &str) -> bool {
-    let unsigned = number.strip_prefix('-').unwrap_or(number);
-    let Some(first) = unsigned.chars().next() else {
-        return false;
-    };
-    if !first.is_ascii_digit() {
-        return false;
-    }
-    if !unsigned.chars().any(|ch| ch.is_ascii_digit()) {
-        return false;
-    }
-    if unsigned
-        .chars()
-        .any(|ch| !(ch.is_ascii_digit() || matches!(ch, '_' | '.' | 'e' | 'E' | '+' | '-')))
-    {
-        return false;
-    }
-    true
-}
-
-fn float_literal_fits_f32(number: &str) -> bool {
-    float_literal_has_rust_number_shape(number) && number.parse::<f32>().is_ok_and(f32::is_finite)
-}
-
-fn float_literal_fits_f64(number: &str) -> bool {
-    float_literal_has_rust_number_shape(number) && number.parse::<f64>().is_ok_and(f64::is_finite)
-}
-
-fn integer_literal_in_range(number: &str, min: i128, max: i128) -> bool {
-    number
-        .parse::<i128>()
-        .is_ok_and(|value| value >= min && value <= max)
-}
-
-fn unsigned_integer_literal_in_range(number: &str, max: u128) -> bool {
-    if number.starts_with('-') {
-        return false;
-    }
-    number.parse::<u128>().is_ok_and(|value| value <= max)
-}
-
-fn find_top_level_as(raw: &str) -> Option<usize> {
-    let mut paren = 0usize;
-    let mut square = 0usize;
-    let mut brace = 0usize;
-    let mut angle = 0usize;
-    let bytes = raw.as_bytes();
-    let mut index = 0usize;
-    while index + 4 <= bytes.len() {
-        match bytes[index] as char {
-            '(' => paren += 1,
-            ')' => paren = paren.saturating_sub(1),
-            '[' => square += 1,
-            ']' => square = square.saturating_sub(1),
-            '{' => brace += 1,
-            '}' => brace = brace.saturating_sub(1),
-            '<' => angle += 1,
-            '>' => angle = angle.saturating_sub(1),
-            _ => {}
-        }
-        if paren == 0 && square == 0 && brace == 0 && angle == 0 && raw[index..].starts_with(" as ")
-        {
-            return Some(index);
-        }
-        index += 1;
-    }
-    None
-}
-
 fn parse_closure_expr(
     raw: &str,
     path: &Path,
@@ -3132,10 +2999,8 @@ fn explicit_return_lifetime(ty: &TypeName) -> Option<&str> {
         | TypeName::Slice(_)
         | TypeName::MutSlice(_)
         | TypeName::Int
-        | TypeName::Numeric(_)
         | TypeName::Bool
-        | TypeName::String
-        | TypeName::Str => None,
+        | TypeName::String => None,
     }
 }
 
@@ -3160,8 +3025,7 @@ fn type_uses_lifetime(ty: &TypeName, lifetime: &str) -> bool {
         TypeName::Result(ok, err) | TypeName::Map(ok, err) => {
             type_uses_lifetime(ok, lifetime) || type_uses_lifetime(err, lifetime)
         }
-        TypeName::Int | TypeName::Numeric(_) | TypeName::Bool | TypeName::String => false,
-        TypeName::Str => false,
+        TypeName::Int | TypeName::Bool | TypeName::String => false,
     }
 }
 
@@ -3169,7 +3033,6 @@ fn type_contains_borrowed_slice(ty: &TypeName) -> bool {
     match ty {
         TypeName::Slice(_)
         | TypeName::MutSlice(_)
-        | TypeName::Str
         | TypeName::LifetimeSlice(_, _)
         | TypeName::LifetimeMutSlice(_, _) => true,
         TypeName::Named(_, args) | TypeName::Tuple(args) => {
@@ -3186,7 +3049,7 @@ fn type_contains_borrowed_slice(ty: &TypeName) -> bool {
         TypeName::Result(ok, err) | TypeName::Map(ok, err) => {
             type_contains_borrowed_slice(ok) || type_contains_borrowed_slice(err)
         }
-        TypeName::Int | TypeName::Numeric(_) | TypeName::Bool | TypeName::String => false,
+        TypeName::Int | TypeName::Bool | TypeName::String => false,
     }
 }
 
@@ -3219,12 +3082,62 @@ fn collect_lifetime_uses(ty: &TypeName, found: &mut Vec<String>) {
             }
             collect_lifetime_uses(return_ty, found);
         }
-        TypeName::Int
-        | TypeName::Numeric(_)
-        | TypeName::Bool
-        | TypeName::String
-        | TypeName::Str => {}
+        TypeName::Int | TypeName::Bool | TypeName::String => {}
     }
+
+fn parse_numeric_literal(raw: &str) -> Option<Literal> {
+    for suffix in [
+        "isize", "usize", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
+    ] {
+        let Some(number) = raw.strip_suffix(suffix) else {
+            continue;
+        };
+        if number.is_empty() || number == "." {
+            return None;
+        }
+        let ty = NumericType::parse(suffix)?;
+        let valid = if ty.is_float() {
+            number.parse::<f64>().is_ok()
+        } else {
+            number.parse::<u128>().is_ok()
+                || (number.starts_with('-') && number[1..].parse::<u128>().is_ok())
+        };
+        if valid {
+            return Some(Literal::Numeric {
+                raw: number.to_string(),
+                ty,
+            });
+        }
+    }
+    None
+}
+
+fn find_top_level_as(raw: &str) -> Option<usize> {
+    let mut paren = 0usize;
+    let mut square = 0usize;
+    let mut brace = 0usize;
+    let mut angle = 0usize;
+    let bytes = raw.as_bytes();
+    let mut index = 0usize;
+    while index + 4 <= bytes.len() {
+        match bytes[index] as char {
+            '(' => paren += 1,
+            ')' => paren = paren.saturating_sub(1),
+            '[' => square += 1,
+            ']' => square = square.saturating_sub(1),
+            '{' => brace += 1,
+            '}' => brace = brace.saturating_sub(1),
+            '<' => angle += 1,
+            '>' => angle = angle.saturating_sub(1),
+            _ => {}
+        }
+        if paren == 0 && square == 0 && brace == 0 && angle == 0 && raw[index..].starts_with(" as ")
+        {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
 }
 
 fn parse_function_name<'a>(

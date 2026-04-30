@@ -2322,7 +2322,6 @@ fn expr_uses_call(expr: &Expr, name: &str) -> bool {
         }
         Expr::Closure { body, .. } => expr_uses_call(body, name),
         Expr::Literal(_) | Expr::VarRef { .. } => false,
-        Expr::StringBorrow { expr, .. } => expr_uses_call(expr, name),
     }
 }
 
@@ -2379,7 +2378,6 @@ impl<'a> TypeContext<'a> {
             | Type::String
             | Type::Ptr(_)
             | Type::MutPtr(_) => false,
-            Type::Str => true,
             Type::Slice(_) | Type::MutSlice(_) => true,
             Type::Struct(name) => {
                 if !visiting_structs.insert(name.clone()) {
@@ -2787,7 +2785,7 @@ fn collect_expr_mutable_borrows(expr: &Expr, locals: &mut HashSet<String>) {
             end,
             ty,
         } => {
-            if matches!(ty, Type::MutSlice(_)) && !matches!(base.ty(), Type::MutSlice(_)) {
+            if matches!(ty, Type::MutSlice(_)) {
                 if let Some(name) = mutable_borrow_root_name(base) {
                     locals.insert(name.to_string());
                 }
@@ -2813,8 +2811,6 @@ fn collect_expr_mutable_borrows(expr: &Expr, locals: &mut HashSet<String>) {
         }
         Expr::Try { expr, .. }
         | Expr::Await { expr, .. }
-        | Expr::Cast { expr, .. }
-        | Expr::StringBorrow { expr, .. }
         | Expr::FieldAccess { base: expr, .. }
         | Expr::TupleIndex { base: expr, .. } => collect_expr_mutable_borrows(expr, locals),
         Expr::StructLiteral { fields, .. } => {
@@ -2837,7 +2833,6 @@ fn collect_expr_mutable_borrows(expr: &Expr, locals: &mut HashSet<String>) {
             collect_expr_mutable_borrows(base, locals);
             collect_expr_mutable_borrows(index, locals);
         }
-        Expr::Closure { body, .. } => collect_expr_mutable_borrows(body, locals),
         Expr::Literal(_) | Expr::VarRef { .. } => {}
     }
 }
@@ -3168,8 +3163,6 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Literal(LiteralValue::Numeric { raw, ty }) => format!("{raw}{}", ty.as_str()),
         Expr::Literal(LiteralValue::Bool(value)) => value.to_string(),
         Expr::Literal(LiteralValue::String(value)) => format!("String::from({value:?})"),
-        Expr::Literal(LiteralValue::Str(value)) => format!("{value:?}"),
-        Expr::StringBorrow { expr, .. } => format!("{}.as_str()", render_expr(expr)),
         Expr::VarRef { name, .. } if name == "self" => String::from("self_"),
         Expr::VarRef { name, .. } => name.clone(),
         Expr::Call { name, args, .. } if name == "assert_true" => {
@@ -3506,22 +3499,13 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Call { name, args, ty } if name == "last" => {
             render_collection_edge(&args[0], ty, true)
         }
-        Expr::Call { name, args, .. } if name.starts_with("__axiom_numeric_") => {
-            let method = name.trim_start_matches("__axiom_numeric_");
-            format!(
-                "({}).{}({})",
-                render_expr(&args[0]),
-                method,
-                render_expr(&args[1])
-            )
-        }
         Expr::Call { name, args, .. } => {
             let rendered_args = args.iter().map(render_expr).collect::<Vec<_>>().join(", ");
             format!("{name}({rendered_args})")
         }
         Expr::BinaryAdd { lhs, rhs, ty } => match ty {
             Type::Int | Type::Numeric(_) => format!("{} + {}", render_expr(lhs), render_expr(rhs)),
-            Type::String | Type::Str => format!(
+            Type::String => format!(
                 "format!(\"{{}}{{}}\", {}, {})",
                 render_expr(lhs),
                 render_expr(rhs)
@@ -3744,10 +3728,6 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
         Type::Numeric(numeric) => numeric.as_str().to_string(),
         Type::Bool => String::from("bool"),
         Type::String => String::from("String"),
-        Type::Str => match lifetime {
-            Some(lifetime) => format!("&{lifetime} str"),
-            None => String::from("&str"),
-        },
         Type::Struct(name) => {
             if type_context.struct_uses_borrowed_slice(name) {
                 format!("{name}<{}>", lifetime.unwrap_or("'_"))

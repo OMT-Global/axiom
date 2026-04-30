@@ -228,133 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn parser_distinguishes_owned_string_from_borrowed_str() {
-        let source = r#"fn read(label: &str): int {
-print label
-return 1
-}
-
-let literal: &str = "borrowed"
-let owned: String = "owned"
-print read(literal)
-print read(owned)
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let hir = hir::lower(&parsed).expect("lower");
-        let mir = mir::lower(&hir);
-        let rendered = render_rust(&mir);
-        assert!(rendered.contains("fn read<'a>(label: &'a str) -> i64 {"));
-        assert!(rendered.contains(r#"let literal: &str = "borrowed";"#));
-        assert!(rendered.contains(r#"let owned: String = String::from("owned");"#));
-        assert!(rendered.contains(r#"println!("{}", read(literal));"#));
-        assert!(rendered.contains(r#"println!("{}", read(owned.as_str()));"#));
-    }
-
-    #[test]
-    fn parser_rejects_borrowed_str_from_temporary_string() {
-        let source = r#"fn make(): String {
-return "owned"
-}
-
-let borrowed: &str = make()
-print borrowed
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let err = hir::lower(&parsed).expect_err("lower should reject borrowed temporary String");
-        assert!(
-            err.message
-                .contains("cannot borrow a temporary String as &str")
-        );
-    }
-
-    #[test]
-    fn parser_rejects_borrowed_str_from_temporary_concat() {
-        let source = r#"let borrowed: &str = "own" + "ed"
-print borrowed
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let err = hir::lower(&parsed).expect_err("lower should reject borrowed temporary concat");
-        assert!(
-            err.message
-                .contains("cannot borrow a temporary String as &str")
-        );
-    }
-
-    #[test]
-    fn parser_rejects_borrowed_str_from_indexed_string() {
-        let source = r#"let values: [string] = ["hello"]
-let borrowed: &str = values[0]
-print borrowed
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let err = hir::lower(&parsed).expect_err("lower should reject indexed String borrow");
-        assert!(
-            err.message
-                .contains("cannot borrow a temporary String as &str")
-        );
-    }
-
-    #[test]
-    fn parser_allows_borrowed_str_call_arg_from_temporary_string() {
-        let source = r#"fn read(label: &str): int {
-print label
-return 1
-}
-
-fn make(): String {
-return "owned"
-}
-
-print read(make())
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let hir = hir::lower(&parsed).expect("lower");
-        let mir = mir::lower(&hir);
-        let rendered = render_rust(&mir);
-        assert!(rendered.contains(r#"println!("{}", read(make().as_str()));"#));
-    }
-
-    #[test]
-    fn parser_rejects_borrow_return_from_temporary_string_call_arg() {
-        let source = r#"fn echo(value: &str): &str {
-return value
-}
-
-fn make(): String {
-return "owned"
-}
-
-let borrowed: &str = echo(make())
-print borrowed
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let err = hir::lower(&parsed)
-            .expect_err("lower should reject escaping borrow from temporary String call arg");
-        assert!(
-            err.message
-                .contains("cannot borrow a temporary String as &str")
-        );
-    }
-
-    #[test]
-    fn parser_rejects_borrow_return_from_temporary_concat_call_arg() {
-        let source = r#"fn echo(value: &str): &str {
-return value
-}
-
-let borrowed: &str = echo("own" + "ed")
-print borrowed
-"#;
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let err = hir::lower(&parsed)
-            .expect_err("lower should reject escaping borrow from temporary concat call arg");
-        assert!(
-            err.message
-                .contains("cannot borrow a temporary String as &str")
-        );
-    }
-
-    #[test]
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -1234,64 +1107,7 @@ print fail()
         let source = "let byte: u8 = 1u8\nlet word: u32 = 2u32\nlet bad: u32 = byte + word\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         let error = hir::lower(&parsed).expect_err("mixed-width arithmetic should fail");
-        assert!(
-            error
-                .message
-                .contains("matching numeric or string operands")
-        );
-    }
-
-    #[test]
-    fn parser_rejects_unsigned_negative_numeric_literal() {
-        let source = "let bad: u8 = -1u8\n";
-        let error = parse_program(source, Path::new("main.ax"))
-            .expect_err("unsigned negative numeric literal should fail during parsing");
-        assert!(error.message.contains("invalid numeric literal"));
-    }
-
-    #[test]
-    fn parser_rejects_out_of_range_numeric_literal() {
-        let source = "let bad: u8 = 300u8\n";
-        let error = parse_program(source, Path::new("main.ax"))
-            .expect_err("out-of-range numeric literal should fail during parsing");
-        assert!(error.message.contains("invalid numeric literal"));
-    }
-
-    #[test]
-    fn parser_rejects_non_rust_suffixed_float_literals() {
-        for source in [
-            "let bad: f64 = NaNf64\n",
-            "let bad: f32 = inff32\n",
-            "let bad: f32 = 1e39f32\n",
-        ] {
-            let error = parse_program(source, Path::new("main.ax"))
-                .expect_err("non-rust float literal should fail during parsing");
-            assert!(error.message.contains("invalid numeric literal"));
-        }
-    }
-
-    #[test]
-    fn parser_lowers_numeric_checked_and_wrapping_methods() {
-        let source = "let byte: u8 = 255u8
-let wrapped: u8 = byte.wrapping_add(1u8)
-let checked: Option<u8> = byte.checked_add(1u8)
-";
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let hir = hir::lower(&parsed).expect("lower");
-        let mir = mir::lower(&hir);
-        let rendered = render_rust(&mir);
-        assert!(rendered.contains("let wrapped: u8 = (byte).wrapping_add(1u8);"));
-        assert!(rendered.contains("let checked: Option<u8> = (byte).checked_add(1u8);"));
-    }
-
-    #[test]
-    fn checker_rejects_numeric_method_argument_type_mismatch() {
-        let source = "let byte: u8 = 1u8
-let bad: u8 = byte.wrapping_add(1u16)
-";
-        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
-        let error = hir::lower(&parsed).expect_err("numeric method argument width should fail");
-        assert!(error.message.contains("expects argument type u8"));
+        assert!(error.message.contains("matching numeric or string operands"));
     }
 
     #[test]
@@ -5676,11 +5492,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 "cannot create mutable borrow of value",
             ),
             (
-                "move_string_while_str_borrow_live",
-                "move_while_borrowed",
-                "cannot move value",
-            ),
-            (
                 "loop_move_outer_non_copy",
                 "loop_move_outer_non_copy",
                 "cannot move non-copy value",
@@ -7343,23 +7154,6 @@ print 0
     }
 
     #[test]
-    fn check_project_rejects_str_return_from_local_string() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("str-return-local-string");
-        create_project(&project, Some("str-return-local-string-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "fn pick(input: &str): &str {\nlet owned: string = \"local\"\nreturn owned\n}\n\nprint 0\n",
-        )
-        .expect("write source");
-        let error = check_project(&project).expect_err("local string borrow return should fail");
-        assert!(error.message.contains(
-            "returning borrowed values requires data derived from one of the borrowed parameters"
-        ));
-        assert_eq!(error.kind, "ownership");
-    }
-
-    #[test]
     fn check_project_rejects_wrapped_borrow_return_from_local_value() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("wrapped-borrow-return-local");
@@ -8724,17 +8518,6 @@ print 0
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
-        assert_eq!(payload["cache_key"]["target"], payload["target"]);
-        assert_eq!(payload["cache_key"]["debug"], true);
-        assert!(payload["cache_key"]["manifest_hash"].is_string());
-        assert!(payload["cache_key"]["lockfile_hash"].is_string());
-        assert!(payload["cache_key"]["generated_rust_hash"].is_string());
-        assert!(payload["cache_key"]["sources"].is_array());
-        assert!(payload["cache_key"]["sources"][0]["source_hash"].is_string());
-        assert_eq!(
-            payload["packages"][0]["cache_key"]["lockfile_hash"],
-            payload["cache_key"]["lockfile_hash"]
-        );
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());

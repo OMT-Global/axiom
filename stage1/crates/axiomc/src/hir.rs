@@ -238,10 +238,6 @@ pub enum Expr {
         index: Box<Expr>,
         ty: Type,
     },
-    StringBorrow {
-        expr: Box<Expr>,
-        ty: Type,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Eq)]
@@ -251,7 +247,6 @@ pub enum Type {
     Numeric(syntax::NumericType),
     Bool,
     String,
-    Str,
     Struct(String),
     Enum(String),
     Ptr(Box<Type>),
@@ -276,9 +271,7 @@ impl PartialEq for Type {
             (Type::Error, Type::Error)
             | (Type::Int, Type::Int)
             | (Type::Bool, Type::Bool)
-            | (Type::String, Type::String)
-            | (Type::Str, Type::Str) => true,
-            (Type::Numeric(lhs), Type::Numeric(rhs)) => lhs == rhs,
+            | (Type::String, Type::String) => true,
             (Type::Struct(lhs), Type::Struct(rhs)) | (Type::Enum(lhs), Type::Enum(rhs)) => {
                 lhs == rhs
             }
@@ -411,7 +404,6 @@ struct MethodSig {
     function_name: String,
     params: Vec<Type>,
     return_ty: Type,
-    borrow_return_params: Vec<usize>,
     has_self: bool,
 }
 
@@ -443,7 +435,13 @@ struct VariantInfo {
 
 const OWNERSHIP_CLOSURE_MOVE_CAPTURED_NON_COPY: &str = "closure_move_captured_non_copy";
 const OWNERSHIP_CLOSURE_BORROWED_SLICE_RETURN: &str = "closure_borrowed_slice_return";
+const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
+const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str = "borrow_return_requires_param_origin";
+const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
 const OWNERSHIP_USE_AFTER_MOVE: &str = "use_after_move";
+const OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE: &str = "shared_borrow_while_mutable_live";
+const OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE: &str = "mutable_borrow_while_mutable_live";
+const OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE: &str = "mutable_borrow_while_shared_live";
 
 fn function_symbol_name(function: &syntax::Function) -> String {
     match &function.impl_target {
@@ -462,28 +460,6 @@ fn is_ordered_numeric(ty: &Type) -> bool {
 
 fn is_addable_numeric(ty: &Type) -> bool {
     matches!(ty, Type::Int | Type::Numeric(_))
-}
-
-fn numeric_method_return_ty(receiver: &Type, method: &str) -> Option<Type> {
-    let is_integer = match receiver {
-        Type::Int => true,
-        Type::Numeric(numeric) => {
-            !matches!(numeric, syntax::NumericType::F32 | syntax::NumericType::F64)
-        }
-        _ => false,
-    };
-    if !is_integer {
-        return None;
-    }
-    match method {
-        "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_div" | "wrapping_rem" => {
-            Some(receiver.clone())
-        }
-        "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" => {
-            Some(Type::Option(Box::new(receiver.clone())))
-        }
-        _ => None,
-    }
 }
 
 fn method_owner_name(ty: &Type) -> Option<&str> {
@@ -872,7 +848,6 @@ fn type_has_unboxed_recursive_path(
         | Type::Numeric(_)
         | Type::Bool
         | Type::String
-        | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
         Type::Struct(name) => {
@@ -1302,22 +1277,6 @@ fn infer_generic_calls_in_expr(
             line: *line,
             column: *column,
         },
-        syntax::Expr::Cast {
-            expr,
-            ty,
-            line,
-            column,
-        } => syntax::Expr::Cast {
-            expr: Box::new(infer_generic_calls_in_expr(
-                expr,
-                Some(ty),
-                env,
-                generic_functions,
-            )?),
-            ty: ty.clone(),
-            line: *line,
-            column: *column,
-        },
         syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
             expr: Box::new(infer_generic_calls_in_expr(
                 expr,
@@ -1711,11 +1670,7 @@ fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<Stri
                 .any(|param| contains_generic_type_param(param, type_params))
                 || contains_generic_type_param(return_ty, type_params)
         }
-        syntax::TypeName::Int
-        | syntax::TypeName::Numeric(_)
-        | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Str => false,
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
     }
 }
 
@@ -1881,11 +1836,7 @@ fn unify_generic_type_name(
                 Ok(())
             }
         }
-        syntax::TypeName::Int
-        | syntax::TypeName::Numeric(_)
-        | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Str => Ok(()),
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => Ok(()),
     }
 }
 
@@ -2306,8 +2257,7 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
         syntax::TypeName::Int
         | syntax::TypeName::Numeric(_)
         | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Str => {}
+        | syntax::TypeName::String => {}
     }
 }
 
@@ -2747,7 +2697,6 @@ fn rewrite_aggregate_type_name(
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
         syntax::TypeName::String => syntax::TypeName::String,
-        syntax::TypeName::Str => syntax::TypeName::Str,
     })
 }
 
@@ -4176,7 +4125,6 @@ fn substitute_type_name(
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
         syntax::TypeName::String => syntax::TypeName::String,
-        syntax::TypeName::Str => syntax::TypeName::Str,
     }
 }
 
@@ -4232,7 +4180,6 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
         syntax::TypeName::Numeric(numeric) => numeric.as_str().to_string(),
         syntax::TypeName::Bool => String::from("bool"),
         syntax::TypeName::String => String::from("string"),
-        syntax::TypeName::Str => String::from("str"),
         syntax::TypeName::Named(name, args) if args.is_empty() => name.clone(),
         syntax::TypeName::Named(name, args) => monomorphized_type_name(name, args),
         syntax::TypeName::Ptr(inner) => format!("ptr_{}", type_name_monomorph_suffix(inner)),
@@ -4292,6 +4239,10 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
         .collect()
 }
 
+fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
+    Diagnostic::new("ownership", message).with_code(code)
+}
+
 impl Type {
     fn is_error(&self) -> bool {
         matches!(self, Type::Error)
@@ -4303,7 +4254,6 @@ impl Type {
             | Type::Int
             | Type::Numeric(_)
             | Type::Bool
-            | Type::Str
             | Type::Ptr(_)
             | Type::MutPtr(_)
             | Type::Slice(_) => true,
@@ -4326,7 +4276,7 @@ impl Type {
 
     fn supports_map_key(&self) -> bool {
         match self {
-            Type::Int | Type::Numeric(_) | Type::Bool | Type::String | Type::Str => true,
+            Type::Int | Type::Numeric(_) | Type::Bool | Type::String => true,
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
             Type::Error
             | Type::Struct(_)
@@ -4748,19 +4698,10 @@ fn collect_method_signatures(
         } else {
             return_ty
         };
-        let borrow_return_params = borrowck::classify_borrow_return(
-            &params,
-            &return_ty,
-            structs,
-            enums,
-            function.line,
-            function.column,
-        )?;
         let method = MethodSig {
             function_name: function_symbol_name(function),
             params,
             return_ty,
-            borrow_return_params,
             has_self: function.receiver.is_some(),
         };
         let entry = methods.entry(target_name.clone()).or_default();
@@ -5534,14 +5475,11 @@ fn lower_stmt(
             let lowered = lower_expr(expr, env, ctx)?;
             if !matches!(
                 lowered.ty(),
-                Type::Error | Type::Int | Type::Numeric(_) | Type::Bool | Type::String | Type::Str
+                Type::Error | Type::Int | Type::Numeric(_) | Type::Bool | Type::String
             ) {
                 return Err(Diagnostic::new(
                     "type",
-                    format!(
-                        "print expects int, bool, String, or &str, got {}",
-                        lowered.ty()
-                    ),
+                    format!("print expects int, bool, or string, got {}", lowered.ty()),
                 )
                 .with_span(*line, *column));
             }
@@ -6185,66 +6123,14 @@ fn lower_expr(
     lower_expr_with_expected(expr, None, env, ctx)
 }
 
-fn is_string_like_type(ty: &Type) -> bool {
-    matches!(ty, Type::String | Type::Str)
-}
-
-fn coerce_expr_to_expected(
-    expr: Expr,
-    expected: Option<&Type>,
-    allow_temporary_string_borrow: bool,
-) -> Result<Expr, Diagnostic> {
-    match expected {
-        Some(Type::Str) if expr.ty() == &Type::String => {
-            if !allow_temporary_string_borrow && !is_stable_string_borrow_owner(&expr) {
-                return Err(Diagnostic::new(
-                    "ownership",
-                    "cannot borrow a temporary String as &str; bind the String to a local first",
-                ));
-            }
-            Ok(Expr::StringBorrow {
-                expr: Box::new(expr),
-                ty: Type::Str,
-            })
-        }
-        _ => Ok(expr),
-    }
-}
-
-fn is_stable_string_borrow_owner(expr: &Expr) -> bool {
-    matches!(expr, Expr::VarRef { .. } | Expr::FieldAccess { .. })
-}
-
 fn lower_expr_with_expected(
     expr: &syntax::Expr,
     expected: Option<&Type>,
     env: &mut HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
 ) -> Result<Expr, Diagnostic> {
-    lower_expr_with_expected_inner(expr, expected, env, ctx)
-        .and_then(|lowered| coerce_expr_to_expected(lowered, expected, false))
-}
-
-fn lower_call_arg_with_expected(
-    expr: &syntax::Expr,
-    expected: Option<&Type>,
-    env: &mut HashMap<String, Binding>,
-    ctx: &LowerContext<'_>,
-    allow_temporary_string_borrow: bool,
-) -> Result<Expr, Diagnostic> {
-    lower_expr_with_expected_inner(expr, expected, env, ctx).and_then(|lowered| {
-        coerce_expr_to_expected(lowered, expected, allow_temporary_string_borrow)
-    })
-}
-
-fn lower_expr_with_expected_inner(
-    expr: &syntax::Expr,
-    expected: Option<&Type>,
-    env: &mut HashMap<String, Binding>,
-    ctx: &LowerContext<'_>,
-) -> Result<Expr, Diagnostic> {
     match expr {
-        syntax::Expr::Literal(literal) => Ok(lower_literal(literal, expected)),
+        syntax::Expr::Literal(literal) => Ok(lower_literal(literal)),
         syntax::Expr::VarRef { name, line, column } => {
             if let Some(binding) = env.get(name) {
                 if binding.moved {
@@ -6488,7 +6374,7 @@ fn lower_expr_with_expected_inner(
                     0
                 };
                 let lhs = lower_expr(&args[value_start], env, ctx)?;
-                if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String | Type::Str) {
+                if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -7647,7 +7533,7 @@ fn lower_expr_with_expected_inner(
                     let mut lowered_args = Vec::new();
                     for (arg, expected) in args.iter().zip(param_tys.iter()) {
                         let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
-                        if !type_assignable_to(lowered.ty(), expected) {
+                        if lowered.ty() != expected {
                             return Err(Diagnostic::new(
                                 "type",
                                 format!(
@@ -7692,17 +7578,8 @@ fn lower_expr_with_expected_inner(
                 }
                 let mut lowered_args = Vec::new();
                 let mut temporary_borrows = Vec::new();
-                for (index, (arg, expected)) in args.iter().zip(signature.params.iter()).enumerate()
-                {
-                    let allow_temporary_string_borrow =
-                        !signature.borrow_return_params.contains(&index);
-                    let lowered = lower_call_arg_with_expected(
-                        arg,
-                        Some(expected),
-                        env,
-                        ctx,
-                        allow_temporary_string_borrow,
-                    )?;
+                for (arg, expected) in args.iter().zip(signature.params.iter()) {
+                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
                     if !type_assignable_to(lowered.ty(), expected) {
                         return Err(Diagnostic::new(
                             "type",
@@ -7741,7 +7618,7 @@ fn lower_expr_with_expected_inner(
                 let lowered = lower_expr_with_expected(&args[0], inner_expected, env, ctx)?;
                 let inner_ty = lowered.ty().clone();
                 if let Some(expected_inner) = inner_expected
-                    && !type_assignable_to(&inner_ty, expected_inner)
+                    && &inner_ty != expected_inner
                 {
                     return Err(Diagnostic::new(
                         "type",
@@ -7778,7 +7655,7 @@ fn lower_expr_with_expected_inner(
                     .with_span(*line, *column));
                 };
                 let lowered = lower_expr_with_expected(&args[0], Some(ok_ty.as_ref()), env, ctx)?;
-                if !type_assignable_to(lowered.ty(), ok_ty.as_ref()) {
+                if lowered.ty() != ok_ty.as_ref() {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -7815,7 +7692,7 @@ fn lower_expr_with_expected_inner(
                     .with_span(*line, *column));
                 };
                 let lowered = lower_expr_with_expected(&args[0], Some(err_ty.as_ref()), env, ctx)?;
-                if !type_assignable_to(lowered.ty(), err_ty.as_ref()) {
+                if lowered.ty() != err_ty.as_ref() {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -7896,18 +7773,9 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(*line, *column));
                 }
-                for (index, (arg, expected)) in args.iter().zip(signature.params.iter()).enumerate()
-                {
-                    let allow_temporary_string_borrow =
-                        !signature.borrow_return_params.contains(&index);
-                    let lowered = lower_call_arg_with_expected(
-                        arg,
-                        Some(expected),
-                        env,
-                        ctx,
-                        allow_temporary_string_borrow,
-                    )?;
-                    if !type_assignable_to(lowered.ty(), expected) {
+                for (arg, expected) in args.iter().zip(signature.params.iter()) {
+                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                    if lowered.ty() != expected {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -7932,35 +7800,6 @@ fn lower_expr_with_expected_inner(
                 });
             }
             let lowered_base = lower_expr(base, env, ctx)?;
-            if let Some(return_ty) = numeric_method_return_ty(lowered_base.ty(), method) {
-                if args.len() != 1 {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!(
-                            "numeric method {method:?} expects 1 argument, got {}",
-                            args.len()
-                        ),
-                    )
-                    .with_span(*line, *column));
-                }
-                let receiver_ty = lowered_base.ty().clone();
-                let lowered_arg = lower_expr_with_expected(&args[0], Some(&receiver_ty), env, ctx)?;
-                if lowered_arg.ty() != &receiver_ty {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!(
-                            "numeric method {method:?} expects argument type {receiver_ty}, got {}",
-                            lowered_arg.ty()
-                        ),
-                    )
-                    .with_span(args[0].line(), args[0].column()));
-                }
-                return Ok(Expr::Call {
-                    name: format!("__axiom_numeric_{method}"),
-                    args: vec![lowered_base, lowered_arg],
-                    ty: return_ty,
-                });
-            }
             let Some(owner_name) = method_owner_name(lowered_base.ty()) else {
                 return Err(Diagnostic::new(
                     "type",
@@ -8023,20 +7862,9 @@ fn lower_expr_with_expected_inner(
                 move_lowered_value(&lowered_base, env)?;
             }
             lowered_args.push(lowered_base);
-            for (arg_index, (arg, expected)) in
-                args.iter().zip(signature.params.iter().skip(1)).enumerate()
-            {
-                let param_index = arg_index + 1;
-                let allow_temporary_string_borrow =
-                    !signature.borrow_return_params.contains(&param_index);
-                let lowered = lower_call_arg_with_expected(
-                    arg,
-                    Some(expected),
-                    env,
-                    ctx,
-                    allow_temporary_string_borrow,
-                )?;
-                if !type_assignable_to(lowered.ty(), expected) {
+            for (arg, expected) in args.iter().zip(signature.params.iter().skip(1)) {
+                let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                if lowered.ty() != expected {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -8070,11 +7898,8 @@ fn lower_expr_with_expected_inner(
             let rhs = lower_expr(rhs, env, ctx)?;
             let lhs_ty = lhs.ty().clone();
             let rhs_ty = rhs.ty().clone();
-            let result_ty = if lhs_ty == rhs_ty && is_addable_numeric(&lhs_ty) {
-                lhs_ty.clone()
-            } else if is_string_like_type(&lhs_ty) && is_string_like_type(&rhs_ty) {
-                Type::String
-            } else {
+            if lhs_ty != rhs_ty || !(is_addable_numeric(&lhs_ty) || matches!(lhs_ty, Type::String))
+            {
                 return Err(
                     Diagnostic::new(
                         "type",
@@ -8084,11 +7909,11 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(*line, *column),
                 );
-            };
+            }
             Ok(Expr::BinaryAdd {
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
-                ty: result_ty,
+                ty: lhs_ty,
             })
         }
         syntax::Expr::BinaryCompare {
@@ -8104,9 +7929,7 @@ fn lower_expr_with_expected_inner(
             let rhs_ty = rhs.ty().clone();
             match op {
                 syntax::CompareOp::Eq | syntax::CompareOp::Ne => {
-                    if lhs_ty != rhs_ty
-                        && !(is_string_like_type(&lhs_ty) && is_string_like_type(&rhs_ty))
-                    {
+                    if lhs_ty != rhs_ty {
                         return Err(
                             Diagnostic::new(
                                 "type",
@@ -8149,15 +7972,7 @@ fn lower_expr_with_expected_inner(
             column,
         } => {
             let expr = lower_expr(expr, env, ctx)?;
-            let target = lower_type(
-                ty,
-                ctx.structs,
-                ctx.enums,
-                ctx.aliases,
-                ctx.consts,
-                *line,
-                *column,
-            )?;
+            let target = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
             if !is_castable_numeric(expr.ty()) || !is_castable_numeric(&target) {
                 return Err(Diagnostic::new(
                     "type",
@@ -8524,27 +8339,13 @@ fn lower_expr_with_expected_inner(
                 )
                 .with_span(*line, *column));
             }
-            let expected_key_value = match expected {
-                Some(Type::Map(key, value)) => Some((key.as_ref(), value.as_ref())),
-                _ => None,
-            };
             let mut lowered_entries = Vec::new();
             let mut key_ty = None;
             let mut value_ty = None;
             let mut temporary_borrows = Vec::new();
             for entry in entries {
-                let lowered_key = lower_expr_with_expected(
-                    &entry.key,
-                    expected_key_value.map(|(key, _)| key),
-                    env,
-                    ctx,
-                )?;
-                let lowered_value = lower_expr_with_expected(
-                    &entry.value,
-                    expected_key_value.map(|(_, value)| value),
-                    env,
-                    ctx,
-                )?;
+                let lowered_key = lower_expr(&entry.key, env, ctx)?;
+                let lowered_value = lower_expr(&entry.value, env, ctx)?;
                 if let Some(expected) = key_ty.as_ref() {
                     if lowered_key.ty() != expected {
                         return Err(Diagnostic::new(
@@ -8613,17 +8414,13 @@ fn lower_expr_with_expected_inner(
                 )
                 .with_span(*line, *column));
             }
-            let expected_element = match expected {
-                Some(Type::Array(element_ty, _)) => Some(element_ty.as_ref()),
-                _ => None,
-            };
             let mut lowered_elements = Vec::new();
             let mut element_ty = None;
             let mut temporary_borrows = Vec::new();
             for element in elements {
-                let lowered = lower_expr_with_expected(element, expected_element, env, ctx)?;
+                let lowered = lower_expr(element, env, ctx)?;
                 if let Some(expected) = element_ty.as_ref() {
-                    if !type_assignable_to(lowered.ty(), expected) {
+                    if lowered.ty() != expected {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -8726,11 +8523,7 @@ fn lower_expr_with_expected_inner(
             column,
         } => {
             let lowered_base = lower_projection_base_expr(base, env, ctx)?;
-            let index_expected_ty = match lowered_base.ty() {
-                Type::Map(key_ty, _) => Some(key_ty.as_ref()),
-                _ => None,
-            };
-            let lowered_index = lower_expr_with_expected(index, index_expected_ty, env, ctx)?;
+            let lowered_index = lower_expr(index, env, ctx)?;
             let result_ty = match lowered_base.ty() {
                 Type::Array(element_ty, _) => {
                     if lowered_index.ty() != &Type::Int {
@@ -8991,9 +8784,9 @@ fn collect_var_refs(expr: &syntax::Expr, refs: &mut HashSet<String>) {
             collect_var_refs(lhs, refs);
             collect_var_refs(rhs, refs);
         }
-        syntax::Expr::Try { expr, .. }
-        | syntax::Expr::Await { expr, .. }
-        | syntax::Expr::Cast { expr, .. } => collect_var_refs(expr, refs),
+        syntax::Expr::Try { expr, .. } | syntax::Expr::Await { expr, .. } => {
+            collect_var_refs(expr, refs)
+        }
         syntax::Expr::StructLiteral { fields, .. } => {
             for field in fields {
                 collect_var_refs(&field.expr, refs);
@@ -9429,8 +9222,7 @@ fn validate_ffi_type_name(
         syntax::TypeName::Int
         | syntax::TypeName::Numeric(_)
         | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Str => Ok(()),
+        | syntax::TypeName::String => Ok(()),
         syntax::TypeName::Ptr(inner) | syntax::TypeName::MutPtr(inner) => {
             validate_ffi_type_name(inner, line, column)
         }
@@ -9444,7 +9236,7 @@ fn validate_ffi_type_name(
 
 fn validate_ffi_type(ty: &Type, line: usize, column: usize) -> Result<(), Diagnostic> {
     match ty {
-        Type::Int | Type::Numeric(_) | Type::Bool | Type::String | Type::Str => Ok(()),
+        Type::Int | Type::Numeric(_) | Type::Bool | Type::String => Ok(()),
         Type::Ptr(inner) | Type::MutPtr(inner) => validate_ffi_type(inner, line, column),
         _ => Err(Diagnostic::new(
             "type",
@@ -9537,8 +9329,8 @@ fn lower_variant_constructor(
     }
     let mut lowered_payloads = Vec::new();
     for (arg, expected) in args.iter().zip(variant.payload_tys.iter()) {
-        let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx, false)?;
-        if !type_assignable_to(lowered.ty(), expected) {
+        let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+        if lowered.ty() != expected {
             return Err(Diagnostic::new(
                 "type",
                 format!(
@@ -9599,7 +9391,7 @@ fn lower_named_variant_constructor(
         }
         let expected = &variant.payload_tys[position];
         let lowered = lower_expr_with_expected(&field.expr, Some(expected), env, ctx)?;
-        if !type_assignable_to(lowered.ty(), expected) {
+        if lowered.ty() != expected {
             return Err(Diagnostic::new(
                 "type",
                 format!(
@@ -9889,9 +9681,6 @@ fn expr_borrow_origin(
         Expr::Index { base, .. } => expr_borrow_origin(base, env, ctx),
         Expr::Closure { .. } => None,
         Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => None,
-        Expr::StringBorrow { expr, .. } => {
-            expr_borrow_origin(expr, env, ctx).or(Some(BorrowOrigin::Local))
-        }
     }
 }
 
@@ -10027,7 +9816,6 @@ fn expr_borrowed_owners(
         Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => {
             HashSet::new()
         }
-        Expr::StringBorrow { expr, .. } => owned_borrow_root(expr).into_iter().collect(),
         Expr::StructLiteral { fields, .. } => {
             let mut owners = HashSet::new();
             for field in fields {
@@ -10083,10 +9871,8 @@ fn explicit_return_lifetime(ty: &syntax::TypeName) -> Option<&str> {
         | syntax::TypeName::Ptr(_)
         | syntax::TypeName::MutPtr(_)
         | syntax::TypeName::Int
-        | syntax::TypeName::Numeric(_)
         | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Str => None,
+        | syntax::TypeName::String => None,
     }
 }
 
@@ -10112,11 +9898,7 @@ fn type_has_lifetime(ty: &syntax::TypeName, lifetime: &str) -> bool {
             params.iter().any(|arg| type_has_lifetime(arg, lifetime))
                 || type_has_lifetime(return_ty, lifetime)
         }
-        syntax::TypeName::Int
-        | syntax::TypeName::Numeric(_)
-        | syntax::TypeName::Bool
-        | syntax::TypeName::String
-        | syntax::TypeName::Str => false,
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
     }
 }
 
@@ -10131,6 +9913,272 @@ fn explicit_borrow_return_params(function: &syntax::Function) -> Option<Vec<usiz
             .collect(),
     )
 }
+
+
+fn contains_borrowed_slice_type_inner(
+    ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    visiting_structs: &mut HashSet<String>,
+    visiting_enums: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Type::Slice(_) | Type::MutSlice(_) => true,
+        Type::Option(inner) => contains_borrowed_slice_type_inner(
+            inner,
+            structs,
+            enums,
+            visiting_structs,
+            visiting_enums,
+        ),
+        Type::Result(ok, err) => {
+            contains_borrowed_slice_type_inner(ok, structs, enums, visiting_structs, visiting_enums)
+                || contains_borrowed_slice_type_inner(
+                    err,
+                    structs,
+                    enums,
+                    visiting_structs,
+                    visiting_enums,
+                )
+        }
+        Type::Tuple(elements) => elements.iter().any(|element| {
+            contains_borrowed_slice_type_inner(
+                element,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }),
+        Type::Map(key, value) => {
+            contains_borrowed_slice_type_inner(
+                key,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            ) || contains_borrowed_slice_type_inner(
+                value,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }
+        Type::Array(inner)
+        | Type::Task(inner)
+        | Type::JoinHandle(inner)
+        | Type::AsyncChannel(inner)
+        | Type::SelectResult(inner) => contains_borrowed_slice_type_inner(
+            inner,
+            structs,
+            enums,
+            visiting_structs,
+            visiting_enums,
+        ),
+        Type::Struct(name) => {
+            if !visiting_structs.insert(name.clone()) {
+                return false;
+            }
+            let contains = structs.get(name).is_some_and(|struct_def| {
+                struct_def.fields.iter().any(|field| {
+                    contains_borrowed_slice_type_inner(
+                        &field.ty,
+                        structs,
+                        enums,
+                        visiting_structs,
+                        visiting_enums,
+                    )
+                })
+            });
+            visiting_structs.remove(name);
+            contains
+        }
+        Type::Enum(name) => {
+            if !visiting_enums.insert(name.clone()) {
+                return false;
+            }
+            let contains = enums.get(name).is_some_and(|enum_def| {
+                enum_def.variants.iter().any(|variant| {
+                    variant.payload_tys.iter().any(|payload_ty| {
+                        contains_borrowed_slice_type_inner(
+                            payload_ty,
+                            structs,
+                            enums,
+                            visiting_structs,
+                            visiting_enums,
+                        )
+                    })
+                })
+            });
+            visiting_enums.remove(name);
+            contains
+        }
+        Type::Error
+        | Type::Int
+        | Type::Numeric(_)
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
+    }
+}
+
+fn contains_mut_borrowed_slice_type_inner(
+    ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    visiting_structs: &mut HashSet<String>,
+    visiting_enums: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        Type::MutSlice(_) => true,
+        Type::Error
+        | Type::Slice(_)
+        | Type::Int
+        | Type::Numeric(_)
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
+        Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
+            inner,
+            structs,
+            enums,
+            visiting_structs,
+            visiting_enums,
+        ),
+        Type::Result(ok, err) => {
+            contains_mut_borrowed_slice_type_inner(
+                ok,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            ) || contains_mut_borrowed_slice_type_inner(
+                err,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }
+        Type::Tuple(elements) => elements.iter().any(|element| {
+            contains_mut_borrowed_slice_type_inner(
+                element,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }),
+        Type::Map(key, value) => {
+            contains_mut_borrowed_slice_type_inner(
+                key,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            ) || contains_mut_borrowed_slice_type_inner(
+                value,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }
+        Type::Array(inner)
+        | Type::Task(inner)
+        | Type::JoinHandle(inner)
+        | Type::AsyncChannel(inner)
+        | Type::SelectResult(inner) => contains_mut_borrowed_slice_type_inner(
+            inner,
+            structs,
+            enums,
+            visiting_structs,
+            visiting_enums,
+        ),
+        Type::Struct(name) => {
+            if !visiting_structs.insert(name.clone()) {
+                return false;
+            }
+            let contains = structs.get(name).is_some_and(|struct_def| {
+                struct_def.fields.iter().any(|field| {
+                    contains_mut_borrowed_slice_type_inner(
+                        &field.ty,
+                        structs,
+                        enums,
+                        visiting_structs,
+                        visiting_enums,
+                    )
+                })
+            });
+            visiting_structs.remove(name);
+            contains
+        }
+        Type::Enum(name) => {
+            if !visiting_enums.insert(name.clone()) {
+                return false;
+            }
+            let contains = enums.get(name).is_some_and(|enum_def| {
+                enum_def.variants.iter().any(|variant| {
+                    variant.payload_tys.iter().any(|payload_ty| {
+                        contains_mut_borrowed_slice_type_inner(
+                            payload_ty,
+                            structs,
+                            enums,
+                            visiting_structs,
+                            visiting_enums,
+                        )
+                    })
+                })
+            });
+            visiting_enums.remove(name);
+            contains
+        }
+    }
+}
+
+fn classify_borrow_return(
+    params: &[Type],
+    return_ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+    line: usize,
+    column: usize,
+) -> Result<Vec<usize>, Diagnostic> {
+    if !contains_borrowed_slice_type(return_ty, structs, enums) {
+        return Ok(Vec::new());
+    }
+    let matches = params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, ty)| contains_borrowed_slice_type(ty, structs, enums).then_some(index))
+        .collect::<Vec<_>>();
+    if matches.is_empty() {
+        return Err(Diagnostic::new(
+            "type",
+            "borrowed return functions must take at least one borrowed parameter in stage1",
+        )
+        .with_span(line, column));
+    }
+    Ok(matches)
+}
+
+fn borrow_kind_for_type(
+    ty: &Type,
+    structs: &HashMap<String, StructDef>,
+    enums: &HashMap<String, EnumDef>,
+) -> Option<BorrowKind> {
+    if contains_mut_borrowed_slice_type(ty, structs, enums) {
+        Some(BorrowKind::Mutable)
+    } else if contains_borrowed_slice_type(ty, structs, enums) {
+        Some(BorrowKind::Shared)
+    } else {
+        None
+    }
+}
+
 
 fn increment_active_borrows(
     owner_names: &HashSet<String>,
@@ -10249,7 +10297,7 @@ fn merge_borrow_count(
     then_count.max(else_count)
 }
 
-fn lower_literal(literal: &syntax::Literal, expected: Option<&Type>) -> Expr {
+fn lower_literal(literal: &syntax::Literal) -> Expr {
     match literal {
         syntax::Literal::Int(value) => Expr::Literal {
             ty: Type::Int,
@@ -10267,11 +10315,7 @@ fn lower_literal(literal: &syntax::Literal, expected: Option<&Type>) -> Expr {
             value: LiteralValue::Bool(*value),
         },
         syntax::Literal::String(value) => Expr::Literal {
-            ty: if matches!(expected, Some(Type::Str)) {
-                Type::Str
-            } else {
-                Type::String
-            },
+            ty: Type::String,
             value: LiteralValue::String(value.clone()),
         },
     }
@@ -10314,7 +10358,6 @@ fn lower_type_inner<T, U>(
         syntax::TypeName::Numeric(numeric) => Ok(Type::Numeric(*numeric)),
         syntax::TypeName::Bool => Ok(Type::Bool),
         syntax::TypeName::String => Ok(Type::String),
-        syntax::TypeName::Str => Ok(Type::Str),
         syntax::TypeName::Named(name, args) => {
             if is_async_runtime_type(name) {
                 if args.len() != 1 {
@@ -10542,7 +10585,6 @@ impl Expr {
             Expr::Closure { ty, .. } => ty,
             Expr::Slice { ty, .. } => ty,
             Expr::Index { ty, .. } => ty,
-            Expr::StringBorrow { ty, .. } => ty,
         }
     }
 }
@@ -10680,7 +10722,6 @@ impl std::fmt::Display for Type {
             Type::Numeric(numeric) => write!(f, "{}", numeric.as_str()),
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
-            Type::Str => write!(f, "&str"),
             Type::Struct(name) => write!(f, "{name}"),
             Type::Enum(name) => write!(f, "{name}"),
             Type::Ptr(inner) => write!(f, "ptr<{inner}>"),
