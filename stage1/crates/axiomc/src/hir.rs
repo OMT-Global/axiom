@@ -206,6 +206,7 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Type {
+    Error,
     Int,
     Bool,
     String,
@@ -347,12 +348,30 @@ pub fn lower_with_capabilities(
     program: &syntax::Program,
     capabilities: &CapabilityConfig,
 ) -> Result<Program, Diagnostic> {
-    let program = monomorphize_program(program)?;
+    lower_with_capabilities_recovery(program, capabilities).map_err(primary_diagnostic)
+}
+
+pub fn lower_with_capabilities_recovery(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+) -> Result<Program, Vec<Diagnostic>> {
+    lower_with_capabilities_impl(program, capabilities, true)
+}
+
+fn lower_with_capabilities_impl(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+    recover: bool,
+) -> Result<Program, Vec<Diagnostic>> {
+    let program = monomorphize_program(program).map_err(single_diagnostic)?;
     let (struct_names, enum_names, aliases) =
-        collect_type_names(&program.structs, &program.enums, &program.type_aliases)?;
+        collect_type_names(&program.structs, &program.enums, &program.type_aliases)
+            .map_err(single_diagnostic)?;
     let (enums, variants) =
-        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)?;
-    let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)?;
+        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)
+            .map_err(single_diagnostic)?;
+    let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)
+        .map_err(single_diagnostic)?;
     validate_recursive_type_cycles(
         &program,
         &structs,
@@ -360,9 +379,13 @@ pub fn lower_with_capabilities(
         &struct_names,
         &enum_names,
         &aliases,
-    )?;
-    let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)?;
-    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)?;
+    )
+    .map_err(single_diagnostic)?;
+    let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)
+        .map_err(single_diagnostic)?;
+    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)
+        .map_err(single_diagnostic)?;
+    let mut diagnostics = Vec::new();
     let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_enums = enums.values().cloned().collect::<Vec<_>>();
@@ -373,7 +396,7 @@ pub fn lower_with_capabilities(
         if function.name.starts_with("std_fs_") && !reachable_functions.contains(&function.name) {
             continue;
         }
-        lowered_functions.push(lower_function(
+        match lower_function(
             function,
             &structs,
             &enums,
@@ -382,7 +405,11 @@ pub fn lower_with_capabilities(
             &functions,
             &methods,
             capabilities,
-        )?);
+        ) {
+            Ok(function) => lowered_functions.push(function),
+            Err(error) if recover => append_diagnostic(&mut diagnostics, error),
+            Err(error) => return Err(single_diagnostic(error)),
+        }
     }
     let ctx = LowerContext {
         structs: &structs,
@@ -396,7 +423,20 @@ pub fn lower_with_capabilities(
         current_borrow_return_params: HashSet::new(),
     };
     let mut env = HashMap::new();
-    let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
+    let stmts = if recover {
+        let (stmts, mut block_diagnostics, _) =
+            lower_block_recovering(&program.stmts, &mut env, &ctx);
+        diagnostics.append(&mut block_diagnostics);
+        stmts
+    } else {
+        lower_block(&program.stmts, &mut env, &ctx)
+            .map_err(single_diagnostic)?
+            .0
+    };
+    if !diagnostics.is_empty() {
+        sort_diagnostics(&mut diagnostics);
+        return Err(diagnostics);
+    }
     Ok(Program {
         path: program.path.clone(),
         structs: lowered_structs,
@@ -406,6 +446,32 @@ pub fn lower_with_capabilities(
     })
 }
 
+fn primary_diagnostic(mut diagnostics: Vec<Diagnostic>) -> Diagnostic {
+    sort_diagnostics(&mut diagnostics);
+    let mut first = diagnostics.remove(0);
+    first.related = diagnostics;
+    first
+}
+
+fn single_diagnostic(diagnostic: Diagnostic) -> Vec<Diagnostic> {
+    vec![diagnostic]
+}
+
+fn append_diagnostic(diagnostics: &mut Vec<Diagnostic>, mut diagnostic: Diagnostic) {
+    diagnostics.append(&mut diagnostic.related);
+    diagnostics.push(diagnostic);
+}
+
+fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.column.cmp(&right.column))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+}
 
 fn reachable_function_names(program: &syntax::Program) -> HashSet<String> {
     let functions_by_name: HashMap<&str, &syntax::Function> = program
@@ -513,7 +579,9 @@ fn collect_expr_calls(expr: &syntax::Expr, calls: &mut VecDeque<String>) {
                 collect_expr_calls(&entry.value, calls);
             }
         }
-        syntax::Expr::Slice { base, start, end, .. } => {
+        syntax::Expr::Slice {
+            base, start, end, ..
+        } => {
             collect_expr_calls(base, calls);
             if let Some(start) = start {
                 collect_expr_calls(start, calls);
@@ -605,7 +673,9 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -2754,9 +2824,18 @@ fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic
 }
 
 impl Type {
+    fn is_error(&self) -> bool {
+        matches!(self, Type::Error)
+    }
+
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool | Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) => true,
+            Type::Error
+            | Type::Int
+            | Type::Bool
+            | Type::Ptr(_)
+            | Type::MutPtr(_)
+            | Type::Slice(_) => true,
             Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
@@ -2777,7 +2856,8 @@ impl Type {
         match self {
             Type::Int | Type::Bool | Type::String => true,
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
-            Type::Struct(_)
+            Type::Error
+            | Type::Struct(_)
             | Type::Enum(_)
             | Type::Ptr(_)
             | Type::MutPtr(_)
@@ -3308,7 +3388,12 @@ fn lower_function(
     let (body, _, guaranteed_return) = if function.is_extern {
         (Vec::new(), env.clone(), true)
     } else {
-        lower_block(&function.body, &mut env, &ctx)?
+        let (body, diagnostics, guaranteed_return) =
+            lower_block_recovering(&function.body, &mut env, &ctx);
+        if !diagnostics.is_empty() {
+            return Err(primary_diagnostic(diagnostics));
+        }
+        (body, env.clone(), guaranteed_return)
     };
     if !guaranteed_return {
         return Err(Diagnostic::new(
@@ -3365,6 +3450,61 @@ fn lower_block(
     Ok((lowered, after, guaranteed_return))
 }
 
+fn lower_block_recovering(
+    block: &[syntax::Stmt],
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> (Vec<Stmt>, Vec<Diagnostic>, bool) {
+    let scope_names = env.keys().cloned().collect::<HashSet<_>>();
+    let mut lowered = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut guaranteed_return = false;
+    for stmt in block {
+        if guaranteed_return {
+            diagnostics.push(
+                Diagnostic::new(
+                    "control",
+                    "unreachable statements after a terminating control-flow statement are not yet supported in stage1",
+                )
+                .with_span(stmt.line(), stmt.column()),
+            );
+            continue;
+        }
+        let mut candidate_env = env.clone();
+        match lower_stmt(stmt, &mut candidate_env, ctx) {
+            Ok(lowered_stmt) => {
+                guaranteed_return = lowered_stmt.always_returns();
+                *env = candidate_env;
+                lowered.push(lowered_stmt);
+            }
+            Err(error) => {
+                insert_type_error_binding_for_failed_stmt(stmt, env);
+                diagnostics.push(error);
+            }
+        }
+    }
+    release_scope_borrows(env, &scope_names);
+    (lowered, diagnostics, guaranteed_return)
+}
+
+fn insert_type_error_binding_for_failed_stmt(
+    stmt: &syntax::Stmt,
+    env: &mut HashMap<String, Binding>,
+) {
+    if let syntax::Stmt::Let { name, .. } = stmt {
+        env.entry(name.clone()).or_insert_with(|| Binding {
+            ty: Type::Error,
+            moved: false,
+            moved_projections: HashSet::new(),
+            borrow_kind: None,
+            borrow_origin: None,
+            borrowed_owners: HashSet::new(),
+            active_borrow_count: 0,
+            active_mut_borrow_count: 0,
+        });
+    }
+}
+
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -3395,7 +3535,7 @@ fn lower_stmt(
             let expected = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
-            if actual != expected {
+            if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -3440,7 +3580,10 @@ fn lower_stmt(
         }
         syntax::Stmt::Print { expr, line, column } => {
             let lowered = lower_expr(expr, env, ctx)?;
-            if !matches!(lowered.ty(), Type::Int | Type::Bool | Type::String) {
+            if !matches!(
+                lowered.ty(),
+                Type::Error | Type::Int | Type::Bool | Type::String
+            ) {
                 return Err(Diagnostic::new(
                     "type",
                     format!("print expects int, bool, or string, got {}", lowered.ty()),
@@ -7481,7 +7624,9 @@ fn contains_borrowed_slice_type_inner(
             visiting_enums.remove(name);
             contains
         }
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
     }
 }
 
@@ -7494,9 +7639,13 @@ fn contains_mut_borrowed_slice_type_inner(
 ) -> bool {
     match ty {
         Type::MutSlice(_) => true,
-        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
+        Type::Error
+        | Type::Slice(_)
+        | Type::Int
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
         Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
             inner,
             structs,
@@ -8144,6 +8293,7 @@ impl CompareOp {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Error => write!(f, "<type-error>"),
             Type::Int => write!(f, "int"),
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
