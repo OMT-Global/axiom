@@ -149,6 +149,10 @@ pub enum Expr {
         rhs: Box<Expr>,
         ty: Type,
     },
+    Cast {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     Try {
         expr: Box<Expr>,
         ty: Type,
@@ -208,6 +212,7 @@ pub enum Expr {
 pub enum Type {
     Error,
     Int,
+    Numeric(syntax::NumericType),
     Bool,
     String,
     Struct(String),
@@ -230,6 +235,10 @@ pub enum Type {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum LiteralValue {
     Int(i64),
+    Numeric {
+        raw: String,
+        ty: syntax::NumericType,
+    },
     Bool(bool),
     String(String),
 }
@@ -330,6 +339,18 @@ fn function_symbol_name(function: &syntax::Function) -> String {
         Some(target) => format!("{target}__{}", function.name),
         None => function.name.clone(),
     }
+}
+
+fn is_castable_numeric(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::Numeric(_))
+}
+
+fn is_ordered_numeric(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::Numeric(_))
+}
+
+fn is_addable_numeric(ty: &Type) -> bool {
+    matches!(ty, Type::Int | Type::Numeric(_))
 }
 
 fn method_owner_name(ty: &Type) -> Option<&str> {
@@ -556,7 +577,9 @@ fn collect_expr_calls(expr: &syntax::Expr, calls: &mut VecDeque<String>) {
             collect_expr_calls(lhs, calls);
             collect_expr_calls(rhs, calls);
         }
-        syntax::Expr::Try { expr, .. } | syntax::Expr::Await { expr, .. } => {
+        syntax::Expr::Try { expr, .. }
+        | syntax::Expr::Await { expr, .. }
+        | syntax::Expr::Cast { expr, .. } => {
             collect_expr_calls(expr, calls);
         }
         syntax::Expr::StructLiteral { fields, .. } => {
@@ -673,9 +696,13 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
+        Type::Error
+        | Type::Int
+        | Type::Numeric(_)
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -1140,7 +1167,10 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
                 collect_type_params(element, type_params, found);
             }
         }
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => {}
+        syntax::TypeName::Int
+        | syntax::TypeName::Numeric(_)
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String => {}
     }
 }
 
@@ -1527,6 +1557,7 @@ fn rewrite_aggregate_type_name(
             )?))
         }
         syntax::TypeName::Int => syntax::TypeName::Int,
+        syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
         syntax::TypeName::String => syntax::TypeName::String,
     })
@@ -1871,6 +1902,31 @@ fn rewrite_expr_aggregate_types(
                 queue,
                 queued,
             )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Cast {
+            expr,
+            ty,
+            line,
+            column,
+        } => syntax::Expr::Cast {
+            expr: Box::new(rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            ty: rewrite_aggregate_type_name(
+                ty,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                *line,
+                *column,
+            )?,
             line: *line,
             column: *column,
         },
@@ -2461,6 +2517,23 @@ fn rewrite_expr_generic_calls(
             line: *line,
             column: *column,
         },
+        syntax::Expr::Cast {
+            expr,
+            ty,
+            line,
+            column,
+        } => syntax::Expr::Cast {
+            expr: Box::new(rewrite_expr_generic_calls(
+                expr,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?),
+            ty: substitute_type_name(ty, type_bindings),
+            line: *line,
+            column: *column,
+        },
         syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
             expr: Box::new(rewrite_expr_generic_calls(
                 expr,
@@ -2732,6 +2805,7 @@ fn substitute_type_name(
             syntax::TypeName::Array(Box::new(substitute_type_name(inner, type_bindings)))
         }
         syntax::TypeName::Int => syntax::TypeName::Int,
+        syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
         syntax::TypeName::String => syntax::TypeName::String,
     }
@@ -2782,6 +2856,7 @@ fn is_async_runtime_intrinsic(name: &str) -> bool {
 fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
     match ty {
         syntax::TypeName::Int => String::from("int"),
+        syntax::TypeName::Numeric(numeric) => numeric.as_str().to_string(),
         syntax::TypeName::Bool => String::from("bool"),
         syntax::TypeName::String => String::from("string"),
         syntax::TypeName::Named(name, args) if args.is_empty() => name.clone(),
@@ -2832,6 +2907,7 @@ impl Type {
         match self {
             Type::Error
             | Type::Int
+            | Type::Numeric(_)
             | Type::Bool
             | Type::Ptr(_)
             | Type::MutPtr(_)
@@ -2854,7 +2930,7 @@ impl Type {
 
     fn supports_map_key(&self) -> bool {
         match self {
-            Type::Int | Type::Bool | Type::String => true,
+            Type::Int | Type::Numeric(_) | Type::Bool | Type::String => true,
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
             Type::Error
             | Type::Struct(_)
@@ -3582,7 +3658,7 @@ fn lower_stmt(
             let lowered = lower_expr(expr, env, ctx)?;
             if !matches!(
                 lowered.ty(),
-                Type::Error | Type::Int | Type::Bool | Type::String
+                Type::Error | Type::Int | Type::Numeric(_) | Type::Bool | Type::String
             ) {
                 return Err(Diagnostic::new(
                     "type",
@@ -5906,12 +5982,13 @@ fn lower_expr_with_expected(
             let rhs = lower_expr(rhs, env, ctx)?;
             let lhs_ty = lhs.ty().clone();
             let rhs_ty = rhs.ty().clone();
-            if lhs_ty != rhs_ty || !matches!(lhs_ty, Type::Int | Type::String) {
+            if lhs_ty != rhs_ty || !(is_addable_numeric(&lhs_ty) || matches!(lhs_ty, Type::String))
+            {
                 return Err(
                     Diagnostic::new(
                         "type",
                         format!(
-                            "operator '+' expects matching int or string operands, got {lhs_ty} and {rhs_ty}"
+                            "operator '+' expects matching numeric or string operands, got {lhs_ty} and {rhs_ty}"
                         ),
                     )
                     .with_span(*line, *column),
@@ -5953,11 +6030,11 @@ fn lower_expr_with_expected(
                 | syntax::CompareOp::Le
                 | syntax::CompareOp::Gt
                 | syntax::CompareOp::Ge => {
-                    if lhs_ty != Type::Int || rhs_ty != Type::Int {
+                    if lhs_ty != rhs_ty || !is_ordered_numeric(&lhs_ty) {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
-                                "operator '{}' expects int operands, got {lhs_ty} and {rhs_ty}",
+                                "operator '{}' expects matching numeric operands, got {lhs_ty} and {rhs_ty}",
                                 op.lexeme()
                             ),
                         )
@@ -5970,6 +6047,29 @@ fn lower_expr_with_expected(
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 ty: Type::Bool,
+            })
+        }
+        syntax::Expr::Cast {
+            expr,
+            ty,
+            line,
+            column,
+        } => {
+            let expr = lower_expr(expr, env, ctx)?;
+            let target = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
+            if !is_castable_numeric(expr.ty()) || !is_castable_numeric(&target) {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "cast expects numeric source and target types, got {} as {target}",
+                        expr.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            }
+            Ok(Expr::Cast {
+                expr: Box::new(expr),
+                ty: target,
             })
         }
         syntax::Expr::Try { expr, line, column } => {
@@ -6882,7 +6982,10 @@ fn validate_ffi_type_name(
     column: usize,
 ) -> Result<(), Diagnostic> {
     match ty {
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => Ok(()),
+        syntax::TypeName::Int
+        | syntax::TypeName::Numeric(_)
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String => Ok(()),
         syntax::TypeName::Ptr(inner) | syntax::TypeName::MutPtr(inner) => {
             validate_ffi_type_name(inner, line, column)
         }
@@ -6896,7 +6999,7 @@ fn validate_ffi_type_name(
 
 fn validate_ffi_type(ty: &Type, line: usize, column: usize) -> Result<(), Diagnostic> {
     match ty {
-        Type::Int | Type::Bool | Type::String => Ok(()),
+        Type::Int | Type::Numeric(_) | Type::Bool | Type::String => Ok(()),
         Type::Ptr(inner) | Type::MutPtr(inner) => validate_ffi_type(inner, line, column),
         _ => Err(Diagnostic::new(
             "type",
@@ -7310,7 +7413,9 @@ fn expr_borrow_origin(
                 .iter()
                 .map(|element| expr_borrow_origin(element, env, ctx)),
         ),
-        Expr::Try { expr, .. } | Expr::Await { expr, .. } => expr_borrow_origin(expr, env, ctx),
+        Expr::Try { expr, .. } | Expr::Await { expr, .. } | Expr::Cast { expr, .. } => {
+            expr_borrow_origin(expr, env, ctx)
+        }
         Expr::TupleIndex { base, .. } => expr_borrow_origin(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             merge_borrow_origins(entries.iter().flat_map(|entry| {
@@ -7453,7 +7558,9 @@ fn expr_borrowed_owners(
             })
             .unwrap_or_default(),
         Expr::TupleLiteral { elements, .. } => collect_expr_borrowed_owners(elements, env, ctx),
-        Expr::Try { expr, .. } | Expr::Await { expr, .. } => expr_borrowed_owners(expr, env, ctx),
+        Expr::Try { expr, .. } | Expr::Await { expr, .. } | Expr::Cast { expr, .. } => {
+            expr_borrowed_owners(expr, env, ctx)
+        }
         Expr::TupleIndex { base, .. } => expr_borrowed_owners(base, env, ctx),
         Expr::MapLiteral { entries, .. } => {
             let mut owners = HashSet::new();
@@ -7624,9 +7731,13 @@ fn contains_borrowed_slice_type_inner(
             visiting_enums.remove(name);
             contains
         }
-        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
+        Type::Error
+        | Type::Int
+        | Type::Numeric(_)
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
     }
 }
 
@@ -7642,6 +7753,7 @@ fn contains_mut_borrowed_slice_type_inner(
         Type::Error
         | Type::Slice(_)
         | Type::Int
+        | Type::Numeric(_)
         | Type::Bool
         | Type::String
         | Type::Ptr(_)
@@ -7938,6 +8050,13 @@ fn lower_literal(literal: &syntax::Literal) -> Expr {
             ty: Type::Int,
             value: LiteralValue::Int(*value),
         },
+        syntax::Literal::Numeric { raw, ty } => Expr::Literal {
+            ty: Type::Numeric(*ty),
+            value: LiteralValue::Numeric {
+                raw: raw.clone(),
+                ty: *ty,
+            },
+        },
         syntax::Literal::Bool(value) => Expr::Literal {
             ty: Type::Bool,
             value: LiteralValue::Bool(*value),
@@ -7972,6 +8091,7 @@ fn lower_type_inner<T, U>(
 ) -> Result<Type, Diagnostic> {
     match ty {
         syntax::TypeName::Int => Ok(Type::Int),
+        syntax::TypeName::Numeric(numeric) => Ok(Type::Numeric(*numeric)),
         syntax::TypeName::Bool => Ok(Type::Bool),
         syntax::TypeName::String => Ok(Type::String),
         syntax::TypeName::Named(name, args) => {
@@ -8156,6 +8276,7 @@ impl Expr {
             Expr::Call { ty, .. } => ty,
             Expr::BinaryAdd { ty, .. } => ty,
             Expr::BinaryCompare { ty, .. } => ty,
+            Expr::Cast { ty, .. } => ty,
             Expr::Try { ty, .. } => ty,
             Expr::Await { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
@@ -8242,6 +8363,7 @@ impl syntax::Expr {
             | syntax::Expr::MethodCall { line, .. }
             | syntax::Expr::BinaryAdd { line, .. }
             | syntax::Expr::BinaryCompare { line, .. }
+            | syntax::Expr::Cast { line, .. }
             | syntax::Expr::Try { line, .. }
             | syntax::Expr::Await { line, .. }
             | syntax::Expr::StructLiteral { line, .. }
@@ -8263,6 +8385,7 @@ impl syntax::Expr {
             | syntax::Expr::MethodCall { column, .. }
             | syntax::Expr::BinaryAdd { column, .. }
             | syntax::Expr::BinaryCompare { column, .. }
+            | syntax::Expr::Cast { column, .. }
             | syntax::Expr::Try { column, .. }
             | syntax::Expr::Await { column, .. }
             | syntax::Expr::StructLiteral { column, .. }
@@ -8295,6 +8418,7 @@ impl std::fmt::Display for Type {
         match self {
             Type::Error => write!(f, "<type-error>"),
             Type::Int => write!(f, "int"),
+            Type::Numeric(numeric) => write!(f, "{}", numeric.as_str()),
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
             Type::Struct(name) => write!(f, "{name}"),
