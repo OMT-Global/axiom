@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides fifteen stdlib modules. Six are thin wrappers over
+//! Today this provides sixteen stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -57,6 +57,8 @@
 //!   nonblocking channels.
 //! * `std/async.ax` — deterministic task, join, channel, timeout,
 //!   cancellation, and select wrappers over the stage1 async runtime values.
+//! * `std/regex.ax` — linear-time regular-expression helpers (`is_match`,
+//!   `find`, `replace_all`) over a stage1-safe NFA engine.
 
 use std::path::{Path, PathBuf};
 
@@ -202,6 +204,12 @@ pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_sel
     (
         "http.ax",
         "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
+    ),
+    (
+        "regex.ax",
+        "pub fn is_match(pattern: string, text: string): bool {\nreturn regex_is_match(pattern, text)\n}\n\
+pub fn find(pattern: string, text: string): Option<string> {\nreturn regex_find(pattern, text)\n}\n\
+pub fn replace_all(pattern: string, text: string, replacement: string): string {\nreturn regex_replace_all(pattern, text, replacement)\n}\n",
     ),
 ];
 
