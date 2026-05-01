@@ -1,5 +1,5 @@
 [package]
-name = "stdlib-fs"
+name = "stdlib-testing"
 version = "0.1.0"
 
 [build]
@@ -7,8 +7,7 @@ entry = "src/main.ax"
 out_dir = "dist"
 
 [capabilities]
-fs = true
-"fs:write" = true
+fs = false
 net = false
 process = false
 env = false
