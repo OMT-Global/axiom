@@ -1,4 +1,5 @@
 pub mod codegen;
+pub mod dap;
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -8,6 +9,7 @@ pub mod manifest;
 pub mod mir;
 pub mod new_project;
 pub mod project;
+pub mod registry;
 pub mod stdlib;
 pub mod syntax;
 
@@ -18,7 +20,8 @@ mod tests {
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{
-        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, render_manifest,
+        CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
+        render_manifest,
     };
     use crate::mir;
     use crate::new_project::{WorkloadTemplate, create_project, create_project_with_template};
@@ -48,7 +51,7 @@ mod tests {
         crypto: bool,
     ) -> String {
         format!(
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
+            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
     }
 
@@ -124,6 +127,14 @@ mod tests {
             .join("..")
             .join("..")
             .join("conformance")
+    }
+
+    fn checked_in_example_fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join(name)
     }
 
     fn compiled_binary_command(path: impl AsRef<Path>) -> Command {
@@ -231,6 +242,227 @@ mod tests {
         assert!(rendered.contains("if ready {"));
         assert!(rendered.contains("println!(\"{}\", banner(String::from(\"from stage1\")));"));
         assert!(rendered.contains("println!(\"{}\", ready);"));
+    }
+
+    #[test]
+    fn parser_expands_declarative_statement_macros_before_lowering() {
+        let source = r#"macro_rules! answer {
+($value:expr) => {
+return $value + 1
+}
+}
+
+fn compute(): int {
+answer!(41)
+}
+
+print compute()
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.functions.len(), 1);
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("return 41 + 1;"));
+        assert!(!rendered.contains("answer!"));
+    }
+
+    #[test]
+    fn parser_expands_declarative_expression_macros_before_lowering() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn check_project_expands_declarative_macros_before_typecheck() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("axiom.toml"), render_manifest("macro-demo"))
+            .expect("write manifest");
+        let manifest = load_manifest(dir.path()).expect("load manifest");
+        fs::write(
+            dir.path().join("axiom.lock"),
+            render_lockfile_for_project(dir.path(), &manifest).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::create_dir_all(dir.path().join("src")).expect("create src");
+        fs::write(
+            dir.path().join("src/main.ax"),
+            r#"macro_rules! keep_int {
+($value:expr) => {
+$value
+}
+}
+
+let answer: int = keep_int!(42)
+print answer
+"#,
+        )
+        .expect("write source");
+
+        let checked = check_project(dir.path()).expect("check project");
+        assert_eq!(checked.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_does_not_expand_macro_text_inside_string_literals() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+print "add_one!(41)"
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("add_one!(41)"));
+        assert!(!rendered.contains("41 + 1"));
+    }
+
+    #[test]
+    fn parser_does_not_expand_macro_suffix_of_longer_invocation_name() {
+        let source = r#"macro_rules! add {
+($value:expr) => {
+$value + 1
+}
+}
+
+let my41: int = 10
+let answer: int = myadd!(41)
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .and_then(|parsed| hir::lower(&parsed))
+            .expect_err("longer macro invocation name should not match add! suffix");
+        assert!(
+            error.message.contains("unknown function")
+                || error.message.contains("unknown value")
+                || error.message.contains("invalid identifier"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_definitions() {
+        let source = r#"fn compute(): int {
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_expands_macro_parameters_with_shared_prefixes() {
+        let source = r#"macro_rules! pick_second {
+($a:expr, $ab:expr) => {
+$ab
+}
+}
+
+let answer: int = pick_second!(1, 2)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 2;"));
+        assert!(!rendered.contains("1b;"));
+    }
+
+    #[test]
+    fn parser_does_not_substitute_macro_parameters_inside_template_strings() {
+        let source = r#"macro_rules! label {
+($value:expr) => {
+print "$value"
+}
+}
+
+label!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("$value"));
+        assert!(!rendered.contains("41"));
+    }
+
+    #[test]
+    fn parser_ignores_string_braces_when_collecting_top_level_macros() {
+        let source = r#"print "{"
+
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_even_after_string_close_brace() {
+        let source = r#"fn compute(): int {
+print "}"
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_bounds_recursive_declarative_macro_expansion() {
+        let source = r#"macro_rules! spin {
+() => {
+spin!()
+}
+}
+
+spin!()
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("recursive macro expansion should be bounded");
+        assert!(error.message.contains("exceeded bounded depth"));
     }
 
     #[test]
@@ -1934,6 +2166,7 @@ print fail()
             &TestOptions {
                 filter: None,
                 package: Some(String::from("workspace-app")),
+                include_benchmarks: false,
             },
         )
         .expect("test selected workspace package");
@@ -2106,10 +2339,10 @@ print fail()
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-        assert_eq!(caps.len(), 7);
+        assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
-        assert_eq!(project_caps.len(), 7);
+        assert_eq!(project_caps.len(), 8);
     }
 
     #[test]
@@ -2133,10 +2366,10 @@ print fail()
         assert!(!env.unsafe_unrestricted);
 
         let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][3]["name"], "env");
-        assert_eq!(payload["capabilities"][3]["allowed"][0], "FOO");
-        assert_eq!(payload["capabilities"][3]["allowed"][1], "LOG_LEVEL");
-        assert!(payload["capabilities"][3]["unsafe_unrestricted"].is_null());
+        assert_eq!(payload["capabilities"][4]["name"], "env");
+        assert_eq!(payload["capabilities"][4]["allowed"][0], "FOO");
+        assert_eq!(payload["capabilities"][4]["allowed"][1], "LOG_LEVEL");
+        assert!(payload["capabilities"][4]["unsafe_unrestricted"].is_null());
     }
 
     #[test]
@@ -2738,6 +2971,189 @@ print strlen("hello")
     }
 
     #[test]
+    fn build_project_scopes_fs_write_to_manifest_root_without_read_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("scoped-fs-write-only");
+        create_project(&project, Some("scoped-fs-write-only-app")).expect("create project");
+        fs::create_dir_all(project.join("data")).expect("create data dir");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "scoped-fs-write-only-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+"fs:write" = true
+fs_root = "data"
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"print fs_write("data/inside.txt", "inside") == 0
+print fs_write("outside.txt", "outside") == -1
+print fs_write("data/../outside.txt", "traversal") == -1
+"#,
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\n"
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
+            "inside",
+        );
+        assert!(!project.join("outside.txt").exists());
+    }
+
+    #[test]
+    fn stage1_project_imports_stdlib_fs_read_without_write_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-fs-read-only-app");
+        create_project(&project, Some("stdlib-fs-read-only-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-fs-read-only-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = true
+"fs:write" = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(project.join("src/fixture.txt"), "read only\n").expect("write fixture");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/fs.ax"
+match read_file("src/fixture.txt") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+"#,
+        )
+        .expect("write source");
+
+        check_project(&project).expect("read-only std/fs import should not require fs:write");
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_fs_write_helpers() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-fs-write-app");
+        create_project(&project, Some("stdlib-fs-write-app")).expect("create project");
+        fs::create_dir_all(project.join("data/empty")).expect("create empty dir");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"stdlib-fs-write-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\n\"fs:write\" = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/fs.ax\"\nprint create_file(\"data/new.txt\") == 0\nprint append_file(\"data/new.txt\", \"hello\") == 0\nprint append_file(\"data/new.txt\", \" world\") == 0\nmatch read_file(\"data/new.txt\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\nprint write_file(\"data/write.txt\", \"first\") == 0\nprint replace_file(\"data/write.txt\", \"second\") == 0\nmatch read_file(\"data/write.txt\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\nprint mkdir_all(\"data/nested/dir\") == 0\nprint write_file(\"data/nested/dir/file.txt\", \"nested\") == 0\nprint remove_file(\"data/nested/dir/file.txt\") == 0\nprint mkdir(\"data/single\") == 0\nprint remove_dir(\"data/single\") == 0\nprint write_file(\"../escape.txt\", \"leak\") == -1\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true\ntrue\ntrue\nhello world\ntrue\ntrue\nsecond\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\nhello world\ntrue\ntrue\nsecond\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+        );
+        assert!(!project.join("escape.txt").exists());
+        let _ = fs::remove_file(project.join("data/new.txt"));
+        let _ = fs::remove_file(project.join("data/write.txt"));
+        let _ = fs::remove_dir_all(project.join("data/nested"));
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_fs_write_without_write_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-fs-write-denied");
+        create_project(&project, Some("stdlib-fs-write-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"stdlib-fs-write-denied\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/fs.ax\"\nprint write_file(\"x\", \"content\")\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected fs write capability denial");
+        assert!(
+            err.message
+                .contains("requires [capabilities].fs:write = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_rejects_stdlib_fs_without_fs_capability() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-fs-denied");
@@ -3169,12 +3585,74 @@ print strlen("hello")
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/json.ax\"\nmatch parse_int(\"42\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nmatch parse_string(\"\\\"agent\\\"\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none\"\n}\n}\nprint stringify_bool(true)\nprint stringify_int(7)\nprint stringify_string(\"agent\")\nprint object3(field_string(\"name\", \"agent\"), field_int(\"retries\", 3), field_bool(\"ready\", true))\nmatch parse_bool(\"123\") {\nSome(_value) {\nprint \"bad\"\n}\nNone {\nprint \"none\"\n}\n}\n";
+        let source = r#"import "std/json.ax"
+
+match parse_int("42") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+match parse_string("\"agent\"") {
+Some(value) {
+print value
+}
+None {
+print "none"
+}
+}
+
+print stringify_bool(true)
+print stringify_int(7)
+print stringify_string("agent")
+print object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+
+let payload_name: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_string(payload_name, "name") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+let payload_retries: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_int(payload_retries, "retries") {
+Some(value) {
+print value
+}
+None {
+print 0
+}
+}
+let payload_ready: string = object3(field_string("name", "agent"), field_int("retries", 3), field_bool("ready", true))
+match parse_field_bool(payload_ready, "ready") {
+Some(value) {
+print value
+}
+None {
+print false
+}
+}
+print schema_object3(schema_field_string("name"), schema_field_int("retries"), schema_field_bool("ready"))
+
+match parse_bool("123") {
+Some(_value) {
+print "bad"
+}
+None {
+print "none"
+}
+}
+"#;
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n",
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nagent\n3\ntrue\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"retries\":{\"type\":\"integer\"},\"ready\":{\"type\":\"boolean\"}}}\nnone\n",
         )
         .expect("write golden");
 
@@ -3184,7 +3662,84 @@ print strlen("hello")
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nnone\n"
+            "42\nagent\ntrue\n7\n\"agent\"\n{\"name\":\"agent\",\"retries\":3,\"ready\":true}\nagent\n3\ntrue\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"retries\":{\"type\":\"integer\"},\"ready\":{\"type\":\"boolean\"}}}\nnone\n"
+        );
+
+        let tests = run_project_tests(&project).expect("run tests");
+        assert_eq!(tests.passed, 1);
+        assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_imports_synthetic_stdlib_regex_module() {
+        // `std/regex.ax` stays ungated in stage1: matching runs inside the
+        // deterministic generated runtime and does not cross a host capability
+        // boundary. The engine uses NFA-state simulation rather than
+        // backtracking so agent-provided patterns stay DoS-safe.
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-regex-app");
+        create_project(&project, Some("stdlib-regex-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-regex-app",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/regex.ax\"
+print is_match(\"^h.llo$\", \"hello\")
+print is_match(\"^[a-z]+$\", \"agent\")
+print is_match(\"^[^0-9]+$\", \"agent7\")
+match find(\"[0-9]+\", \"issue-238-ready\") {
+Some(value) {
+print value
+}
+None {
+print \"none\"
+}
+}
+print replace_all(\"[0-9]+\", \"issue-238-ready\", \"#\")
+print is_match(\"a*a\", \"aaaaaaaaaaaaaaaa\")
+";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        fs::write(project.join("src/main_test.ax"), source).expect("write test");
+        fs::write(
+            project.join("src/main_test.stdout"),
+            "true
+true
+false
+238
+issue-#-ready
+true
+",
+        )
+        .expect("write golden");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true
+true
+false
+238
+issue-#-ready
+true
+"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -3471,6 +4026,46 @@ print strlen("hello")
         .expect("write source");
 
         let err = check_project(&project).expect_err("expected json type error");
+        assert!(
+            err.message
+                .contains("expects argument type string, got bool"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_regex_with_wrong_argument_type() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-regex-bad-arg");
+        create_project(&project, Some("stdlib-regex-bad-arg")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-regex-bad-arg",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/regex.ax\"
+print is_match(\"[a-z]+\", true)
+",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected regex type error");
         assert!(
             err.message
                 .contains("expects argument type string, got bool"),
@@ -3794,8 +4389,27 @@ print strlen("hello")
                 name: String::from("math-smoke"),
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
+                kind: TestKind::Unit,
             }]
         );
+    }
+
+    #[test]
+    fn manifest_parses_richer_test_kinds() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("typed-tests");
+        create_project(&project, Some("typed-tests-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"json-table\"\nentry = \"src/main_test.ax\"\nkind = \"table\"\nstdout = \"0\\n\"\n",
+                render_manifest("typed-tests-app")
+            ),
+        )
+        .expect("write manifest");
+
+        let manifest = load_manifest(&project).expect("load manifest");
+        assert_eq!(manifest.tests[0].kind, TestKind::Table);
     }
 
     #[test]
@@ -3935,6 +4549,26 @@ print strlen("hello")
     }
 
     #[test]
+    fn run_project_tests_supports_std_testing_helpers() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-std-testing");
+        create_project(&project, Some("runner-std-testing-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/testing.ax\"\nlet int_case: int = table_int(\"double two\", 2 + 2, 4)\nlet bool_case: int = table_bool(\"bool equality\", true, true)\nlet string_case: int = table_string(\"greeting\", \"hello\" + \" world\", \"hello world\")\nlet property_case: int = property(\"addition identity\", 40 + 2 == 42)\nlet snapshot_case: int = snapshot(\"json line\", \"{\\\"ok\\\":true}\", \"{\\\"ok\\\":true}\")\nprint int_case + bool_case + string_case + property_case + snapshot_case\n",
+        )
+        .expect("write std testing test");
+        fs::write(project.join("src/main_test.stdout"), "0\n").expect("write golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.passed, 1);
+        assert_eq!(output.failed, 0);
+        let case = output.cases.first().expect("test case");
+        assert_eq!(case.stdout, "0\n");
+        assert!(case.ok);
+    }
+
+    #[test]
     fn run_project_tests_reports_assertion_failure_details() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner-assertion-fail");
@@ -4002,6 +4636,66 @@ print strlen("hello")
     }
 
     #[test]
+    fn run_project_tests_classifies_richer_fixture_kinds() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-rich-discovery");
+        create_project(&project, Some("runner-rich-discovery-app")).expect("create project");
+        fs::write(
+            project.join("src/cases_table_test.ax"),
+            "let ok: int = assert_eq(40 + 2, 42)\nprint ok\n",
+        )
+        .expect("write table test");
+        fs::write(project.join("src/cases_table_test.stdout"), "0\n").expect("write table golden");
+        fs::write(
+            project.join("src/roundtrip_property.ax"),
+            "let ok: int = assert_true(42 == 42)\nprint ok\n",
+        )
+        .expect("write property test");
+        fs::write(project.join("src/roundtrip_property.stdout"), "0\n")
+            .expect("write property golden");
+        fs::write(
+            project.join("src/output_snapshot_test.ax"),
+            "print \"snapshot\"\n",
+        )
+        .expect("write snapshot test");
+        fs::write(
+            project.join("src/output_snapshot_test.stdout"),
+            "snapshot\n",
+        )
+        .expect("write snapshot golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.kinds.get(&TestKind::Table), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Property), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Snapshot), Some(&1));
+    }
+
+    #[test]
+    fn run_project_tests_can_include_benchmark_smoke_fixtures() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-benchmark-discovery");
+        create_project(&project, Some("runner-benchmark-discovery-app")).expect("create project");
+        fs::write(project.join("src/compute_bench.ax"), "print \"bench\"\n")
+            .expect("write benchmark");
+
+        let default_output = run_project_tests(&project).expect("run default tests");
+        assert_eq!(default_output.kinds.get(&TestKind::Benchmark), None);
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: None,
+                package: None,
+                include_benchmarks: true,
+            },
+        )
+        .expect("run benchmark smoke tests");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.kinds.get(&TestKind::Benchmark), Some(&1));
+    }
+
+    #[test]
     fn check_project_rejects_use_after_string_move() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("moves");
@@ -4053,6 +4747,35 @@ print strlen("hello")
                 "fixture {case}: {:?}",
                 error.message
             );
+        }
+    }
+
+    #[test]
+    fn checked_in_proof_workload_examples_build_run_and_test() {
+        for example in ["proof_cli", "proof_worker", "proof_http_service"] {
+            let project = checked_in_example_fixture(example);
+            check_project(&project).expect("check checked-in proof workload example");
+
+            let built = build_project(&project).expect("build checked-in proof workload example");
+            let output = compiled_binary_command(&built.binary)
+                .output()
+                .expect("run checked-in proof workload example");
+            let expected = fs::read_to_string(project.join("src/main_test.stdout"))
+                .expect("read expected stdout");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                expected,
+                "example {example}"
+            );
+
+            let tests =
+                run_project_tests(&project).expect("test checked-in proof workload example");
+            let expected_passed = match example {
+                "proof_cli" => 2,
+                _ => 1,
+            };
+            assert_eq!(tests.passed, expected_passed, "example {example}");
+            assert_eq!(tests.failed, 0, "example {example}");
         }
     }
 
@@ -4123,17 +4846,61 @@ print strlen("hello")
     }
 
     #[test]
-    fn check_project_rejects_generic_call_without_type_args() {
+    fn check_project_infers_generic_call_from_argument_type() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("generic-missing-type-args");
-        create_project(&project, Some("generic-missing-type-args-app")).expect("create project");
+        let project = dir.path().join("generic-inferred-arg");
+        create_project(&project, Some("generic-inferred-arg-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "fn identity<T>(value: T): T {\nreturn value\n}\n\nprint identity(42)\n",
         )
         .expect("write source");
-        let error = check_project(&project).expect_err("generic calls require type args");
-        assert!(error.message.contains("requires explicit type arguments"));
+        let output = check_project(&project).expect("generic call should infer type args");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_lowers_inferred_generic_calls_to_monomorphized_copies() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nlet answer: int = identity(42)\nlet label: string = identity<string>(\"stage1\")\nprint answer\nprint label\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn identity__int(value: i64) -> i64 {"));
+        assert!(rendered.contains("fn identity__string(value: String) -> String {"));
+        assert!(rendered.contains("let answer: i64 = identity__int(42);"));
+        assert!(
+            rendered.contains("let label: String = identity__string(String::from(\"stage1\"));")
+        );
+    }
+
+    #[test]
+    fn check_project_infers_generic_call_from_return_context() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inferred-return");
+        create_project(&project, Some("generic-inferred-return-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn none<T>(): Option<T> {\nreturn None\n}\n\nlet missing: Option<int> = none()\n",
+        )
+        .expect("write source");
+        let output = check_project(&project).expect("generic call should infer from expected type");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn check_project_reports_generic_inference_constraint_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inference-mismatch");
+        create_project(&project, Some("generic-inference-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn first<T>(values: [T]): T {\nreturn values[0]\n}\n\nprint first(42)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("argument constraint should fail");
+        assert!(error.message.contains("argument 1 constraint failed"));
+        assert!(error.message.contains("expected generic constraint"));
         assert_eq!(error.kind, "type");
     }
 
@@ -6301,6 +7068,7 @@ print strlen("hello")
             &TestOptions {
                 filter: Some(String::from("math")),
                 package: None,
+                include_benchmarks: false,
             },
         )
         .expect("run filtered tests");
@@ -6371,6 +7139,7 @@ print strlen("hello")
             &TestOptions {
                 filter: Some(String::from("main")),
                 package: None,
+                include_benchmarks: false,
             },
         )
         .expect("test project");
@@ -6383,6 +7152,8 @@ print strlen("hello")
         assert_eq!(payload["command"], "test");
         assert_eq!(payload["filter"], "main");
         assert_eq!(payload["skipped"], 0);
+        assert_eq!(payload["cases"][0]["kind"], "unit");
+        assert_eq!(payload["kinds"]["unit"], 1);
         assert!(payload["duration_ms"].is_u64());
     }
 

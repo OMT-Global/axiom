@@ -8,14 +8,14 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides fifteen stdlib modules. Six are thin wrappers over
+//! Today this provides sixteen stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
 //!   `elapsed_ms(start)`, and `sleep(duration)` on top of `clock_now_ms`,
 //!   `clock_elapsed_ms`, and `clock_sleep_ms` (clock).
 //! * `std/env.ax` — `get_env(key)` on top of `env_get` (env).
-//! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs).
+//! * `std/fs.ax` — `read_file(path)` on top of `fs_read` (fs) plus write-side helpers behind `fs:write`.
 //! * `std/net.ax` — `resolve(host)` on top of `net_resolve`, plus a bounded
 //!   loopback-only TCP/UDP socket floor on top of `net_tcp_*` and `net_udp_*`
 //!   intrinsics (net).
@@ -57,6 +57,10 @@
 //!   nonblocking channels.
 //! * `std/async.ax` — deterministic task, join, channel, timeout,
 //!   cancellation, and select wrappers over the stage1 async runtime values.
+//! * `std/regex.ax` — linear-time regular-expression helpers (`is_match`,
+//!   `find`, `replace_all`) over a stage1-safe NFA engine.
+//! * `std/testing.ax` — table-case, property, and snapshot assertion helpers
+//!   layered over the bootstrap test intrinsics.
 
 use std::path::{Path, PathBuf};
 
@@ -92,7 +96,42 @@ pub fn sleep(duration: Duration): int {\nreturn clock_sleep_ms(duration.ms)\n}\n
     ),
     (
         "fs.ax",
-        "pub fn read_file(path: string): Option<string> {\nreturn fs_read(path)\n}\n",
+        "pub fn read_file(path: string): Option<string> {
+return fs_read(path)
+}
+\
+pub fn write_file(path: string, content: string): int {
+return fs_write(path, content)
+}
+\
+pub fn create_file(path: string): int {
+return fs_create(path)
+}
+\
+pub fn append_file(path: string, content: string): int {
+return fs_append(path, content)
+}
+\
+pub fn mkdir(path: string): int {
+return fs_mkdir(path)
+}
+\
+pub fn mkdir_all(path: string): int {
+return fs_mkdir_all(path)
+}
+\
+pub fn remove_file(path: string): int {
+return fs_remove_file(path)
+}
+\
+pub fn remove_dir(path: string): int {
+return fs_remove_dir(path)
+}
+\
+pub fn replace_file(path: string, content: string): int {
+return fs_replace(path, content)
+}
+",
     ),
     (
         "net.ax",
@@ -124,12 +163,21 @@ pub fn constant_time_eq(left: string, right: string): bool {\nreturn crypto_cons
         "pub fn parse_int(text: string): Option<int> {\nreturn json_parse_int(text)\n}\n\
 pub fn parse_bool(text: string): Option<bool> {\nreturn json_parse_bool(text)\n}\n\
 pub fn parse_string(text: string): Option<string> {\nreturn json_parse_string(text)\n}\n\
+pub fn parse_field_int(text: string, key: string): Option<int> {\nreturn json_parse_field_int(text, key)\n}\n\
+pub fn parse_field_bool(text: string, key: string): Option<bool> {\nreturn json_parse_field_bool(text, key)\n}\n\
+pub fn parse_field_string(text: string, key: string): Option<string> {\nreturn json_parse_field_string(text, key)\n}\n\
 pub fn stringify_int(value: int): string {\nreturn json_stringify_int(value)\n}\n\
 pub fn stringify_bool(value: bool): string {\nreturn json_stringify_bool(value)\n}\n\
 pub fn stringify_string(value: string): string {\nreturn json_stringify_string(value)\n}\n\
 pub fn field_string(key: string, value: string): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_string(value)\n}\n\
 pub fn field_int(key: string, value: int): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_int(value)\n}\n\
 pub fn field_bool(key: string, value: bool): string {\nreturn json_stringify_string(key) + \":\" + json_stringify_bool(value)\n}\n\
+pub fn schema_field_string(key: string): string {\nreturn json_stringify_string(key) + \":{\\\"type\\\":\\\"string\\\"}\"\n}\n\
+pub fn schema_field_int(key: string): string {\nreturn json_stringify_string(key) + \":{\\\"type\\\":\\\"integer\\\"}\"\n}\n\
+pub fn schema_field_bool(key: string): string {\nreturn json_stringify_string(key) + \":{\\\"type\\\":\\\"boolean\\\"}\"\n}\n\
+pub fn schema_object1(field: string): string {\nreturn \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\" + field + \"}}\"\n}\n\
+pub fn schema_object2(first_field: string, second_field: string): string {\nreturn \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\" + first_field + \",\" + second_field + \"}}\"\n}\n\
+pub fn schema_object3(first_field: string, second_field: string, third_field: string): string {\nreturn \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\" + first_field + \",\" + second_field + \",\" + third_field + \"}}\"\n}\n\
 pub fn object1(field: string): string {\nreturn \"{\" + field + \"}\"\n}\n\
 pub fn object2(first_field: string, second_field: string): string {\nreturn \"{\" + first_field + \",\" + second_field + \"}\"\n}\n\
 pub fn object3(first_field: string, second_field: string, third_field: string): string {\nreturn \"{\" + first_field + \",\" + second_field + \",\" + third_field + \"}\"\n}\n",
@@ -200,8 +248,22 @@ pub fn selected<T>(result: SelectResult<T>): int {\nreturn async_selected<T>(res
 pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_selected_value<T>(result)\n}\n",
     ),
     (
+        "testing.ax",
+        "pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+pub fn table_bool(name: string, actual: bool, expected: bool): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+pub fn table_string(name: string, actual: string, expected: string): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+pub fn property(name: string, holds: bool): int {\nreturn assert_property(name, holds)\n}\n\
+pub fn snapshot(name: string, actual: string, expected: string): int {\nreturn assert_snapshot(name, actual, expected)\n}\n",
+    ),
+    (
         "http.ax",
         "pub fn get(url: string): Option<string> {\nreturn http_get(url)\n}\n",
+    ),
+    (
+        "regex.ax",
+        "pub fn is_match(pattern: string, text: string): bool {\nreturn regex_is_match(pattern, text)\n}\n\
+pub fn find(pattern: string, text: string): Option<string> {\nreturn regex_find(pattern, text)\n}\n\
+pub fn replace_all(pattern: string, text: string, replacement: string): string {\nreturn regex_replace_all(pattern, text, replacement)\n}\n",
     ),
 ];
 
