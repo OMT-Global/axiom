@@ -7095,7 +7095,7 @@ print is_match(\"[a-z]+\", true)
         .expect("write root manifest");
         fs::write(
             project.join("src/main.ax"),
-            "import \"core/main.ax\"\n\nprint answer()\n",
+            "import \"core/main.ax\"\n\npub fn root_answer(): int {\nreturn answer()\n}\n\nprint root_answer()\n",
         )
         .expect("write root source");
         fs::write(
@@ -7157,6 +7157,15 @@ print is_match(\"[a-z]+\", true)
         );
 
         let payload = json_contract::check_success(&project, &output);
+        assert!(payload["exports"].is_array());
+        let root_exports = payload["exports"]
+            .as_array()
+            .expect("top-level root exports array");
+        assert!(root_exports.iter().any(|export| {
+            export["kind"] == "function"
+                && export["name"] == "root_answer"
+                && export["signature"] == "fn root_answer(): int"
+        }));
         assert!(payload["packages"][1]["exports"].is_array());
     }
 
