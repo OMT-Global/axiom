@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, Write};
@@ -281,16 +281,17 @@ impl DapSession {
         {
             return json!([]);
         }
-        json!(self
-            .locals
-            .iter()
-            .map(|local| json!({
-                "name": local.name,
-                "value": local.value,
-                "type": local.type_name,
-                "variablesReference": 0
-            }))
-            .collect::<Vec<_>>())
+        json!(
+            self.locals
+                .iter()
+                .map(|local| json!({
+                    "name": local.name,
+                    "value": local.value,
+                    "type": local.type_name,
+                    "variablesReference": 0
+                }))
+                .collect::<Vec<_>>()
+        )
     }
 
     fn advance_to_next_breakpoint(&mut self) -> bool {
