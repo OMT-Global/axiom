@@ -10,8 +10,17 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/b
 
 The checked-in fixture package lives at `stage1/examples/benchmarks`.
 
-The extended validation benchmark gate also compares the current stage1 build
-medians against the committed calibration baseline at
+`axiomc bench` remains the measurement path. For PR and smoke validation, the
+test harness can also compile and execute benchmark entrypoints once without
+collecting timing data:
+
+```bash
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_testing --include-benchmarks --json
+```
+
+This closes the local benchmark-suite foundation. The extended validation
+benchmark gate also compares the current stage1 build medians against the
+committed calibration baseline at
 `stage1/benchmarks/baselines/stage1-build-median.json`. That comparison is
 reported as a non-blocking warning with a documented tolerance while runner
 variance is being measured; the existing benchmark gate still owns hard failures
