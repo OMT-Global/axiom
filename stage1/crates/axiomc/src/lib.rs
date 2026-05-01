@@ -1965,6 +1965,8 @@ print first(values)\n",
         .expect("write cli args program");
 
         let built = build_project(&project).expect("build cli args project");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated Rust");
+        assert!(generated.contains("usize::try_from(index)"));
         let build_output_dir = Path::new(&built.generated_rust)
             .parent()
             .expect("build output directory");

@@ -412,7 +412,10 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("    if index < 0 {\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    std::env::args().skip(1).nth(index as usize)\n");
+    out.push_str("    let Ok(index) = usize::try_from(index) else {\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
+    out.push_str("    std::env::args().skip(1).nth(index)\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
