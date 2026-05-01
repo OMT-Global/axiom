@@ -2134,6 +2134,7 @@ print fail()
                 target: None,
                 package: Some(String::from("workspace-app")),
                 debug: false,
+                ..BuildOptions::default()
             },
         )
         .expect("build selected workspace package");
@@ -2189,6 +2190,111 @@ print fail()
             .expect_err("workspace-only run should require package selection");
         assert_eq!(error.kind, "run");
         assert!(error.message.contains("require -p/--package"));
+    }
+
+    #[test]
+    fn build_locked_offline_accepts_local_path_graph() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("offline-root");
+        let dependency = dir.path().join("offline-dep");
+        create_project(&project, Some("offline-root")).expect("create root project");
+        create_project(&dependency, Some("offline-dep")).expect("create dependency project");
+
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "offline-root"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[dependencies]
+dep = { path = "../offline-dep" }
+
+[capabilities]
+fs = false
+"fs:write" = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+        )
+        .expect("write root manifest");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("locked offline build should accept local path graph");
+        assert!(output.locked);
+        assert!(output.offline);
+        assert!(Path::new(&output.binary).exists());
+    }
+
+    #[test]
+    fn build_locked_offline_missing_lockfile_fails_without_outputs() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-lock");
+        create_project(&project, Some("missing-lock")).expect("create project");
+        fs::remove_file(project.join("axiom.lock")).expect("remove lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("missing lockfile should fail locked offline build");
+        assert_eq!(error.kind, "lockfile");
+        assert!(!project.join("axiom.lock").exists());
+        assert!(!project.join("dist").exists());
+    }
+
+    #[test]
+    fn build_locked_offline_stale_lockfile_fails_without_outputs() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stale-lock");
+        create_project(&project, Some("stale-lock")).expect("create project");
+        let lockfile_path = project.join("axiom.lock");
+        let original_lockfile = fs::read_to_string(&lockfile_path).expect("read lockfile");
+        let manifest = fs::read_to_string(project.join("axiom.toml")).expect("read manifest");
+        fs::write(
+            project.join("axiom.toml"),
+            manifest.replace("version = \"0.1.0\"", "version = \"0.2.0\""),
+        )
+        .expect("stale manifest");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("stale lockfile should fail locked offline build");
+        assert_eq!(error.kind, "lockfile");
+        assert_eq!(
+            fs::read_to_string(&lockfile_path).expect("read unchanged lockfile"),
+            original_lockfile
+        );
+        assert!(!project.join("dist").exists());
     }
 
     #[test]
@@ -6857,6 +6963,7 @@ print is_match(\"[a-z]+\", true)
                 target: Some(target.clone()),
                 package: None,
                 debug: false,
+                ..BuildOptions::default()
             },
         )
         .expect("build project with explicit target");
@@ -6883,6 +6990,7 @@ print is_match(\"[a-z]+\", true)
                 target: Some(String::from("wasm32")),
                 package: None,
                 debug: false,
+                ..BuildOptions::default()
             },
         )
         .expect("build project with wasm alias");
@@ -6917,6 +7025,7 @@ print is_match(\"[a-z]+\", true)
                 target: None,
                 package: None,
                 debug: true,
+                ..BuildOptions::default()
             },
         )
         .expect("debug build");
@@ -6954,6 +7063,7 @@ print is_match(\"[a-z]+\", true)
                 target: None,
                 package: None,
                 debug: true,
+                ..BuildOptions::default()
             },
         )
         .expect("cached debug build");
@@ -7091,6 +7201,9 @@ print is_match(\"[a-z]+\", true)
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
             },
         )
         .expect("build project");
@@ -7102,6 +7215,8 @@ print is_match(\"[a-z]+\", true)
         );
         assert_eq!(payload["command"], "build");
         assert_eq!(payload["backend"], "generated-rust");
+        assert_eq!(payload["locked"], true);
+        assert_eq!(payload["offline"], true);
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
