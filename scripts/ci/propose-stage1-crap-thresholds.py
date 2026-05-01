@@ -29,7 +29,12 @@ class FunctionMetric:
 
 
 def function_ranges(source: str) -> list[tuple[str, int, str]]:
-    matches = list(re.finditer(r"(?m)^(?:pub(?:\([^)]*\))?\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)[^{;]*\{", source))
+    matches = list(
+        re.finditer(
+            r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:(?:async|const|unsafe)\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)[^{;]*\{",
+            source,
+        )
+    )
     ranges: list[tuple[str, int, str]] = []
     for index, match in enumerate(matches):
         start = match.start()
