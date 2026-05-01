@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "fail/closure_move_captured_non_copy",
   "fail/for_loop_requires_iteration_protocol",
   "fail/match_guard_not_supported",
   "fail/mutable_borrow_while_shared_live",

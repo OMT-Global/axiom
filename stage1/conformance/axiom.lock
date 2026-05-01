@@ -1,6 +1,11 @@
 version = 1
 
 [[package]]
+name = "conformance-closure-move-captured-non-copy"
+version = "0.1.0"
+source = "path:fail/closure_move_captured_non_copy"
+
+[[package]]
 name = "conformance-for-loop-requires-iteration-protocol"
 version = "0.1.0"
 source = "path:fail/for_loop_requires_iteration_protocol"

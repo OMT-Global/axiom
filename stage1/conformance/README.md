@@ -37,6 +37,8 @@ message, relative path, line, and column.
 
 Current compile-fail fixtures cover:
 
+- `closure_move_captured_non_copy`: ownership diagnostics for `fn` closures
+  whose body consumes a captured non-copy value.
 - `mutable_borrow_while_shared_live`: ownership diagnostics for conflicting
   mutable and shared borrows.
 - `ownership_use_after_move`: ownership diagnostics for reading a moved value.
