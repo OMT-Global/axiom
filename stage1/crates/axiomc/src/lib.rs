@@ -226,6 +226,227 @@ mod tests {
     }
 
     #[test]
+    fn parser_expands_declarative_statement_macros_before_lowering() {
+        let source = r#"macro_rules! answer {
+($value:expr) => {
+return $value + 1
+}
+}
+
+fn compute(): int {
+answer!(41)
+}
+
+print compute()
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.functions.len(), 1);
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("return 41 + 1;"));
+        assert!(!rendered.contains("answer!"));
+    }
+
+    #[test]
+    fn parser_expands_declarative_expression_macros_before_lowering() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn check_project_expands_declarative_macros_before_typecheck() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("axiom.toml"), render_manifest("macro-demo"))
+            .expect("write manifest");
+        let manifest = load_manifest(dir.path()).expect("load manifest");
+        fs::write(
+            dir.path().join("axiom.lock"),
+            render_lockfile_for_project(dir.path(), &manifest).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::create_dir_all(dir.path().join("src")).expect("create src");
+        fs::write(
+            dir.path().join("src/main.ax"),
+            r#"macro_rules! keep_int {
+($value:expr) => {
+$value
+}
+}
+
+let answer: int = keep_int!(42)
+print answer
+"#,
+        )
+        .expect("write source");
+
+        let checked = check_project(dir.path()).expect("check project");
+        assert_eq!(checked.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_does_not_expand_macro_text_inside_string_literals() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+print "add_one!(41)"
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("add_one!(41)"));
+        assert!(!rendered.contains("41 + 1"));
+    }
+
+    #[test]
+    fn parser_does_not_expand_macro_suffix_of_longer_invocation_name() {
+        let source = r#"macro_rules! add {
+($value:expr) => {
+$value + 1
+}
+}
+
+let my41: int = 10
+let answer: int = myadd!(41)
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .and_then(|parsed| hir::lower(&parsed))
+            .expect_err("longer macro invocation name should not match add! suffix");
+        assert!(
+            error.message.contains("unknown function")
+                || error.message.contains("unknown value")
+                || error.message.contains("invalid identifier"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_definitions() {
+        let source = r#"fn compute(): int {
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_expands_macro_parameters_with_shared_prefixes() {
+        let source = r#"macro_rules! pick_second {
+($a:expr, $ab:expr) => {
+$ab
+}
+}
+
+let answer: int = pick_second!(1, 2)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 2;"));
+        assert!(!rendered.contains("1b;"));
+    }
+
+    #[test]
+    fn parser_does_not_substitute_macro_parameters_inside_template_strings() {
+        let source = r#"macro_rules! label {
+($value:expr) => {
+print "$value"
+}
+}
+
+label!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("$value"));
+        assert!(!rendered.contains("41"));
+    }
+
+    #[test]
+    fn parser_ignores_string_braces_when_collecting_top_level_macros() {
+        let source = r#"print "{"
+
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_even_after_string_close_brace() {
+        let source = r#"fn compute(): int {
+print "}"
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_bounds_recursive_declarative_macro_expansion() {
+        let source = r#"macro_rules! spin {
+() => {
+spin!()
+}
+}
+
+spin!()
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("recursive macro expansion should be bounded");
+        assert!(error.message.contains("exceeded bounded depth"));
+    }
+
+    #[test]
     fn parser_lowers_panic_statement() {
         let source = "fn fail(): int {\npanic(\"boom\")\n}\n\nprint 0\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -2776,7 +2997,10 @@ print fs_write("data/../outside.txt", "traversal") == -1
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\ntrue\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\n"
+        );
         assert_eq!(
             fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
             "inside",
@@ -4523,17 +4747,61 @@ print is_match(\"[a-z]+\", true)
     }
 
     #[test]
-    fn check_project_rejects_generic_call_without_type_args() {
+    fn check_project_infers_generic_call_from_argument_type() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("generic-missing-type-args");
-        create_project(&project, Some("generic-missing-type-args-app")).expect("create project");
+        let project = dir.path().join("generic-inferred-arg");
+        create_project(&project, Some("generic-inferred-arg-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "fn identity<T>(value: T): T {\nreturn value\n}\n\nprint identity(42)\n",
         )
         .expect("write source");
-        let error = check_project(&project).expect_err("generic calls require type args");
-        assert!(error.message.contains("requires explicit type arguments"));
+        let output = check_project(&project).expect("generic call should infer type args");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_lowers_inferred_generic_calls_to_monomorphized_copies() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nlet answer: int = identity(42)\nlet label: string = identity<string>(\"stage1\")\nprint answer\nprint label\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn identity__int(value: i64) -> i64 {"));
+        assert!(rendered.contains("fn identity__string(value: String) -> String {"));
+        assert!(rendered.contains("let answer: i64 = identity__int(42);"));
+        assert!(
+            rendered.contains("let label: String = identity__string(String::from(\"stage1\"));")
+        );
+    }
+
+    #[test]
+    fn check_project_infers_generic_call_from_return_context() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inferred-return");
+        create_project(&project, Some("generic-inferred-return-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn none<T>(): Option<T> {\nreturn None\n}\n\nlet missing: Option<int> = none()\n",
+        )
+        .expect("write source");
+        let output = check_project(&project).expect("generic call should infer from expected type");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn check_project_reports_generic_inference_constraint_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inference-mismatch");
+        create_project(&project, Some("generic-inference-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn first<T>(values: [T]): T {\nreturn values[0]\n}\n\nprint first(42)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("argument constraint should fail");
+        assert!(error.message.contains("argument 1 constraint failed"));
+        assert!(error.message.contains("expected generic constraint"));
         assert_eq!(error.kind, "type");
     }
 
