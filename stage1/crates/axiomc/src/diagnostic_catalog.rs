@@ -59,6 +59,14 @@ pub const STABLE_DIAGNOSTIC_CODES: &[DiagnosticCodeInfo] = &[
         example: "let mutable: &mut [int] = values[0:1]\nlet shared: &[int] = values[1:2]",
         suggested_fix: "End the mutable borrow before creating shared borrows.",
     },
+    DiagnosticCodeInfo {
+        code: "mutable_borrow_while_mutable_live",
+        kind: "ownership",
+        title: "Mutable borrow while mutable borrow is live",
+        explanation: "A mutable borrowed slice was created while another mutable borrowed slice of the same owner was still live.",
+        example: "let first: &mut [int] = values[0:1]\nlet second: &mut [int] = values[1:2]",
+        suggested_fix: "End the first mutable borrow before creating another mutable borrow of the same owner.",
+    },
 ];
 
 pub fn diagnostic_code_info(code: &str) -> Option<&'static DiagnosticCodeInfo> {
@@ -84,6 +92,7 @@ mod tests {
         assert!(codes.contains(&"borrow_return_requires_param_origin"));
         assert!(codes.contains(&"mutable_borrow_while_shared_live"));
         assert!(codes.contains(&"shared_borrow_while_mutable_live"));
+        assert!(codes.contains(&"mutable_borrow_while_mutable_live"));
     }
 
     #[test]
