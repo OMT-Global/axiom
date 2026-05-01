@@ -70,6 +70,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./reg
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_testing --include-benchmarks --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 ```
 
