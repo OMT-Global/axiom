@@ -1,11 +1,13 @@
-use crate::codegen::{compile_native, render_rust_for_package_with_capabilities};
+use crate::codegen::{
+    NativeBackendKind, compile_native, render_rust_for_package_with_capabilities,
+};
 use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
-    binary_path_for_target, capability_descriptors, entry_path, generated_rust_path, load_manifest,
-    manifest_path, out_dir_path,
+    TestKind, binary_path_for_target, capability_descriptors, entry_path, generated_rust_path,
+    load_manifest, manifest_path, out_dir_path,
 };
 use crate::mir;
 use crate::stdlib;
@@ -44,6 +46,7 @@ pub struct CheckOutput {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuiltPackage {
+    pub backend: NativeBackendKind,
     pub package_root: String,
     pub manifest: String,
     pub entry: String,
@@ -59,6 +62,7 @@ pub struct BuiltPackage {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildOutput {
+    pub backend: NativeBackendKind,
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -84,6 +88,7 @@ pub enum BuildCacheStatus {
 pub struct TestCaseResult {
     pub package_root: String,
     pub name: String,
+    pub kind: TestKind,
     pub entry: String,
     pub ok: bool,
     pub binary: Option<String>,
@@ -116,6 +121,7 @@ pub struct TestOutput {
     pub passed: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub kinds: BTreeMap<TestKind, usize>,
     pub duration_ms: u64,
 }
 
@@ -126,6 +132,8 @@ pub struct CheckOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
+    /// Preparatory backend plumbing; `generated-rust` remains the only implemented option today.
+    pub backend: NativeBackendKind,
     pub target: Option<String>,
     pub package: Option<String>,
     pub debug: bool,
@@ -140,6 +148,7 @@ pub struct RunOptions {
 pub struct TestOptions {
     pub filter: Option<String>,
     pub package: Option<String>,
+    pub include_benchmarks: bool,
 }
 
 pub fn check_project(project_root: &Path) -> Result<CheckOutput, Diagnostic> {
@@ -226,6 +235,7 @@ pub fn build_project_with_options(
             options,
         )?;
         packages.push(BuiltPackage {
+            backend: options.backend,
             package_root: package_root.display().to_string(),
             manifest: manifest_path(&package_root).display().to_string(),
             entry: analyzed.entry_path.display().to_string(),
@@ -256,6 +266,7 @@ pub fn build_project_with_options(
         .count();
     let cache_misses = packages.len().saturating_sub(cache_hits);
     Ok(BuildOutput {
+        backend: options.backend,
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -291,6 +302,7 @@ pub fn run_project_with_options(
     let built = build_project_with_options(
         &project_root,
         &BuildOptions {
+            backend: NativeBackendKind::GeneratedRust,
             target: None,
             package: options.package.clone(),
             debug: false,
@@ -355,7 +367,12 @@ pub fn run_project_tests_with_options(
             }
             continue;
         }
-        let tests = collect_test_targets(&package_root, &manifest, options.filter.as_deref())?;
+        let tests = collect_test_targets(
+            &package_root,
+            &manifest,
+            options.filter.as_deref(),
+            options.include_benchmarks,
+        )?;
         if tests.is_empty() {
             continue;
         }
@@ -373,6 +390,10 @@ pub fn run_project_tests_with_options(
     }
     let passed = cases.iter().filter(|case| case.ok).count();
     let failed = cases.len().saturating_sub(passed);
+    let mut kinds = BTreeMap::new();
+    for case in &cases {
+        *kinds.entry(case.kind).or_insert(0) += 1;
+    }
     Ok(TestOutput {
         manifest: manifest_path(&project_root).display().to_string(),
         packages,
@@ -380,6 +401,7 @@ pub fn run_project_tests_with_options(
         passed,
         failed,
         skipped: 0,
+        kinds,
         duration_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -388,11 +410,15 @@ fn collect_test_targets(
     project_root: &Path,
     manifest: &Manifest,
     filter: Option<&str>,
+    include_benchmarks: bool,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let mut tests = manifest.tests.clone();
+    if !include_benchmarks {
+        tests.retain(|test| test.kind != TestKind::Benchmark);
+    }
     if let Some(expected_stdout) = load_package_expected_output(project_root)? {
         for test in &mut tests {
-            if test.stdout.is_none() {
+            if test.kind != TestKind::Benchmark && test.stdout.is_none() {
                 test.stdout = Some(expected_stdout.clone());
             }
         }
@@ -401,7 +427,7 @@ fn collect_test_targets(
         .iter()
         .map(|test| test.entry.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    for discovered in discover_test_targets(project_root)? {
+    for discovered in discover_test_targets(project_root, include_benchmarks)? {
         if seen_entries.insert(discovered.entry.clone()) {
             tests.push(discovered);
         }
@@ -414,6 +440,7 @@ fn collect_test_targets(
 
 fn discover_test_targets(
     project_root: &Path,
+    include_benchmarks: bool,
 ) -> Result<Vec<crate::manifest::TestTarget>, Diagnostic> {
     let src_root = project_root.join("src");
     if !src_root.exists() {
@@ -425,6 +452,7 @@ fn discover_test_targets(
         project_root,
         &src_root,
         package_expected_output.as_deref(),
+        include_benchmarks,
         &mut tests,
     )?;
     tests.sort_by(|left, right| left.entry.cmp(&right.entry));
@@ -435,6 +463,7 @@ fn collect_discovered_tests(
     project_root: &Path,
     dir: &Path,
     package_expected_output: Option<&str>,
+    include_benchmarks: bool,
     tests: &mut Vec<crate::manifest::TestTarget>,
 ) -> Result<(), Diagnostic> {
     let entries = fs::read_dir(dir).map_err(|err| {
@@ -448,7 +477,13 @@ fn collect_discovered_tests(
         })?;
         let path = entry.path();
         if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-            collect_discovered_tests(project_root, &path, package_expected_output, tests)?;
+            collect_discovered_tests(
+                project_root,
+                &path,
+                package_expected_output,
+                include_benchmarks,
+                tests,
+            )?;
             continue;
         }
         if path.extension().and_then(|value| value.to_str()) != Some("ax") {
@@ -458,9 +493,11 @@ fn collect_discovered_tests(
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("");
-        if !stem.ends_with("_test") {
+        let kind = discovered_test_kind(stem, include_benchmarks);
+        if kind.is_none() {
             continue;
         }
+        let kind = kind.expect("test kind checked");
         let relative = normalize_path(path.strip_prefix(project_root).unwrap_or(&path));
         let stdout_path = path.with_extension("stdout");
         let stdout = if stdout_path.exists() {
@@ -471,6 +508,8 @@ fn collect_discovered_tests(
                 )
                 .with_path(stdout_path.display().to_string())
             })?)
+        } else if kind == TestKind::Benchmark {
+            None
         } else {
             package_expected_output.map(str::to_string)
         };
@@ -478,9 +517,29 @@ fn collect_discovered_tests(
             name: relative.with_extension("").display().to_string(),
             entry: relative.display().to_string(),
             stdout,
+            kind,
         });
     }
     Ok(())
+}
+
+fn discovered_test_kind(stem: &str, include_benchmarks: bool) -> Option<TestKind> {
+    if include_benchmarks && stem.ends_with("_bench") {
+        return Some(TestKind::Benchmark);
+    }
+    if stem.ends_with("_property") || stem.ends_with("_property_test") {
+        return Some(TestKind::Property);
+    }
+    if stem.ends_with("_table_test") {
+        return Some(TestKind::Table);
+    }
+    if stem.ends_with("_snapshot_test") || stem.ends_with("_golden_test") {
+        return Some(TestKind::Snapshot);
+    }
+    if stem.ends_with("_test") {
+        return Some(TestKind::Unit);
+    }
+    None
 }
 
 fn load_package_expected_output(project_root: &Path) -> Result<Option<String>, Diagnostic> {
@@ -663,6 +722,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
         tests: Vec::new(),
         capabilities: CapabilityConfig {
             fs: true,
+            fs_write: true,
             fs_root: None,
             net: true,
             process: true,
@@ -851,6 +911,7 @@ struct BuildArtifactReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct BuildCacheFile {
     version: u32,
+    backend: NativeBackendKind,
     compiler: String,
     target: Option<String>,
     debug: bool,
@@ -908,6 +969,7 @@ fn build_artifacts(
         package_root,
         analyzed,
         &rust_source,
+        options.backend,
         resolved_target.map(str::to_string),
         options.debug,
     )?;
@@ -934,7 +996,13 @@ fn build_artifacts(
         write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
     }
     let started = Instant::now();
-    compile_native(generated_rust, binary, resolved_target, options.debug)?;
+    compile_native(
+        options.backend,
+        generated_rust,
+        binary,
+        resolved_target,
+        options.debug,
+    )?;
     let compile_ms = started.elapsed().as_millis() as u64;
     let mut cache = cache;
     cache.binary_hash = Some(hash_file_bytes(binary)?);
@@ -1066,12 +1134,14 @@ fn build_cache_file(
     package_root: &Path,
     analyzed: &AnalyzedProject,
     rust_source: &str,
+    backend: NativeBackendKind,
     target: Option<String>,
     debug: bool,
 ) -> Result<BuildCacheFile, Diagnostic> {
     Ok(BuildCacheFile {
         version: BUILD_CACHE_VERSION,
-        compiler: BUILD_CACHE_COMPILER.to_string(),
+        backend,
+        compiler: format!("{}-{}", BUILD_CACHE_COMPILER, backend),
         target,
         debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
@@ -1207,6 +1277,7 @@ fn run_test_case(
         return TestCaseResult {
             package_root: project_root.display().to_string(),
             name: test.name.clone(),
+            kind: test.kind,
             entry: test.entry.clone(),
             ok: false,
             binary: Some(binary.display().to_string()),
@@ -1272,6 +1343,7 @@ fn run_test_case(
             TestCaseResult {
                 package_root: project_root.display().to_string(),
                 name: test.name.clone(),
+                kind: test.kind,
                 entry: test.entry.clone(),
                 ok: error.is_none(),
                 binary: Some(binary.display().to_string()),
@@ -1288,6 +1360,7 @@ fn run_test_case(
         Err(err) => TestCaseResult {
             package_root: project_root.display().to_string(),
             name: test.name.clone(),
+            kind: test.kind,
             entry: test.entry.clone(),
             ok: false,
             binary: Some(binary.display().to_string()),
@@ -1322,6 +1395,7 @@ fn run_compile_fail_case(
             return TestCaseResult {
                 package_root: project_root.display().to_string(),
                 name: case_name.to_string(),
+                kind: TestKind::Unit,
                 entry: manifest.build.entry.clone(),
                 ok: false,
                 binary: None,
@@ -1342,6 +1416,7 @@ fn run_compile_fail_case(
             return TestCaseResult {
                 package_root: project_root.display().to_string(),
                 name: case_name.to_string(),
+                kind: TestKind::Unit,
                 entry: manifest.build.entry.clone(),
                 ok: false,
                 binary: None,
@@ -1367,6 +1442,7 @@ fn run_compile_fail_case(
     TestCaseResult {
         package_root: project_root.display().to_string(),
         name: case_name.to_string(),
+        kind: TestKind::Unit,
         entry: manifest.build.entry.clone(),
         ok: mismatch.is_none(),
         binary: None,
@@ -1501,6 +1577,7 @@ fn failed_test_case_result(
     TestCaseResult {
         package_root: project_root.display().to_string(),
         name: test.name.clone(),
+        kind: test.kind,
         entry: test.entry.clone(),
         ok: false,
         binary,
@@ -1931,6 +2008,8 @@ fn validate_expr_capabilities(
 fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
     match name {
         "fs_read" => Some(CapabilityKind::Fs),
+        "fs_write" | "fs_create" | "fs_append" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file"
+        | "fs_remove_dir" | "fs_replace" => Some(CapabilityKind::FsWrite),
         "net_resolve" => Some(CapabilityKind::Net),
         "net_tcp_listen_loopback_once" => Some(CapabilityKind::Net),
         "net_tcp_dial" => Some(CapabilityKind::Net),
@@ -1943,6 +2022,8 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "clock_sleep_ms" => Some(CapabilityKind::Clock),
         "env_get" => Some(CapabilityKind::Env),
         "crypto_sha256" => Some(CapabilityKind::Crypto),
+        "crypto_hmac_sha256" => Some(CapabilityKind::Crypto),
+        "crypto_constant_time_eq" => Some(CapabilityKind::Crypto),
         _ => None,
     }
 }
@@ -3989,7 +4070,7 @@ fn fs_root_path_for_package(
     package_root: &Path,
     manifest: &Manifest,
 ) -> Result<PathBuf, Diagnostic> {
-    let configured = if manifest.capabilities.fs {
+    let configured = if manifest.capabilities.fs || manifest.capabilities.fs_write {
         manifest.capabilities.fs_root.as_deref().unwrap_or(".")
     } else {
         "."
@@ -4247,6 +4328,91 @@ mod tests {
 
         analyze_package(&graph, &relative_root)
             .unwrap_or_else(|err| panic!("relative package root should analyze: {err:?}"));
+    }
+
+    #[test]
+    fn manifest_benchmark_tests_require_include_benchmarks() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        let mut manifest = package_manifest();
+        manifest.tests = vec![
+            crate::manifest::TestTarget {
+                name: "unit".to_string(),
+                entry: "src/unit_test.ax".to_string(),
+                stdout: None,
+                kind: TestKind::Unit,
+            },
+            crate::manifest::TestTarget {
+                name: "bench".to_string(),
+                entry: "src/demo_bench.ax".to_string(),
+                stdout: None,
+                kind: TestKind::Benchmark,
+            },
+        ];
+
+        let default_tests = collect_test_targets(root, &manifest, None, false)
+            .unwrap_or_else(|err| panic!("collect default tests: {err:?}"));
+        assert_eq!(
+            default_tests
+                .iter()
+                .map(|test| test.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unit"]
+        );
+
+        let benchmark_tests = collect_test_targets(root, &manifest, None, true)
+            .unwrap_or_else(|err| panic!("collect benchmark tests: {err:?}"));
+        assert_eq!(
+            benchmark_tests
+                .iter()
+                .map(|test| test.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unit", "bench"]
+        );
+    }
+
+    #[test]
+    fn benchmark_tests_do_not_inherit_package_expected_output() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        let source_root = root.join("src");
+        fs::create_dir_all(&source_root).unwrap_or_else(|err| panic!("create src: {err}"));
+        fs::write(root.join("expected-output.txt"), "package\n")
+            .unwrap_or_else(|err| panic!("write package expected output: {err}"));
+        fs::write(source_root.join("unit_test.ax"), "")
+            .unwrap_or_else(|err| panic!("write unit test: {err}"));
+        fs::write(source_root.join("slow_bench.ax"), "")
+            .unwrap_or_else(|err| panic!("write benchmark test: {err}"));
+        fs::write(source_root.join("explicit_bench.ax"), "")
+            .unwrap_or_else(|err| panic!("write explicit benchmark test: {err}"));
+        fs::write(source_root.join("explicit_bench.stdout"), "explicit\n")
+            .unwrap_or_else(|err| panic!("write explicit benchmark stdout: {err}"));
+
+        let mut manifest = package_manifest();
+        manifest.tests.push(crate::manifest::TestTarget {
+            name: "manifest_bench".to_string(),
+            entry: "src/manifest_bench.ax".to_string(),
+            stdout: None,
+            kind: TestKind::Benchmark,
+        });
+
+        let tests = collect_test_targets(root, &manifest, None, true)
+            .unwrap_or_else(|err| panic!("collect benchmark tests: {err:?}"));
+        let stdout_by_name = tests
+            .iter()
+            .map(|test| (test.name.as_str(), test.stdout.as_deref()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            stdout_by_name.get("src/unit_test"),
+            Some(&Some("package\n"))
+        );
+        assert_eq!(stdout_by_name.get("src/slow_bench"), Some(&None));
+        assert_eq!(
+            stdout_by_name.get("src/explicit_bench"),
+            Some(&Some("explicit\n"))
+        );
+        assert_eq!(stdout_by_name.get("manifest_bench"), Some(&None));
     }
 
     #[cfg(unix)]
