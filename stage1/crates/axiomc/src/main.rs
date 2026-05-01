@@ -73,6 +73,8 @@ enum Command {
         json: bool,
         #[arg(long)]
         filter: Option<String>,
+        #[arg(long)]
+        include_benchmarks: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
@@ -212,12 +214,14 @@ fn main() {
             path,
             json,
             filter,
+            include_benchmarks,
             package,
         } => match run_project_tests_with_options(
             &path,
             &TestOptions {
                 filter: filter.clone(),
                 package: package.clone(),
+                include_benchmarks,
             },
         ) {
             Ok(output) => {
@@ -230,7 +234,7 @@ fn main() {
                 } else {
                     for case in &output.cases {
                         let status = if case.ok { "PASS" } else { "FAIL" };
-                        eprintln!("{status} {} ({})", case.name, case.entry);
+                        eprintln!("{status} {:?} {} ({})", case.kind, case.name, case.entry);
                         if let Some(error) = &case.error {
                             eprintln!("  {}", error);
                         }
