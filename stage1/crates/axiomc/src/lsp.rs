@@ -2,7 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::hir;
 use crate::manifest::CapabilityConfig;
 use crate::mir;
-use crate::syntax::parse_program;
+use crate::syntax;
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -137,19 +137,26 @@ pub fn publish_diagnostics(uri: &str, source: &str) -> Value {
 
 pub fn analyze_source(uri: &str, source: &str) -> Vec<Diagnostic> {
     let path = path_for_uri(uri);
-    match parse_program(source, &path) {
+    match syntax::parse_program_with_recovery(source, &path) {
         Ok(program) => {
             let capabilities = CapabilityConfig::default();
-            match hir::lower_with_capabilities(&program, &capabilities) {
+            match hir::lower_with_capabilities_recovery(&program, &capabilities) {
                 Ok(hir) => {
                     let _ = mir::lower(&hir);
                     Vec::new()
                 }
-                Err(error) => vec![diagnostic_with_default_path(error, &path)],
+                Err(diagnostics) => diagnostics_with_default_path(diagnostics, &path),
             }
         }
-        Err(error) => vec![diagnostic_with_default_path(error, &path)],
+        Err(diagnostics) => diagnostics_with_default_path(diagnostics, &path),
     }
+}
+
+fn diagnostics_with_default_path(diagnostics: Vec<Diagnostic>, path: &Path) -> Vec<Diagnostic> {
+    diagnostics
+        .into_iter()
+        .map(|diagnostic| diagnostic_with_default_path(diagnostic, path))
+        .collect()
 }
 
 fn diagnostic_with_default_path(mut diagnostic: Diagnostic, path: &Path) -> Diagnostic {
@@ -329,6 +336,83 @@ mod tests {
         assert_eq!(
             diagnostics[0]["range"]["start"],
             json!({ "line": 0, "character": 0 })
+        );
+    }
+
+    #[test]
+    fn did_open_publishes_multiple_parse_diagnostics() {
+        let payload = notification(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": "file:///tmp/multi-parse.ax",
+                    "languageId": "axiom",
+                    "version": 1,
+                    "text": "import math.ax\nlet answer int = 42\nelse {\n"
+                }
+            }),
+        );
+
+        let response = handle_message(&payload).expect("handle didOpen");
+
+        let diagnostics = response.messages[0]["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics array");
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics[0]["message"],
+            json!("import must use a quoted relative path")
+        );
+        assert_eq!(
+            diagnostics[1]["message"],
+            json!("let binding is missing ':'")
+        );
+        assert_eq!(diagnostics[2]["message"], json!("unexpected else block"));
+    }
+
+    #[test]
+    fn did_open_publishes_multiple_type_diagnostics() {
+        let payload = notification(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": "file:///tmp/multi-type.ax",
+                    "languageId": "axiom",
+                    "version": 1,
+                    "text": "print missing_name\nlet answer: int = \"nope\"\nprint answer\nprint also_missing\n"
+                }
+            }),
+        );
+
+        let response = handle_message(&payload).expect("handle didOpen");
+
+        let diagnostics = response.messages[0]["params"]["diagnostics"]
+            .as_array()
+            .expect("diagnostics array");
+        assert_eq!(diagnostics.len(), 3);
+        assert_eq!(
+            diagnostics[0]["range"]["start"],
+            json!({ "line": 0, "character": 6 })
+        );
+        assert!(
+            diagnostics[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("undefined variable")
+        );
+        assert_eq!(
+            diagnostics[1]["message"],
+            json!("let binding \"answer\" expects int, got string")
+        );
+        assert_eq!(
+            diagnostics[2]["range"]["start"],
+            json!({ "line": 3, "character": 6 })
+        );
+        assert!(
+            diagnostics[2]["message"]
+                .as_str()
+                .unwrap()
+                .contains("undefined variable")
         );
     }
 
