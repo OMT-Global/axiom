@@ -196,7 +196,9 @@ stdio" precedent alongside the existing `print` statement. `std/json.ax`
 adds ungated scalar/string JSON helpers, `std/collections.ax` adds generic
 borrowed-slice helpers on top of AG2 generic functions, `std/sync.ax` provides
 ownership-shaped synchronization values, and `std/async.ax` exposes the
-deterministic AG4.2 task/channel runtime. AG4.4 capability-aware integration
+deterministic AG4.2 task/channel runtime. `std/regex.ax` adds an ungated
+generated-runtime regex floor for deterministic matching, finding, and
+replacement. AG4.4 capability-aware integration
 for the currently landed stdlib/runtime surface is now complete; AG4.3 HTTP
 *server* support remains open.
 
@@ -303,6 +305,15 @@ Work packages:
     It deliberately does not add host log sinks, runtime filtering, or replay
     buffers. Covered by `stage1/examples/stdlib_log` and one Rust test
     (`stage1_project_imports_synthetic_stdlib_log_module`).
+  - `std.regex` — **landed as a floor** as `std/regex.ax` exposing
+    `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`,
+    and `replace_all(pattern, text, replacement): string` on top of ungated
+    generated-runtime intrinsics. The matcher supports literals, escapes, `.`,
+    anchors, `*`, `+`, `?`, and character classes with bounded
+    dynamic-programming evaluation rather than recursive backtracking. Covered
+    by `stage1/examples/stdlib_regex` and Rust tests
+    (`stage1_project_imports_synthetic_stdlib_regex_module`,
+    `stage1_project_rejects_stdlib_regex_with_wrong_argument_type`).
   - `std.sync` — **landed** as `std/sync.ax` exposing ownership-shaped
     primitives (`Mutex`, `MutexGuard`, `Once`, and `Channel`) implemented in
     Axiom without host-thread capabilities. The stage1 channel is single-slot
