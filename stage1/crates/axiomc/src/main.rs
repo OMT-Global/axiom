@@ -1,15 +1,18 @@
 use axiomc::codegen::NativeBackendKind;
+use axiomc::dap;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
 use axiomc::manifest::CapabilityDescriptor;
 use axiomc::new_project::create_project;
 use axiomc::project::{
-    build_project_with_options, check_project_with_options, project_capabilities,
-    run_project_tests_with_options, run_project_with_options, BuildOptions, BuildOutput,
-    CheckOptions, RunOptions, TestOptions,
+    BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
+    check_project_with_options, project_capabilities, run_project_tests_with_options,
+    run_project_with_options,
 };
-use axiomc::registry::{load_registry_index, render_registry_index};
+use axiomc::registry::{
+    PublishOptions, load_registry_index, publish_package, render_registry_index,
+};
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -71,6 +74,8 @@ enum Command {
         json: bool,
         #[arg(long)]
         filter: Option<String>,
+        #[arg(long)]
+        include_benchmarks: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
@@ -109,6 +114,16 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Pack, sign, and publish a stage1 package into a local registry tree.
+    Publish {
+        path: PathBuf,
+        #[arg(long = "registry-dir")]
+        registry_dir: PathBuf,
+        #[arg(long = "signing-key")]
+        signing_key: Option<String>,
+        #[arg(long)]
+        allow_overwrite: bool,
+    },
     /// Build a static package-registry index from package release folders.
     RegistryIndex {
         packages_dir: PathBuf,
@@ -121,7 +136,8 @@ enum Command {
     RegistryValidate { index: PathBuf },
     /// Start the bounded axiom-analyzer Language Server Protocol endpoint.
     Lsp,
-
+    /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
+    Dap,
 }
 
 fn main() {
@@ -201,12 +217,14 @@ fn main() {
             path,
             json,
             filter,
+            include_benchmarks,
             package,
         } => match run_project_tests_with_options(
             &path,
             &TestOptions {
                 filter: filter.clone(),
                 package: package.clone(),
+                include_benchmarks,
             },
         ) {
             Ok(output) => {
@@ -219,7 +237,7 @@ fn main() {
                 } else {
                     for case in &output.cases {
                         let status = if case.ok { "PASS" } else { "FAIL" };
-                        eprintln!("{status} {} ({})", case.name, case.entry);
+                        eprintln!("{status} {:?} {} ({})", case.kind, case.name, case.entry);
                         if let Some(error) = &case.error {
                             eprintln!("  {}", error);
                         }
@@ -230,11 +248,7 @@ fn main() {
                         output.passed, output.failed, output.skipped, output.duration_ms
                     );
                 }
-                if ok {
-                    0
-                } else {
-                    1
-                }
+                if ok { 0 } else { 1 }
             }
             Err(error) => print_error("test", error, json),
         },
@@ -319,17 +333,37 @@ fn main() {
                         );
                     }
                 }
-                if report.failed == 0 {
-                    0
-                } else {
-                    1
-                }
+                if report.failed == 0 { 0 } else { 1 }
             }
             Err(error) => print_error("bench", error, json),
         },
         Command::Repl { json } => match run_repl(io::stdin().lock(), io::stdout(), json) {
             Ok(()) => 0,
             Err(error) => print_error("repl", error, json),
+        },
+        Command::Publish {
+            path,
+            registry_dir,
+            signing_key,
+            allow_overwrite,
+        } => match publish_package(
+            &path,
+            &registry_dir,
+            &PublishOptions {
+                signing_key,
+                allow_overwrite,
+            },
+        ) {
+            Ok(output) => {
+                eprintln!(
+                    "published {}@{} to {}",
+                    output.package, output.version, output.release_dir
+                );
+                eprintln!("wrote {}", output.archive);
+                eprintln!("wrote {}", output.signature);
+                0
+            }
+            Err(error) => print_error("publish", error, false),
         },
         Command::RegistryIndex {
             packages_dir,
@@ -370,7 +404,10 @@ fn main() {
         Command::Lsp => match lsp::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("lsp", error, false),
-
+        },
+        Command::Dap => match dap::run_stdio(io::stdin().lock(), io::stdout()) {
+            Ok(()) => 0,
+            Err(error) => print_error("dap", error, false),
         },
     };
     std::process::exit(code);
@@ -884,6 +921,7 @@ mod tests {
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
         assert!(help.contains("Start a small stage1 scratch REPL"));
+        assert!(help.contains("Pack, sign, and publish a stage1 package"));
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
     }
@@ -891,10 +929,16 @@ mod tests {
     #[test]
     fn build_rejects_unimplemented_native_backend_values() {
         let error = Cli::try_parse_from(["axiomc", "build", ".", "--backend", "direct-native"])
-            .expect_err("direct-native should remain unavailable in the preparatory backend plumbing");
+            .expect_err(
+                "direct-native should remain unavailable in the preparatory backend plumbing",
+            );
         let rendered = error.to_string();
         assert!(rendered.contains("unsupported backend \"direct-native\""));
-        assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
+        assert!(
+            rendered.contains(
+                "only generated-rust is implemented in this preparatory backend plumbing"
+            )
+        );
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
