@@ -2144,6 +2144,27 @@ print fail()
     }
 
     #[test]
+    fn explicit_unrestricted_env_requires_rationale_with_legacy_env_bool() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("caps-env-explicit-and-legacy");
+        create_project(&project, Some("caps-env-explicit-and-legacy-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"caps-env-explicit-and-legacy-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv = true\nenv_unrestricted = true\n",
+        )
+        .expect("write manifest");
+
+        let error = load_manifest(&project)
+            .expect_err("explicit env_unrestricted should require unsafe rationale");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("capabilities.unsafe_rationale is required")
+        );
+    }
+
+    #[test]
     fn unrestricted_env_rationale_is_reported_in_caps() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("caps-env-rationale");
