@@ -206,6 +206,7 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Type {
+    Error,
     Int,
     Bool,
     String,
@@ -347,12 +348,30 @@ pub fn lower_with_capabilities(
     program: &syntax::Program,
     capabilities: &CapabilityConfig,
 ) -> Result<Program, Diagnostic> {
-    let program = monomorphize_program(program)?;
+    lower_with_capabilities_recovery(program, capabilities).map_err(primary_diagnostic)
+}
+
+pub fn lower_with_capabilities_recovery(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+) -> Result<Program, Vec<Diagnostic>> {
+    lower_with_capabilities_impl(program, capabilities, true)
+}
+
+fn lower_with_capabilities_impl(
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+    recover: bool,
+) -> Result<Program, Vec<Diagnostic>> {
+    let program = monomorphize_program(program).map_err(single_diagnostic)?;
     let (struct_names, enum_names, aliases) =
-        collect_type_names(&program.structs, &program.enums, &program.type_aliases)?;
+        collect_type_names(&program.structs, &program.enums, &program.type_aliases)
+            .map_err(single_diagnostic)?;
     let (enums, variants) =
-        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)?;
-    let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)?;
+        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases)
+            .map_err(single_diagnostic)?;
+    let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases)
+        .map_err(single_diagnostic)?;
     validate_recursive_type_cycles(
         &program,
         &structs,
@@ -360,9 +379,13 @@ pub fn lower_with_capabilities(
         &struct_names,
         &enum_names,
         &aliases,
-    )?;
-    let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)?;
-    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)?;
+    )
+    .map_err(single_diagnostic)?;
+    let functions = collect_function_signatures(&program.functions, &structs, &enums, &aliases)
+        .map_err(single_diagnostic)?;
+    let methods = collect_method_signatures(&program.functions, &structs, &enums, &aliases)
+        .map_err(single_diagnostic)?;
+    let mut diagnostics = Vec::new();
     let mut lowered_structs = structs.values().cloned().collect::<Vec<_>>();
     lowered_structs.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
     let mut lowered_enums = enums.values().cloned().collect::<Vec<_>>();
@@ -373,7 +396,7 @@ pub fn lower_with_capabilities(
         if function.name.starts_with("std_fs_") && !reachable_functions.contains(&function.name) {
             continue;
         }
-        lowered_functions.push(lower_function(
+        match lower_function(
             function,
             &structs,
             &enums,
@@ -382,7 +405,11 @@ pub fn lower_with_capabilities(
             &functions,
             &methods,
             capabilities,
-        )?);
+        ) {
+            Ok(function) => lowered_functions.push(function),
+            Err(error) if recover => append_diagnostic(&mut diagnostics, error),
+            Err(error) => return Err(single_diagnostic(error)),
+        }
     }
     let ctx = LowerContext {
         structs: &structs,
@@ -396,7 +423,20 @@ pub fn lower_with_capabilities(
         current_borrow_return_params: HashSet::new(),
     };
     let mut env = HashMap::new();
-    let (stmts, _, _) = lower_block(&program.stmts, &mut env, &ctx)?;
+    let stmts = if recover {
+        let (stmts, mut block_diagnostics, _) =
+            lower_block_recovering(&program.stmts, &mut env, &ctx);
+        diagnostics.append(&mut block_diagnostics);
+        stmts
+    } else {
+        lower_block(&program.stmts, &mut env, &ctx)
+            .map_err(single_diagnostic)?
+            .0
+    };
+    if !diagnostics.is_empty() {
+        sort_diagnostics(&mut diagnostics);
+        return Err(diagnostics);
+    }
     Ok(Program {
         path: program.path.clone(),
         structs: lowered_structs,
@@ -406,6 +446,32 @@ pub fn lower_with_capabilities(
     })
 }
 
+fn primary_diagnostic(mut diagnostics: Vec<Diagnostic>) -> Diagnostic {
+    sort_diagnostics(&mut diagnostics);
+    let mut first = diagnostics.remove(0);
+    first.related = diagnostics;
+    first
+}
+
+fn single_diagnostic(diagnostic: Diagnostic) -> Vec<Diagnostic> {
+    vec![diagnostic]
+}
+
+fn append_diagnostic(diagnostics: &mut Vec<Diagnostic>, mut diagnostic: Diagnostic) {
+    diagnostics.append(&mut diagnostic.related);
+    diagnostics.push(diagnostic);
+}
+
+fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.line.cmp(&right.line))
+            .then_with(|| left.column.cmp(&right.column))
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.message.cmp(&right.message))
+    });
+}
 
 fn reachable_function_names(program: &syntax::Program) -> HashSet<String> {
     let functions_by_name: HashMap<&str, &syntax::Function> = program
@@ -513,7 +579,9 @@ fn collect_expr_calls(expr: &syntax::Expr, calls: &mut VecDeque<String>) {
                 collect_expr_calls(&entry.value, calls);
             }
         }
-        syntax::Expr::Slice { base, start, end, .. } => {
+        syntax::Expr::Slice {
+            base, start, end, ..
+        } => {
             collect_expr_calls(base, calls);
             if let Some(start) = start {
                 collect_expr_calls(start, calls);
@@ -605,7 +673,9 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -672,10 +742,830 @@ struct GenericInstantiation {
     type_args: Vec<syntax::TypeName>,
 }
 
+fn infer_generic_call_type_args(
+    program: &syntax::Program,
+    generic_functions: &HashMap<String, syntax::Function>,
+) -> Result<syntax::Program, Diagnostic> {
+    let mut inferred = program.clone();
+    inferred.functions = program
+        .functions
+        .iter()
+        .map(|function| infer_generic_calls_in_function(function, generic_functions))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut env = HashMap::new();
+    inferred.stmts =
+        infer_generic_calls_in_stmts(&program.stmts, &mut env, None, generic_functions)?;
+    Ok(inferred)
+}
+
+fn infer_generic_calls_in_function(
+    function: &syntax::Function,
+    generic_functions: &HashMap<String, syntax::Function>,
+) -> Result<syntax::Function, Diagnostic> {
+    let mut env = HashMap::new();
+    for param in &function.params {
+        env.insert(param.name.clone(), param.ty.clone());
+    }
+    let mut inferred = function.clone();
+    inferred.body = infer_generic_calls_in_stmts(
+        &function.body,
+        &mut env,
+        Some(&function.return_ty),
+        generic_functions,
+    )?;
+    Ok(inferred)
+}
+
+fn infer_generic_calls_in_stmts(
+    stmts: &[syntax::Stmt],
+    env: &mut HashMap<String, syntax::TypeName>,
+    return_ty: Option<&syntax::TypeName>,
+    generic_functions: &HashMap<String, syntax::Function>,
+) -> Result<Vec<syntax::Stmt>, Diagnostic> {
+    let mut inferred = Vec::new();
+    for stmt in stmts {
+        inferred.push(infer_generic_calls_in_stmt(
+            stmt,
+            env,
+            return_ty,
+            generic_functions,
+        )?);
+    }
+    Ok(inferred)
+}
+
+fn infer_generic_calls_in_stmt(
+    stmt: &syntax::Stmt,
+    env: &mut HashMap<String, syntax::TypeName>,
+    return_ty: Option<&syntax::TypeName>,
+    generic_functions: &HashMap<String, syntax::Function>,
+) -> Result<syntax::Stmt, Diagnostic> {
+    Ok(match stmt {
+        syntax::Stmt::Let {
+            name,
+            ty,
+            expr,
+            line,
+            column,
+        } => {
+            let expr = infer_generic_calls_in_expr(expr, Some(ty), env, generic_functions)?;
+            env.insert(name.clone(), ty.clone());
+            syntax::Stmt::Let {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr,
+                line: *line,
+                column: *column,
+            }
+        }
+        syntax::Stmt::Print { expr, line, column } => syntax::Stmt::Print {
+            expr: infer_generic_calls_in_expr(expr, None, env, generic_functions)?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Panic { expr, line, column } => syntax::Stmt::Panic {
+            expr: infer_generic_calls_in_expr(
+                expr,
+                Some(&syntax::TypeName::String),
+                env,
+                generic_functions,
+            )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Defer { expr, line, column } => syntax::Stmt::Defer {
+            expr: infer_generic_calls_in_expr(expr, None, env, generic_functions)?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            line,
+            column,
+        } => {
+            let mut then_env = env.clone();
+            let mut else_env = env.clone();
+            syntax::Stmt::If {
+                cond: infer_generic_calls_in_expr(
+                    cond,
+                    Some(&syntax::TypeName::Bool),
+                    env,
+                    generic_functions,
+                )?,
+                then_block: infer_generic_calls_in_stmts(
+                    then_block,
+                    &mut then_env,
+                    return_ty,
+                    generic_functions,
+                )?,
+                else_block: else_block
+                    .as_ref()
+                    .map(|block| {
+                        infer_generic_calls_in_stmts(
+                            block,
+                            &mut else_env,
+                            return_ty,
+                            generic_functions,
+                        )
+                    })
+                    .transpose()?,
+                line: *line,
+                column: *column,
+            }
+        }
+        syntax::Stmt::While {
+            cond,
+            body,
+            line,
+            column,
+        } => {
+            let mut body_env = env.clone();
+            syntax::Stmt::While {
+                cond: infer_generic_calls_in_expr(
+                    cond,
+                    Some(&syntax::TypeName::Bool),
+                    env,
+                    generic_functions,
+                )?,
+                body: infer_generic_calls_in_stmts(
+                    body,
+                    &mut body_env,
+                    return_ty,
+                    generic_functions,
+                )?,
+                line: *line,
+                column: *column,
+            }
+        }
+        syntax::Stmt::Match {
+            expr,
+            arms,
+            line,
+            column,
+        } => syntax::Stmt::Match {
+            expr: infer_generic_calls_in_expr(expr, None, env, generic_functions)?,
+            arms: arms
+                .iter()
+                .map(|arm| {
+                    let mut arm_env = env.clone();
+                    Ok(syntax::MatchArm {
+                        variant: arm.variant.clone(),
+                        bindings: arm.bindings.clone(),
+                        is_named: arm.is_named,
+                        body: infer_generic_calls_in_stmts(
+                            &arm.body,
+                            &mut arm_env,
+                            return_ty,
+                            generic_functions,
+                        )?,
+                        line: arm.line,
+                        column: arm.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Return { expr, line, column } => syntax::Stmt::Return {
+            expr: infer_generic_calls_in_expr(expr, return_ty, env, generic_functions)?,
+            line: *line,
+            column: *column,
+        },
+    })
+}
+
+fn infer_generic_calls_in_expr(
+    expr: &syntax::Expr,
+    expected: Option<&syntax::TypeName>,
+    env: &HashMap<String, syntax::TypeName>,
+    generic_functions: &HashMap<String, syntax::Function>,
+) -> Result<syntax::Expr, Diagnostic> {
+    Ok(match expr {
+        syntax::Expr::Call {
+            name,
+            type_args,
+            args,
+            line,
+            column,
+        } => {
+            let mut type_args = type_args.clone();
+            if type_args.is_empty() {
+                if let Some(template) = generic_functions.get(name) {
+                    type_args = infer_type_args_for_call(
+                        template,
+                        args,
+                        expected,
+                        env,
+                        generic_functions,
+                        *line,
+                        *column,
+                    )?;
+                }
+            }
+            let param_expected = generic_functions.get(name).and_then(|template| {
+                if type_args.len() == template.type_params.len() {
+                    Some(generic_type_bindings(template, &type_args).ok()?)
+                } else {
+                    None
+                }
+            });
+            let args = args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    let expected_arg = generic_functions
+                        .get(name)
+                        .and_then(|template| template.params.get(index))
+                        .and_then(|param| {
+                            param_expected
+                                .as_ref()
+                                .map(|bindings| substitute_type_name(&param.ty, bindings))
+                        });
+                    infer_generic_calls_in_expr(arg, expected_arg.as_ref(), env, generic_functions)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            syntax::Expr::Call {
+                name: name.clone(),
+                type_args,
+                args,
+                line: *line,
+                column: *column,
+            }
+        }
+        syntax::Expr::MethodCall {
+            base,
+            method,
+            type_args,
+            args,
+            line,
+            column,
+        } => syntax::Expr::MethodCall {
+            base: Box::new(infer_generic_calls_in_expr(
+                base,
+                None,
+                env,
+                generic_functions,
+            )?),
+            method: method.clone(),
+            type_args: type_args.clone(),
+            args: args
+                .iter()
+                .map(|arg| infer_generic_calls_in_expr(arg, None, env, generic_functions))
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::BinaryAdd {
+            lhs,
+            rhs,
+            line,
+            column,
+        } => syntax::Expr::BinaryAdd {
+            lhs: Box::new(infer_generic_calls_in_expr(
+                lhs,
+                expected,
+                env,
+                generic_functions,
+            )?),
+            rhs: Box::new(infer_generic_calls_in_expr(
+                rhs,
+                expected,
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::BinaryCompare {
+            op,
+            lhs,
+            rhs,
+            line,
+            column,
+        } => syntax::Expr::BinaryCompare {
+            op: *op,
+            lhs: Box::new(infer_generic_calls_in_expr(
+                lhs,
+                None,
+                env,
+                generic_functions,
+            )?),
+            rhs: Box::new(infer_generic_calls_in_expr(
+                rhs,
+                None,
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
+            expr: Box::new(infer_generic_calls_in_expr(
+                expr,
+                None,
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Await { expr, line, column } => syntax::Expr::Await {
+            expr: Box::new(infer_generic_calls_in_expr(
+                expr,
+                None,
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::StructLiteral {
+            name,
+            fields,
+            line,
+            column,
+        } => syntax::Expr::StructLiteral {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| {
+                    Ok(syntax::StructFieldValue {
+                        name: field.name.clone(),
+                        expr: infer_generic_calls_in_expr(
+                            &field.expr,
+                            None,
+                            env,
+                            generic_functions,
+                        )?,
+                        line: field.line,
+                        column: field.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::FieldAccess {
+            base,
+            field,
+            line,
+            column,
+        } => syntax::Expr::FieldAccess {
+            base: Box::new(infer_generic_calls_in_expr(
+                base,
+                None,
+                env,
+                generic_functions,
+            )?),
+            field: field.clone(),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::TupleLiteral {
+            elements,
+            line,
+            column,
+        } => syntax::Expr::TupleLiteral {
+            elements: elements
+                .iter()
+                .map(|element| infer_generic_calls_in_expr(element, None, env, generic_functions))
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::TupleIndex {
+            base,
+            index,
+            line,
+            column,
+        } => syntax::Expr::TupleIndex {
+            base: Box::new(infer_generic_calls_in_expr(
+                base,
+                None,
+                env,
+                generic_functions,
+            )?),
+            index: *index,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::MapLiteral {
+            entries,
+            line,
+            column,
+        } => syntax::Expr::MapLiteral {
+            entries: entries
+                .iter()
+                .map(|entry| {
+                    Ok(syntax::MapEntry {
+                        key: infer_generic_calls_in_expr(&entry.key, None, env, generic_functions)?,
+                        value: infer_generic_calls_in_expr(
+                            &entry.value,
+                            None,
+                            env,
+                            generic_functions,
+                        )?,
+                        line: entry.line,
+                        column: entry.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::ArrayLiteral {
+            elements,
+            line,
+            column,
+        } => syntax::Expr::ArrayLiteral {
+            elements: elements
+                .iter()
+                .map(|element| infer_generic_calls_in_expr(element, None, env, generic_functions))
+                .collect::<Result<Vec<_>, _>>()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Slice {
+            base,
+            start,
+            end,
+            line,
+            column,
+        } => syntax::Expr::Slice {
+            base: Box::new(infer_generic_calls_in_expr(
+                base,
+                None,
+                env,
+                generic_functions,
+            )?),
+            start: start
+                .as_ref()
+                .map(|expr| {
+                    infer_generic_calls_in_expr(
+                        expr,
+                        Some(&syntax::TypeName::Int),
+                        env,
+                        generic_functions,
+                    )
+                    .map(Box::new)
+                })
+                .transpose()?,
+            end: end
+                .as_ref()
+                .map(|expr| {
+                    infer_generic_calls_in_expr(
+                        expr,
+                        Some(&syntax::TypeName::Int),
+                        env,
+                        generic_functions,
+                    )
+                    .map(Box::new)
+                })
+                .transpose()?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Index {
+            base,
+            index,
+            line,
+            column,
+        } => syntax::Expr::Index {
+            base: Box::new(infer_generic_calls_in_expr(
+                base,
+                None,
+                env,
+                generic_functions,
+            )?),
+            index: Box::new(infer_generic_calls_in_expr(
+                index,
+                Some(&syntax::TypeName::Int),
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => expr.clone(),
+    })
+}
+
+fn infer_type_args_for_call(
+    template: &syntax::Function,
+    args: &[syntax::Expr],
+    expected: Option<&syntax::TypeName>,
+    env: &HashMap<String, syntax::TypeName>,
+    generic_functions: &HashMap<String, syntax::Function>,
+    line: usize,
+    column: usize,
+) -> Result<Vec<syntax::TypeName>, Diagnostic> {
+    let mut bindings = HashMap::new();
+    let type_params = template.type_params.iter().cloned().collect::<HashSet<_>>();
+    for (index, (param, arg)) in template.params.iter().zip(args).enumerate() {
+        if let Some(arg_ty) = infer_expr_type_name(arg, None, env, generic_functions) {
+            unify_generic_type_name(
+                &param.ty,
+                &arg_ty,
+                &type_params,
+                &mut bindings,
+                line,
+                column,
+            )
+            .map_err(|error| {
+                Diagnostic::new(
+                    "type",
+                    format!(
+                        "generic function {:?} argument {} constraint failed: {}",
+                        template.name,
+                        index + 1,
+                        error.message
+                    ),
+                )
+                .with_span(line, column)
+            })?;
+        }
+    }
+    if let Some(expected) = expected {
+        unify_generic_type_name(
+            &template.return_ty,
+            expected,
+            &type_params,
+            &mut bindings,
+            line,
+            column,
+        )
+        .map_err(|error| {
+            Diagnostic::new(
+                "type",
+                format!(
+                    "generic function {:?} return constraint failed: {}",
+                    template.name, error.message
+                ),
+            )
+            .with_span(line, column)
+        })?;
+    }
+    template
+        .type_params
+        .iter()
+        .map(|param| {
+            bindings.get(param).cloned().ok_or_else(|| {
+                Diagnostic::new(
+                    "type",
+                    format!(
+                        "generic function {:?} could not infer type parameter {:?}",
+                        template.name, param
+                    ),
+                )
+                .with_span(line, column)
+            })
+        })
+        .collect()
+}
+
+fn infer_expr_type_name(
+    expr: &syntax::Expr,
+    expected: Option<&syntax::TypeName>,
+    env: &HashMap<String, syntax::TypeName>,
+    generic_functions: &HashMap<String, syntax::Function>,
+) -> Option<syntax::TypeName> {
+    match expr {
+        syntax::Expr::Literal(syntax::Literal::Int(_)) => Some(syntax::TypeName::Int),
+        syntax::Expr::Literal(syntax::Literal::Bool(_)) => Some(syntax::TypeName::Bool),
+        syntax::Expr::Literal(syntax::Literal::String(_)) => Some(syntax::TypeName::String),
+        syntax::Expr::VarRef { name, .. } => {
+            if (name == "None" || name == "Some" || name == "Ok" || name == "Err")
+                && expected.is_some()
+            {
+                expected.cloned()
+            } else {
+                env.get(name).cloned()
+            }
+        }
+        syntax::Expr::Call {
+            name,
+            type_args,
+            args,
+            ..
+        } => {
+            if let Some(template) = generic_functions.get(name) {
+                let inferred_args = if type_args.is_empty() {
+                    infer_type_args_for_call(template, args, expected, env, generic_functions, 0, 0)
+                        .ok()?
+                } else {
+                    type_args.clone()
+                };
+                let bindings = generic_type_bindings(template, &inferred_args).ok()?;
+                Some(substitute_type_name(&template.return_ty, &bindings))
+            } else {
+                expected.cloned()
+            }
+        }
+        syntax::Expr::ArrayLiteral { elements, .. } => elements
+            .first()
+            .and_then(|element| infer_expr_type_name(element, None, env, generic_functions))
+            .map(|inner| syntax::TypeName::Array(Box::new(inner))),
+        syntax::Expr::Slice { base, .. } => {
+            match infer_expr_type_name(base, None, env, generic_functions)? {
+                syntax::TypeName::Array(inner)
+                | syntax::TypeName::Slice(inner)
+                | syntax::TypeName::MutSlice(inner) => Some(syntax::TypeName::Slice(inner)),
+                other => Some(other),
+            }
+        }
+        syntax::Expr::Index { base, .. } => {
+            match infer_expr_type_name(base, None, env, generic_functions)? {
+                syntax::TypeName::Array(inner)
+                | syntax::TypeName::Slice(inner)
+                | syntax::TypeName::MutSlice(inner) => Some(*inner),
+                syntax::TypeName::Map(_, value) => Some(*value),
+                _ => None,
+            }
+        }
+        syntax::Expr::TupleLiteral { elements, .. } => elements
+            .iter()
+            .map(|element| infer_expr_type_name(element, None, env, generic_functions))
+            .collect::<Option<Vec<_>>>()
+            .map(syntax::TypeName::Tuple),
+        syntax::Expr::Try { expr, .. } | syntax::Expr::Await { expr, .. } => {
+            infer_expr_type_name(expr, expected, env, generic_functions)
+        }
+        _ => expected.cloned(),
+    }
+}
+
+fn generic_constraint_mismatch(
+    pattern: &syntax::TypeName,
+    actual: &syntax::TypeName,
+    line: usize,
+    column: usize,
+) -> Diagnostic {
+    Diagnostic::new(
+        "type",
+        format!("expected generic constraint {pattern:?}, got {actual:?}"),
+    )
+    .with_span(line, column)
+}
+
+fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<String>) -> bool {
+    match ty {
+        syntax::TypeName::Named(name, args) => {
+            (args.is_empty() && type_params.contains(name))
+                || args
+                    .iter()
+                    .any(|arg| contains_generic_type_param(arg, type_params))
+        }
+        syntax::TypeName::Ptr(inner)
+        | syntax::TypeName::MutPtr(inner)
+        | syntax::TypeName::Slice(inner)
+        | syntax::TypeName::MutSlice(inner)
+        | syntax::TypeName::Option(inner)
+        | syntax::TypeName::Array(inner) => contains_generic_type_param(inner, type_params),
+        syntax::TypeName::Result(ok, err) | syntax::TypeName::Map(ok, err) => {
+            contains_generic_type_param(ok, type_params)
+                || contains_generic_type_param(err, type_params)
+        }
+        syntax::TypeName::Tuple(elements) => elements
+            .iter()
+            .any(|element| contains_generic_type_param(element, type_params)),
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
+    }
+}
+
+fn unify_generic_type_name(
+    pattern: &syntax::TypeName,
+    actual: &syntax::TypeName,
+    type_params: &HashSet<String>,
+    bindings: &mut HashMap<String, syntax::TypeName>,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
+    match pattern {
+        syntax::TypeName::Named(name, args) if args.is_empty() && type_params.contains(name) => {
+            if let Some(bound) = bindings.get(name) {
+                if bound != actual {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("generic type parameter {name:?} inferred as both {bound:?} and {actual:?}"),
+                    ).with_span(line, column));
+                }
+            } else {
+                bindings.insert(name.clone(), actual.clone());
+            }
+            Ok(())
+        }
+        syntax::TypeName::Named(lhs_name, lhs_args) => match actual {
+            syntax::TypeName::Named(rhs_name, rhs_args)
+                if lhs_name == rhs_name && lhs_args.len() == rhs_args.len() =>
+            {
+                for (lhs, rhs) in lhs_args.iter().zip(rhs_args) {
+                    unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)?;
+                }
+                Ok(())
+            }
+            _ if contains_generic_type_param(pattern, type_params) => {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            }
+            _ => Ok(()),
+        },
+        syntax::TypeName::Ptr(lhs) => {
+            if let syntax::TypeName::Ptr(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::MutPtr(lhs) => {
+            if let syntax::TypeName::MutPtr(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Slice(lhs) => {
+            if let syntax::TypeName::Slice(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::MutSlice(lhs) => {
+            if let syntax::TypeName::MutSlice(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Option(lhs) => {
+            if let syntax::TypeName::Option(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Result(lhs_ok, lhs_err) => {
+            if let syntax::TypeName::Result(rhs_ok, rhs_err) = actual {
+                unify_generic_type_name(lhs_ok, rhs_ok, type_params, bindings, line, column)?;
+                unify_generic_type_name(lhs_err, rhs_err, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Tuple(lhs) => {
+            if let syntax::TypeName::Tuple(rhs) = actual {
+                if lhs.len() != rhs.len() && contains_generic_type_param(pattern, type_params) {
+                    return Err(generic_constraint_mismatch(pattern, actual, line, column));
+                }
+                for (lhs, rhs) in lhs.iter().zip(rhs) {
+                    unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)?;
+                }
+                Ok(())
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Map(lhs_key, lhs_value) => {
+            if let syntax::TypeName::Map(rhs_key, rhs_value) = actual {
+                unify_generic_type_name(lhs_key, rhs_key, type_params, bindings, line, column)?;
+                unify_generic_type_name(lhs_value, rhs_value, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Array(lhs) => {
+            if let syntax::TypeName::Array(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => Ok(()),
+    }
+}
+
 fn monomorphize_program(program: &syntax::Program) -> Result<syntax::Program, Diagnostic> {
     let mut generic_functions = HashMap::new();
     let mut seen_function_names = HashSet::new();
-    let mut concrete_functions = Vec::new();
 
     for function in &program.functions {
         if !seen_function_names.insert(function.name.clone()) {
@@ -684,10 +1574,19 @@ fn monomorphize_program(program: &syntax::Program) -> Result<syntax::Program, Di
                     .with_span(function.line, function.column),
             );
         }
+        if !function.type_params.is_empty() {
+            validate_generic_function(function)?;
+            generic_functions.insert(function.name.clone(), function.clone());
+        }
+    }
+
+    let program = infer_generic_call_type_args(program, &generic_functions)?;
+    let mut generic_functions = HashMap::new();
+    let mut concrete_functions = Vec::new();
+    for function in &program.functions {
         if function.type_params.is_empty() {
             concrete_functions.push(function.clone());
         } else {
-            validate_generic_function(function)?;
             generic_functions.insert(function.name.clone(), function.clone());
         }
     }
@@ -2754,9 +3653,18 @@ fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic
 }
 
 impl Type {
+    fn is_error(&self) -> bool {
+        matches!(self, Type::Error)
+    }
+
     pub fn is_copy(&self) -> bool {
         match self {
-            Type::Int | Type::Bool | Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) => true,
+            Type::Error
+            | Type::Int
+            | Type::Bool
+            | Type::Ptr(_)
+            | Type::MutPtr(_)
+            | Type::Slice(_) => true,
             Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
@@ -2777,7 +3685,8 @@ impl Type {
         match self {
             Type::Int | Type::Bool | Type::String => true,
             Type::Tuple(elements) => elements.iter().all(Type::supports_map_key),
-            Type::Struct(_)
+            Type::Error
+            | Type::Struct(_)
             | Type::Enum(_)
             | Type::Ptr(_)
             | Type::MutPtr(_)
@@ -3308,7 +4217,12 @@ fn lower_function(
     let (body, _, guaranteed_return) = if function.is_extern {
         (Vec::new(), env.clone(), true)
     } else {
-        lower_block(&function.body, &mut env, &ctx)?
+        let (body, diagnostics, guaranteed_return) =
+            lower_block_recovering(&function.body, &mut env, &ctx);
+        if !diagnostics.is_empty() {
+            return Err(primary_diagnostic(diagnostics));
+        }
+        (body, env.clone(), guaranteed_return)
     };
     if !guaranteed_return {
         return Err(Diagnostic::new(
@@ -3365,6 +4279,61 @@ fn lower_block(
     Ok((lowered, after, guaranteed_return))
 }
 
+fn lower_block_recovering(
+    block: &[syntax::Stmt],
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> (Vec<Stmt>, Vec<Diagnostic>, bool) {
+    let scope_names = env.keys().cloned().collect::<HashSet<_>>();
+    let mut lowered = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut guaranteed_return = false;
+    for stmt in block {
+        if guaranteed_return {
+            diagnostics.push(
+                Diagnostic::new(
+                    "control",
+                    "unreachable statements after a terminating control-flow statement are not yet supported in stage1",
+                )
+                .with_span(stmt.line(), stmt.column()),
+            );
+            continue;
+        }
+        let mut candidate_env = env.clone();
+        match lower_stmt(stmt, &mut candidate_env, ctx) {
+            Ok(lowered_stmt) => {
+                guaranteed_return = lowered_stmt.always_returns();
+                *env = candidate_env;
+                lowered.push(lowered_stmt);
+            }
+            Err(error) => {
+                insert_type_error_binding_for_failed_stmt(stmt, env);
+                diagnostics.push(error);
+            }
+        }
+    }
+    release_scope_borrows(env, &scope_names);
+    (lowered, diagnostics, guaranteed_return)
+}
+
+fn insert_type_error_binding_for_failed_stmt(
+    stmt: &syntax::Stmt,
+    env: &mut HashMap<String, Binding>,
+) {
+    if let syntax::Stmt::Let { name, .. } = stmt {
+        env.entry(name.clone()).or_insert_with(|| Binding {
+            ty: Type::Error,
+            moved: false,
+            moved_projections: HashSet::new(),
+            borrow_kind: None,
+            borrow_origin: None,
+            borrowed_owners: HashSet::new(),
+            active_borrow_count: 0,
+            active_mut_borrow_count: 0,
+        });
+    }
+}
+
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -3395,7 +4364,7 @@ fn lower_stmt(
             let expected = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
-            if actual != expected {
+            if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -3440,7 +4409,10 @@ fn lower_stmt(
         }
         syntax::Stmt::Print { expr, line, column } => {
             let lowered = lower_expr(expr, env, ctx)?;
-            if !matches!(lowered.ty(), Type::Int | Type::Bool | Type::String) {
+            if !matches!(
+                lowered.ty(),
+                Type::Error | Type::Int | Type::Bool | Type::String
+            ) {
                 return Err(Diagnostic::new(
                     "type",
                     format!("print expects int, bool, or string, got {}", lowered.ty()),
@@ -7481,7 +8453,9 @@ fn contains_borrowed_slice_type_inner(
             visiting_enums.remove(name);
             contains
         }
-        Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => false,
+        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
+            false
+        }
     }
 }
 
@@ -7494,9 +8468,13 @@ fn contains_mut_borrowed_slice_type_inner(
 ) -> bool {
     match ty {
         Type::MutSlice(_) => true,
-        Type::Slice(_) | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
+        Type::Error
+        | Type::Slice(_)
+        | Type::Int
+        | Type::Bool
+        | Type::String
+        | Type::Ptr(_)
+        | Type::MutPtr(_) => false,
         Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
             inner,
             structs,
@@ -8144,6 +9122,7 @@ impl CompareOp {
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Error => write!(f, "<type-error>"),
             Type::Int => write!(f, "int"),
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
