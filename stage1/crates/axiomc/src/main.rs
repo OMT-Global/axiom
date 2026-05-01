@@ -302,7 +302,7 @@ fn main() {
                             println!("{payload}");
                             0
                         }
-                        Err(error) => print_error("doc", error, false),
+                        Err(error) => print_error("doc", error, json),
                     }
                 } else {
                     eprintln!("wrote {}", output.markdown.display());
@@ -310,7 +310,7 @@ fn main() {
                     0
                 }
             }
-            Err(error) => print_error("doc", error, false),
+            Err(error) => print_error("doc", error, json),
         },
         Command::Bench {
             path,
