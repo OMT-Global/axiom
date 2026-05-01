@@ -6739,7 +6739,14 @@ print is_match(\"[a-z]+\", true)
         assert!(error.message.contains(&alpha.display().to_string()));
         assert!(error.message.contains(&beta.display().to_string()));
         assert!(error.path.as_deref().unwrap().ends_with("src/alpha.ax"));
-        assert_eq!(error.related.len(), 3);
+        assert_eq!(error.related.len(), 2);
+        let related_paths = error
+            .related
+            .iter()
+            .map(|related| related.path.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert!(related_paths.iter().any(|path| path.ends_with("src/alpha.ax")));
+        assert!(related_paths.iter().any(|path| path.ends_with("src/beta.ax")));
         assert!(
             error
                 .related

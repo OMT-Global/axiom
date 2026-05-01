@@ -1753,7 +1753,7 @@ fn load_module_recursive(
             .iter()
             .map(|path| path.display().to_string())
             .collect::<Vec<_>>();
-        let related = cycle
+        let related = visiting[cycle_start..]
             .iter()
             .map(|path| {
                 Diagnostic::new("import", "module participates in import cycle")
