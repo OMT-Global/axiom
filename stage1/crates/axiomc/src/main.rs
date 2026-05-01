@@ -57,6 +57,10 @@ enum Command {
         timings: bool,
         #[arg(long)]
         target: Option<String>,
+        #[arg(long)]
+        locked: bool,
+        #[arg(long)]
+        offline: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
@@ -177,6 +181,8 @@ fn main() {
             debug,
             timings,
             target,
+            locked,
+            offline,
             package,
         } => {
             match build_project_with_options(
@@ -186,6 +192,8 @@ fn main() {
                     target,
                     package: package.clone(),
                     debug,
+                    locked,
+                    offline,
                 },
             ) {
                 Ok(output) => {
