@@ -18,6 +18,7 @@ members = [
   "fail/recursive_struct_without_indirection",
   "fail/result_ok_without_context",
   "fail/stdlib_clock_without_capability",
+  "pass/closures",
   "pass/collection_operations",
   "pass/functions_across_modules",
   "pass/legacy_core_programs",

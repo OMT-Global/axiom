@@ -181,6 +181,11 @@ pub enum Expr {
         elements: Vec<Expr>,
         ty: Type,
     },
+    Closure {
+        params: Vec<Param>,
+        body: Box<Expr>,
+        ty: Type,
+    },
     Slice {
         base: Box<Expr>,
         start: Option<Box<Expr>>,
@@ -231,6 +236,7 @@ pub enum Type {
     JoinHandle(Box<Type>),
     AsyncChannel(Box<Type>),
     SelectResult(Box<Type>),
+    Fn(Vec<Type>, Box<Type>),
 }
 
 impl Type {
@@ -249,7 +255,8 @@ impl Type {
             | Type::Task(_)
             | Type::JoinHandle(_)
             | Type::AsyncChannel(_)
-            | Type::SelectResult(_) => false,
+            | Type::SelectResult(_)
+            | Type::Fn(_, _) => false,
         }
     }
 }
@@ -299,6 +306,7 @@ impl Expr {
             Expr::MapLiteral { ty, .. } => ty.clone(),
             Expr::EnumVariant { ty, .. } => ty.clone(),
             Expr::ArrayLiteral { ty, .. } => ty.clone(),
+            Expr::Closure { ty, .. } => ty.clone(),
             Expr::Slice { ty, .. } => ty.clone(),
             Expr::Index { ty, .. } => ty.clone(),
         }
@@ -536,6 +544,11 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             elements: elements.iter().map(lower_expr).collect(),
             ty: lower_type(ty),
         },
+        hir::Expr::Closure { params, body, ty } => Expr::Closure {
+            params: params.iter().map(lower_param).collect(),
+            body: Box::new(lower_expr(body)),
+            ty: lower_type(ty),
+        },
         hir::Expr::Slice {
             base,
             start,
@@ -579,6 +592,10 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::JoinHandle(inner) => Type::JoinHandle(Box::new(lower_type(inner))),
         hir::Type::AsyncChannel(inner) => Type::AsyncChannel(Box::new(lower_type(inner))),
         hir::Type::SelectResult(inner) => Type::SelectResult(Box::new(lower_type(inner))),
+        hir::Type::Fn(params, return_ty) => Type::Fn(
+            params.iter().map(lower_type).collect(),
+            Box::new(lower_type(return_ty)),
+        ),
     }
 }
 

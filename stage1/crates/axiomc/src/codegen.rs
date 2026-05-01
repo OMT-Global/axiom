@@ -45,30 +45,47 @@ pub fn render_rust_for_package_with_capabilities(
         .functions
         .iter()
         .filter(|function| function.is_extern)
-        .any(|function| function.params.iter().any(|param| matches!(param.ty, Type::String)));
+        .any(|function| {
+            function
+                .params
+                .iter()
+                .any(|param| matches!(param.ty, Type::String))
+        });
     let uses_ffi_cstr = program
         .functions
         .iter()
         .filter(|function| function.is_extern)
         .any(|function| matches!(function.return_ty, Type::String));
     let mut out = String::new();
-    out.push_str("#[allow(unused_imports)]
-");
-    out.push_str("use std::collections::HashMap;
-");
+    out.push_str(
+        "#[allow(unused_imports)]
+",
+    );
+    out.push_str(
+        "use std::collections::HashMap;
+",
+    );
     if uses_ffi_cstr && uses_ffi_cstring {
-        out.push_str("use std::ffi::{CStr, CString};
-");
+        out.push_str(
+            "use std::ffi::{CStr, CString};
+",
+        );
     } else if uses_ffi_cstr {
-        out.push_str("use std::ffi::CStr;
-");
+        out.push_str(
+            "use std::ffi::CStr;
+",
+        );
     } else if uses_ffi_cstring {
-        out.push_str("use std::ffi::CString;
-");
+        out.push_str(
+            "use std::ffi::CString;
+",
+        );
     }
     if uses_ffi {
-        out.push_str("use std::os::raw::c_char;
-");
+        out.push_str(
+            "use std::os::raw::c_char;
+",
+        );
     }
     out.push_str("use std::panic;\n");
     out.push_str("use std::sync::Once;\n\n");
@@ -1082,6 +1099,7 @@ fn expr_uses_call(expr: &Expr, name: &str) -> bool {
         Expr::Index { base, index, .. } => {
             expr_uses_call(base, name) || expr_uses_call(index, name)
         }
+        Expr::Closure { body, .. } => expr_uses_call(body, name),
         Expr::Literal(_) | Expr::VarRef { .. } => false,
     }
 }
@@ -1190,6 +1208,15 @@ impl<'a> TypeContext<'a> {
             | Type::AsyncChannel(inner)
             | Type::SelectResult(inner) => {
                 self.type_contains_borrowed_slice_inner(inner, visiting_structs, visiting_enums)
+            }
+            Type::Fn(params, return_ty) => {
+                params.iter().any(|param| {
+                    self.type_contains_borrowed_slice_inner(param, visiting_structs, visiting_enums)
+                }) || self.type_contains_borrowed_slice_inner(
+                    return_ty,
+                    visiting_structs,
+                    visiting_enums,
+                )
             }
         }
     }
@@ -1314,16 +1341,22 @@ fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, o
     let extern_name = format!("{}_extern", function.name);
     out.push_str("#[link(name = ");
     out.push_str(&format!("{:?}", library));
-    out.push_str(")]
-");
+    out.push_str(
+        ")]
+",
+    );
     out.push_str("unsafe extern ");
     out.push_str(&format!("{:?}", abi));
-    out.push_str(" {
-");
+    out.push_str(
+        " {
+",
+    );
     out.push_str("    #[link_name = ");
     out.push_str(&format!("{:?}", function.source_name));
-    out.push_str("]
-");
+    out.push_str(
+        "]
+",
+    );
     out.push_str("    fn ");
     out.push_str(&extern_name);
     out.push('(');
@@ -1338,11 +1371,15 @@ fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, o
     );
     out.push_str(") -> ");
     out.push_str(&rust_ffi_type(&function.return_ty, type_context));
-    out.push_str(";
+    out.push_str(
+        ";
 }
-");
-    out.push_str("#[allow(non_snake_case)]
-");
+",
+    );
+    out.push_str(
+        "#[allow(non_snake_case)]
+",
+    );
     out.push_str(&format!(
         "fn {}({}) -> {} {{
 ",
@@ -1371,19 +1408,27 @@ fn render_extern_function(function: &Function, type_context: &TypeContext<'_>, o
         .collect::<Vec<_>>()
         .join(", ");
     if matches!(function.return_ty, Type::String) {
-        out.push_str(&format!("        let value = {extern_name}({call_args});\n"));
+        out.push_str(&format!(
+            "        let value = {extern_name}({call_args});\n"
+        ));
         out.push_str("        if value.is_null() {\n");
         out.push_str("            axiom_runtime_error(\"ffi\", \"extern function returned a null string pointer\");\n");
         out.push_str("        }\n");
         out.push_str("        CStr::from_ptr(value).to_string_lossy().into_owned()\n");
     } else {
-        out.push_str(&format!("        {extern_name}({call_args})
-"));
+        out.push_str(&format!(
+            "        {extern_name}({call_args})
+"
+        ));
     }
-    out.push_str("    }
-");
-    out.push_str("}
-");
+    out.push_str(
+        "    }
+",
+    );
+    out.push_str(
+        "}
+",
+    );
 }
 
 fn render_ffi_arg(name: &str, ty: &Type) -> String {
@@ -1760,6 +1805,7 @@ fn render_expr(expr: &Expr) -> String {
             Type::JoinHandle(_) => unreachable!("type checker rejects join handle addition"),
             Type::AsyncChannel(_) => unreachable!("type checker rejects async channel addition"),
             Type::SelectResult(_) => unreachable!("type checker rejects select result addition"),
+            Type::Fn(_, _) => unreachable!("type checker rejects function addition"),
         },
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
@@ -1831,6 +1877,17 @@ fn render_expr(expr: &Expr) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("vec![{rendered}]")
+        }
+        Expr::Closure { params, body, .. } => {
+            let rendered_params = params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Box::new(move |{rendered_params}| {{ {} }})",
+                render_expr(body)
+            )
         }
         Expr::Slice {
             base, start, end, ..
@@ -2023,6 +2080,15 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
                 rust_type_inner(inner, lifetime, type_context)
             )
         }
+        Type::Fn(params, return_ty) => format!(
+            "Box<dyn Fn({}) -> {}>",
+            params
+                .iter()
+                .map(|param| rust_type_inner(param, lifetime, type_context))
+                .collect::<Vec<_>>()
+                .join(", "),
+            rust_type_inner(return_ty, lifetime, type_context)
+        ),
     }
 }
 
