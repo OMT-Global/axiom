@@ -5,11 +5,13 @@ use axiomc::json_contract;
 use axiomc::lsp;
 use axiomc::new_project::create_project;
 use axiomc::project::{
-    build_project_with_options, check_project_with_options, project_capabilities,
-    run_project_tests_with_options, run_project_with_options, BuildOptions, BuildOutput,
-    CheckOptions, RunOptions, TestOptions,
+    BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
+    check_project_with_options, project_capabilities, run_project_tests_with_options,
+    run_project_with_options,
 };
-use axiomc::registry::{load_registry_index, publish_package, render_registry_index, PublishOptions};
+use axiomc::registry::{
+    PublishOptions, load_registry_index, publish_package, render_registry_index,
+};
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -133,7 +135,6 @@ enum Command {
     Lsp,
     /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
     Dap,
-
 }
 
 fn main() {
@@ -244,11 +245,7 @@ fn main() {
                         output.passed, output.failed, output.skipped, output.duration_ms
                     );
                 }
-                if ok {
-                    0
-                } else {
-                    1
-                }
+                if ok { 0 } else { 1 }
             }
             Err(error) => print_error("test", error, json),
         },
@@ -319,11 +316,7 @@ fn main() {
                         );
                     }
                 }
-                if report.failed == 0 {
-                    0
-                } else {
-                    1
-                }
+                if report.failed == 0 { 0 } else { 1 }
             }
             Err(error) => print_error("bench", error, json),
         },
@@ -398,7 +391,6 @@ fn main() {
         Command::Dap => match dap::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("dap", error, false),
-
         },
     };
     std::process::exit(code);
@@ -878,10 +870,16 @@ mod tests {
     #[test]
     fn build_rejects_unimplemented_native_backend_values() {
         let error = Cli::try_parse_from(["axiomc", "build", ".", "--backend", "direct-native"])
-            .expect_err("direct-native should remain unavailable in the preparatory backend plumbing");
+            .expect_err(
+                "direct-native should remain unavailable in the preparatory backend plumbing",
+            );
         let rendered = error.to_string();
         assert!(rendered.contains("unsupported backend \"direct-native\""));
-        assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
+        assert!(
+            rendered.contains(
+                "only generated-rust is implemented in this preparatory backend plumbing"
+            )
+        );
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
