@@ -118,6 +118,7 @@
         "name": {
           "enum": [
             "fs",
+            "fs:write",
             "net",
             "process",
             "env",
