@@ -20,7 +20,8 @@ mod tests {
     use crate::json_contract;
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{
-        CapabilityConfig, TestTarget, capability_descriptors, load_manifest, render_manifest,
+        CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
+        render_manifest,
     };
     use crate::mir;
     use crate::new_project::create_project;
@@ -223,6 +224,227 @@ mod tests {
         assert!(rendered.contains("if ready {"));
         assert!(rendered.contains("println!(\"{}\", banner(String::from(\"from stage1\")));"));
         assert!(rendered.contains("println!(\"{}\", ready);"));
+    }
+
+    #[test]
+    fn parser_expands_declarative_statement_macros_before_lowering() {
+        let source = r#"macro_rules! answer {
+($value:expr) => {
+return $value + 1
+}
+}
+
+fn compute(): int {
+answer!(41)
+}
+
+print compute()
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        assert_eq!(parsed.functions.len(), 1);
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("return 41 + 1;"));
+        assert!(!rendered.contains("answer!"));
+    }
+
+    #[test]
+    fn parser_expands_declarative_expression_macros_before_lowering() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn check_project_expands_declarative_macros_before_typecheck() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("axiom.toml"), render_manifest("macro-demo"))
+            .expect("write manifest");
+        let manifest = load_manifest(dir.path()).expect("load manifest");
+        fs::write(
+            dir.path().join("axiom.lock"),
+            render_lockfile_for_project(dir.path(), &manifest).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::create_dir_all(dir.path().join("src")).expect("create src");
+        fs::write(
+            dir.path().join("src/main.ax"),
+            r#"macro_rules! keep_int {
+($value:expr) => {
+$value
+}
+}
+
+let answer: int = keep_int!(42)
+print answer
+"#,
+        )
+        .expect("write source");
+
+        let checked = check_project(dir.path()).expect("check project");
+        assert_eq!(checked.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_does_not_expand_macro_text_inside_string_literals() {
+        let source = r#"macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+print "add_one!(41)"
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("add_one!(41)"));
+        assert!(!rendered.contains("41 + 1"));
+    }
+
+    #[test]
+    fn parser_does_not_expand_macro_suffix_of_longer_invocation_name() {
+        let source = r#"macro_rules! add {
+($value:expr) => {
+$value + 1
+}
+}
+
+let my41: int = 10
+let answer: int = myadd!(41)
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .and_then(|parsed| hir::lower(&parsed))
+            .expect_err("longer macro invocation name should not match add! suffix");
+        assert!(
+            error.message.contains("unknown function")
+                || error.message.contains("unknown value")
+                || error.message.contains("invalid identifier"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_definitions() {
+        let source = r#"fn compute(): int {
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_expands_macro_parameters_with_shared_prefixes() {
+        let source = r#"macro_rules! pick_second {
+($a:expr, $ab:expr) => {
+$ab
+}
+}
+
+let answer: int = pick_second!(1, 2)
+print answer
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 2;"));
+        assert!(!rendered.contains("1b;"));
+    }
+
+    #[test]
+    fn parser_does_not_substitute_macro_parameters_inside_template_strings() {
+        let source = r#"macro_rules! label {
+($value:expr) => {
+print "$value"
+}
+}
+
+label!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("$value"));
+        assert!(!rendered.contains("41"));
+    }
+
+    #[test]
+    fn parser_ignores_string_braces_when_collecting_top_level_macros() {
+        let source = r#"print "{"
+
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+
+let answer: int = add_one!(41)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let answer: i64 = 41 + 1;"));
+    }
+
+    #[test]
+    fn parser_rejects_nested_macro_rules_even_after_string_close_brace() {
+        let source = r#"fn compute(): int {
+print "}"
+macro_rules! add_one {
+($value:expr) => {
+$value + 1
+}
+}
+return add_one!(41)
+}
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("nested macro definitions should be rejected");
+        assert!(
+            error.message.contains("top level"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_bounds_recursive_declarative_macro_expansion() {
+        let source = r#"macro_rules! spin {
+() => {
+spin!()
+}
+}
+
+spin!()
+"#;
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("recursive macro expansion should be bounded");
+        assert!(error.message.contains("exceeded bounded depth"));
     }
 
     #[test]
@@ -1945,6 +2167,7 @@ print fail()
             &TestOptions {
                 filter: None,
                 package: Some(String::from("workspace-app")),
+                include_benchmarks: false,
             },
         )
         .expect("test selected workspace package");
@@ -2795,7 +3018,10 @@ print fs_write("data/../outside.txt", "traversal") == -1
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\ntrue\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "true\ntrue\ntrue\n"
+        );
         assert_eq!(
             fs::read_to_string(project.join("data/inside.txt")).expect("inside write"),
             "inside",
@@ -4164,8 +4390,27 @@ print is_match(\"[a-z]+\", true)
                 name: String::from("math-smoke"),
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
+                kind: TestKind::Unit,
             }]
         );
+    }
+
+    #[test]
+    fn manifest_parses_richer_test_kinds() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("typed-tests");
+        create_project(&project, Some("typed-tests-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"json-table\"\nentry = \"src/main_test.ax\"\nkind = \"table\"\nstdout = \"0\\n\"\n",
+                render_manifest("typed-tests-app")
+            ),
+        )
+        .expect("write manifest");
+
+        let manifest = load_manifest(&project).expect("load manifest");
+        assert_eq!(manifest.tests[0].kind, TestKind::Table);
     }
 
     #[test]
@@ -4392,6 +4637,66 @@ print is_match(\"[a-z]+\", true)
     }
 
     #[test]
+    fn run_project_tests_classifies_richer_fixture_kinds() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-rich-discovery");
+        create_project(&project, Some("runner-rich-discovery-app")).expect("create project");
+        fs::write(
+            project.join("src/cases_table_test.ax"),
+            "let ok: int = assert_eq(40 + 2, 42)\nprint ok\n",
+        )
+        .expect("write table test");
+        fs::write(project.join("src/cases_table_test.stdout"), "0\n").expect("write table golden");
+        fs::write(
+            project.join("src/roundtrip_property.ax"),
+            "let ok: int = assert_true(42 == 42)\nprint ok\n",
+        )
+        .expect("write property test");
+        fs::write(project.join("src/roundtrip_property.stdout"), "0\n")
+            .expect("write property golden");
+        fs::write(
+            project.join("src/output_snapshot_test.ax"),
+            "print \"snapshot\"\n",
+        )
+        .expect("write snapshot test");
+        fs::write(
+            project.join("src/output_snapshot_test.stdout"),
+            "snapshot\n",
+        )
+        .expect("write snapshot golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.kinds.get(&TestKind::Table), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Property), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Snapshot), Some(&1));
+    }
+
+    #[test]
+    fn run_project_tests_can_include_benchmark_smoke_fixtures() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-benchmark-discovery");
+        create_project(&project, Some("runner-benchmark-discovery-app")).expect("create project");
+        fs::write(project.join("src/compute_bench.ax"), "print \"bench\"\n")
+            .expect("write benchmark");
+
+        let default_output = run_project_tests(&project).expect("run default tests");
+        assert_eq!(default_output.kinds.get(&TestKind::Benchmark), None);
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: None,
+                package: None,
+                include_benchmarks: true,
+            },
+        )
+        .expect("run benchmark smoke tests");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.kinds.get(&TestKind::Benchmark), Some(&1));
+    }
+
+    #[test]
     fn check_project_rejects_use_after_string_move() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("moves");
@@ -4542,17 +4847,61 @@ print is_match(\"[a-z]+\", true)
     }
 
     #[test]
-    fn check_project_rejects_generic_call_without_type_args() {
+    fn check_project_infers_generic_call_from_argument_type() {
         let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("generic-missing-type-args");
-        create_project(&project, Some("generic-missing-type-args-app")).expect("create project");
+        let project = dir.path().join("generic-inferred-arg");
+        create_project(&project, Some("generic-inferred-arg-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "fn identity<T>(value: T): T {\nreturn value\n}\n\nprint identity(42)\n",
         )
         .expect("write source");
-        let error = check_project(&project).expect_err("generic calls require type args");
-        assert!(error.message.contains("requires explicit type arguments"));
+        let output = check_project(&project).expect("generic call should infer type args");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn parser_lowers_inferred_generic_calls_to_monomorphized_copies() {
+        let source = "fn identity<T>(value: T): T {\nreturn value\n}\n\nlet answer: int = identity(42)\nlet label: string = identity<string>(\"stage1\")\nprint answer\nprint label\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn identity__int(value: i64) -> i64 {"));
+        assert!(rendered.contains("fn identity__string(value: String) -> String {"));
+        assert!(rendered.contains("let answer: i64 = identity__int(42);"));
+        assert!(
+            rendered.contains("let label: String = identity__string(String::from(\"stage1\"));")
+        );
+    }
+
+    #[test]
+    fn check_project_infers_generic_call_from_return_context() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inferred-return");
+        create_project(&project, Some("generic-inferred-return-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn none<T>(): Option<T> {\nreturn None\n}\n\nlet missing: Option<int> = none()\n",
+        )
+        .expect("write source");
+        let output = check_project(&project).expect("generic call should infer from expected type");
+        assert_eq!(output.statement_count, 2);
+    }
+
+    #[test]
+    fn check_project_reports_generic_inference_constraint_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("generic-inference-mismatch");
+        create_project(&project, Some("generic-inference-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn first<T>(values: [T]): T {\nreturn values[0]\n}\n\nprint first(42)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("argument constraint should fail");
+        assert!(error.message.contains("argument 1 constraint failed"));
+        assert!(error.message.contains("expected generic constraint"));
         assert_eq!(error.kind, "type");
     }
 
@@ -6738,6 +7087,7 @@ print is_match(\"[a-z]+\", true)
             &TestOptions {
                 filter: Some(String::from("math")),
                 package: None,
+                include_benchmarks: false,
             },
         )
         .expect("run filtered tests");
@@ -6808,6 +7158,7 @@ print is_match(\"[a-z]+\", true)
             &TestOptions {
                 filter: Some(String::from("main")),
                 package: None,
+                include_benchmarks: false,
             },
         )
         .expect("test project");
@@ -6820,6 +7171,8 @@ print is_match(\"[a-z]+\", true)
         assert_eq!(payload["command"], "test");
         assert_eq!(payload["filter"], "main");
         assert_eq!(payload["skipped"], 0);
+        assert_eq!(payload["cases"][0]["kind"], "unit");
+        assert_eq!(payload["kinds"]["unit"], 1);
         assert!(payload["duration_ms"].is_u64());
     }
 
