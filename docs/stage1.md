@@ -60,12 +60,17 @@ coverage, `import "std/testing.ax"` exposes table-case helpers
 helper for QuickCheck-style sampled checks expressed as deterministic loops or
 fixtures, and `snapshot(name, actual, expected)` for inline golden assertions.
 Projects that need explicit naming or inline expectations can still declare
-`[[tests]]` entries in
-`axiom.toml`. The command now also accepts `--filter <pattern>` to run a subset
-of discovered tests by test name or entry path, and the default CLI summary now
-prints `passed` / `failed` / `skipped` counts. Workspace-only roots are now
-supported as long as build/run commands select a concrete member package with
-`-p/--package`.
+`[[tests]]` entries in `axiom.toml`, including `kind = "unit"`, `"table"`,
+`"property"`, `"snapshot"`, or `"benchmark"` for JSON reporting. Discovery
+classifies `*_table_test.ax`, `*_property.ax`, `*_property_test.ax`,
+`*_snapshot_test.ax`, and `*_golden_test.ax` as richer fixture kinds while
+preserving the ordinary `*_test.ax` lane. Benchmark entrypoints remain owned by
+`axiomc bench`, but `axiomc test --include-benchmarks` can smoke-run discovered
+`*_bench.ax` fixtures once so benchmark code participates in functional gates.
+The command also accepts `--filter <pattern>` to run a subset of discovered
+tests by test name or entry path, and the default CLI summary prints `passed` /
+`failed` / `skipped` counts. Workspace-only roots are supported as long as
+build/run commands select a concrete member package with `-p/--package`.
 
 ## JSON contract
 
