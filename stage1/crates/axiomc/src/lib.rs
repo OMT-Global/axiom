@@ -7576,6 +7576,17 @@ print serve_once("127.0.0.1:18080", "hello")
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
+        assert_eq!(payload["cache_key"]["target"], payload["target"]);
+        assert_eq!(payload["cache_key"]["debug"], true);
+        assert!(payload["cache_key"]["manifest_hash"].is_string());
+        assert!(payload["cache_key"]["lockfile_hash"].is_string());
+        assert!(payload["cache_key"]["generated_rust_hash"].is_string());
+        assert!(payload["cache_key"]["sources"].is_array());
+        assert!(payload["cache_key"]["sources"][0]["source_hash"].is_string());
+        assert_eq!(
+            payload["packages"][0]["cache_key"]["lockfile_hash"],
+            payload["cache_key"]["lockfile_hash"]
+        );
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());

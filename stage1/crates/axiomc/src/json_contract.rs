@@ -39,6 +39,7 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "statement_count": output.statement_count,
         "target": output.target,
         "debug": output.debug,
+        "cache_key": output.cache_key,
         "cache_hits": output.cache_hits,
         "cache_misses": output.cache_misses,
         "duration_ms": output.duration_ms,
