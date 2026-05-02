@@ -46,6 +46,8 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DependencySpec {
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -145,6 +147,7 @@ enum RawDependencySpec {
 #[derive(Debug, Deserialize)]
 struct RawDependencyDetail {
     path: Option<String>,
+    version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -504,16 +507,77 @@ fn normalize_dependencies(
                     .with_path(path.display().to_string()),
             );
         }
-        let raw_path = match raw_spec {
-            RawDependencySpec::Path(value) => value,
+        match raw_spec {
+            RawDependencySpec::Path(value) => {
+                validate_dependency_path(path, &format!("dependencies.{name}.path"), &value)?;
+                dependencies.insert(
+                    name,
+                    DependencySpec {
+                        path: value,
+                        version: None,
+                    },
+                );
+                continue;
+            }
             RawDependencySpec::Detailed(detail) => {
-                required_field(detail.path, path, &format!("dependencies.{name}.path"))?
+                let raw_path =
+                    required_field(detail.path, path, &format!("dependencies.{name}.path"))?;
+                validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
+                let version = normalize_dependency_version(
+                    path,
+                    &format!("dependencies.{name}.version"),
+                    detail.version,
+                )?;
+                dependencies.insert(
+                    name,
+                    DependencySpec {
+                        path: raw_path,
+                        version,
+                    },
+                );
             }
         };
-        validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
-        dependencies.insert(name, DependencySpec { path: raw_path });
     }
     Ok(dependencies)
+}
+
+fn normalize_dependency_version(
+    path: &Path,
+    field_name: &str,
+    version: Option<String>,
+) -> Result<Option<String>, Diagnostic> {
+    let Some(version) = version else {
+        return Ok(None);
+    };
+    let version = required_field(Some(version), path, field_name)?;
+    validate_version_constraint(path, field_name, &version)?;
+    Ok(Some(version))
+}
+
+fn validate_version_constraint(
+    path: &Path,
+    field_name: &str,
+    version: &str,
+) -> Result<(), Diagnostic> {
+    if version == "*" {
+        return Ok(());
+    }
+    let candidate = version.strip_prefix('^').unwrap_or(version);
+    let parts = candidate.split('.').collect::<Vec<_>>();
+    if parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return Ok(());
+    }
+    Err(
+        Diagnostic::new(
+            "manifest",
+            format!("{field_name} must be '*', an exact MAJOR.MINOR.PATCH version, or a caret constraint like ^1.2.3"),
+        )
+        .with_path(path.display().to_string()),
+    )
 }
 
 fn normalize_tests(

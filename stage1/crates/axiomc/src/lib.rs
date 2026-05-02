@@ -2381,6 +2381,72 @@ crypto = false
     }
 
     #[test]
+    fn dependency_version_constraints_are_enforced() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("versioned-dependency-app");
+        let dependency = project.join("deps/core");
+        create_project(&project, Some("versioned-dependency-app")).expect("create root");
+        create_project(&dependency, Some("versioned-core")).expect("create dependency");
+
+        fs::write(
+            dependency.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.2.0\" }}\n",
+                render_manifest("versioned-dependency-app")
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error = check_project(&project).expect_err("incompatible version should fail");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("version constraint \"^0.2.0\" is incompatible")
+        );
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.1.0\" }}\n",
+                render_manifest("versioned-dependency-app")
+            ),
+        )
+        .expect("write compatible root manifest");
+        let manifest = load_manifest(&project).expect("load compatible root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("compatible root lockfile"),
+        )
+        .expect("write compatible root lockfile");
+        check_project(&project).expect("compatible version should pass");
+    }
+
+    #[test]
     fn dependency_package_must_enable_its_own_capabilities() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("dep-cap-root");

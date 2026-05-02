@@ -815,6 +815,13 @@ fn load_package_graph_recursive(
         }
         let dependency_root = canonicalize_existing_path(&dependency_root, "dependency path")?;
         load_package_graph_recursive(&dependency_root, graph, visiting)?;
+        validate_dependency_version(
+            &manifest_path(&project_root),
+            name,
+            spec,
+            graph,
+            &dependency_root,
+        )?;
         dependencies.insert(name.clone(), dependency_root);
     }
     for member_root in &workspace_members {
@@ -832,6 +839,74 @@ fn load_package_graph_recursive(
         },
     );
     Ok(())
+}
+
+fn validate_dependency_version(
+    manifest_path: &Path,
+    dependency_name: &str,
+    spec: &crate::manifest::DependencySpec,
+    graph: &PackageGraph,
+    dependency_root: &Path,
+) -> Result<(), Diagnostic> {
+    let Some(constraint) = spec.version.as_deref() else {
+        return Ok(());
+    };
+    let dependency = graph.context(dependency_root)?;
+    let package = dependency.manifest.package.as_ref().ok_or_else(|| {
+        Diagnostic::new(
+            "manifest",
+            format!(
+                "dependency {dependency_name:?} declares version constraint {constraint:?}, but {} has no [package] version",
+                manifest_path.display()
+            ),
+        )
+        .with_path(manifest_path.display().to_string())
+    })?;
+    if dependency_version_matches(constraint, &package.version) {
+        return Ok(());
+    }
+    Err(
+        Diagnostic::new(
+            "manifest",
+            format!(
+                "dependency {dependency_name:?} version constraint {constraint:?} is incompatible with package version {:?}",
+                package.version
+            ),
+        )
+        .with_path(manifest_path.display().to_string()),
+    )
+}
+
+fn dependency_version_matches(constraint: &str, version: &str) -> bool {
+    if constraint == "*" || constraint == version {
+        return true;
+    }
+    let Some(base) = constraint.strip_prefix('^') else {
+        return false;
+    };
+    let Some(base) = parse_semver_triplet(base) else {
+        return false;
+    };
+    let Some(version) = parse_semver_triplet(version) else {
+        return false;
+    };
+    if base.0 == 0 {
+        version.0 == 0 && version.1 == base.1 && version >= base
+    } else {
+        version.0 == base.0 && version >= base
+    }
+}
+
+fn parse_semver_triplet(version: &str) -> Option<(u64, u64, u64)> {
+    let parts = version.split('.').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
 }
 
 fn resolve_workspace_members(
