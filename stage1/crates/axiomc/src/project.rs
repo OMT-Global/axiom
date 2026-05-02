@@ -32,6 +32,8 @@ pub struct CheckedPackage {
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exports: Vec<ApiExport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,7 +43,18 @@ pub struct CheckOutput {
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exports: Vec<ApiExport>,
     pub packages: Vec<CheckedPackage>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ApiExport {
+    pub kind: String,
+    pub name: String,
+    pub module: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,6 +143,7 @@ pub struct TestOutput {
 #[derive(Debug, Clone, Default)]
 pub struct CheckOptions {
     pub package: Option<String>,
+    pub include_exports: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -172,6 +186,11 @@ pub fn check_project_with_options(
     for package_root in workspace_package_roots(&graph, &project_root, options.package.as_deref())?
     {
         let analyzed = analyze_package(&graph, &package_root)?;
+        let exports = if options.include_exports {
+            public_api_exports(&analyzed.modules, &package_root)
+        } else {
+            Vec::new()
+        };
         packages.push(CheckedPackage {
             package_root: package_root.display().to_string(),
             manifest: manifest_path(&package_root).display().to_string(),
@@ -179,6 +198,7 @@ pub fn check_project_with_options(
             statement_count: analyzed.mir.statement_count(),
             capabilities: capability_descriptors(&analyzed.manifest.capabilities),
             warnings: analyzed.manifest.capabilities.warnings(),
+            exports,
         });
     }
     let root = packages.first().cloned().ok_or_else(|| {
@@ -196,6 +216,7 @@ pub fn check_project_with_options(
         statement_count: root.statement_count,
         capabilities: root.capabilities,
         warnings: root.warnings,
+        exports: root.exports,
         packages,
     })
 }
@@ -2352,6 +2373,159 @@ fn flatten_modules(
         functions: flattened_functions,
         stmts: flattened_stmts,
     })
+}
+
+fn public_api_exports(modules: &[LoadedModule], package_root: &Path) -> Vec<ApiExport> {
+    let mut exports = Vec::new();
+    for module in modules
+        .iter()
+        .filter(|module| module.package_root == package_root)
+    {
+        let module_path = module.path.display().to_string();
+        for alias in module
+            .program
+            .type_aliases
+            .iter()
+            .filter(|alias| alias.visibility.is_public())
+        {
+            exports.push(ApiExport {
+                kind: String::from("type_alias"),
+                name: alias.name.clone(),
+                module: module_path.clone(),
+                signature: Some(format!(
+                    "type {} = {}",
+                    alias.name,
+                    format_type_name(&alias.ty)
+                )),
+            });
+        }
+        for struct_decl in module
+            .program
+            .structs
+            .iter()
+            .filter(|struct_decl| struct_decl.visibility.is_public())
+        {
+            exports.push(ApiExport {
+                kind: String::from("struct"),
+                name: struct_decl.name.clone(),
+                module: module_path.clone(),
+                signature: Some(format!("struct {}", struct_decl.name)),
+            });
+        }
+        for enum_decl in module
+            .program
+            .enums
+            .iter()
+            .filter(|enum_decl| enum_decl.visibility.is_public())
+        {
+            exports.push(ApiExport {
+                kind: String::from("enum"),
+                name: enum_decl.name.clone(),
+                module: module_path.clone(),
+                signature: Some(format!("enum {}", enum_decl.name)),
+            });
+        }
+        for function in module
+            .program
+            .functions
+            .iter()
+            .filter(|function| function.visibility.is_public())
+        {
+            let params = format_function_params(function);
+            let display_name = function
+                .impl_target
+                .as_ref()
+                .map(|target| format!("{target}.{}", function.name))
+                .unwrap_or_else(|| function.name.clone());
+            exports.push(ApiExport {
+                kind: String::from("function"),
+                name: function.name.clone(),
+                module: module_path.clone(),
+                signature: Some(format!(
+                    "fn {display_name}({params}): {}",
+                    format_type_name(&function.return_ty)
+                )),
+            });
+        }
+        for constant in module
+            .program
+            .consts
+            .iter()
+            .filter(|constant| constant.visibility.is_public())
+        {
+            exports.push(ApiExport {
+                kind: String::from("const"),
+                name: constant.name.clone(),
+                module: module_path.clone(),
+                signature: Some(format!(
+                    "const {}: {}",
+                    constant.name,
+                    format_type_name(&constant.ty)
+                )),
+            });
+        }
+    }
+    exports.sort_by(|left, right| {
+        left.module
+            .cmp(&right.module)
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    exports
+}
+
+fn format_function_params(function: &syntax::Function) -> String {
+    let mut params = Vec::new();
+    if function.receiver.is_some() {
+        params.push(String::from("self"));
+    }
+    params.extend(
+        function
+            .params
+            .iter()
+            .map(|param| format!("{}: {}", param.name, format_type_name(&param.ty))),
+    );
+    params.join(", ")
+}
+
+fn format_type_name(ty: &syntax::TypeName) -> String {
+    match ty {
+        syntax::TypeName::Int => String::from("int"),
+        syntax::TypeName::Bool => String::from("bool"),
+        syntax::TypeName::String => String::from("string"),
+        syntax::TypeName::Named(name, args) if args.is_empty() => name.clone(),
+        syntax::TypeName::Named(name, args) => format!(
+            "{name}<{}>",
+            args.iter()
+                .map(format_type_name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        syntax::TypeName::Ptr(inner) => format!("&{}", format_type_name(inner)),
+        syntax::TypeName::MutPtr(inner) => format!("&mut {}", format_type_name(inner)),
+        syntax::TypeName::Slice(inner) => format!("&[{}]", format_type_name(inner)),
+        syntax::TypeName::MutSlice(inner) => format!("&mut [{}]", format_type_name(inner)),
+        syntax::TypeName::Option(inner) => format!("Option<{}>", format_type_name(inner)),
+        syntax::TypeName::Result(ok, err) => {
+            format!(
+                "Result<{}, {}>",
+                format_type_name(ok),
+                format_type_name(err)
+            )
+        }
+        syntax::TypeName::Tuple(elements) => format!(
+            "({})",
+            elements
+                .iter()
+                .map(format_type_name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        syntax::TypeName::Map(key, value) => {
+            format!("{{{}: {}}}", format_type_name(key), format_type_name(value))
+        }
+        syntax::TypeName::Array(inner) => format!("[{}]", format_type_name(inner)),
+    }
 }
 
 fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnostic> {
