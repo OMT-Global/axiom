@@ -2745,10 +2745,12 @@ fn render_match_arm(
         let pattern = if let Some(variant) = variant {
             if variant.payload_tys.is_empty() {
                 format!("{}::{}", arm.enum_name, arm.variant)
-            } else if !variant.payload_names.is_empty() {
+            } else if arm.ignore_payloads && !variant.payload_names.is_empty() {
                 format!("{}::{} {{ .. }}", arm.enum_name, arm.variant)
-            } else {
+            } else if arm.ignore_payloads {
                 format!("{}::{}(..)", arm.enum_name, arm.variant)
+            } else {
+                format!("{}::{}", arm.enum_name, arm.variant)
             }
         } else if arm.enum_name == "Option" && arm.variant == "Some" {
             String::from("Option::Some(_)")

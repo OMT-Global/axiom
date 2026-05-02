@@ -114,6 +114,7 @@ pub struct MatchArm {
     pub variant: String,
     pub bindings: Vec<String>,
     pub is_named: bool,
+    pub ignore_payloads: bool,
     pub body: Vec<Stmt>,
 }
 
@@ -2609,6 +2610,7 @@ fn rewrite_stmt_aggregate_types(
                         variant: arm.variant.clone(),
                         bindings: arm.bindings.clone(),
                         is_named: arm.is_named,
+                        ignore_payloads: arm.ignore_payloads,
                         body: arm
                             .body
                             .iter()
@@ -3229,6 +3231,7 @@ fn rewrite_stmt_generic_calls(
                         variant: arm.variant.clone(),
                         bindings: arm.bindings.clone(),
                         is_named: arm.is_named,
+                        ignore_payloads: arm.ignore_payloads,
                         body: arm
                             .body
                             .iter()
@@ -4822,6 +4825,7 @@ fn lower_stmt(
                 variant: variant.clone(),
                 bindings: bindings.clone(),
                 is_named: *is_named,
+                ignore_payloads: false,
                 body: then_block.clone(),
                 line: *line,
                 column: *column,
@@ -4833,6 +4837,7 @@ fn lower_stmt(
                         variant: candidate.name.clone(),
                         bindings: Vec::new(),
                         is_named: !candidate.payload_names.is_empty(),
+                        ignore_payloads: true,
                         body: fallback_body.clone(),
                         line: *line,
                         column: *column,
@@ -4904,7 +4909,19 @@ fn lower_stmt(
                     .with_span(arm.line, arm.column));
                 }
                 let mut arm_env = before.clone();
-                let binding_tys = if arm.is_named {
+                let binding_tys = if arm.ignore_payloads {
+                    if !arm.bindings.is_empty() {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "match arm {:?} cannot both ignore payloads and bind names",
+                                arm.variant
+                            ),
+                        )
+                        .with_span(arm.line, arm.column));
+                    }
+                    Vec::new()
+                } else if arm.is_named {
                     if variant_def.payload_names.is_empty() {
                         return Err(Diagnostic::new(
                             "type",
@@ -4915,9 +4932,7 @@ fn lower_stmt(
                         )
                         .with_span(arm.line, arm.column));
                     }
-                    if arm.bindings.is_empty() {
-                        Vec::new()
-                    } else if arm.bindings.len() != variant_def.payload_names.len() {
+                    if arm.bindings.len() != variant_def.payload_names.len() {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -4971,9 +4986,7 @@ fn lower_stmt(
                         )
                         .with_span(arm.line, arm.column));
                     }
-                    if arm.bindings.is_empty() {
-                        Vec::new()
-                    } else if arm.bindings.len() != variant_def.payload_tys.len() {
+                    if arm.bindings.len() != variant_def.payload_tys.len() {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -5043,6 +5056,7 @@ fn lower_stmt(
                     variant: arm.variant.clone(),
                     bindings: arm.bindings.clone(),
                     is_named: arm.is_named,
+                    ignore_payloads: arm.ignore_payloads,
                     body,
                 });
                 arm_states.push((after, returns));
