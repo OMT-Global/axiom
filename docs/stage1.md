@@ -90,6 +90,9 @@ incremental generated-Rust cache.
 Parser diagnostics now preserve additional recovered top-level parse errors in
 the error payload's `related` array when possible, so editor tooling can show
 more than the first syntax error without waiting for full checker recovery.
+Checked-in `check --json` contract fixtures live under
+`stage1/json-fixtures/check/` and cover success, parse, type, ownership, and
+capability-denial payloads.
 
 ## Current gaps
 
