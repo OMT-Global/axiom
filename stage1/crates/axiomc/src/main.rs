@@ -14,7 +14,7 @@ use axiomc::registry::{
 };
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -109,6 +109,14 @@ enum Command {
         warmup: usize,
         #[arg(long, default_value_t = 5)]
         iterations: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Convert mutation-test survivors into a stable issue-comment report.
+    MutationReport {
+        /// JSON mutation output from tools such as cargo-mutants.
+        input: PathBuf,
+        /// Emit the normalized machine-readable report instead of Markdown.
         #[arg(long)]
         json: bool,
     },
@@ -329,6 +337,21 @@ fn main() {
                 if report.failed == 0 { 0 } else { 1 }
             }
             Err(error) => print_error("bench", error, json),
+        },
+        Command::MutationReport { input, json } => match mutation_report_from_path(&input) {
+            Ok(report) => {
+                if json {
+                    println!(
+                        "{}",
+                        json_contract::to_pretty_string(&report)
+                            .unwrap_or_else(|_| String::from("{}"))
+                    );
+                } else {
+                    println!("{}", render_mutation_issue_report(&report));
+                }
+                0
+            }
+            Err(error) => print_error("mutation-report", error, json),
         },
         Command::Repl { json } => match run_repl(io::stdin().lock(), io::stdout(), json) {
             Ok(()) => 0,
@@ -707,6 +730,209 @@ fn run_benchmarks(
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct MutationIssueReport {
+    schema_version: &'static str,
+    survivor_count: usize,
+    groups: Vec<MutationSurvivorGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct MutationSurvivorGroup {
+    file: String,
+    function: String,
+    recommended_fixture: String,
+    survivors: Vec<MutationSurvivor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct MutationSurvivor {
+    id: String,
+    mutator: String,
+    line: Option<u64>,
+    description: String,
+}
+
+fn mutation_report_from_path(path: &Path) -> Result<MutationIssueReport, Diagnostic> {
+    let source = fs::read_to_string(path).map_err(|err| {
+        Diagnostic::new(
+            "mutation-report",
+            format!("failed to read {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })?;
+    mutation_report_from_json_str(&source)
+}
+
+fn mutation_report_from_json_str(source: &str) -> Result<MutationIssueReport, Diagnostic> {
+    let value: serde_json::Value = serde_json::from_str(source)
+        .map_err(|err| Diagnostic::new("mutation-report", format!("invalid JSON: {err}")))?;
+    let rows = mutation_rows(&value).ok_or_else(|| {
+        Diagnostic::new(
+            "mutation-report",
+            "expected a JSON array or an object containing mutants/survivors/results",
+        )
+    })?;
+
+    let mut survivors = Vec::new();
+    for row in rows {
+        if is_survivor(row) {
+            let file = string_field(row, &["file", "source_file", "source", "path"])
+                .unwrap_or_else(|| String::from("<unknown>"));
+            let function = string_field(row, &["function", "function_name", "fn", "symbol"])
+                .unwrap_or_else(|| {
+                    infer_function_from_file_and_line(
+                        &file,
+                        number_field(row, &["line", "start_line"]),
+                    )
+                });
+            survivors.push((
+                file,
+                function,
+                MutationSurvivor {
+                    id: string_field(row, &["id", "name", "mutant", "mutation_id"])
+                        .unwrap_or_else(|| stable_survivor_id(row)),
+                    mutator: string_field(row, &["mutator", "operator", "mutation", "kind"])
+                        .unwrap_or_else(|| String::from("unknown")),
+                    line: number_field(row, &["line", "start_line"]),
+                    description: string_field(
+                        row,
+                        &["description", "replacement", "diff", "summary"],
+                    )
+                    .unwrap_or_else(|| String::from("surviving mutation")),
+                },
+            ));
+        }
+    }
+
+    survivors.sort_by(|a, b| (&a.0, &a.1, a.2.line, &a.2.id).cmp(&(&b.0, &b.1, b.2.line, &b.2.id)));
+    let mut groups: Vec<MutationSurvivorGroup> = Vec::new();
+    for (file, function, survivor) in survivors {
+        if let Some(group) = groups
+            .last_mut()
+            .filter(|g| g.file == file && g.function == function)
+        {
+            group.survivors.push(survivor);
+        } else {
+            groups.push(MutationSurvivorGroup {
+                recommended_fixture: recommended_fixture_name(&file, &function),
+                file,
+                function,
+                survivors: vec![survivor],
+            });
+        }
+    }
+    let survivor_count = groups.iter().map(|group| group.survivors.len()).sum();
+    Ok(MutationIssueReport {
+        schema_version: "axiom.stage1.mutation-issue-report.v1",
+        survivor_count,
+        groups,
+    })
+}
+
+fn mutation_rows(value: &serde_json::Value) -> Option<Vec<&serde_json::Value>> {
+    if let Some(rows) = value.as_array() {
+        return Some(rows.iter().collect());
+    }
+    for key in ["survivors", "mutants", "results", "mutations"] {
+        if let Some(rows) = value.get(key).and_then(|v| v.as_array()) {
+            return Some(rows.iter().collect());
+        }
+    }
+    None
+}
+
+fn is_survivor(value: &serde_json::Value) -> bool {
+    for key in ["status", "outcome", "result"] {
+        if let Some(status) = value.get(key).and_then(|v| v.as_str()) {
+            let normalized = status.to_ascii_lowercase().replace(['_', '-'], " ");
+            return normalized == "survived" || normalized == "survivor" || normalized == "live";
+        }
+    }
+    value
+        .get("survived")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+fn string_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key)?.as_str().map(ToString::to_string))
+}
+
+fn number_field(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|key| value.get(*key)?.as_u64())
+}
+
+fn stable_survivor_id(value: &serde_json::Value) -> String {
+    let encoded = serde_json::to_string(value).unwrap_or_default();
+    format!("survivor-{:016x}", stable_hash(&encoded))
+}
+
+fn stable_hash(input: &str) -> u64 {
+    input.bytes().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
+fn infer_function_from_file_and_line(file: &str, _line: Option<u64>) -> String {
+    Path::new(file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("module")
+        .to_string()
+}
+
+fn recommended_fixture_name(file: &str, function: &str) -> String {
+    let stem = Path::new(file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("source");
+    let raw = format!("mutation_{}_{}_survivors", stem, function);
+    raw.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn render_mutation_issue_report(report: &MutationIssueReport) -> String {
+    let mut out = String::new();
+    out.push_str("## Mutation survivor report\n\n");
+    out.push_str(&format!("Surviving mutants: {}\n\n", report.survivor_count));
+    if report.groups.is_empty() {
+        out.push_str("No surviving mutants found.\n");
+        return out;
+    }
+    for group in &report.groups {
+        out.push_str(&format!("### `{}` :: `{}`\n\n", group.file, group.function));
+        out.push_str(&format!(
+            "Recommended fixture: `{}`\n\n",
+            group.recommended_fixture
+        ));
+        for survivor in &group.survivors {
+            let line = survivor
+                .line
+                .map(|line| format!(":{line}"))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "- `{}`{} `{}` — {}\n",
+                survivor.id, line, survivor.mutator, survivor.description
+            ));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 fn run_repl<R: BufRead, W: Write>(
     mut input: R,
     mut output: W,
@@ -974,6 +1200,45 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].signature, "pub fn inc(value: int): int {");
         assert_eq!(items[0].docs, vec![String::from("Adds one.")]);
+    }
+
+    #[test]
+    fn mutation_report_groups_survivors_stably() {
+        let source = r#"{
+          "mutants": [
+            {"id":"m2","status":"killed","file":"src/main.ax","function":"score","line":8,"mutator":"replace + with -"},
+            {"id":"m1","status":"survived","file":"src/main.ax","function":"score","line":7,"mutator":"replace > with >=","description":"boundary branch survived"},
+            {"id":"m3","survived":true,"file":"src/main.ax","function":"score","line":9,"operator":"remove call"},
+            {"id":"m4","outcome":"survived","source_file":"src/lib.ax","fn":"parse","start_line":3,"kind":"literal replacement"}
+          ]
+        }"#;
+
+        let report = mutation_report_from_json_str(source).expect("mutation report");
+
+        assert_eq!(report.survivor_count, 3);
+        assert_eq!(report.groups.len(), 2);
+        assert_eq!(report.groups[0].file, "src/lib.ax");
+        assert_eq!(
+            report.groups[0].recommended_fixture,
+            "mutation_lib_parse_survivors"
+        );
+        assert_eq!(report.groups[1].file, "src/main.ax");
+        assert_eq!(report.groups[1].survivors.len(), 2);
+        assert_eq!(report.groups[1].survivors[0].id, "m1");
+    }
+
+    #[test]
+    fn mutation_report_markdown_is_issue_comment_ready() {
+        let report = mutation_report_from_json_str(
+            r#"[{"id":"m1","status":"survived","file":"src/main.ax","function":"main","mutator":"negate condition","description":"condition still passes"}]"#,
+        )
+        .expect("mutation report");
+
+        let markdown = render_mutation_issue_report(&report);
+
+        assert!(markdown.contains("## Mutation survivor report"));
+        assert!(markdown.contains("Recommended fixture: `mutation_main_main_survivors`"));
+        assert!(markdown.contains("- `m1` `negate condition` — condition still passes"));
     }
 
     #[test]
