@@ -3296,7 +3296,6 @@ fn rewrite_stmt(
                         variant: arm.variant.clone(),
                         bindings: arm.bindings.clone(),
                         is_named: arm.is_named,
-                        ignore_payloads: arm.ignore_payloads,
                         body: arm
                             .body
                             .iter()

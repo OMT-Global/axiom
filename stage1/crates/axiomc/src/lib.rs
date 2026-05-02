@@ -5931,6 +5931,26 @@ print serve_once("127.0.0.1:18080", "hello")
     }
 
     #[test]
+    fn build_project_if_let_fallback_ignores_unmatched_positional_payloads() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("if-let-positional-fallback");
+        create_project(&project, Some("if-let-positional-fallback-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Choice {\nPicked(int)\nIgnored(int, string)\n}\nlet choice: Choice = Ignored(1, \"skip\")\nif let Picked(value) = choice {\nprint value\n} else {\nprint \"fallback\"\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "fallback\n");
+    }
+
+    #[test]
     fn check_project_rejects_import_aliases_explicitly() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("import-alias");
@@ -7183,6 +7203,22 @@ print serve_once("127.0.0.1:18080", "hello")
         .expect("write source");
         let error = check_project(&project).expect_err("match should require payload binding");
         assert!(error.message.contains("expects 1 bindings, got 0"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    fn check_project_rejects_bare_positional_payload_match_arm() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("bare-positional-payload-match-arm");
+        create_project(&project, Some("bare-positional-payload-match-arm-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Choice {\nPicked(int, string)\nEmpty\n}\n\nfn render(choice: Choice): string {\nmatch choice {\nPicked {\nreturn \"picked\"\n}\nEmpty {\nreturn \"empty\"\n}\n}\n}\n\nprint render(Empty)\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("bare payload arm should bind arity");
+        assert!(error.message.contains("expects 2 bindings, got 0"));
         assert_eq!(error.kind, "type");
     }
 
