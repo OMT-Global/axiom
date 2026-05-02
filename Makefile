@@ -27,6 +27,7 @@ stage1-conformance:
 
 stage1-bench-gate:
 	python3 scripts/ci/check-stage1-benchmarks.py
+	python3 scripts/ci/report-stage1-reference-comparison.py
 
 stage1-crap-proposal:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py --output stage1/quality/crap-threshold-proposal.json
