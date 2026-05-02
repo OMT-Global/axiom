@@ -178,13 +178,12 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("const AXIOM_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str("#[derive(Debug, PartialEq)]\n");
     out.push_str("struct AxiomTask<T> {\n");
-    out.push_str("    value: T,\n");
+    out.push_str("    value: Option<T>,\n");
+    out.push_str("    thunk: Option<Box<dyn FnOnce() -> T + Send>>,\n");
     out.push_str("    canceled: bool,\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str("#[derive(Debug)]\n");
     out.push_str("struct AxiomJoinHandle<T> {\n");
     out.push_str("    task: Option<AxiomTask<T>>,\n");
     out.push_str("    worker: Option<std::thread::JoinHandle<AxiomTask<T>>>,\n");
@@ -224,14 +223,22 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_task_ready<T>(value: T) -> AxiomTask<T> {\n");
-    out.push_str("    AxiomTask { value, canceled: false }\n");
+    out.push_str("    AxiomTask { value: Some(value), thunk: None, canceled: false }\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_await<T>(task: AxiomTask<T>) -> T {\n");
+    out.push_str("fn axiom_task_deferred<T: Send + 'static>(thunk: impl FnOnce() -> T + Send + 'static) -> AxiomTask<T> {\n");
+    out.push_str("    AxiomTask { value: None, thunk: Some(Box::new(thunk)), canceled: false }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_await<T>(mut task: AxiomTask<T>) -> T {\n");
     out.push_str("    if task.canceled {\n");
     out.push_str("        axiom_runtime_error(\"async\", \"awaited task was canceled\");\n");
     out.push_str("    }\n");
-    out.push_str("    task.value\n");
+    out.push_str("    if let Some(value) = task.value.take() { return value; }\n");
+    out.push_str("    match task.thunk.take() {\n");
+    out.push_str("        Some(thunk) => thunk(),\n");
+    out.push_str("        None => axiom_runtime_error(\"async\", \"task had no value or scheduled body\"),\n");
+    out.push_str("    }\n");
     out.push_str("}\n\n");
     out.push_str(r#"#[allow(dead_code)]
 fn axiom_async_host_enabled() -> bool {
@@ -268,32 +275,37 @@ fn axiom_async_join<T: Send + 'static>(handle: AxiomJoinHandle<T>) -> AxiomTask<
 }
 
 #[allow(dead_code)]
-fn axiom_async_cancel<T>(task: AxiomTask<T>) -> AxiomTask<T> {
-    AxiomTask { value: task.value, canceled: true }
+fn axiom_async_cancel<T>(mut task: AxiomTask<T>) -> AxiomTask<T> {
+    task.canceled = true;
+    task
 }
 
 #[allow(dead_code)]
 fn axiom_async_timeout<T: Send + 'static>(task: AxiomTask<T>, timeout_ms: i64) -> AxiomTask<Option<T>> {
     if task.canceled {
-        return AxiomTask { value: None, canceled: false };
+        return axiom_task_ready(None);
     }
     if axiom_async_host_enabled() {
-        let handle = std::thread::spawn(move || task.value);
+        let handle = std::thread::spawn(move || axiom_await(task));
         let deadline = std::time::Instant::now()
             + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
         while !handle.is_finished() {
             if std::time::Instant::now() >= deadline {
-                return AxiomTask { value: None, canceled: false };
+                let value = handle
+                    .join()
+                    .unwrap_or_else(|_| axiom_runtime_error("async", "host async timeout worker panicked"));
+                let _ = value;
+                return axiom_task_ready(None);
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         let value = handle
             .join()
             .unwrap_or_else(|_| axiom_runtime_error("async", "host async timeout worker panicked"));
-        AxiomTask { value: Some(value), canceled: false }
+        axiom_task_ready(Some(value))
     } else {
         let _timeout_ms = timeout_ms;
-        AxiomTask { value: Some(task.value), canceled: false }
+        axiom_task_ready(Some(axiom_await(task)))
     }
 }
 
@@ -2286,16 +2298,31 @@ fn render_function(
         params,
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
-    render_stmt_block(
-        &function.body,
-        type_context,
-        out,
-        1,
-        &function.path,
-        function.is_async,
-        debug,
-        &[],
-    );
+    if function.is_async {
+        out.push_str("    axiom_task_deferred(move || {\n");
+        render_stmt_block(
+            &function.body,
+            type_context,
+            out,
+            2,
+            &function.path,
+            false,
+            debug,
+            &[],
+        );
+        out.push_str("    })\n");
+    } else {
+        render_stmt_block(
+            &function.body,
+            type_context,
+            out,
+            1,
+            &function.path,
+            false,
+            debug,
+            &[],
+        );
+    }
     out.push_str("}\n");
 }
 
