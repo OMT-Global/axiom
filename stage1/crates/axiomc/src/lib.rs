@@ -31,7 +31,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
+    use crate::syntax::{Stmt, TypeName, Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -620,7 +620,7 @@ print fail()
 
     #[test]
     fn parser_tracks_package_visibility() {
-        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
+        let source = "pub(pkg) static ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         assert_eq!(parsed.consts[0].visibility, Visibility::Package);
         assert_eq!(parsed.type_aliases[0].visibility, Visibility::Package);
@@ -1829,7 +1829,7 @@ print fail()
         .expect("write main");
         fs::write(
             project.join("src/shared.ax"),
-            "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
+            "pub(pkg) static ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
         )
         .expect("write shared");
         let built = build_project(&project).expect("build package-visible module");
@@ -5799,6 +5799,54 @@ print serve_once("127.0.0.1:18080", "hello")
             String::from_utf8_lossy(&output.stdout),
             "42\ntrue\nstage1\n"
         );
+    }
+
+    #[test]
+    fn parser_accepts_const_sized_array_types() {
+        let source =
+            "const WIDTH: int = 3\nlet values: [int; WIDTH] = [1, 2, 3]\nprint len(values)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse const-sized array");
+        let Stmt::Let { ty, .. } = &parsed.stmts[0] else {
+            panic!("expected let statement");
+        };
+        assert_eq!(
+            ty,
+            &TypeName::Array(Box::new(TypeName::Int), Some(String::from("WIDTH")))
+        );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_const_sized_arrays() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("const-sized-arrays");
+        create_project(&project, Some("const-sized-arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const WIDTH: int = 3\nlet values: [int; WIDTH] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with const-sized arrays");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_static_declarations() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-declarations");
+        create_project(&project, Some("static-declarations-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static ANSWER: int = 40 + 2\nstatic READY: bool = ANSWER == 42\nprint ANSWER\nprint READY\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with static declarations");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\n");
     }
 
     #[test]
