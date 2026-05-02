@@ -6,6 +6,36 @@ version = "0.1.0"
 source = "path:fail/for_loop_requires_iteration_protocol"
 
 [[package]]
+name = "conformance-import-cycle"
+version = "0.1.0"
+source = "path:fail/import_cycle"
+
+[[package]]
+name = "conformance-import-duplicate-export"
+version = "0.1.0"
+source = "path:fail/import_duplicate_export"
+
+[[package]]
+name = "conformance-import-missing-module"
+version = "0.1.0"
+source = "path:fail/import_missing_module"
+
+[[package]]
+name = "conformance-import-path-escape"
+version = "0.1.0"
+source = "path:fail/import_path_escape"
+
+[[package]]
+name = "conformance-import-reserved-namespace"
+version = "0.1.0"
+source = "path:fail/import_reserved_namespace"
+
+[[package]]
+name = "conformance-import-unsupported-alias"
+version = "0.1.0"
+source = "path:fail/import_unsupported_alias"
+
+[[package]]
 name = "conformance-match-guard-not-supported"
 version = "0.1.0"
 source = "path:fail/match_guard_not_supported"
