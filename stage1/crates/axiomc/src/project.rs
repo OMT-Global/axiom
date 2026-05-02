@@ -301,9 +301,13 @@ pub fn run_project_with_options(
     let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     if options.package.is_none() && graph.context(&project_root)?.manifest.is_workspace_only() {
+        let packages = workspace_package_names(&graph, &project_root)?;
         return Err(Diagnostic::new(
             "run",
-            "workspace-only manifests require -p/--package for `axiomc run`",
+            format!(
+                "workspace-only manifests require -p/--package for `axiomc run`; valid packages: {}",
+                packages.join(", ")
+            ),
         )
         .with_path(manifest_path(&project_root).display().to_string()));
     }
@@ -1639,6 +1643,24 @@ fn workspace_package_roots(
         return Ok(matched);
     }
     Ok(roots)
+}
+
+fn workspace_package_names(
+    graph: &PackageGraph,
+    project_root: &Path,
+) -> Result<Vec<String>, Diagnostic> {
+    let mut names = workspace_package_roots(graph, project_root, None)?
+        .into_iter()
+        .filter_map(|root| {
+            graph
+                .context(&root)
+                .ok()
+                .and_then(|package| package.manifest.package.as_ref())
+                .map(|package| package.name.clone())
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names)
 }
 
 fn collect_workspace_package_roots(
