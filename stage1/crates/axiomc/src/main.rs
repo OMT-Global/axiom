@@ -90,6 +90,11 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect project metadata for agent tooling.
+    Inspect {
+        #[command(subcommand)]
+        command: InspectCommand,
+    },
     /// Format .ax source files with the canonical stage1 style.
     Fmt {
         path: PathBuf,
@@ -141,6 +146,16 @@ enum Command {
     Lsp,
     /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
     Dap,
+}
+
+#[derive(Debug, Subcommand)]
+enum InspectCommand {
+    /// Emit exported functions, types, consts, imports, and capability use.
+    Symbols {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() {
@@ -280,6 +295,28 @@ fn main() {
                 Err(error) => print_error("caps", error, json),
             }
         }
+        Command::Inspect { command } => match command {
+            InspectCommand::Symbols { path, json } => match inspect_symbols(&path) {
+                Ok(report) => {
+                    if json {
+                        println!(
+                            "{}",
+                            json_contract::to_pretty_string(&report)
+                                .unwrap_or_else(|_| String::from("{}"))
+                        );
+                    } else {
+                        for symbol in &report.symbols {
+                            println!(
+                                "{} {} {}:{}",
+                                symbol.kind, symbol.name, symbol.span.path, symbol.span.line
+                            );
+                        }
+                    }
+                    0
+                }
+                Err(error) => print_error("inspect symbols", error, json),
+            },
+        },
         Command::Fmt { path, check } => match format_axiom_sources(&path, check) {
             Ok(report) => {
                 for file in &report.files {
@@ -443,6 +480,313 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
         }
     }
     1
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InspectSymbolsReport {
+    schema_version: &'static str,
+    ok: bool,
+    command: &'static str,
+    project: String,
+    symbols: Vec<InspectedSymbol>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InspectedSymbol {
+    name: String,
+    kind: &'static str,
+    signature: String,
+    span: SymbolSpan,
+    imports: Vec<String>,
+    capabilities: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SymbolSpan {
+    path: String,
+    line: usize,
+    column: usize,
+}
+
+fn inspect_symbols(path: &Path) -> Result<InspectSymbolsReport, Diagnostic> {
+    let files = axiom_files(path)?;
+    let mut symbols = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(&file).map_err(|err| {
+            Diagnostic::new(
+                "inspect",
+                format!("failed to read {}: {err}", file.display()),
+            )
+            .with_path(file.display().to_string())
+        })?;
+        let program = parse_program(&source, &file)?;
+        let imports = program
+            .imports
+            .iter()
+            .map(|import| import.path.clone())
+            .collect::<Vec<_>>();
+        for decl in &program.consts {
+            if decl.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "const",
+                    signature: format!("pub const {}: {}", decl.name, render_type(&decl.ty)),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: capabilities_in_expr(&decl.expr),
+                });
+            }
+        }
+        for decl in &program.type_aliases {
+            if decl.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "type",
+                    signature: format!("pub type {} = {}", decl.name, render_type(&decl.ty)),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        for decl in &program.structs {
+            if decl.visibility.is_public() {
+                let fields = decl
+                    .fields
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name, render_type(&field.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "struct",
+                    signature: format!("pub struct {} {{ {} }}", decl.name, fields),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        for decl in &program.enums {
+            if decl.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "enum",
+                    signature: format!("pub enum {}", decl.name),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        for function in &program.functions {
+            if function.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: function.source_name.clone(),
+                    kind: "function",
+                    signature: function_signature(function),
+                    span: symbol_span(&file, function.line, function.column),
+                    imports: imports.clone(),
+                    capabilities: capabilities_in_stmts(&function.body),
+                });
+            }
+        }
+    }
+    symbols.sort_by(|left, right| {
+        left.span
+            .path
+            .cmp(&right.span.path)
+            .then_with(|| left.span.line.cmp(&right.span.line))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(InspectSymbolsReport {
+        schema_version: json_contract::JSON_SCHEMA_VERSION,
+        ok: true,
+        command: "inspect symbols",
+        project: path.display().to_string(),
+        symbols,
+    })
+}
+
+fn symbol_span(path: &Path, line: usize, column: usize) -> SymbolSpan {
+    SymbolSpan {
+        path: path.display().to_string(),
+        line,
+        column,
+    }
+}
+
+fn function_signature(function: &axiomc::syntax::Function) -> String {
+    let async_prefix = if function.is_async { "async " } else { "" };
+    let params = function
+        .params
+        .iter()
+        .map(|param| format!("{}: {}", param.name, render_type(&param.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "pub {async_prefix}fn {}({params}): {}",
+        function.source_name,
+        render_type(&function.return_ty)
+    )
+}
+
+fn render_type(ty: &axiomc::syntax::TypeName) -> String {
+    use axiomc::syntax::TypeName;
+    match ty {
+        TypeName::Int => "int".to_string(),
+        TypeName::Bool => "bool".to_string(),
+        TypeName::String => "string".to_string(),
+        TypeName::Named(name, args) if args.is_empty() => name.clone(),
+        TypeName::Named(name, args) => format!(
+            "{}<{}>",
+            name,
+            args.iter().map(render_type).collect::<Vec<_>>().join(", ")
+        ),
+        TypeName::Ptr(inner) => format!("ptr<{}>", render_type(inner)),
+        TypeName::MutPtr(inner) => format!("mut ptr<{}>", render_type(inner)),
+        TypeName::Slice(inner) => format!("&[{}]", render_type(inner)),
+        TypeName::MutSlice(inner) => format!("&mut [{}]", render_type(inner)),
+        TypeName::Option(inner) => format!("Option<{}>", render_type(inner)),
+        TypeName::Result(ok, err) => format!("Result<{}, {}>", render_type(ok), render_type(err)),
+        TypeName::Tuple(elements) => format!(
+            "({})",
+            elements
+                .iter()
+                .map(render_type)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        TypeName::Map(key, value) => format!("{{{}: {}}}", render_type(key), render_type(value)),
+        TypeName::Array(inner) => format!("[{}]", render_type(inner)),
+    }
+}
+
+fn capabilities_in_stmts(stmts: &[axiomc::syntax::Stmt]) -> Vec<&'static str> {
+    let mut capabilities = Vec::new();
+    for stmt in stmts {
+        collect_stmt_capabilities(stmt, &mut capabilities);
+    }
+    capabilities.sort_unstable();
+    capabilities.dedup();
+    capabilities
+}
+
+fn capabilities_in_expr(expr: &axiomc::syntax::Expr) -> Vec<&'static str> {
+    let mut capabilities = Vec::new();
+    collect_expr_capabilities(expr, &mut capabilities);
+    capabilities.sort_unstable();
+    capabilities.dedup();
+    capabilities
+}
+
+fn collect_stmt_capabilities(stmt: &axiomc::syntax::Stmt, capabilities: &mut Vec<&'static str>) {
+    use axiomc::syntax::Stmt;
+    match stmt {
+        Stmt::Let { expr, .. }
+        | Stmt::Print { expr, .. }
+        | Stmt::Panic { expr, .. }
+        | Stmt::Defer { expr, .. }
+        | Stmt::Return { expr, .. } => collect_expr_capabilities(expr, capabilities),
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_expr_capabilities(cond, capabilities);
+            for stmt in then_block {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+            for stmt in else_block.iter().flatten() {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            collect_expr_capabilities(cond, capabilities);
+            for stmt in body {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+        }
+        Stmt::Match { expr, arms, .. } => {
+            collect_expr_capabilities(expr, capabilities);
+            for arm in arms {
+                for stmt in &arm.body {
+                    collect_stmt_capabilities(stmt, capabilities);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expr_capabilities(expr: &axiomc::syntax::Expr, capabilities: &mut Vec<&'static str>) {
+    use axiomc::syntax::Expr;
+    match expr {
+        Expr::Call { name, args, .. } => {
+            if let Some(capability) = capability_for_call(name) {
+                capabilities.push(capability);
+            }
+            for arg in args {
+                collect_expr_capabilities(arg, capabilities);
+            }
+        }
+        Expr::MethodCall { base, args, .. } => {
+            collect_expr_capabilities(base, capabilities);
+            for arg in args {
+                collect_expr_capabilities(arg, capabilities);
+            }
+        }
+        Expr::BinaryAdd { lhs, rhs, .. } | Expr::BinaryCompare { lhs, rhs, .. } => {
+            collect_expr_capabilities(lhs, capabilities);
+            collect_expr_capabilities(rhs, capabilities);
+        }
+        Expr::Try { expr, .. } | Expr::Await { expr, .. } => {
+            collect_expr_capabilities(expr, capabilities);
+        }
+        Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_expr_capabilities(&field.expr, capabilities);
+            }
+        }
+        Expr::FieldAccess { base, .. }
+        | Expr::TupleIndex { base, .. }
+        | Expr::Slice { base, .. } => {
+            collect_expr_capabilities(base, capabilities);
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_expr_capabilities(element, capabilities);
+            }
+        }
+        Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                collect_expr_capabilities(&entry.key, capabilities);
+                collect_expr_capabilities(&entry.value, capabilities);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_expr_capabilities(base, capabilities);
+            collect_expr_capabilities(index, capabilities);
+        }
+        Expr::Literal(_) | Expr::VarRef { .. } => {}
+    }
+}
+
+fn capability_for_call(name: &str) -> Option<&'static str> {
+    match name {
+        "clock_now_ms" | "clock_elapsed_ms" | "clock_sleep_ms" => Some("clock"),
+        "env_get" => Some("env"),
+        "fs_read" => Some("fs"),
+        "net_resolve"
+        | "http_get"
+        | "tcp_listen_loopback_once"
+        | "tcp_dial"
+        | "udp_bind_loopback_once"
+        | "udp_send_recv" => Some("net"),
+        "process_status" => Some("process"),
+        "crypto_sha256" => Some("crypto"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -870,6 +1214,7 @@ mod tests {
         assert!(!build_help.contains("direct-native"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
+        assert!(help.contains("Inspect project metadata for agent tooling"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
@@ -947,6 +1292,49 @@ mod tests {
         assert_eq!(
             build_summary_lines(&build_output(None), false),
             vec![String::from("wrote dist/app (backend=generated-rust)")]
+        );
+    }
+
+    #[test]
+    fn inspect_symbols_reports_public_symbols_and_capabilities() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_dir = dir.path().join("src");
+        fs::create_dir_all(&source_dir).expect("create source dir");
+        fs::write(
+            source_dir.join("main.ax"),
+            "import \"time.ax\"\n\npub const LIMIT: int = 3\n\npub struct Job {\nname: string\n}\n\npub fn now(): int {\nreturn clock_now_ms()\n}\n\nfn private_helper(): int {\nreturn 1\n}\n",
+        )
+        .expect("write main source");
+        fs::write(
+            source_dir.join("time.ax"),
+            "pub fn exported(): int {\nreturn 7\n}\n",
+        )
+        .expect("write imported source");
+
+        let report = inspect_symbols(dir.path()).expect("inspect symbols");
+
+        assert_eq!(report.command, "inspect symbols");
+        assert_eq!(report.symbols.len(), 4);
+        let now = report
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "now")
+            .expect("now symbol");
+        assert_eq!(now.kind, "function");
+        assert!(now.signature.contains("pub fn now(): int"));
+        assert_eq!(now.imports, vec![String::from("time.ax")]);
+        assert_eq!(now.capabilities, vec!["clock"]);
+        assert!(
+            report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "exported")
+        );
+        assert!(
+            !report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "private_helper")
         );
     }
 
