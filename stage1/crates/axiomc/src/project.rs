@@ -1006,7 +1006,9 @@ fn dependency_version_matches(constraint: &str, version: &str) -> bool {
     let Some(version) = parse_semver_triplet(version) else {
         return false;
     };
-    if base.0 == 0 {
+    if base.0 == 0 && base.1 == 0 {
+        version.0 == 0 && version.1 == 0 && version.2 == base.2
+    } else if base.0 == 0 {
         version.0 == 0 && version.1 == base.1 && version >= base
     } else {
         version.0 == base.0 && version >= base

@@ -121,7 +121,9 @@ Future registry packages will need stable source and integrity metadata:
 Those registry fields are intentionally reserved. Until registry resolution
 exists, manifests must not contain root `[registry]`, `package.checksum`,
 `package.registry`, `package.source`, or dependency
-`version`/`checksum`/`registry`/`source` fields. The parser rejects them instead
+`checksum`/`registry`/`source` fields. Local dependency `version` constraints
+are accepted only with a local `path` and are validated against the dependency
+package version. The parser rejects reserved registry fields instead
 of silently treating a registry package as a local package. `[publish]` is
 accepted only as metadata; it does not make `axiomc` contact or upload to a
 remote registry.

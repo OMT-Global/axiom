@@ -2695,6 +2695,41 @@ crypto = false
         )
         .expect("write compatible root lockfile");
         check_project(&project).expect("compatible version should pass");
+
+        fs::write(
+            dependency.join("axiom.toml"),
+            "[package]\nname = \"versioned-core\"\nversion = \"0.0.4\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write 0.0.x dependency manifest");
+        let dependency_manifest = load_manifest(&dependency).expect("load 0.0.x dependency");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("0.0.x dependency lockfile"),
+        )
+        .expect("write 0.0.x dependency lockfile");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.0.3\" }}\n",
+                render_manifest("versioned-dependency-app")
+            ),
+        )
+        .expect("write 0.0.x root manifest");
+        let manifest = load_manifest(&project).expect("load 0.0.x root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("0.0.x root lockfile"),
+        )
+        .expect("write 0.0.x root lockfile");
+
+        let error = check_project(&project).expect_err("^0.0.3 must reject 0.0.4");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("version constraint \"^0.0.3\" is incompatible")
+        );
     }
 
     #[test]
@@ -5461,7 +5496,28 @@ print serve_once("127.0.0.1:18080", "hello")
         let err = load_manifest(&dependency_version).expect_err("reserved dependency should fail");
         assert!(
             err.message
-                .contains("dependencies.core.version is reserved")
+                .contains("dependencies.core.registry is reserved")
+        );
+
+        let invalid_dependency_version = dir.path().join("invalid-dependency-version");
+        create_project(
+            &invalid_dependency_version,
+            Some("invalid-dependency-version-app"),
+        )
+        .expect("create project");
+        fs::write(
+            invalid_dependency_version.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"latest\" }}\n",
+                render_manifest("invalid-dependency-version-app")
+            ),
+        )
+        .expect("write manifest");
+        let err = load_manifest(&invalid_dependency_version)
+            .expect_err("invalid dependency version should fail");
+        assert!(
+            err.message
+                .contains("dependencies.core.version must be")
         );
     }
 
