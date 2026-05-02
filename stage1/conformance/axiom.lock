@@ -129,3 +129,8 @@ source = "path:pass/package_visibility"
 name = "conformance-struct-field-access"
 version = "0.1.0"
 source = "path:pass/struct_field_access"
+
+[[package]]
+name = "conformance-type-system-aggregates"
+version = "0.1.0"
+source = "path:pass/type_system_aggregates"
