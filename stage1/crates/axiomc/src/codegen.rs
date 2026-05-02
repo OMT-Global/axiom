@@ -298,7 +298,13 @@ fn axiom_async_timeout<T: Send + 'static>(task: AxiomTask<T>, timeout_ms: i64) -
                     .join()
                     .unwrap_or_else(|_| axiom_runtime_error("async", "host async timeout worker panicked")),
             )),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => axiom_task_ready(None),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Rust cannot forcibly cancel a running thread safely. Dropping
+                // the JoinHandle detaches the worker so the timeout returns on
+                // schedule while the task finishes independently.
+                drop(worker);
+                axiom_task_ready(None)
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = worker.join();
                 axiom_runtime_error("async", "host async timeout worker panicked")
