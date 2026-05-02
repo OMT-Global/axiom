@@ -31,6 +31,21 @@ The current stage1 examples document the supported manifest surface:
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
 
+## Editor Schemas
+
+Checked-in editor and agent metadata lives under `stage1/schemas/`:
+
+- `stage1/schemas/axiom.toml.schema.json` describes the decoded `axiom.toml`
+  manifest shape for TOML-aware editors.
+- `stage1/schemas/axiom.stage1.v1.schema.json` describes the shared JSON
+  envelope emitted by `axiomc check`, `build`, `test`, and `caps` with
+  `--json`.
+
+These schemas are intentionally metadata for editor completion, validation, and
+agent contract discovery. The compiler remains the source of truth for semantic
+checks such as dependency graph validity, capability enforcement, and source
+analysis.
+
 ## Publish and Static Registry Groundwork
 
 `axiomc publish` packs a checked stage1 package into a deterministic `package.axp`, writes an `axiom-signature-v1` sidecar, and copies `axiom.toml` plus `axiom.lock` into a local registry tree at `<packages>/<name>/<version>/`. The command validates the lockfile first and refuses to replace an existing release unless `--allow-overwrite` is passed.

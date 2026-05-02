@@ -77,6 +77,9 @@ build/run commands select a concrete member package with `-p/--package`.
 
 `axiomc check --json`, `build --json`, `test --json`, and `caps --json` all now
 emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
+The checked-in compiler JSON schema is
+`stage1/schemas/axiom.stage1.v1.schema.json`; the manifest editor schema is
+`stage1/schemas/axiom.toml.schema.json`.
 Successful payloads always include `ok`, `command`, and `project`, while
 `axiomc test --json` additionally reports `filter` and per-run/per-case
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
