@@ -253,7 +253,7 @@ fn axiom_async_spawn<T: Send + 'static>(task: AxiomTask<T>) -> AxiomJoinHandle<T
     if axiom_async_host_enabled() {
         AxiomJoinHandle {
             task: None,
-            worker: Some(std::thread::spawn(move || task)),
+            worker: Some(std::thread::spawn(move || axiom_task_ready(axiom_await(task)))),
         }
     } else {
         AxiomJoinHandle {
@@ -286,23 +286,18 @@ fn axiom_async_timeout<T: Send + 'static>(task: AxiomTask<T>, timeout_ms: i64) -
         return axiom_task_ready(None);
     }
     if axiom_async_host_enabled() {
-        let handle = std::thread::spawn(move || axiom_await(task));
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
-        while !handle.is_finished() {
-            if std::time::Instant::now() >= deadline {
-                let value = handle
-                    .join()
-                    .unwrap_or_else(|_| axiom_runtime_error("async", "host async timeout worker panicked"));
-                let _ = value;
-                return axiom_task_ready(None);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let value = axiom_await(task);
+            let _ = tx.send(value);
+        });
+        match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms.max(0) as u64)) {
+            Ok(value) => axiom_task_ready(Some(value)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => axiom_task_ready(None),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                axiom_runtime_error("async", "host async timeout worker panicked")
             }
-            std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        let value = handle
-            .join()
-            .unwrap_or_else(|_| axiom_runtime_error("async", "host async timeout worker panicked"));
-        axiom_task_ready(Some(value))
     } else {
         let _timeout_ms = timeout_ms;
         axiom_task_ready(Some(axiom_await(task)))
