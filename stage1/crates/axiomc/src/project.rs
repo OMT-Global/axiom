@@ -743,6 +743,10 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             clock: true,
             crypto: true,
             ffi: false,
+            deny_by_default: false,
+            unsafe_opt_ins: Vec::new(),
+            owners: BTreeMap::new(),
+            rationale: BTreeMap::new(),
         },
     };
     graph.packages.insert(
