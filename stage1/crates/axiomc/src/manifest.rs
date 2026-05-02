@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
-pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
+pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
     CapabilityKind::Net,
@@ -14,6 +14,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Clock,
     CapabilityKind::Crypto,
     CapabilityKind::Ffi,
+    CapabilityKind::Async,
 ];
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -82,6 +83,7 @@ pub struct CapabilityConfig {
     pub clock: bool,
     pub crypto: bool,
     pub ffi: bool,
+    pub async_runtime: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -95,6 +97,7 @@ pub enum CapabilityKind {
     Clock,
     Crypto,
     Ffi,
+    Async,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -168,6 +171,8 @@ struct RawCapabilityConfig {
     clock: Option<bool>,
     crypto: Option<bool>,
     ffi: Option<bool>,
+    #[serde(rename = "async")]
+    async_runtime: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,7 +266,7 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
 
 pub fn render_manifest(name: &str) -> String {
     format!(
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
+        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
     )
 }
 
@@ -276,6 +281,7 @@ impl CapabilityConfig {
             CapabilityKind::Clock => self.clock,
             CapabilityKind::Crypto => self.crypto,
             CapabilityKind::Ffi => self.ffi,
+            CapabilityKind::Async => self.async_runtime,
         }
     }
 
@@ -311,6 +317,7 @@ impl CapabilityKind {
             CapabilityKind::Clock => "clock",
             CapabilityKind::Crypto => "crypto",
             CapabilityKind::Ffi => "ffi",
+            CapabilityKind::Async => "async",
         }
     }
 
@@ -324,6 +331,7 @@ impl CapabilityKind {
             CapabilityKind::Clock => "wall-clock time access",
             CapabilityKind::Crypto => "hashing and cryptography primitives",
             CapabilityKind::Ffi => "foreign function interface access",
+            CapabilityKind::Async => "host async runtime access",
         }
     }
 }
@@ -375,6 +383,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             clock: capabilities.clock.unwrap_or(false),
             crypto: capabilities.crypto.unwrap_or(false),
             ffi: capabilities.ffi.unwrap_or(false),
+            async_runtime: capabilities.async_runtime.unwrap_or(false),
         },
     })
 }
