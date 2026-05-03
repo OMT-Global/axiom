@@ -2362,10 +2362,11 @@ fn render_function(
         return;
     }
     let uses_slice_lifetime = function_signature_uses_borrowed_slice(function, type_context);
+    let mutable_locals = collect_mutably_borrowed_locals(&function.body);
     let params = function
         .params
         .iter()
-        .map(|param| render_param(param, uses_slice_lifetime, type_context))
+        .map(|param| render_param(param, uses_slice_lifetime, type_context, &mutable_locals))
         .collect::<Vec<_>>()
         .join(", ");
     let lifetime = if uses_slice_lifetime { "<'a>" } else { "" };
@@ -2377,7 +2378,6 @@ fn render_function(
         params,
         rust_type_in_signature(&function.return_ty, uses_slice_lifetime, type_context)
     ));
-    let mutable_locals = collect_mutably_borrowed_locals(&function.body);
     render_stmt_block(
         &function.body,
         type_context,
@@ -2511,9 +2511,15 @@ fn render_param(
     param: &Param,
     uses_slice_lifetime: bool,
     type_context: &TypeContext<'_>,
+    mutable_locals: &HashSet<String>,
 ) -> String {
+    let mutability = mutable_locals
+        .contains(&param.name)
+        .then_some("mut ")
+        .unwrap_or("");
     format!(
-        "{}: {}",
+        "{}{}: {}",
+        mutability,
         param.name,
         rust_type_in_signature(&param.ty, uses_slice_lifetime, type_context)
     )
