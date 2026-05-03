@@ -1439,7 +1439,10 @@ fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<Stri
         syntax::TypeName::Tuple(elements) => elements
             .iter()
             .any(|element| contains_generic_type_param(element, type_params)),
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
+        syntax::TypeName::Int
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String
+        | syntax::TypeName::Str => false,
     }
 }
 
@@ -1568,7 +1571,10 @@ fn unify_generic_type_name(
                 Ok(())
             }
         }
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => Ok(()),
+        syntax::TypeName::Int
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String
+        | syntax::TypeName::Str => Ok(()),
     }
 }
 
@@ -5179,14 +5185,30 @@ fn is_string_like_type(ty: &Type) -> bool {
     matches!(ty, Type::String | Type::Str)
 }
 
-fn coerce_expr_to_expected(expr: Expr, expected: Option<&Type>) -> Expr {
+fn coerce_expr_to_expected(
+    expr: Expr,
+    expected: Option<&Type>,
+    allow_temporary_string_borrow: bool,
+) -> Result<Expr, Diagnostic> {
     match expected {
-        Some(Type::Str) if expr.ty() == &Type::String => Expr::StringBorrow {
-            expr: Box::new(expr),
-            ty: Type::Str,
-        },
-        _ => expr,
+        Some(Type::Str) if expr.ty() == &Type::String => {
+            if !allow_temporary_string_borrow && !is_stable_string_borrow_owner(&expr) {
+                return Err(Diagnostic::new(
+                    "ownership",
+                    "cannot borrow a temporary String as &str; bind the String to a local first",
+                ));
+            }
+            Ok(Expr::StringBorrow {
+                expr: Box::new(expr),
+                ty: Type::Str,
+            })
+        }
+        _ => Ok(expr),
     }
+}
+
+fn is_stable_string_borrow_owner(expr: &Expr) -> bool {
+    matches!(expr, Expr::VarRef { .. } | Expr::FieldAccess { .. } | Expr::Index { .. })
 }
 
 fn lower_expr_with_expected(
@@ -5196,7 +5218,17 @@ fn lower_expr_with_expected(
     ctx: &LowerContext<'_>,
 ) -> Result<Expr, Diagnostic> {
     lower_expr_with_expected_inner(expr, expected, env, ctx)
-        .map(|lowered| coerce_expr_to_expected(lowered, expected))
+        .and_then(|lowered| coerce_expr_to_expected(lowered, expected, false))
+}
+
+fn lower_call_arg_with_expected(
+    expr: &syntax::Expr,
+    expected: Option<&Type>,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Expr, Diagnostic> {
+    lower_expr_with_expected_inner(expr, expected, env, ctx)
+        .and_then(|lowered| coerce_expr_to_expected(lowered, expected, true))
 }
 
 fn lower_expr_with_expected_inner(
@@ -6568,7 +6600,7 @@ fn lower_expr_with_expected_inner(
                 let mut lowered_args = Vec::new();
                 let mut temporary_borrows = Vec::new();
                 for (arg, expected) in args.iter().zip(signature.params.iter()) {
-                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                    let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx)?;
                     if lowered.ty() != expected {
                         return Err(Diagnostic::new(
                             "type",
@@ -6763,7 +6795,7 @@ fn lower_expr_with_expected_inner(
                     .with_span(*line, *column));
                 }
                 for (arg, expected) in args.iter().zip(signature.params.iter()) {
-                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                    let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx)?;
                     if lowered.ty() != expected {
                         return Err(Diagnostic::new(
                             "type",
@@ -6852,7 +6884,7 @@ fn lower_expr_with_expected_inner(
             }
             lowered_args.push(lowered_base);
             for (arg, expected) in args.iter().zip(signature.params.iter().skip(1)) {
-                let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+                let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx)?;
                 if lowered.ty() != expected {
                     return Err(Diagnostic::new(
                         "type",
@@ -8001,7 +8033,7 @@ fn lower_variant_constructor(
     }
     let mut lowered_payloads = Vec::new();
     for (arg, expected) in args.iter().zip(variant.payload_tys.iter()) {
-        let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
+        let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx)?;
         if lowered.ty() != expected {
             return Err(Diagnostic::new(
                 "type",
@@ -8963,10 +8995,10 @@ fn lower_literal(literal: &syntax::Literal, expected: Option<&Type>) -> Expr {
             value: LiteralValue::Bool(*value),
         },
         syntax::Literal::String(value) => Expr::Literal {
-            ty: if matches!(expected, Some(Type::String)) {
-                Type::String
-            } else {
+            ty: if matches!(expected, Some(Type::Str)) {
                 Type::Str
+            } else {
+                Type::String
             },
             value: LiteralValue::String(value.clone()),
         },
@@ -9322,7 +9354,7 @@ impl std::fmt::Display for Type {
             Type::Error => write!(f, "<type-error>"),
             Type::Int => write!(f, "int"),
             Type::Bool => write!(f, "bool"),
-            Type::String => write!(f, "String"),
+            Type::String => write!(f, "string"),
             Type::Str => write!(f, "&str"),
             Type::Struct(name) => write!(f, "{name}"),
             Type::Enum(name) => write!(f, "{name}"),
