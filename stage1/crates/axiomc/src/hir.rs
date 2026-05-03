@@ -5402,11 +5402,15 @@ fn lower_stmt(
                 .with_span(*line, *column));
             }
             if env.contains_key(name) {
-                return Err(Diagnostic::new(
-                    "type",
-                    format!("rebinding existing name {name:?} is not yet supported in stage1"),
-                )
-                .with_span(*line, *column));
+                let existing = &env[name];
+                let message = if !existing.ty.is_copy() {
+                    format!("rebinding name {name:?} is not supported; the existing binding holds an owned value")
+                } else {
+                    format!("rebinding name {name:?} is not supported in stage1")
+                };
+                return Err(Diagnostic::new("ownership", message)
+                    .with_code("rebind_not_supported")
+                    .with_span(*line, *column));
             }
             let expected = lower_type(
                 ty,
