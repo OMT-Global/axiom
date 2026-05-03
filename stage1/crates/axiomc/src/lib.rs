@@ -7480,6 +7480,67 @@ print serve_once("127.0.0.1:18080", "hello")
             );
         }
 
+        let mappings = map["mappings"].as_array().expect("debug mappings array");
+        assert!(
+            mappings.iter().any(|mapping| mapping["source"] == source
+                && mapping["line"] == 1
+                && mapping["column"] == 1),
+            "debug map should preserve the primary Axiom source span"
+        );
+
+        fs::write(
+            project.join("src/helper.ax"),
+            "pub fn helper(): int {\n    return 7\n}\n",
+        )
+        .expect("write helper source");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"helper.ax\"\nlet answer: int = helper()\nprint answer\n",
+        )
+        .expect("write imported source program");
+        let imported_debug = build_project_with_options(
+            &project,
+            &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
+                target: None,
+                package: None,
+                debug: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("debug build with import");
+        let imported_map: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(
+                imported_debug
+                    .debug_map
+                    .as_ref()
+                    .expect("imported debug map path"),
+            )
+            .expect("read imported debug map"),
+        )
+        .expect("parse imported debug map");
+        let helper_source = project
+            .join("src/helper.ax")
+            .canonicalize()
+            .expect("canonical helper source path")
+            .display()
+            .to_string();
+        let imported_mappings = imported_map["mappings"]
+            .as_array()
+            .expect("imported debug mappings array");
+        assert!(
+            imported_mappings.iter().any(|mapping| mapping["source"] == source
+                && mapping["line"] == 2
+                && mapping["column"] == 1),
+            "debug map should retain primary source spans after imports"
+        );
+        assert!(
+            imported_mappings.iter().any(|mapping| mapping["source"] == helper_source
+                && mapping["line"] == 2
+                && mapping["column"] == 1),
+            "debug map should retain imported module source spans instead of collapsing to the primary file"
+        );
+
         fs::remove_file(&debug_map).expect("remove debug map");
         let cached_debug = build_project_with_options(
             &project,
