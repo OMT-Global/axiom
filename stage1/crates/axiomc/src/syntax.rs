@@ -2538,13 +2538,7 @@ fn parse_numeric_literal(raw: &str) -> Option<Literal> {
             return None;
         }
         let ty = NumericType::parse(suffix)?;
-        let valid = if ty.is_float() {
-            number.parse::<f64>().is_ok()
-        } else {
-            number.parse::<u128>().is_ok()
-                || (number.starts_with('-') && number[1..].parse::<u128>().is_ok())
-        };
-        if valid {
+        if numeric_literal_fits(number, ty) {
             return Some(Literal::Numeric {
                 raw: number.to_string(),
                 ty,
@@ -2552,6 +2546,37 @@ fn parse_numeric_literal(raw: &str) -> Option<Literal> {
         }
     }
     None
+}
+
+fn numeric_literal_fits(number: &str, ty: NumericType) -> bool {
+    match ty {
+        NumericType::F32 | NumericType::F64 => number.parse::<f64>().is_ok(),
+        NumericType::I8 => integer_literal_in_range(number, i8::MIN as i128, i8::MAX as i128),
+        NumericType::I16 => integer_literal_in_range(number, i16::MIN as i128, i16::MAX as i128),
+        NumericType::I32 => integer_literal_in_range(number, i32::MIN as i128, i32::MAX as i128),
+        NumericType::I64 | NumericType::Isize => {
+            integer_literal_in_range(number, i64::MIN as i128, i64::MAX as i128)
+        }
+        NumericType::U8 => unsigned_integer_literal_in_range(number, u8::MAX as u128),
+        NumericType::U16 => unsigned_integer_literal_in_range(number, u16::MAX as u128),
+        NumericType::U32 => unsigned_integer_literal_in_range(number, u32::MAX as u128),
+        NumericType::U64 | NumericType::Usize => {
+            unsigned_integer_literal_in_range(number, u64::MAX as u128)
+        }
+    }
+}
+
+fn integer_literal_in_range(number: &str, min: i128, max: i128) -> bool {
+    number
+        .parse::<i128>()
+        .is_ok_and(|value| value >= min && value <= max)
+}
+
+fn unsigned_integer_literal_in_range(number: &str, max: u128) -> bool {
+    if number.starts_with('-') {
+        return false;
+    }
+    number.parse::<u128>().is_ok_and(|value| value <= max)
 }
 
 fn find_top_level_as(raw: &str) -> Option<usize> {
