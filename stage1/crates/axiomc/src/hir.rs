@@ -1277,6 +1277,22 @@ fn infer_generic_calls_in_expr(
             line: *line,
             column: *column,
         },
+        syntax::Expr::Cast {
+            expr,
+            ty,
+            line,
+            column,
+        } => syntax::Expr::Cast {
+            expr: Box::new(infer_generic_calls_in_expr(
+                expr,
+                Some(ty),
+                env,
+                generic_functions,
+            )?),
+            ty: ty.clone(),
+            line: *line,
+            column: *column,
+        },
         syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
             expr: Box::new(infer_generic_calls_in_expr(
                 expr,
@@ -1670,7 +1686,10 @@ fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<Stri
                 .any(|param| contains_generic_type_param(param, type_params))
                 || contains_generic_type_param(return_ty, type_params)
         }
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
+        syntax::TypeName::Int
+        | syntax::TypeName::Numeric(_)
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String => false,
     }
 }
 
@@ -1836,7 +1855,10 @@ fn unify_generic_type_name(
                 Ok(())
             }
         }
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => Ok(()),
+        syntax::TypeName::Int
+        | syntax::TypeName::Numeric(_)
+        | syntax::TypeName::Bool
+        | syntax::TypeName::String => Ok(()),
     }
 }
 
