@@ -1,0 +1,7 @@
+{
+  "kind": "type",
+  "message": "unknown type \"InternalBuffer\"",
+  "path": "src/main.ax",
+  "line": 3,
+  "column": 1
+}

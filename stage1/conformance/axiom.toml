@@ -24,6 +24,7 @@ members = [
   "fail/mutable_borrow_while_shared_live",
   "fail/named_nested_match_pattern_not_supported",
   "fail/nested_match_pattern_not_supported",
+  "fail/ownership_across_dependency_boundary",
   "fail/ownership_use_after_move",
   "fail/package_visibility_dependency_boundary",
   "fail/panic_rejects_multiple_arguments",

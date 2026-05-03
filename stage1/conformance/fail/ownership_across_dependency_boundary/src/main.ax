@@ -1,0 +1,4 @@
+import "core"
+
+let buf: InternalBuffer = allocate(16)
+print buf.capacity
