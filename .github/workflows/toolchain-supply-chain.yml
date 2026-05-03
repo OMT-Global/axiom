@@ -47,7 +47,7 @@ jobs:
           SBOM_OUTPUT_DIR: stage1/target/sbom
         run: bash scripts/ci/run-toolchain-supply-chain.sh
       - name: Upload stage1 SBOM
-        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4 pinned 2026-04-19
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4 pinned 2026-04-19
         with:
           name: stage1-sbom
           path: stage1/target/sbom/stage1.spdx.json
