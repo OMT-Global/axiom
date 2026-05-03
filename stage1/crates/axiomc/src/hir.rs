@@ -299,6 +299,7 @@ enum BorrowKind {
 }
 
 struct LowerContext<'a> {
+    consts: &'a HashMap<String, syntax::ConstDecl>,
     structs: &'a HashMap<String, StructDef>,
     enums: &'a HashMap<String, EnumDef>,
     aliases: &'a HashMap<String, syntax::TypeAliasDecl>,
@@ -364,6 +365,12 @@ fn lower_with_capabilities_impl(
     recover: bool,
 ) -> Result<Program, Vec<Diagnostic>> {
     let program = monomorphize_program(program).map_err(single_diagnostic)?;
+    let consts = program
+        .consts
+        .iter()
+        .map(|constant| (constant.name.clone(), constant.clone()))
+        .collect::<HashMap<_, _>>();
+    validate_const_array_lengths_in_program(&program, &consts).map_err(single_diagnostic)?;
     let (struct_names, enum_names, aliases) =
         collect_type_names(&program.structs, &program.enums, &program.type_aliases)
             .map_err(single_diagnostic)?;
@@ -412,6 +419,7 @@ fn lower_with_capabilities_impl(
         }
     }
     let ctx = LowerContext {
+        consts: &consts,
         structs: &structs,
         enums: &enums,
         aliases: &aliases,
@@ -1366,10 +1374,10 @@ fn infer_expr_type_name(
         syntax::Expr::ArrayLiteral { elements, .. } => elements
             .first()
             .and_then(|element| infer_expr_type_name(element, None, env, generic_functions))
-            .map(|inner| syntax::TypeName::Array(Box::new(inner))),
+            .map(|inner| syntax::TypeName::Array(Box::new(inner), None)),
         syntax::Expr::Slice { base, .. } => {
             match infer_expr_type_name(base, None, env, generic_functions)? {
-                syntax::TypeName::Array(inner)
+                syntax::TypeName::Array(inner, _)
                 | syntax::TypeName::Slice(inner)
                 | syntax::TypeName::MutSlice(inner) => Some(syntax::TypeName::Slice(inner)),
                 other => Some(other),
@@ -1377,7 +1385,7 @@ fn infer_expr_type_name(
         }
         syntax::Expr::Index { base, .. } => {
             match infer_expr_type_name(base, None, env, generic_functions)? {
-                syntax::TypeName::Array(inner)
+                syntax::TypeName::Array(inner, _)
                 | syntax::TypeName::Slice(inner)
                 | syntax::TypeName::MutSlice(inner) => Some(*inner),
                 syntax::TypeName::Map(_, value) => Some(*value),
@@ -1422,7 +1430,7 @@ fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<Stri
         | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
         | syntax::TypeName::Option(inner)
-        | syntax::TypeName::Array(inner) => contains_generic_type_param(inner, type_params),
+        | syntax::TypeName::Array(inner, _) => contains_generic_type_param(inner, type_params),
         syntax::TypeName::Result(ok, err) | syntax::TypeName::Map(ok, err) => {
             contains_generic_type_param(ok, type_params)
                 || contains_generic_type_param(err, type_params)
@@ -1550,8 +1558,8 @@ fn unify_generic_type_name(
                 Ok(())
             }
         }
-        syntax::TypeName::Array(lhs) => {
-            if let syntax::TypeName::Array(rhs) = actual {
+        syntax::TypeName::Array(lhs, _) => {
+            if let syntax::TypeName::Array(rhs, _) = actual {
                 unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
             } else if contains_generic_type_param(pattern, type_params) {
                 Err(generic_constraint_mismatch(pattern, actual, line, column))
@@ -4214,7 +4222,9 @@ fn lower_function(
             ty,
         });
     }
+    let consts = HashMap::new();
     let ctx = LowerContext {
+        consts: &consts,
         structs,
         enums,
         aliases,
@@ -4349,6 +4359,148 @@ fn insert_type_error_binding_for_failed_stmt(
     }
 }
 
+fn declared_array_len(
+    ty: &syntax::TypeName,
+    ctx: &LowerContext<'_>,
+    line: usize,
+    column: usize,
+) -> Result<Option<usize>, Diagnostic> {
+    match ty {
+        syntax::TypeName::Array(_, Some(raw)) => {
+            let value = resolve_const_array_len(raw.trim(), ctx.consts, line, column)?;
+            if value < 0 {
+                return Err(Diagnostic::new("type", "array length must be non-negative")
+                    .with_span(line, column));
+            }
+            Ok(Some(value as usize))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn resolve_const_array_len(
+    raw: &str,
+    consts: &HashMap<String, syntax::ConstDecl>,
+    line: usize,
+    column: usize,
+) -> Result<i64, Diagnostic> {
+    if let Ok(value) = raw.parse::<i64>() {
+        return Ok(value);
+    }
+    let Some(const_decl) = consts.get(raw) else {
+        return Err(Diagnostic::new(
+            "type",
+            format!("array length {raw:?} must be a known int const/static expression"),
+        )
+        .with_span(line, column));
+    };
+    eval_const_int_expr(&const_decl.expr).ok_or_else(|| {
+        Diagnostic::new(
+            "type",
+            format!(
+                "array length const {:?} must evaluate to int",
+                const_decl.name
+            ),
+        )
+        .with_span(const_decl.line, const_decl.column)
+    })
+}
+
+fn eval_const_int_expr(expr: &syntax::Expr) -> Option<i64> {
+    match expr {
+        syntax::Expr::Literal(syntax::Literal::Int(value)) => Some(*value),
+        syntax::Expr::BinaryAdd { lhs, rhs, .. } => {
+            Some(eval_const_int_expr(lhs)? + eval_const_int_expr(rhs)?)
+        }
+        _ => None,
+    }
+}
+
+fn validate_const_array_lengths_in_program(
+    program: &syntax::Program,
+    consts: &HashMap<String, syntax::ConstDecl>,
+) -> Result<(), Diagnostic> {
+    for struct_decl in &program.structs {
+        for field in &struct_decl.fields {
+            validate_const_array_lengths_in_type(&field.ty, consts, field.line, field.column)?;
+        }
+    }
+    for enum_decl in &program.enums {
+        for variant in &enum_decl.variants {
+            for payload_ty in &variant.payload_tys {
+                validate_const_array_lengths_in_type(
+                    payload_ty,
+                    consts,
+                    variant.line,
+                    variant.column,
+                )?;
+            }
+        }
+    }
+    for alias in &program.type_aliases {
+        validate_const_array_lengths_in_type(&alias.ty, consts, alias.line, alias.column)?;
+    }
+    for function in &program.functions {
+        validate_const_array_lengths_in_type(
+            &function.return_ty,
+            consts,
+            function.line,
+            function.column,
+        )?;
+        for param in &function.params {
+            validate_const_array_lengths_in_type(&param.ty, consts, param.line, param.column)?;
+        }
+    }
+    for stmt in &program.stmts {
+        if let syntax::Stmt::Let { ty, line, column, .. } = stmt {
+            validate_const_array_lengths_in_type(ty, consts, *line, *column)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_const_array_lengths_in_type(
+    ty: &syntax::TypeName,
+    consts: &HashMap<String, syntax::ConstDecl>,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
+    match ty {
+        syntax::TypeName::Array(inner, len) => {
+            if let Some(raw) = len {
+                let value = resolve_const_array_len(raw.trim(), consts, line, column)?;
+                if value < 0 {
+                    return Err(Diagnostic::new("type", "array length must be non-negative")
+                        .with_span(line, column));
+                }
+            }
+            validate_const_array_lengths_in_type(inner, consts, line, column)
+        }
+        syntax::TypeName::Slice(inner)
+        | syntax::TypeName::MutSlice(inner)
+        | syntax::TypeName::Option(inner) => {
+            validate_const_array_lengths_in_type(inner, consts, line, column)
+        }
+        syntax::TypeName::Result(ok, err) | syntax::TypeName::Map(ok, err) => {
+            validate_const_array_lengths_in_type(ok, consts, line, column)?;
+            validate_const_array_lengths_in_type(err, consts, line, column)
+        }
+        syntax::TypeName::Tuple(elements) => {
+            for element in elements {
+                validate_const_array_lengths_in_type(element, consts, line, column)?;
+            }
+            Ok(())
+        }
+        syntax::TypeName::Named(_, args) => {
+            for arg in args {
+                validate_const_array_lengths_in_type(arg, consts, line, column)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -4377,8 +4529,23 @@ fn lower_stmt(
                 .with_span(*line, *column));
             }
             let expected = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
+            let expected_array_len = declared_array_len(ty, ctx, *line, *column)?;
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
+            if let Some(expected_len) = expected_array_len {
+                if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
+                    if elements.len() != expected_len {
+                        return Err(Diagnostic::new(
+                            "type",
+                            format!(
+                                "array literal length mismatch: declared {expected_len}, got {}",
+                                elements.len()
+                            ),
+                        )
+                        .with_span(*line, *column));
+                    }
+                }
+            }
             if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",

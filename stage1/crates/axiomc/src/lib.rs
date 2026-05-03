@@ -5903,6 +5903,77 @@ print serve_once("127.0.0.1:18080", "hello")
     }
 
     #[test]
+    fn build_project_rejects_unknown_const_sized_array_lengths() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("unknown-const-sized-arrays");
+        create_project(&project, Some("unknown-const-sized-arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int; MISSING] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("unknown array length const should fail");
+        assert!(
+            error.message.contains("known int const/static expression"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_non_int_const_sized_array_lengths() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("non-int-const-sized-arrays");
+        create_project(&project, Some("non-int-const-sized-arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const WIDTH: bool = true\nlet values: [int; WIDTH] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("non-int array length const should fail");
+        assert!(
+            error.message.contains("must evaluate to int"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_mismatched_const_sized_array_literals() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mismatched-const-sized-arrays");
+        create_project(&project, Some("mismatched-const-sized-arrays-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int; 2] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("mismatched array literal should fail");
+        assert!(
+            error.message.contains("array literal length mismatch"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_unknown_const_sized_array_lengths_in_signatures() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("signature-unknown-const-sized-arrays");
+        create_project(&project, Some("signature-unknown-const-sized-arrays-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn first(values: [int; MISSING]): int {\nreturn values[0]\n}\nprint 1\n",
+        )
+        .expect("write source");
+        let error = build_project(&project)
+            .expect_err("unknown array length const in function signature should fail");
+        assert!(
+            error.message.contains("known int const/static expression"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
     fn build_project_emits_native_binary_with_static_declarations() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("static-declarations");
