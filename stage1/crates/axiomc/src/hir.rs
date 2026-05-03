@@ -941,6 +941,44 @@ fn infer_generic_calls_in_stmt(
                 column: *column,
             }
         }
+        syntax::Stmt::IfLet {
+            variant,
+            bindings,
+            is_named,
+            expr,
+            then_block,
+            else_block,
+            line,
+            column,
+        } => {
+            let mut then_env = env.clone();
+            let mut else_env = env.clone();
+            syntax::Stmt::IfLet {
+                variant: variant.clone(),
+                bindings: bindings.clone(),
+                is_named: *is_named,
+                expr: infer_generic_calls_in_expr(expr, None, env, generic_functions)?,
+                then_block: infer_generic_calls_in_stmts(
+                    then_block,
+                    &mut then_env,
+                    return_ty,
+                    generic_functions,
+                )?,
+                else_block: else_block
+                    .as_ref()
+                    .map(|block| {
+                        infer_generic_calls_in_stmts(
+                            block,
+                            &mut else_env,
+                            return_ty,
+                            generic_functions,
+                        )
+                    })
+                    .transpose()?,
+                line: *line,
+                column: *column,
+            }
+        }
         syntax::Stmt::Match {
             expr,
             arms,
@@ -4478,7 +4516,6 @@ fn insert_type_error_binding_for_failed_stmt(
             active_mut_borrow_count: 0,
         });
     }
-    });
 }
 
 fn lower_match_stmt(
