@@ -7870,4 +7870,60 @@ print next.value
         assert!(error.message.contains("must be called as"));
         assert!(error.message.contains(".new()"));
     }
+
+    #[test]
+    fn hir_recovery_collects_independent_type_errors_in_source_order() {
+        // Three functions each reference an undefined variable; recovery must
+        // accumulate all three errors rather than short-circuit after the first.
+        let source = "\
+fn alpha(): int {
+return missing_a
+}
+fn beta(): int {
+return missing_b
+}
+fn gamma(): int {
+return missing_c
+}
+";
+        let parsed =
+            parse_program(source, Path::new("src/main.ax")).expect("source must parse cleanly");
+        let capabilities = CapabilityConfig::default();
+        let diagnostics = hir::lower_with_capabilities_recovery(&parsed, &capabilities)
+            .expect_err("three undefined variables should yield three type errors");
+
+        assert!(
+            diagnostics.len() >= 3,
+            "expected at least 3 diagnostics, got {}: {diagnostics:?}",
+            diagnostics.len()
+        );
+        assert!(
+            diagnostics.iter().all(|d| d.kind == "type"),
+            "all diagnostics should have kind \"type\""
+        );
+        let messages: Vec<&str> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("missing_a")),
+            "expected error for missing_a"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("missing_b")),
+            "expected error for missing_b"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("missing_c")),
+            "expected error for missing_c"
+        );
+        // Verify source order: line numbers must be non-decreasing.
+        let lines: Vec<usize> = diagnostics
+            .iter()
+            .filter_map(|d| d.line)
+            .collect();
+        let sorted = {
+            let mut s = lines.clone();
+            s.sort_unstable();
+            s
+        };
+        assert_eq!(lines, sorted, "diagnostics must be in source order");
+    }
 }
