@@ -45,6 +45,15 @@ pub struct CheckOutput {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct BuildMetadata {
+    pub target: Option<String>,
+    pub debug: bool,
+    pub lockfile: String,
+    pub lockfile_hash: String,
+    pub source_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct BuiltPackage {
     pub backend: NativeBackendKind,
     pub package_root: String,
@@ -56,6 +65,7 @@ pub struct BuiltPackage {
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
+    pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
 }
@@ -73,6 +83,7 @@ pub struct BuildOutput {
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
+    pub metadata: BuildMetadata,
     pub cache_hits: usize,
     pub cache_misses: usize,
     pub duration_ms: u64,
@@ -253,6 +264,7 @@ pub fn build_project_with_options(
             statement_count: analyzed.mir.statement_count(),
             target: resolved_target.clone(),
             debug: options.debug,
+            metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
         });
@@ -283,6 +295,7 @@ pub fn build_project_with_options(
         statement_count: root.statement_count,
         target: root.target,
         debug: root.debug,
+        metadata: root.metadata,
         cache_hits,
         cache_misses,
         duration_ms: started.elapsed().as_millis() as u64,
@@ -301,9 +314,13 @@ pub fn run_project_with_options(
     let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     if options.package.is_none() && graph.context(&project_root)?.manifest.is_workspace_only() {
+        let packages = workspace_package_names(&graph, &project_root)?;
         return Err(Diagnostic::new(
             "run",
-            "workspace-only manifests require -p/--package for `axiomc run`",
+            format!(
+                "workspace-only manifests require -p/--package for `axiomc run`; valid packages: {}",
+                packages.join(", ")
+            ),
         )
         .with_path(manifest_path(&project_root).display().to_string()));
     }
@@ -764,6 +781,10 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             clock: true,
             crypto: true,
             ffi: false,
+            deny_by_default: false,
+            unsafe_opt_ins: Vec::new(),
+            owners: BTreeMap::new(),
+            rationale: BTreeMap::new(),
         },
     };
     graph.packages.insert(
@@ -935,6 +956,7 @@ fn resolve_workspace_members(
 
 #[derive(Debug, Clone)]
 struct BuildArtifactReport {
+    metadata: BuildMetadata,
     cache_status: BuildCacheStatus,
     compile_ms: u64,
 }
@@ -1013,6 +1035,7 @@ fn build_artifacts(
             write_debug_source_map(generated_rust, &debug_source_map_path(generated_rust))?;
         }
         return Ok(BuildArtifactReport {
+            metadata: build_metadata(package_root, &cache),
             cache_status: BuildCacheStatus::Hit,
             compile_ms: 0,
         });
@@ -1039,9 +1062,33 @@ fn build_artifacts(
     cache.binary_hash = Some(hash_file_bytes(binary)?);
     write_build_cache(&cache_path, &cache)?;
     Ok(BuildArtifactReport {
+        metadata: build_metadata(package_root, &cache),
         cache_status: BuildCacheStatus::Miss,
         compile_ms,
     })
+}
+
+fn build_metadata(package_root: &Path, cache: &BuildCacheFile) -> BuildMetadata {
+    BuildMetadata {
+        target: cache.target.clone(),
+        debug: cache.debug,
+        lockfile: crate::manifest::lockfile_path(package_root)
+            .display()
+            .to_string(),
+        lockfile_hash: cache.lockfile_hash.clone(),
+        source_hash: source_hash_for_cache(cache),
+    }
+}
+
+fn source_hash_for_cache(cache: &BuildCacheFile) -> String {
+    let mut content = String::new();
+    for module in &cache.modules {
+        content.push_str(&module.path);
+        content.push('\0');
+        content.push_str(&module.source_hash);
+        content.push('\n');
+    }
+    hash_text(&content)
 }
 
 fn build_cache_path(generated_rust: &Path) -> PathBuf {
@@ -1660,6 +1707,24 @@ fn workspace_package_roots(
         return Ok(matched);
     }
     Ok(roots)
+}
+
+fn workspace_package_names(
+    graph: &PackageGraph,
+    project_root: &Path,
+) -> Result<Vec<String>, Diagnostic> {
+    let mut names = workspace_package_roots(graph, project_root, None)?
+        .into_iter()
+        .filter_map(|root| {
+            graph
+                .context(&root)
+                .ok()
+                .and_then(|package| package.manifest.package.as_ref())
+                .map(|package| package.name.clone())
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names)
 }
 
 fn collect_workspace_package_roots(
