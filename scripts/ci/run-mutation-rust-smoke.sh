@@ -100,10 +100,19 @@ print(f"wrote mutation smoke survivor summary: {summary_path}")
 print(json.dumps({"survivors": len(survivors), "status": status}, sort_keys=True))
 PY
 
-# cargo-mutants returns non-zero when mutants survive. For this smoke profile,
+# cargo-mutants returns 2 when mutants survive. For this smoke profile,
 # survivors are recorded as follow-up diagnostics rather than weakening existing
 # stage1 gates, so only infrastructure/tool failures block the target.
-if [[ "$status" -eq 127 || "$status" -eq 2 ]]; then
-  exit "$status"
-fi
-exit 0
+case "$status" in
+  0)
+    exit 0
+    ;;
+  2)
+    echo "cargo-mutants reported surviving mutants; recorded diagnostics in $summary_path" >&2
+    exit 0
+    ;;
+  *)
+    echo "cargo-mutants failed with infrastructure/tool status $status" >&2
+    exit "$status"
+    ;;
+esac
