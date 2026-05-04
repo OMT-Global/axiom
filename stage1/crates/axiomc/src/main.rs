@@ -1314,7 +1314,7 @@ mod tests {
 
     #[test]
     fn mutation_report_infers_function_from_source_line() {
-        let dir = tempdir().expect("tempdir");
+        let dir = tempfile::tempdir().expect("tempdir");
         let source_path = dir.path().join("main.ax");
         fs::write(
             &source_path,
@@ -1339,7 +1339,7 @@ mod tests {
 
     #[test]
     fn mutation_report_infers_function_from_relative_source_file() {
-        let dir = tempdir().expect("tempdir");
+        let dir = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(dir.path().join("src")).expect("create src dir");
         fs::write(
             dir.path().join("src/main.ax"),
