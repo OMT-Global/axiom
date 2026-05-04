@@ -761,10 +761,18 @@ fn mutation_report_from_path(path: &Path) -> Result<MutationIssueReport, Diagnos
         )
         .with_path(path.display().to_string())
     })?;
-    mutation_report_from_json_str(&source)
+    let base_dir = path.parent();
+    mutation_report_from_json_str_with_base_dir(&source, base_dir)
 }
 
 fn mutation_report_from_json_str(source: &str) -> Result<MutationIssueReport, Diagnostic> {
+    mutation_report_from_json_str_with_base_dir(source, None)
+}
+
+fn mutation_report_from_json_str_with_base_dir(
+    source: &str,
+    base_dir: Option<&Path>,
+) -> Result<MutationIssueReport, Diagnostic> {
     let value: serde_json::Value = serde_json::from_str(source)
         .map_err(|err| Diagnostic::new("mutation-report", format!("invalid JSON: {err}")))?;
     let rows = mutation_rows(&value).ok_or_else(|| {
@@ -784,6 +792,7 @@ fn mutation_report_from_json_str(source: &str) -> Result<MutationIssueReport, Di
                     infer_function_from_file_and_line(
                         &file,
                         number_field(row, &["line", "start_line"]),
+                        base_dir,
                     )
                 });
             survivors.push((
@@ -875,9 +884,17 @@ fn stable_hash(input: &str) -> u64 {
     })
 }
 
-fn infer_function_from_file_and_line(file: &str, line: Option<u64>) -> String {
+fn infer_function_from_file_and_line(
+    file: &str,
+    line: Option<u64>,
+    base_dir: Option<&Path>,
+) -> String {
     if let Some(line) = line {
-        if let Ok(source) = fs::read_to_string(file) {
+        let source_path = match (Path::new(file).is_absolute(), base_dir) {
+            (true, _) | (_, None) => PathBuf::from(file),
+            (false, Some(base_dir)) => base_dir.join(file),
+        };
+        if let Ok(source) = fs::read_to_string(source_path) {
             let mut current_function = None;
             for (index, source_line) in source.lines().enumerate() {
                 let source_line_number = u64::try_from(index).unwrap_or(u64::MAX) + 1;
@@ -1314,6 +1331,32 @@ mod tests {
         );
 
         let report = mutation_report_from_json_str(&json).expect("mutation report");
+
+        assert_eq!(report.groups.len(), 2);
+        assert_eq!(report.groups[0].function, "first");
+        assert_eq!(report.groups[1].function, "second");
+    }
+
+    #[test]
+    fn mutation_report_infers_function_from_relative_source_file() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+        fs::write(
+            dir.path().join("src/main.ax"),
+            "fn first(): int {\nreturn 1\n}\n\nfn second(): int {\nreturn 2\n}\n",
+        )
+        .expect("write source");
+        let report_path = dir.path().join("mutants.json");
+        fs::write(
+            &report_path,
+            r#"[
+                {"id":"m1","status":"survived","file":"src/main.ax","line":2},
+                {"id":"m2","status":"survived","file":"src/main.ax","line":6}
+            ]"#,
+        )
+        .expect("write report");
+
+        let report = mutation_report_from_path(&report_path).expect("mutation report");
 
         assert_eq!(report.groups.len(), 2);
         assert_eq!(report.groups[0].function, "first");
