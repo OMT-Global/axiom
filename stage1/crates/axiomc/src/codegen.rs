@@ -2861,6 +2861,21 @@ fn render_stmt(
     }
 }
 
+fn render_match_binding(binding: &str, mutable_locals: &HashSet<String>) -> String {
+    mutable_locals
+        .contains(binding)
+        .then(|| format!("mut {binding}"))
+        .unwrap_or_else(|| binding.to_string())
+}
+
+fn render_match_bindings(bindings: &[String], mutable_locals: &HashSet<String>) -> String {
+    bindings
+        .iter()
+        .map(|binding| render_match_binding(binding, mutable_locals))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn render_match_arm(
     arm: &MatchArm,
     type_context: &TypeContext<'_>,
@@ -2880,14 +2895,14 @@ fn render_match_arm(
             "{pad}{}::{} {{ {} }} => {{\n",
             arm.enum_name,
             arm.variant,
-            arm.bindings.join(", ")
+            render_match_bindings(&arm.bindings, mutable_locals)
         ));
     } else {
         out.push_str(&format!(
             "{pad}{}::{}({}) => {{\n",
             arm.enum_name,
             arm.variant,
-            arm.bindings.join(", ")
+            render_match_bindings(&arm.bindings, mutable_locals)
         ));
     }
     render_stmt_block(
