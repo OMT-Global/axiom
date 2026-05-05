@@ -5311,6 +5311,11 @@ print serve_once("127.0.0.1:18080", "hello")
                 "cannot create mutable borrow of value",
             ),
             (
+                "move_string_while_str_borrow_live",
+                "move_while_borrowed",
+                "cannot move value",
+            ),
+            (
                 "loop_move_outer_non_copy",
                 "loop_move_outer_non_copy",
                 "cannot move non-copy value",
