@@ -5954,6 +5954,45 @@ print serve_once("127.0.0.1:18080", "hello")
         );
     }
 
+
+    #[test]
+    fn build_project_rejects_mismatched_const_sized_array_bindings() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mismatched-const-sized-array-bindings");
+        create_project(&project, Some("mismatched-const-sized-array-bindings-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let three: [int; 3] = [1, 2, 3]\nlet two: [int; 2] = three\nprint len(two)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("mismatched array binding should fail");
+        assert!(
+            error.message.contains("expects [int; 2], got [int; 3]"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_resolves_const_sized_arrays_inside_function_bodies() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("function-local-const-sized-arrays");
+        create_project(&project, Some("function-local-const-sized-arrays-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const WIDTH: int = 3\nfn f(): int {\nlet xs: [int; WIDTH] = [1, 2, 3]\nreturn len(xs)\n}\nprint f()\n",
+        )
+        .expect("write source");
+        let built = build_project(&project)
+            .expect("build project with const-sized array inside function body");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3
+");
+    }
+
     #[test]
     fn build_project_rejects_unknown_const_sized_array_lengths_in_signatures() {
         let dir = tempdir().expect("tempdir");
