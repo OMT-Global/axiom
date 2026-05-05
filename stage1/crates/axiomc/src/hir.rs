@@ -8641,7 +8641,7 @@ fn expr_borrowed_owners(
         Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => {
             HashSet::new()
         }
-        Expr::StringBorrow { expr, .. } => expr_borrowed_owners(expr, env, ctx),
+        Expr::StringBorrow { expr, .. } => owned_borrow_root(expr).into_iter().collect(),
         Expr::StructLiteral { fields, .. } => {
             let mut owners = HashSet::new();
             for field in fields {
@@ -8705,7 +8705,7 @@ fn contains_borrowed_slice_type_inner(
     visiting_enums: &mut HashSet<String>,
 ) -> bool {
     match ty {
-        Type::Slice(_) | Type::MutSlice(_) => true,
+        Type::Slice(_) | Type::MutSlice(_) | Type::Str => true,
         Type::Option(inner) => contains_borrowed_slice_type_inner(
             inner,
             structs,
@@ -8800,7 +8800,6 @@ fn contains_borrowed_slice_type_inner(
         | Type::Int
         | Type::Bool
         | Type::String
-        | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
     }
