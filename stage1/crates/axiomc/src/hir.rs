@@ -4542,7 +4542,10 @@ fn lower_match_stmt(
     let (enum_name, variant_defs) = match_variants(lowered_expr.ty(), ctx).ok_or_else(|| {
         Diagnostic::new(
             "type",
-            format!("match expects an enum-like value, got {}", lowered_expr.ty()),
+            format!(
+                "match expects an enum-like value, got {}",
+                lowered_expr.ty()
+            ),
         )
         .with_span(line, column)
     })?;
@@ -4550,10 +4553,8 @@ fn lower_match_stmt(
     let mut seen = HashMap::new();
     let mut lowered_arms = Vec::new();
     let mut arm_states = Vec::new();
-    let mut ignored_body_cache: HashMap<
-        String,
-        (Vec<Stmt>, HashMap<String, Binding>, bool),
-    > = HashMap::new();
+    let mut ignored_body_cache: HashMap<String, (Vec<Stmt>, HashMap<String, Binding>, bool)> =
+        HashMap::new();
     for arm in arms {
         let variant_def = variant_defs
             .iter()
@@ -4570,8 +4571,10 @@ fn lower_match_stmt(
                 .with_span(arm.line, arm.column)
             })?;
         if seen.insert(arm.variant.clone(), ()).is_some() {
-            return Err(Diagnostic::new("type", format!("duplicate match arm {:?}", arm.variant))
-                .with_span(arm.line, arm.column));
+            return Err(
+                Diagnostic::new("type", format!("duplicate match arm {:?}", arm.variant))
+                    .with_span(arm.line, arm.column),
+            );
         }
         let mut arm_env = before.clone();
         let binding_tys = if arm.ignore_payloads {
@@ -4764,7 +4767,6 @@ fn lower_match_stmt(
         arms: lowered_arms,
         span: SourceSpan { line, column },
     })
-
 }
 
 fn lower_stmt(
