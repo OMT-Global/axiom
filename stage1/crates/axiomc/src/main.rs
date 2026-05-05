@@ -929,11 +929,7 @@ fn function_name_from_source_line(line: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn recommended_fixture_name(file: &str, function: &str) -> String {
