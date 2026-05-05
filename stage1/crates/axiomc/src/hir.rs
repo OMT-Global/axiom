@@ -227,7 +227,6 @@ pub enum Type {
     SelectResult(Box<Type>),
 }
 
-
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -235,7 +234,9 @@ impl PartialEq for Type {
             | (Type::Int, Type::Int)
             | (Type::Bool, Type::Bool)
             | (Type::String, Type::String) => true,
-            (Type::Struct(lhs), Type::Struct(rhs)) | (Type::Enum(lhs), Type::Enum(rhs)) => lhs == rhs,
+            (Type::Struct(lhs), Type::Struct(rhs)) | (Type::Enum(lhs), Type::Enum(rhs)) => {
+                lhs == rhs
+            }
             (Type::Ptr(lhs), Type::Ptr(rhs))
             | (Type::MutPtr(lhs), Type::MutPtr(rhs))
             | (Type::Slice(lhs), Type::Slice(rhs))
@@ -251,11 +252,47 @@ impl PartialEq for Type {
             }
             (Type::Tuple(lhs), Type::Tuple(rhs)) => lhs == rhs,
             (Type::Array(lhs_inner, lhs_len), Type::Array(rhs_inner, rhs_len)) => {
-                lhs_inner == rhs_inner
-                    && (lhs_len == rhs_len || lhs_len.is_none() || rhs_len.is_none())
+                lhs_inner == rhs_inner && lhs_len == rhs_len
             }
             _ => false,
         }
+    }
+}
+
+fn type_assignable_to(actual: &Type, expected: &Type) -> bool {
+    match (actual, expected) {
+        (_, Type::Error) | (Type::Error, _) => true,
+        (Type::Array(actual_inner, actual_len), Type::Array(expected_inner, expected_len)) => {
+            type_assignable_to(actual_inner, expected_inner)
+                && match expected_len {
+                    Some(len) => actual_len == &Some(*len),
+                    None => true,
+                }
+        }
+        (Type::Ptr(actual_inner), Type::Ptr(expected_inner))
+        | (Type::MutPtr(actual_inner), Type::MutPtr(expected_inner))
+        | (Type::Slice(actual_inner), Type::Slice(expected_inner))
+        | (Type::MutSlice(actual_inner), Type::MutSlice(expected_inner))
+        | (Type::Option(actual_inner), Type::Option(expected_inner))
+        | (Type::Task(actual_inner), Type::Task(expected_inner))
+        | (Type::JoinHandle(actual_inner), Type::JoinHandle(expected_inner))
+        | (Type::AsyncChannel(actual_inner), Type::AsyncChannel(expected_inner))
+        | (Type::SelectResult(actual_inner), Type::SelectResult(expected_inner)) => {
+            type_assignable_to(actual_inner, expected_inner)
+        }
+        (Type::Result(actual_ok, actual_err), Type::Result(expected_ok, expected_err))
+        | (Type::Map(actual_ok, actual_err), Type::Map(expected_ok, expected_err)) => {
+            type_assignable_to(actual_ok, expected_ok)
+                && type_assignable_to(actual_err, expected_err)
+        }
+        (Type::Tuple(actual), Type::Tuple(expected)) => {
+            actual.len() == expected.len()
+                && actual
+                    .iter()
+                    .zip(expected.iter())
+                    .all(|(actual, expected)| type_assignable_to(actual, expected))
+        }
+        _ => actual == expected,
     }
 }
 
@@ -406,9 +443,14 @@ fn lower_with_capabilities_impl(
     let (struct_names, enum_names, aliases) =
         collect_type_names(&program.structs, &program.enums, &program.type_aliases)
             .map_err(single_diagnostic)?;
-    let (enums, variants) =
-        collect_enum_definitions(&program.enums, &struct_names, &enum_names, &aliases, &consts)
-            .map_err(single_diagnostic)?;
+    let (enums, variants) = collect_enum_definitions(
+        &program.enums,
+        &struct_names,
+        &enum_names,
+        &aliases,
+        &consts,
+    )
+    .map_err(single_diagnostic)?;
     let structs = collect_struct_definitions(&program.structs, &enum_names, &aliases, &consts)
         .map_err(single_diagnostic)?;
     validate_recursive_type_cycles(
@@ -979,7 +1021,7 @@ fn infer_generic_calls_in_stmt(
             expr: infer_generic_calls_in_expr(expr, return_ty, env, generic_functions)?,
             line: *line,
             column: *column,
-        }
+        },
     })
 }
 
@@ -2620,7 +2662,7 @@ fn rewrite_stmt_aggregate_types(
             )?,
             line: *line,
             column: *column,
-        }
+        },
     })
 }
 
@@ -2970,7 +3012,7 @@ fn rewrite_expr_aggregate_types(
             )?),
             line: *line,
             column: *column,
-        }
+        },
     })
 }
 
@@ -3188,7 +3230,7 @@ fn rewrite_stmt_generic_calls(
             )?,
             line: *line,
             column: *column,
-        }
+        },
     })
 }
 
@@ -3557,7 +3599,7 @@ fn rewrite_expr_generic_calls(
             )?),
             line: *line,
             column: *column,
-        }
+        },
     })
 }
 
@@ -3700,7 +3742,7 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
                 sanitize_symbol_suffix(len)
             ),
             None => format!("array_{}", type_name_monomorph_suffix(inner)),
-        }
+        },
     }
 }
 
@@ -4521,7 +4563,10 @@ fn validate_const_array_lengths_in_program(
         }
     }
     for stmt in &program.stmts {
-        if let syntax::Stmt::Let { ty, line, column, .. } = stmt {
+        if let syntax::Stmt::Let {
+            ty, line, column, ..
+        } = stmt
+        {
             validate_const_array_lengths_in_type(ty, consts, *line, *column)?;
         }
     }
@@ -4623,7 +4668,8 @@ fn lower_stmt(
                     }
                 }
             }
-            if actual != expected && !actual.is_error() && !expected.is_error() {
+            if !type_assignable_to(&actual, &expected) && !actual.is_error() && !expected.is_error()
+            {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -5129,7 +5175,7 @@ fn lower_stmt(
                 );
             };
             let lowered_expr = lower_expr_with_expected(expr, Some(expected), env, ctx)?;
-            if lowered_expr.ty() != expected {
+            if !type_assignable_to(lowered_expr.ty(), expected) {
                 return Err(Diagnostic::new(
                     "type",
                     format!("return expects {expected}, got {}", lowered_expr.ty()),
@@ -6785,7 +6831,7 @@ fn lower_expr_with_expected(
                 let mut temporary_borrows = Vec::new();
                 for (arg, expected) in args.iter().zip(signature.params.iter()) {
                     let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
-                    if lowered.ty() != expected {
+                    if !type_assignable_to(lowered.ty(), expected) {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -7318,7 +7364,7 @@ fn lower_expr_with_expected(
                     .with_span(field.line, field.column));
                 }
                 let lowered = lower_expr_with_expected(&field.expr, Some(expected), env, ctx)?;
-                if lowered.ty() != expected {
+                if !type_assignable_to(lowered.ty(), expected) {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -7631,9 +7677,7 @@ fn lower_expr_with_expected(
             let element_ty = match lowered_base.ty() {
                 Type::Array(element_ty, _)
                 | Type::Slice(element_ty)
-                | Type::MutSlice(element_ty) => {
-                    (*element_ty.clone()).clone()
-                }
+                | Type::MutSlice(element_ty) => (*element_ty.clone()).clone(),
                 _ => {
                     return Err(Diagnostic::new(
                         "type",
@@ -9146,7 +9190,7 @@ fn lower_literal(literal: &syntax::Literal) -> Expr {
         syntax::Literal::String(value) => Expr::Literal {
             ty: Type::String,
             value: LiteralValue::String(value.clone()),
-        }
+        },
     }
 }
 
@@ -9160,7 +9204,16 @@ fn lower_type<T, U>(
     column: usize,
 ) -> Result<Type, Diagnostic> {
     let mut resolving = HashSet::new();
-    lower_type_inner(ty, structs, enums, aliases, consts, &mut resolving, line, column)
+    lower_type_inner(
+        ty,
+        structs,
+        enums,
+        aliases,
+        consts,
+        &mut resolving,
+        line,
+        column,
+    )
 }
 
 fn lower_type_inner<T, U>(
@@ -9267,7 +9320,9 @@ fn lower_type_inner<T, U>(
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         syntax::TypeName::Map(key, value) => {
-            let key = lower_type_inner(key, structs, enums, aliases, consts, resolving, line, column)?;
+            let key = lower_type_inner(
+                key, structs, enums, aliases, consts, resolving, line, column,
+            )?;
             if !key.supports_map_key() {
                 return Err(Diagnostic::new(
                     "type",

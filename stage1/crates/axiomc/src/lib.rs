@@ -5954,7 +5954,6 @@ print serve_once("127.0.0.1:18080", "hello")
         );
     }
 
-
     #[test]
     fn build_project_rejects_mismatched_const_sized_array_bindings() {
         let dir = tempdir().expect("tempdir");
@@ -5969,6 +5968,54 @@ print serve_once("127.0.0.1:18080", "hello")
         let error = build_project(&project).expect_err("mismatched array binding should fail");
         assert!(
             error.message.contains("expects [int; 2], got [int; 3]"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_unsized_array_binding_to_sized_array() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("unsized-to-sized-array-binding");
+        create_project(&project, Some("unsized-to-sized-array-binding-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let three: [int] = [1, 2, 3]
+let two: [int; 2] = three
+print len(two)
+",
+        )
+        .expect("write source");
+        let error =
+            build_project(&project).expect_err("unsized array should not satisfy sized binding");
+        assert!(
+            error.message.contains("expects [int; 2], got [int]"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_unsized_array_argument_to_sized_parameter() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("unsized-to-sized-array-argument");
+        create_project(&project, Some("unsized-to-sized-array-argument-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn takes_two(xs: [int; 2]): int {
+return len(xs)
+}
+let three: [int] = [1, 2, 3]
+print takes_two(three)
+",
+        )
+        .expect("write source");
+        let error =
+            build_project(&project).expect_err("unsized array should not satisfy sized parameter");
+        assert!(
+            error
+                .message
+                .contains("expects argument type [int; 2], got [int]"),
             "unexpected diagnostic: {error:?}"
         );
     }
@@ -5989,8 +6036,11 @@ print serve_once("127.0.0.1:18080", "hello")
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "3
-");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "3
+"
+        );
     }
 
     #[test]
@@ -7756,15 +7806,19 @@ print serve_once("127.0.0.1:18080", "hello")
             .as_array()
             .expect("imported debug mappings array");
         assert!(
-            imported_mappings.iter().any(|mapping| mapping["source"] == source
-                && mapping["line"] == 2
-                && mapping["column"] == 1),
+            imported_mappings
+                .iter()
+                .any(|mapping| mapping["source"] == source
+                    && mapping["line"] == 2
+                    && mapping["column"] == 1),
             "debug map should retain primary source spans after imports"
         );
         assert!(
-            imported_mappings.iter().any(|mapping| mapping["source"] == helper_source
-                && mapping["line"] == 2
-                && mapping["column"] == 1),
+            imported_mappings
+                .iter()
+                .any(|mapping| mapping["source"] == helper_source
+                    && mapping["line"] == 2
+                    && mapping["column"] == 1),
             "debug map should retain imported module source spans instead of collapsing to the primary file"
         );
 
@@ -7999,11 +8053,27 @@ print serve_once("127.0.0.1:18080", "hello")
     #[test]
     fn json_contract_adds_stable_codes_for_common_diagnostic_kinds() {
         let cases = [
-            ("parse", "missing closing brace for block", "parse.missing_closing_brace"),
+            (
+                "parse",
+                "missing closing brace for block",
+                "parse.missing_closing_brace",
+            ),
             ("manifest", "invalid axiom.toml", "manifest.invalid"),
-            ("import", "import not found: ./missing.ax", "import.unresolved"),
-            ("capability", "fs requires capability fs", "capability.denied"),
-            ("type", "undefined variable \"answer\"", "type.undefined_symbol"),
+            (
+                "import",
+                "import not found: ./missing.ax",
+                "import.unresolved",
+            ),
+            (
+                "capability",
+                "fs requires capability fs",
+                "capability.denied",
+            ),
+            (
+                "type",
+                "undefined variable \"answer\"",
+                "type.undefined_symbol",
+            ),
             ("build", "failed to invoke rustc", "build.failed"),
             ("runtime", "process exited with status 1", "runtime.failed"),
         ];
@@ -8027,16 +8097,21 @@ print serve_once("127.0.0.1:18080", "hello")
         let source_payload = json_contract::error("check", &source_error);
 
         assert_eq!(source_payload["error"]["repair"]["action"], "edit_source");
-        assert!(source_payload["error"]["repair"]["edit"]
-            .as_str()
-            .expect("repair edit")
-            .contains("reported span"));
+        assert!(
+            source_payload["error"]["repair"]["edit"]
+                .as_str()
+                .expect("repair edit")
+                .contains("reported span")
+        );
 
         let fmt_error = crate::diagnostics::Diagnostic::new("fmt", "1 file(s) need formatting");
         let fmt_payload = json_contract::error("fmt", &fmt_error);
 
         assert_eq!(fmt_payload["error"]["repair"]["action"], "run_command");
-        assert_eq!(fmt_payload["error"]["repair"]["command"], "axiomc fmt <path>");
+        assert_eq!(
+            fmt_payload["error"]["repair"]["command"],
+            "axiomc fmt <path>"
+        );
     }
 
     #[test]
@@ -8260,7 +8335,10 @@ print c
         let hir = hir::lower(&parsed).expect("lower");
         let mir = mir::lower(&hir);
         let rendered = render_rust(&mir);
-        assert!(rendered.contains("fn wrap__int("), "wrap<int> must produce 'wrap__int'");
+        assert!(
+            rendered.contains("fn wrap__int("),
+            "wrap<int> must produce 'wrap__int'"
+        );
         assert!(
             rendered.contains("fn identity__int("),
             "identity<int> must produce 'identity__int'"
@@ -8338,10 +8416,7 @@ return missing_c
             "expected error for missing_c"
         );
         // Verify source order: line numbers must be non-decreasing.
-        let lines: Vec<usize> = diagnostics
-            .iter()
-            .filter_map(|d| d.line)
-            .collect();
+        let lines: Vec<usize> = diagnostics.iter().filter_map(|d| d.line).collect();
         let sorted = {
             let mut s = lines.clone();
             s.sort_unstable();
