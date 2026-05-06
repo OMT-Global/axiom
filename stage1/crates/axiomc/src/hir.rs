@@ -366,6 +366,7 @@ struct MethodSig {
     function_name: String,
     params: Vec<Type>,
     return_ty: Type,
+    borrow_return_params: Vec<usize>,
     has_self: bool,
 }
 
@@ -4329,10 +4330,19 @@ fn collect_method_signatures(
         } else {
             return_ty
         };
+        let borrow_return_params = classify_borrow_return(
+            &params,
+            &return_ty,
+            structs,
+            enums,
+            function.line,
+            function.column,
+        )?;
         let method = MethodSig {
             function_name: function_symbol_name(function),
             params,
             return_ty,
+            borrow_return_params,
             has_self: function.receiver.is_some(),
         };
         let entry = methods.entry(target_name.clone()).or_default();
@@ -7348,8 +7358,19 @@ fn lower_expr_with_expected_inner(
                 move_lowered_value(&lowered_base, env)?;
             }
             lowered_args.push(lowered_base);
-            for (arg, expected) in args.iter().zip(signature.params.iter().skip(1)) {
-                let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx)?;
+            for (arg_index, (arg, expected)) in
+                args.iter().zip(signature.params.iter().skip(1)).enumerate()
+            {
+                let param_index = arg_index + 1;
+                let allow_temporary_string_borrow =
+                    !signature.borrow_return_params.contains(&param_index);
+                let lowered = lower_call_arg_with_expected(
+                    arg,
+                    Some(expected),
+                    env,
+                    ctx,
+                    allow_temporary_string_borrow,
+                )?;
                 if lowered.ty() != expected {
                     return Err(Diagnostic::new(
                         "type",
@@ -7463,7 +7484,15 @@ fn lower_expr_with_expected_inner(
             column,
         } => {
             let expr = lower_expr(expr, env, ctx)?;
-            let target = lower_type(ty, ctx.structs, ctx.enums, ctx.aliases, *line, *column)?;
+            let target = lower_type(
+                ty,
+                ctx.structs,
+                ctx.enums,
+                ctx.aliases,
+                ctx.consts,
+                *line,
+                *column,
+            )?;
             if !is_castable_numeric(expr.ty()) || !is_castable_numeric(&target) {
                 return Err(Diagnostic::new(
                     "type",
@@ -7913,7 +7942,7 @@ fn lower_expr_with_expected_inner(
                 .with_span(*line, *column));
             }
             let expected_element = match expected {
-                Some(Type::Array(element_ty)) => Some(element_ty.as_ref()),
+                Some(Type::Array(element_ty, _)) => Some(element_ty.as_ref()),
                 _ => None,
             };
             let mut lowered_elements = Vec::new();
@@ -8523,7 +8552,7 @@ fn lower_variant_constructor(
     }
     let mut lowered_payloads = Vec::new();
     for (arg, expected) in args.iter().zip(variant.payload_tys.iter()) {
-        let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx)?;
+        let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx, false)?;
         if lowered.ty() != expected {
             return Err(Diagnostic::new(
                 "type",

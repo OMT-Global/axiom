@@ -2633,6 +2633,8 @@ fn collect_expr_mutable_borrows(expr: &Expr, locals: &mut HashSet<String>) {
         }
         Expr::Try { expr, .. }
         | Expr::Await { expr, .. }
+        | Expr::Cast { expr, .. }
+        | Expr::StringBorrow { expr, .. }
         | Expr::FieldAccess { base: expr, .. }
         | Expr::TupleIndex { base: expr, .. } => collect_expr_mutable_borrows(expr, locals),
         Expr::StructLiteral { fields, .. } => {
