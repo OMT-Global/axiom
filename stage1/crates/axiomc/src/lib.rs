@@ -31,7 +31,7 @@ mod tests {
         command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
         run_project_tests_with_options, run_project_with_options,
     };
-    use crate::syntax::{Visibility, parse_program, parse_program_with_recovery};
+    use crate::syntax::{Stmt, TypeName, Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -620,7 +620,7 @@ print fail()
 
     #[test]
     fn parser_tracks_package_visibility() {
-        let source = "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
+        let source = "pub(pkg) static ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn answer(): int {\nreturn ANSWER\n}\npub(pkg) async fn answer_later(): int {\nreturn ANSWER\n}\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         assert_eq!(parsed.consts[0].visibility, Visibility::Package);
         assert_eq!(parsed.type_aliases[0].visibility, Visibility::Package);
@@ -1829,7 +1829,7 @@ print fail()
         .expect("write main");
         fs::write(
             project.join("src/shared.ax"),
-            "pub(pkg) const ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
+            "pub(pkg) static ANSWER: int = 42\npub(pkg) type Id = int\npub(pkg) struct BuildInfo {\nlabel: string\n}\npub(pkg) enum Status {\nReady\n}\npub(pkg) fn helper(): Id {\nreturn ANSWER\n}\npub(pkg) fn build(): BuildInfo {\nreturn BuildInfo { label: \"package\" }\n}\npub(pkg) fn ready(): Status {\nreturn Ready\n}\n",
         )
         .expect("write shared");
         let built = build_project(&project).expect("build package-visible module");
@@ -5872,6 +5872,214 @@ print serve_once("127.0.0.1:18080", "hello")
     }
 
     #[test]
+    fn parser_accepts_const_sized_array_types() {
+        let source =
+            "const WIDTH: int = 3\nlet values: [int; WIDTH] = [1, 2, 3]\nprint len(values)\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse const-sized array");
+        let Stmt::Let { ty, .. } = &parsed.stmts[0] else {
+            panic!("expected let statement");
+        };
+        assert_eq!(
+            ty,
+            &TypeName::Array(Box::new(TypeName::Int), Some(String::from("WIDTH")))
+        );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_const_sized_arrays() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("const-sized-arrays");
+        create_project(&project, Some("const-sized-arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const WIDTH: int = 3\nlet values: [int; WIDTH] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with const-sized arrays");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
+    fn build_project_rejects_unknown_const_sized_array_lengths() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("unknown-const-sized-arrays");
+        create_project(&project, Some("unknown-const-sized-arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int; MISSING] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("unknown array length const should fail");
+        assert!(
+            error.message.contains("known int const/static expression"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_non_int_const_sized_array_lengths() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("non-int-const-sized-arrays");
+        create_project(&project, Some("non-int-const-sized-arrays-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const WIDTH: bool = true\nlet values: [int; WIDTH] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("non-int array length const should fail");
+        assert!(
+            error.message.contains("must evaluate to int"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_mismatched_const_sized_array_literals() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mismatched-const-sized-arrays");
+        create_project(&project, Some("mismatched-const-sized-arrays-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let values: [int; 2] = [1, 2, 3]\nprint len(values)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("mismatched array literal should fail");
+        assert!(
+            error.message.contains("array literal length mismatch"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_mismatched_const_sized_array_bindings() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mismatched-const-sized-array-bindings");
+        create_project(&project, Some("mismatched-const-sized-array-bindings-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let three: [int; 3] = [1, 2, 3]\nlet two: [int; 2] = three\nprint len(two)\n",
+        )
+        .expect("write source");
+        let error = build_project(&project).expect_err("mismatched array binding should fail");
+        assert!(
+            error.message.contains("expects [int; 2], got [int; 3]"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_unsized_array_binding_to_sized_array() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("unsized-to-sized-array-binding");
+        create_project(&project, Some("unsized-to-sized-array-binding-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let three: [int] = [1, 2, 3]
+let two: [int; 2] = three
+print len(two)
+",
+        )
+        .expect("write source");
+        let error =
+            build_project(&project).expect_err("unsized array should not satisfy sized binding");
+        assert!(
+            error.message.contains("expects [int; 2], got [int]"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_unsized_array_argument_to_sized_parameter() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("unsized-to-sized-array-argument");
+        create_project(&project, Some("unsized-to-sized-array-argument-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn takes_two(xs: [int; 2]): int {
+return len(xs)
+}
+let three: [int] = [1, 2, 3]
+print takes_two(three)
+",
+        )
+        .expect("write source");
+        let error =
+            build_project(&project).expect_err("unsized array should not satisfy sized parameter");
+        assert!(
+            error
+                .message
+                .contains("expects argument type [int; 2], got [int]"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_resolves_const_sized_arrays_inside_function_bodies() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("function-local-const-sized-arrays");
+        create_project(&project, Some("function-local-const-sized-arrays-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const WIDTH: int = 3\nfn f(): int {\nlet xs: [int; WIDTH] = [1, 2, 3]\nreturn len(xs)\n}\nprint f()\n",
+        )
+        .expect("write source");
+        let built = build_project(&project)
+            .expect("build project with const-sized array inside function body");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "3
+"
+        );
+    }
+
+    #[test]
+    fn build_project_rejects_unknown_const_sized_array_lengths_in_signatures() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("signature-unknown-const-sized-arrays");
+        create_project(&project, Some("signature-unknown-const-sized-arrays-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn first(values: [int; MISSING]): int {\nreturn values[0]\n}\nprint 1\n",
+        )
+        .expect("write source");
+        let error = build_project(&project)
+            .expect_err("unknown array length const in function signature should fail");
+        assert!(
+            error.message.contains("known int const/static expression"),
+            "unexpected diagnostic: {error:?}"
+        );
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_static_declarations() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-declarations");
+        create_project(&project, Some("static-declarations-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static ANSWER: int = 40 + 2\nstatic READY: bool = ANSWER == 42\nprint ANSWER\nprint READY\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with static declarations");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\n");
+    }
+
+    #[test]
     fn build_project_emits_native_binary_with_imported_public_consts() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("public-consts");
@@ -7598,15 +7806,19 @@ print serve_once("127.0.0.1:18080", "hello")
             .as_array()
             .expect("imported debug mappings array");
         assert!(
-            imported_mappings.iter().any(|mapping| mapping["source"] == source
-                && mapping["line"] == 2
-                && mapping["column"] == 1),
+            imported_mappings
+                .iter()
+                .any(|mapping| mapping["source"] == source
+                    && mapping["line"] == 2
+                    && mapping["column"] == 1),
             "debug map should retain primary source spans after imports"
         );
         assert!(
-            imported_mappings.iter().any(|mapping| mapping["source"] == helper_source
-                && mapping["line"] == 2
-                && mapping["column"] == 1),
+            imported_mappings
+                .iter()
+                .any(|mapping| mapping["source"] == helper_source
+                    && mapping["line"] == 2
+                    && mapping["column"] == 1),
             "debug map should retain imported module source spans instead of collapsing to the primary file"
         );
 
@@ -7841,11 +8053,27 @@ print serve_once("127.0.0.1:18080", "hello")
     #[test]
     fn json_contract_adds_stable_codes_for_common_diagnostic_kinds() {
         let cases = [
-            ("parse", "missing closing brace for block", "parse.missing_closing_brace"),
+            (
+                "parse",
+                "missing closing brace for block",
+                "parse.missing_closing_brace",
+            ),
             ("manifest", "invalid axiom.toml", "manifest.invalid"),
-            ("import", "import not found: ./missing.ax", "import.unresolved"),
-            ("capability", "fs requires capability fs", "capability.denied"),
-            ("type", "undefined variable \"answer\"", "type.undefined_symbol"),
+            (
+                "import",
+                "import not found: ./missing.ax",
+                "import.unresolved",
+            ),
+            (
+                "capability",
+                "fs requires capability fs",
+                "capability.denied",
+            ),
+            (
+                "type",
+                "undefined variable \"answer\"",
+                "type.undefined_symbol",
+            ),
             ("build", "failed to invoke rustc", "build.failed"),
             ("runtime", "process exited with status 1", "runtime.failed"),
         ];
@@ -7869,16 +8097,21 @@ print serve_once("127.0.0.1:18080", "hello")
         let source_payload = json_contract::error("check", &source_error);
 
         assert_eq!(source_payload["error"]["repair"]["action"], "edit_source");
-        assert!(source_payload["error"]["repair"]["edit"]
-            .as_str()
-            .expect("repair edit")
-            .contains("reported span"));
+        assert!(
+            source_payload["error"]["repair"]["edit"]
+                .as_str()
+                .expect("repair edit")
+                .contains("reported span")
+        );
 
         let fmt_error = crate::diagnostics::Diagnostic::new("fmt", "1 file(s) need formatting");
         let fmt_payload = json_contract::error("fmt", &fmt_error);
 
         assert_eq!(fmt_payload["error"]["repair"]["action"], "run_command");
-        assert_eq!(fmt_payload["error"]["repair"]["command"], "axiomc fmt <path>");
+        assert_eq!(
+            fmt_payload["error"]["repair"]["command"],
+            "axiomc fmt <path>"
+        );
     }
 
     #[test]
@@ -8102,7 +8335,10 @@ print c
         let hir = hir::lower(&parsed).expect("lower");
         let mir = mir::lower(&hir);
         let rendered = render_rust(&mir);
-        assert!(rendered.contains("fn wrap__int("), "wrap<int> must produce 'wrap__int'");
+        assert!(
+            rendered.contains("fn wrap__int("),
+            "wrap<int> must produce 'wrap__int'"
+        );
         assert!(
             rendered.contains("fn identity__int("),
             "identity<int> must produce 'identity__int'"
@@ -8180,10 +8416,7 @@ return missing_c
             "expected error for missing_c"
         );
         // Verify source order: line numbers must be non-decreasing.
-        let lines: Vec<usize> = diagnostics
-            .iter()
-            .filter_map(|d| d.line)
-            .collect();
+        let lines: Vec<usize> = diagnostics.iter().filter_map(|d| d.line).collect();
         let sorted = {
             let mut s = lines.clone();
             s.sort_unstable();
