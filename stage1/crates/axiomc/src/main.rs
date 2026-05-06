@@ -13,6 +13,7 @@ use axiomc::manifest::{load_manifest, manifest_path};
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
 use axiomc::new_project::create_project;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -26,6 +27,7 @@ use axiomc::project::{
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
 };
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -44,9 +46,10 @@ use axiomc::registry::{load_registry_index, render_registry_index};
 =======
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -204,6 +207,7 @@ enum Command {
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -234,6 +238,7 @@ enum Command {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 }
 
 <<<<<<< HEAD
@@ -259,9 +264,10 @@ enum InspectCommand {
 =======
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
 }
 
 fn main() {
@@ -2598,7 +2604,7 @@ mod tests {
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2613,6 +2619,7 @@ mod tests {
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2621,6 +2628,7 @@ mod tests {
             statement_count: 1,
             target: None,
             debug: true,
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -2635,6 +2643,7 @@ mod tests {
                 generated_rust_hash: String::from("rust-hash"),
                 sources: Vec::new(),
             },
+=======
 =======
 =======
 =======

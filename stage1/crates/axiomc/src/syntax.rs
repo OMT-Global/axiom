@@ -272,6 +272,7 @@ pub enum TypeName {
     Map(Box<TypeName>, Box<TypeName>),
     Array(Box<TypeName>, Option<String>),
     Fn(Vec<TypeName>, Box<TypeName>),
+>>>>>>> origin/codex/issue-387-capability-validation
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1449,15 +1450,18 @@ fn parse_const_or_static_decl(
     let column = visibility_column + keyword.len() + 1;
     let colon = find_top_level_char(header, ':').ok_or_else(|| {
         Diagnostic::new("parse", "const/static declaration is missing ':'")
+<<<<<<< HEAD
     let column = visibility_column + keyword_len;
     let colon = find_top_level_char(header, ':').ok_or_else(|| {
         Diagnostic::new("parse", format!("{keyword} declaration is missing ':'"))
+=======
             .with_path(path.display().to_string())
             .with_span(line_no, column)
     })?;
     let equals = find_top_level_char(header, '=').ok_or_else(|| {
         Diagnostic::new("parse", "const/static declaration is missing '='")
         Diagnostic::new("parse", format!("{keyword} declaration is missing '='"))
+>>>>>>> origin/codex/issue-387-capability-validation
             .with_path(path.display().to_string())
             .with_span(line_no, column)
     })?;
@@ -1465,7 +1469,9 @@ fn parse_const_or_static_decl(
         return Err(Diagnostic::new(
             "parse",
             "const/static declaration must use `const NAME: Type = expr` or `static NAME: Type = expr` syntax",
+<<<<<<< HEAD
             format!("{keyword} declaration must use `{keyword} NAME: Type = expr` syntax"),
+=======
         )
         .with_path(path.display().to_string())
         .with_span(line_no, column));
@@ -1476,7 +1482,10 @@ fn parse_const_or_static_decl(
     if ty_text.is_empty() {
         return Err(
             Diagnostic::new("parse", "const/static declaration is missing a type")
+<<<<<<< HEAD
             Diagnostic::new("parse", format!("{keyword} declaration is missing a type"))
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
                 .with_path(path.display().to_string())
                 .with_span(line_no, column + colon + 1),
         );

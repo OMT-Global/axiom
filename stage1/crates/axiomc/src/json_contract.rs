@@ -37,18 +37,18 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "command": "build",
         "project": project.display().to_string(),
         "backend": output.backend,
-<<<<<<< HEAD
         "locked": output.locked,
         "offline": output.offline,
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
-=======
->>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

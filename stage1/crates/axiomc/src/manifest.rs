@@ -15,6 +15,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -81,7 +82,9 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub stderr: Option<String>,
+=======
 =======
 =======
 =======
@@ -106,6 +109,7 @@ pub struct CapabilityConfig {
     pub ffi: bool,
     pub async_runtime: bool,
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
@@ -193,8 +197,10 @@ struct RawTestTarget {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     kind: Option<String>,
     stderr: Option<String>,
+=======
 =======
 =======
 =======
@@ -222,6 +228,7 @@ struct RawCapabilityConfig {
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -328,7 +335,9 @@ pub fn render_manifest(name: &str) -> String {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
+=======
 =======
 =======
 =======
@@ -475,6 +484,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             ffi: capabilities.ffi.unwrap_or(false),
             async_runtime: capabilities.async_runtime.unwrap_or(false),
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
@@ -703,11 +713,13 @@ fn normalize_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             stderr: raw_test.stderr,
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
         });
     }
     Ok(tests)

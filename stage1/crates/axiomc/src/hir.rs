@@ -968,6 +968,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Map(_, _)
         | Type::Array(_, _)
         | Type::Fn(_, _) => false,
+        Type::Slice(_) | Type::MutSlice(_) | Type::Map(_, _) | Type::Array(_, _) => false,
         Type::Option(inner)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -2790,6 +2791,7 @@ fn rewrite_aggregate_type_name(
                 column,
             )?),
         ),
+>>>>>>> origin/codex/issue-387-capability-validation
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
@@ -4212,6 +4214,7 @@ fn substitute_type_name(
             Box::new(substitute_type_name(inner, type_bindings)),
             len.clone(),
         ),
+<<<<<<< HEAD
         syntax::TypeName::Fn(params, return_ty) => syntax::TypeName::Fn(
             params
                 .iter()
@@ -4219,6 +4222,7 @@ fn substitute_type_name(
                 .collect(),
             Box::new(substitute_type_name(return_ty, type_bindings)),
         ),
+=======
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
@@ -4339,6 +4343,12 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
         .collect()
 }
 
+=======
+fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
+    Diagnostic::new("ownership", message).with_code(code)
+}
+
+>>>>>>> origin/codex/issue-387-capability-validation
 impl Type {
     fn is_error(&self) -> bool {
         matches!(self, Type::Error)
@@ -5283,6 +5293,7 @@ fn validate_const_array_lengths_in_type(
     }
 }
 
+<<<<<<< HEAD
 fn lower_match_stmt(
     expr: &syntax::Expr,
     arms: Vec<MatchArmInput>,
@@ -5541,6 +5552,7 @@ fn lower_match_stmt(
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5604,6 +5616,7 @@ fn lower_stmt(
             }
             if !type_assignable_to(&actual, &expected) && !actual.is_error() && !expected.is_error()
             {
+<<<<<<< HEAD
 =======
 =======
 =======
@@ -5613,6 +5626,7 @@ fn lower_stmt(
 =======
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
+=======
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -7868,6 +7882,8 @@ fn lower_expr_with_expected_inner(
                         ctx,
                         allow_temporary_string_borrow,
                     )?;
+                for (arg, expected) in args.iter().zip(signature.params.iter()) {
+                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
                     if !type_assignable_to(lowered.ty(), expected) {
                         return Err(Diagnostic::new(
                             "type",
@@ -10347,6 +10363,7 @@ fn contains_borrowed_slice_type_inner(
             )
         }
         Type::Array(inner)
+        Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
         | Type::AsyncChannel(inner)
@@ -10464,6 +10481,7 @@ fn contains_mut_borrowed_slice_type_inner(
             )
         }
         Type::Array(inner)
+        Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
         | Type::AsyncChannel(inner)
@@ -10897,6 +10915,7 @@ fn lower_type_inner<T, U>(
                 len,
             ))
         }
+<<<<<<< HEAD
         syntax::TypeName::Fn(params, return_ty) => Ok(Type::Fn(
             params
                 .iter()
@@ -10910,6 +10929,8 @@ fn lower_type_inner<T, U>(
                 return_ty, structs, enums, aliases, consts, resolving, line, column,
             )?),
         )),
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
     }
 }
 

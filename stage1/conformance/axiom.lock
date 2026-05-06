@@ -17,6 +17,7 @@ source = "path:fail/closure_move_captured_non_copy"
 
 [[package]]
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
 name = "conformance-comparison-owned-resource-move"
 version = "0.1.0"
 source = "path:fail/comparison_owned_resource_move"
@@ -193,6 +194,8 @@ name = "conformance-struct-field-access"
 version = "0.1.0"
 source = "path:pass/struct_field_access"
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 
->>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation

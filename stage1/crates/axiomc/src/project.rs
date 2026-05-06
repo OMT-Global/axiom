@@ -74,6 +74,7 @@ pub struct BuiltPackage {
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -87,11 +88,13 @@ pub struct BuildOutput {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -329,6 +332,7 @@ pub fn build_project_with_options(
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -355,11 +359,13 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -947,6 +953,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/issue-387-capability-validation
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1241,6 +1248,7 @@ fn build_artifacts(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1261,6 +1269,7 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
+=======
 =======
 =======
 =======
@@ -2719,7 +2728,6 @@ fn flatten_modules(
             )?;
 <<<<<<< HEAD
             flattened_consts.push(const_decl.clone());
-=======
             if const_decl.is_static {
                 let mut rewritten = module_symbols
                     .consts
@@ -2730,6 +2738,8 @@ fn flatten_modules(
                 rewritten.name = format!("{}_{}", module_symbols.module_id, const_decl.name);
                 flattened_consts.push(rewritten);
             }
+=======
+            flattened_consts.push(const_decl.clone());
         }
 
         for type_alias in &module.program.type_aliases {
@@ -4336,6 +4346,7 @@ fn rewrite_type_name(
             )?),
             len.clone(),
         )),
+<<<<<<< HEAD
         syntax::TypeName::Fn(params, return_ty) => Ok(syntax::TypeName::Fn(
             params
                 .iter()
@@ -4359,6 +4370,8 @@ fn rewrite_type_name(
                 column,
             )?),
         )),
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
     }
 }
 

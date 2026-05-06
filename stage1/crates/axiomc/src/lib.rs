@@ -7,6 +7,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -64,16 +65,18 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
 =======
 =======
->>>>>>> origin/codex/issue-383-new-templates
 =======
 >>>>>>> origin/codex/agent-g-regex
 =======
 >>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
     }
@@ -400,6 +403,7 @@ print borrowed
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2797,11 +2801,13 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
 =======
 =======
 =======
@@ -2913,6 +2919,7 @@ crypto = false
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
     }
 
     #[test]
@@ -5443,7 +5450,9 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 stderr: None,
+=======
 =======
 =======
 =======
@@ -5966,6 +5975,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 .count()
                 == 24
                 == 20
+>>>>>>> origin/codex/issue-387-capability-validation
                 == 21
         );
         assert_eq!(
@@ -5974,9 +5984,11 @@ print serve_once("127.0.0.1:18080", "hello")
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
+<<<<<<< HEAD
             12
->>>>>>> origin/codex/issue-383-new-templates
             9
+=======
+>>>>>>> origin/codex/issue-387-capability-validation
             10
         );
     }
@@ -8974,7 +8986,7 @@ print 0
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-387-capability-validation
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
@@ -9265,8 +9277,8 @@ print next.value
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-=======
 >>>>>>> origin/codex/agent-f-fs
+=======
 
     // AG2: deterministic monomorphized symbol naming (#337)
     // These snapshot tests lock the exact symbol names produced for nested generics,
