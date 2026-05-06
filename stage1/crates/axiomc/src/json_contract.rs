@@ -1,10 +1,8 @@
 use crate::diagnostics::Diagnostic;
 use crate::manifest::CapabilityDescriptor;
-use crate::project::{BuildOutput, CheckOutput, TestListOutput, TestOutput};
+use crate::project::{BuildOutput, CheckOutput, TestOutput};
 use serde::Serialize;
 use serde_json::{Value, json};
-
-use serde_json::{json, Value};
 use std::path::Path;
 
 pub const JSON_SCHEMA_VERSION: &str = "axiom.stage1.v1";
@@ -19,7 +17,6 @@ pub fn check_success(project: &Path, output: &CheckOutput) -> Value {
         "entry": output.entry,
         "statement_count": output.statement_count,
         "capabilities": output.capabilities,
-        "exports": output.exports,
         "warnings": output.warnings,
         "packages": output.packages,
     })
@@ -34,19 +31,15 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "backend": output.backend,
         "locked": output.locked,
         "offline": output.offline,
-
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,
         "generated_rust": output.generated_rust,
         "debug_map": output.debug_map,
-        "debug_manifest": output.debug_manifest,
         "statement_count": output.statement_count,
         "target": output.target,
         "debug": output.debug,
-
         "cache_key": output.cache_key,
-
         "metadata": output.metadata,
         "cache_hits": output.cache_hits,
         "cache_misses": output.cache_misses,
@@ -69,21 +62,6 @@ pub fn test_success(project: &Path, filter: Option<&str>, output: &TestOutput) -
         "skipped": output.skipped,
         "kinds": output.kinds,
         "duration_ms": output.duration_ms,
-        "cases": output.cases,
-    })
-}
-
-pub fn test_list_success(project: &Path, filter: Option<&str>, output: &TestListOutput) -> Value {
-    json!({
-        "schema_version": JSON_SCHEMA_VERSION,
-        "ok": true,
-        "command": "test",
-        "mode": "list",
-        "project": project.display().to_string(),
-        "manifest": output.manifest,
-        "packages": output.packages,
-        "filter": filter,
-        "total": output.total,
         "cases": output.cases,
     })
 }

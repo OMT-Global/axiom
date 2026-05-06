@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
-
-pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
     CapabilityKind::Net,
@@ -27,7 +25,6 @@ pub struct Manifest {
     pub build: BuildSection,
     pub tests: Vec<TestTarget>,
     pub capabilities: CapabilityConfig,
-    pub publish: PublishSection,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -50,8 +47,6 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DependencySpec {
     pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -71,33 +66,6 @@ pub enum TestKind {
     Property,
     Snapshot,
     Benchmark,
-
-    pub stderr: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
-pub struct PublishSection {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub registry: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub include: Vec<String>,
-
-    pub expected_error: Option<ExpectedDiagnostic>,
-    pub capabilities: Vec<CapabilityKind>,
-    pub package: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExpectedDiagnostic {
-    pub kind: String,
-    pub code: Option<String>,
-    pub message: String,
-    pub path: String,
-    pub line: usize,
-    pub column: usize,
-
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -110,22 +78,19 @@ pub struct CapabilityConfig {
     pub env: bool,
     pub env_vars: Vec<String>,
     pub env_unrestricted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unsafe_rationale: Option<String>,
     #[serde(skip_serializing)]
     pub env_legacy_unrestricted: bool,
     pub clock: bool,
     pub crypto: bool,
     pub ffi: bool,
     pub async_runtime: bool,
-
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
     pub rationale: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityKind {
     Fs,
@@ -148,12 +113,6 @@ pub struct CapabilityDescriptor {
     pub deny_by_default: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allowed: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub configured_root: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effective_root: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub package_root: Option<String>,
     #[serde(skip_serializing_if = "is_false")]
     pub unsafe_unrestricted: bool,
     #[serde(skip_serializing_if = "is_false")]
@@ -162,9 +121,6 @@ pub struct CapabilityDescriptor {
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unsafe_rationale: Option<String>,
-
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,18 +131,12 @@ struct RawManifest {
     build: Option<RawBuildSection>,
     tests: Option<Vec<RawTestTarget>>,
     capabilities: Option<RawCapabilityConfig>,
-    publish: Option<RawPublishSection>,
-    registry: Option<toml::Value>,
-    publish: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawPackageSection {
     name: Option<String>,
     version: Option<String>,
-    checksum: Option<toml::Value>,
-    registry: Option<toml::Value>,
-    source: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,11 +160,6 @@ enum RawDependencySpec {
 #[derive(Debug, Deserialize)]
 struct RawDependencyDetail {
     path: Option<String>,
-    version: Option<String>,
-    version: Option<toml::Value>,
-    checksum: Option<toml::Value>,
-    registry: Option<toml::Value>,
-    source: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,22 +167,6 @@ struct RawTestTarget {
     name: Option<String>,
     entry: Option<String>,
     stdout: Option<String>,
-
-    kind: Option<String>,
-    stderr: Option<String>,
-    kind: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct RawPublishSection {
-    registry: Option<String>,
-    checksum: Option<String>,
-    include: Option<Vec<String>>,
-    kind: Option<String>,
-    expected_error: Option<ExpectedDiagnostic>,
-    capabilities: Option<Vec<CapabilityKind>>,
-    package: Option<String>,
-
     kind: Option<String>,
 }
 
@@ -251,13 +180,11 @@ struct RawCapabilityConfig {
     process: Option<bool>,
     env: Option<RawEnvCapability>,
     env_unrestricted: Option<bool>,
-    unsafe_rationale: Option<String>,
     clock: Option<bool>,
     crypto: Option<bool>,
     ffi: Option<bool>,
     #[serde(rename = "async")]
     async_runtime: Option<bool>,
-
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -349,37 +276,16 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             } else {
                 Vec::new()
             },
-            configured_root: None,
-            effective_root: None,
-            package_root: None,
             unsafe_unrestricted: *kind == CapabilityKind::Env && config.env_unrestricted,
             unsafe_opt_in: config.unsafe_opt_ins.iter().any(|name| name == kind.name()),
             owner: config.owners.get(kind.name()).cloned(),
             rationale: config.rationale.get(kind.name()).cloned(),
-            unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
-                .then(|| config.unsafe_rationale.clone())
-                .flatten(),
-
         })
         .collect()
 }
 
 pub fn render_manifest(name: &str) -> String {
     format!(
-
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-
-        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
     )
 }
@@ -458,7 +364,6 @@ impl CapabilityKind {
 }
 
 fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnostic> {
-    validate_reserved_root_publish_fields(&raw, path)?;
     let workspace = normalize_workspace(raw.workspace, path)?;
     let package = normalize_package(raw.package, workspace.is_some(), path)?;
     let raw_build = raw.build;
@@ -478,20 +383,13 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     validate_relative_path(path, "build.out_dir", &out_dir)?;
     let dependencies = normalize_dependencies(raw.dependencies.unwrap_or_default(), path)?;
     let tests = normalize_tests(raw.tests.unwrap_or_default(), path)?;
-    let publish = normalize_publish(raw.publish.unwrap_or_default(), path)?;
     let capabilities = raw.capabilities.unwrap_or_default();
     let fs_root =
         normalize_optional_relative_path(path, "capabilities.fs_root", capabilities.fs_root)?;
-    let explicit_env_unrestricted = capabilities.env_unrestricted.unwrap_or(false);
     let (env, env_vars, env_unrestricted, env_legacy_unrestricted) = normalize_env_capability(
         path,
         capabilities.env,
-        explicit_env_unrestricted,
-    )?;
-    let unsafe_rationale = normalize_unsafe_rationale(
-        path,
-        capabilities.unsafe_rationale,
-        explicit_env_unrestricted,
+        capabilities.env_unrestricted.unwrap_or(false),
     )?;
     let unsafe_opt_ins = normalize_capability_name_list(
         path,
@@ -523,19 +421,16 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             env,
             env_vars,
             env_unrestricted,
-            unsafe_rationale,
             env_legacy_unrestricted,
             clock: capabilities.clock.unwrap_or(false),
             crypto: capabilities.crypto.unwrap_or(false),
             ffi: capabilities.ffi.unwrap_or(false),
             async_runtime: capabilities.async_runtime.unwrap_or(false),
-
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
             rationale,
         },
-        publish,
     })
 }
 
@@ -595,22 +490,6 @@ fn normalize_capability_name(
         .with_path(path.display().to_string()));
     }
     Ok(name)
-fn validate_reserved_root_publish_fields(raw: &RawManifest, path: &Path) -> Result<(), Diagnostic> {
-    if raw.registry.is_some() {
-        return Err(reserved_manifest_field(path, "[registry]"));
-    }
-    if raw.publish.is_some() {
-        return Err(reserved_manifest_field(path, "[publish]"));
-    }
-    Ok(())
-}
-
-fn reserved_manifest_field(path: &Path, field_name: &str) -> Diagnostic {
-    Diagnostic::new(
-        "manifest",
-        format!("{field_name} is reserved for future registry publishing"),
-    )
-    .with_path(path.display().to_string())
 }
 
 fn normalize_env_capability(
@@ -630,26 +509,6 @@ fn normalize_env_capability(
             Ok((true, vars, env_unrestricted, false))
         }
         None => Ok((env_unrestricted, Vec::new(), env_unrestricted, false)),
-    }
-}
-
-fn normalize_unsafe_rationale(
-    path: &Path,
-    rationale: Option<String>,
-    env_unrestricted: bool,
-) -> Result<Option<String>, Diagnostic> {
-    let rationale = rationale.map(|value| value.trim().to_string());
-    if env_unrestricted {
-        match rationale {
-            Some(value) if !value.is_empty() => Ok(Some(value)),
-            _ => Err(Diagnostic::new(
-                "manifest",
-                "capabilities.unsafe_rationale is required when unrestricted environment access is enabled",
-            )
-            .with_path(path.display().to_string())),
-        }
-    } else {
-        Ok(rationale.filter(|value| !value.is_empty()))
     }
 }
 
@@ -694,15 +553,6 @@ fn normalize_package(
         return Err(Diagnostic::new("manifest", "missing [package] section")
             .with_path(path.display().to_string()));
     };
-    if package.checksum.is_some() {
-        return Err(reserved_manifest_field(path, "package.checksum"));
-    }
-    if package.registry.is_some() {
-        return Err(reserved_manifest_field(path, "package.registry"));
-    }
-    if package.source.is_some() {
-        return Err(reserved_manifest_field(path, "package.source"));
-    }
     let package_name = required_field(package.name, path, "package.name")?;
     let package_version = required_field(package.version, path, "package.version")?;
     Ok(Some(PackageSection {
@@ -767,102 +617,16 @@ fn normalize_dependencies(
                     .with_path(path.display().to_string()),
             );
         }
-        match raw_spec {
-            RawDependencySpec::Path(value) => {
-                validate_dependency_path(path, &format!("dependencies.{name}.path"), &value)?;
-                dependencies.insert(
-                    name,
-                    DependencySpec {
-                        path: value,
-                        version: None,
-                    },
-                );
-                continue;
-            }
+        let raw_path = match raw_spec {
+            RawDependencySpec::Path(value) => value,
             RawDependencySpec::Detailed(detail) => {
-                let raw_path =
-                    required_field(detail.path, path, &format!("dependencies.{name}.path"))?;
-                validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
-                let version = normalize_dependency_version(
-                    path,
-                    &format!("dependencies.{name}.version"),
-                    detail.version,
-                )?;
-                dependencies.insert(
-                    name,
-                    DependencySpec {
-                        path: raw_path,
-                        version,
-                    },
-                );
-                if detail.version.is_some() {
-                    return Err(reserved_manifest_field(
-                        path,
-                        &format!("dependencies.{name}.version"),
-                    ));
-                }
-                if detail.checksum.is_some() {
-                    return Err(reserved_manifest_field(
-                        path,
-                        &format!("dependencies.{name}.checksum"),
-                    ));
-                }
-                if detail.registry.is_some() {
-                    return Err(reserved_manifest_field(
-                        path,
-                        &format!("dependencies.{name}.registry"),
-                    ));
-                }
-                if detail.source.is_some() {
-                    return Err(reserved_manifest_field(
-                        path,
-                        &format!("dependencies.{name}.source"),
-                    ));
-                }
                 required_field(detail.path, path, &format!("dependencies.{name}.path"))?
             }
         };
+        validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
+        dependencies.insert(name, DependencySpec { path: raw_path });
     }
     Ok(dependencies)
-}
-
-fn normalize_dependency_version(
-    path: &Path,
-    field_name: &str,
-    version: Option<String>,
-) -> Result<Option<String>, Diagnostic> {
-    let Some(version) = version else {
-        return Ok(None);
-    };
-    let version = required_field(Some(version), path, field_name)?;
-    validate_version_constraint(path, field_name, &version)?;
-    Ok(Some(version))
-}
-
-fn validate_version_constraint(
-    path: &Path,
-    field_name: &str,
-    version: &str,
-) -> Result<(), Diagnostic> {
-    if version == "*" {
-        return Ok(());
-    }
-    let candidate = version.strip_prefix('^').unwrap_or(version);
-    let parts = candidate.split('.').collect::<Vec<_>>();
-    if parts.len() == 3
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return Ok(());
-    }
-    Err(
-        Diagnostic::new(
-            "manifest",
-            format!("{field_name} must be '*', an exact MAJOR.MINOR.PATCH version, or a caret constraint like ^1.2.3"),
-        )
-        .with_path(path.display().to_string()),
-    )
 }
 
 fn normalize_tests(
@@ -882,25 +646,10 @@ fn normalize_tests(
         }
         let entry = required_field(raw_test.entry, path, &format!("{field_prefix}.entry"))?;
         validate_relative_path(path, &format!("{field_prefix}.entry"), &entry)?;
-        let package =
-            normalize_optional_name(path, &format!("{field_prefix}.package"), raw_test.package)?;
-        let capabilities = normalize_test_capabilities(
-            path,
-            &format!("{field_prefix}.capabilities"),
-            raw_test.capabilities.unwrap_or_default(),
-        )?;
         tests.push(TestTarget {
             name,
             entry,
             stdout: raw_test.stdout,
-
-            kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
-
-            stderr: raw_test.stderr,
-            expected_error: raw_test.expected_error,
-            capabilities,
-            package,
-
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
         });
     }
@@ -926,117 +675,6 @@ fn normalize_test_kind(
         )
         .with_path(path.display().to_string())),
     }
-
-fn normalize_publish(raw: RawPublishSection, path: &Path) -> Result<PublishSection, Diagnostic> {
-    let registry = match raw.registry {
-        Some(registry) => {
-            let registry = required_field(Some(registry), path, "publish.registry")?;
-            validate_registry_source(path, &registry)?;
-            Some(registry)
-        }
-        None => None,
-    };
-    let checksum = match raw.checksum {
-        Some(checksum) => {
-            let checksum = required_field(Some(checksum), path, "publish.checksum")?;
-            validate_sha256_checksum(path, &checksum)?;
-            Some(checksum)
-        }
-        None => None,
-    };
-    let mut include = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for (index, value) in raw.include.unwrap_or_default().into_iter().enumerate() {
-        let field_name = format!("publish.include[{index}]");
-        let value = required_field(Some(value), path, &field_name)?;
-        validate_relative_path(path, &field_name, &value)?;
-        if !seen.insert(value.clone()) {
-            return Err(Diagnostic::new(
-                "manifest",
-                format!("duplicate publish include path {value:?}"),
-            )
-            .with_path(path.display().to_string()));
-        }
-        include.push(value);
-    }
-    Ok(PublishSection {
-        registry,
-        checksum,
-        include,
-    })
-}
-
-fn validate_registry_source(path: &Path, registry: &str) -> Result<(), Diagnostic> {
-    if let Some(rest) = registry.strip_prefix("https://") {
-        let host = rest.split('/').next().unwrap_or_default();
-        if !host.is_empty() && !host.chars().any(char::is_whitespace) {
-            return Ok(());
-        }
-    } else if let Some(rest) = registry.strip_prefix("file:") {
-        if !rest.is_empty() && !rest.chars().any(char::is_whitespace) {
-            return Ok(());
-        }
-    }
-    Err(Diagnostic::new(
-        "manifest",
-        "publish.registry must be a valid https:// or file: registry source",
-    )
-    .with_path(path.display().to_string()))
-}
-
-fn validate_sha256_checksum(path: &Path, checksum: &str) -> Result<(), Diagnostic> {
-    let Some(hex) = checksum.strip_prefix("sha256:") else {
-        return Err(Diagnostic::new(
-            "manifest",
-            "publish.checksum must use sha256:<64 lowercase hex characters>",
-        )
-        .with_path(path.display().to_string()));
-    };
-    if hex.len() == 64
-        && hex
-            .chars()
-            .all(|ch| ch.is_ascii_digit() || ('a'..='f').contains(&ch))
-    {
-        return Ok(());
-    }
-    Err(Diagnostic::new(
-        "manifest",
-        "publish.checksum must use sha256:<64 lowercase hex characters>",
-    )
-    .with_path(path.display().to_string()))
-
-fn normalize_optional_name(
-    path: &Path,
-    field_name: &str,
-    value: Option<String>,
-) -> Result<Option<String>, Diagnostic> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    required_field(Some(value), path, field_name).map(Some)
-}
-
-fn normalize_test_capabilities(
-    path: &Path,
-    field_name: &str,
-    values: Vec<CapabilityKind>,
-) -> Result<Vec<CapabilityKind>, Diagnostic> {
-    let mut capabilities = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for capability in values {
-        if !seen.insert(capability) {
-            return Err(Diagnostic::new(
-                "manifest",
-                format!(
-                    "duplicate capability {:?} in {field_name}",
-                    capability.name()
-                ),
-            )
-            .with_path(path.display().to_string()));
-        }
-        capabilities.push(capability);
-    }
-    Ok(capabilities)
 }
 
 fn normalize_optional_relative_path(

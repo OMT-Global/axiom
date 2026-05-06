@@ -1,8 +1,8 @@
 use crate::diagnostics::Diagnostic;
 use crate::manifest::CapabilityConfig;
 use crate::mir::{
-    EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, StaticDef, Stmt,
-    StructDef, StructField, Type,
+    EnumDef, Expr, Function, LiteralValue, MatchArm, Param, Program, SourceSpan, Stmt, StructDef,
+    StructField, Type,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -866,82 +866,12 @@ fn axiom_regex_replace_all(pattern: String, text: String, replacement: String) -
             }
         } else {
             remaining = &remaining[end..];
-    out.push_str(
-        r#"#[allow(dead_code)]
-fn axiom_encoding_is_unreserved(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~')
-}
-
-#[allow(dead_code)]
-fn axiom_percent_encode(value: String) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut out = String::new();
-    for byte in value.bytes() {
-        if axiom_encoding_is_unreserved(byte) {
-            out.push(byte as char);
-        } else {
-            out.push('%');
-            out.push(HEX[(byte >> 4) as usize] as char);
-            out.push(HEX[(byte & 0x0f) as usize] as char);
         }
     }
     out
 }
 
 "#);
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_cli_args() -> Vec<String> {\n");
-    out.push_str("    std::env::args().skip(1).collect()\n");
-    out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_cli_arg_count() -> i64 {\n");
-    out.push_str("    std::env::args().skip(1).count() as i64\n");
-    out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_cli_arg(index: i64) -> Option<String> {\n");
-    out.push_str("    if index < 0 {\n");
-    out.push_str("        return None;\n");
-    out.push_str("    }\n");
-    out.push_str("    let Ok(index) = usize::try_from(index) else {\n");
-    out.push_str("        return None;\n");
-    out.push_str("    };\n");
-    out.push_str("    std::env::args().skip(1).nth(index)\n");
-    out.push_str("}\n\n");
-
-#[allow(dead_code)]
-fn axiom_percent_decode(value: String) -> Option<String> {
-    fn hex(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            _ => None,
-        }
-    }
-
-    let bytes = value.as_bytes();
-    let mut index = 0usize;
-    let mut out = Vec::new();
-    while index < bytes.len() {
-        if bytes[index] != b'%' {
-            out.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-        if index + 2 >= bytes.len() {
-            return None;
-        }
-        let high = hex(bytes[index + 1])?;
-        let low = hex(bytes[index + 2])?;
-        out.push((high << 4) | low);
-        index += 3;
-    }
-    String::from_utf8(out).ok()
-}
-
-"#,
-    );
-
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
@@ -2209,24 +2139,12 @@ fn axiom_crypto_constant_time_eq(left: String, right: String) -> bool {
     out.push_str("        None => axiom_runtime_error(\"runtime\", \"map key not found\"),\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_map_lookup<K: Eq + std::hash::Hash, V>(mut values: HashMap<K, V>, key: K) -> Option<V> {\n");
-    out.push_str("    values.remove(&key)\n");
-    out.push_str("}\n\n");
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("fn axiom_map_contains_key<K: Eq + std::hash::Hash, V>(values: HashMap<K, V>, key: K) -> bool {\n");
-    out.push_str("    values.contains_key(&key)\n");
-    out.push_str("}\n\n");
     for enum_def in &program.enums {
         render_enum(enum_def, &type_context, &mut out);
         out.push('\n');
     }
     for struct_def in &program.structs {
         render_struct(struct_def, &type_context, &mut out);
-        out.push('\n');
-    }
-    for static_def in &program.statics {
-        render_static(static_def, &type_context, &mut out);
         out.push('\n');
     }
     for function in &program.functions {
@@ -2492,17 +2410,6 @@ fn render_struct(struct_def: &StructDef, type_context: &TypeContext<'_>, out: &m
         render_struct_field(field, type_context, out, 1, !lifetime.is_empty());
     }
     out.push_str("}\n");
-}
-
-fn render_static(static_def: &StaticDef, type_context: &TypeContext<'_>, out: &mut String) {
-    out.push_str("#[allow(dead_code)]\n");
-    out.push_str("#[allow(non_upper_case_globals)]\n");
-    out.push_str(&format!(
-        "static {}: {} = {};\n",
-        static_def.name,
-        rust_static_type(&static_def.ty, type_context),
-        render_static_expr(&static_def.expr)
-    ));
 }
 
 fn render_enum(enum_def: &EnumDef, type_context: &TypeContext<'_>, out: &mut String) {
@@ -3310,22 +3217,6 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Call { name, args, .. } if name == "json_stringify_string" => {
             format!("axiom_json_stringify_string({})", render_expr(&args[0]))
         }
-
-        Expr::Call { name, args, .. } if name == "map_get" => {
-            format!(
-                "axiom_map_lookup({}, {})",
-                render_expr(&args[0]),
-                render_expr(&args[1])
-            )
-        }
-        Expr::Call { name, args, .. } if name == "map_contains_key" => {
-            format!(
-                "axiom_map_contains_key({}, {})",
-                render_expr(&args[0]),
-                render_expr(&args[1])
-            )
-        }
-
         Expr::Call { name, args, .. } if name == "regex_is_match" => {
             format!(
                 "axiom_regex_is_match({}, {})",
@@ -3347,19 +3238,6 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(&args[1]),
                 render_expr(&args[2])
             )
-        Expr::Call { name, .. } if name == "cli_args" => String::from("axiom_cli_args()"),
-        Expr::Call { name, .. } if name == "cli_arg_count" => String::from("axiom_cli_arg_count()"),
-        Expr::Call { name, args, .. } if name == "cli_arg" => {
-            format!("axiom_cli_arg({})", render_expr(&args[0]))
-
-        Expr::Call { name, args, .. } if name == "encoding_url_component_encode" => {
-            format!("axiom_percent_encode({})", render_expr(&args[0]))
-        }
-        Expr::Call { name, args, .. } if name == "encoding_url_component_decode" => {
-            format!("axiom_percent_decode({})", render_expr(&args[0]))
-        }
-        Expr::Call { name, args, .. } if name == "encoding_path_segment_encode" => {
-            format!("axiom_percent_encode({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
@@ -3757,33 +3635,8 @@ fn render_expr(expr: &Expr) -> String {
     }
 }
 
-fn render_static_expr(expr: &Expr) -> String {
-    match expr {
-        Expr::Literal(LiteralValue::String(value)) => format!("{value:?}"),
-        Expr::BinaryAdd { lhs, rhs, .. } => {
-            format!("{} + {}", render_static_expr(lhs), render_static_expr(rhs))
-        }
-        Expr::BinaryCompare { op, lhs, rhs, .. } => {
-            format!(
-                "{} {} {}",
-                render_static_expr(lhs),
-                op.lexeme(),
-                render_static_expr(rhs)
-            )
-        }
-        _ => render_expr(expr),
-    }
-}
-
 fn rust_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
     rust_type_inner(ty, None, type_context)
-}
-
-fn rust_static_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
-    match ty {
-        Type::String => String::from("&'static str"),
-        _ => rust_type(ty, type_context),
-    }
 }
 
 fn rust_type_in_signature(

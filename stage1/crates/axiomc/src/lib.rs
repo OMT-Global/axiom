@@ -1,8 +1,6 @@
 pub mod borrowck;
 pub mod codegen;
 pub mod dap;
-pub mod diagnostic_catalog;
-
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -25,22 +23,14 @@ mod tests {
     use crate::manifest::{
         CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
         render_manifest,
-
-        CapabilityConfig, CapabilityKind, ExpectedDiagnostic, TestTarget, capability_descriptors,
-        load_manifest, render_manifest,
-
-        lockfile_path, render_manifest,
-
     };
     use crate::mir;
-    use crate::new_project::{WorkloadTemplate, create_project, create_project_with_template};
+    use crate::new_project::create_project;
     use crate::project::{
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        command_for_build_output, command_for_executable, list_project_tests_with_options,
-        command_for_build_output, command_for_executable, package_graph_metadata,
-        project_capabilities, run_project_tests, run_project_tests_with_options,
-        run_project_with_options,
+        command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
+        run_project_tests_with_options, run_project_with_options,
     };
     use crate::syntax::{Stmt, TypeName, Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
@@ -62,29 +52,8 @@ mod tests {
         crypto: bool,
     ) -> String {
         format!(
-
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
-
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
-
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
         )
-
-        let mut manifest = format!(
-            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-        );
-        if env {
-            manifest.push_str("unsafe_rationale = \"test fixture uses legacy unrestricted env\"\n");
-        }
-        manifest
     }
 
     fn write_process_fixture(dir: &Path) -> String {
@@ -239,24 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn new_project_templates_build_and_test_without_edits() {
-        let dir = tempdir().expect("tempdir");
-        for template in [
-            WorkloadTemplate::Cli,
-            WorkloadTemplate::Worker,
-            WorkloadTemplate::Service,
-        ] {
-            let project = dir.path().join(format!("{}-app", template.name()));
-            create_project_with_template(&project, None, template).expect("create project");
-
-            check_project(&project).expect("check generated project");
-            let tests = run_project_tests(&project).expect("test generated project");
-            assert_eq!(tests.failed, 0);
-            assert_eq!(tests.passed, 1);
-        }
-    }
-
-    #[test]
     fn parser_lowers_functions_calls_and_while() {
         let source = "fn banner(name: string): string {\nreturn \"hello \" + name\n}\n\nfn lucky(base: int): int {\nreturn base + 2\n}\n\nfn is_ready(value: int): bool {\nreturn value == 42\n}\n\nlet answer: int = lucky(40)\nlet ready: bool = is_ready(answer)\nwhile false {\nprint \"never\"\n}\nif ready {\nprint banner(\"from stage1\")\n} else {\nprint \"bad\"\n}\nprint answer\nprint ready\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -404,7 +355,6 @@ print borrowed
     }
 
     #[test]
-
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2442,7 +2392,6 @@ let bad: u8 = byte.wrapping_add(1u16)
             &project,
             &CheckOptions {
                 package: Some(String::from("workspace-app")),
-                include_exports: false,
             },
         )
         .expect("check selected workspace package");
@@ -2482,125 +2431,10 @@ let bad: u8 = byte.wrapping_add(1u16)
             &project,
             &RunOptions {
                 package: Some(String::from("workspace-app")),
-                args: Vec::new(),
             },
         )
         .expect("run selected workspace package");
         assert_eq!(exit, 0);
-    }
-
-    #[test]
-    fn run_project_forwards_cli_args_to_stdlib_cli() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("cli-args");
-        create_project(&project, Some("cli-args-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "import \"std/cli.ax\"\n\
-print arg_count()\n\
-match arg(0) {\n\
-Some(value) {\n\
-print value\n\
-}\n\
-None {\n\
-print \"missing\"\n\
-}\n\
-}\n\
-let values: [string] = args()\n\
-print first(values)\n",
-        )
-        .expect("write cli args program");
-
-        let built = build_project(&project).expect("build cli args project");
-        let generated = fs::read_to_string(&built.generated_rust).expect("read generated Rust");
-        assert!(generated.contains("usize::try_from(index)"));
-        let build_output_dir = Path::new(&built.generated_rust)
-            .parent()
-            .expect("build output directory");
-        let output = command_for_build_output(&built.binary, build_output_dir)
-            .expect("binary command")
-            .args(["alpha", "beta"])
-            .output()
-            .expect("run binary with args");
-        assert!(output.status.success());
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\nalpha\n");
-
-        let exit = run_project_with_options(
-            &project,
-            &RunOptions {
-                package: None,
-                args: vec![String::from("alpha"), String::from("beta")],
-            },
-        )
-        .expect("run project with forwarded args");
-        assert_eq!(exit, 0);
-    fn package_graph_metadata_lists_workspace_packages() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("workspace-graph-root");
-        let app = project.join("members/app");
-        let core = project.join("members/core");
-        fs::create_dir_all(project.join("members")).expect("create workspace members dir");
-        create_project(&app, Some("workspace-graph-app")).expect("create app member");
-        create_project(&core, Some("workspace-graph-core")).expect("create core member");
-
-        fs::write(
-            app.join("axiom.toml"),
-            format!(
-                "{}\n[dependencies]\ncore = {{ path = \"../core\" }}\n",
-                render_manifest("workspace-graph-app")
-            ),
-        )
-        .expect("write app manifest");
-        let app_manifest = load_manifest(&app).expect("load app manifest");
-        fs::write(
-            app.join("axiom.lock"),
-            render_lockfile_for_project(&app, &app_manifest).expect("app lockfile"),
-        )
-        .expect("write app lockfile");
-        let core_manifest = load_manifest(&core).expect("load core manifest");
-        fs::write(
-            core.join("axiom.lock"),
-            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
-        )
-        .expect("write core lockfile");
-        fs::write(
-            project.join("axiom.toml"),
-            "[workspace]\nmembers = [\"members/app\", \"members/core\"]\n",
-        )
-        .expect("write workspace-only manifest");
-        let root_manifest = load_manifest(&project).expect("load root manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile"),
-        )
-        .expect("write root lockfile");
-
-        let graph = package_graph_metadata(&project).expect("load package graph metadata");
-        assert_eq!(graph.packages.len(), 3);
-        let root = graph
-            .packages
-            .iter()
-            .find(|package| package.workspace_only)
-            .expect("workspace-only package");
-        assert_eq!(root.members.len(), 2);
-        assert_eq!(root.lockfile.status, "current");
-        let app = graph
-            .packages
-            .iter()
-            .find(|package| package.name.as_deref() == Some("workspace-graph-app"))
-            .expect("app package");
-        assert_eq!(app.dependencies.len(), 1);
-        assert_eq!(app.dependencies[0].name, "core");
-        assert_eq!(
-            app.dependencies[0].package.as_deref(),
-            Some("workspace-graph-core")
-        );
-        assert!(
-            app.entrypoint
-                .as_deref()
-                .unwrap_or("")
-                .ends_with("src/main.ax")
-        );
     }
 
     #[test]
@@ -2795,156 +2629,6 @@ crypto = false
     }
 
     #[test]
-    fn dependency_version_constraints_are_enforced() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("versioned-dependency-app");
-        let dependency = project.join("deps/core");
-        create_project(&project, Some("versioned-dependency-app")).expect("create root");
-        create_project(&dependency, Some("versioned-core")).expect("create dependency");
-
-        fs::write(
-            dependency.join("src/math.ax"),
-            "pub fn answer(): int {\nreturn 42\n}\n",
-        )
-        .expect("write dependency source");
-        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
-        fs::write(
-            dependency.join("axiom.lock"),
-            render_lockfile_for_project(&dependency, &dependency_manifest)
-                .expect("dependency lockfile"),
-        )
-        .expect("write dependency lockfile");
-
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.2.0\" }}\n",
-                render_manifest("versioned-dependency-app")
-            ),
-        )
-        .expect("write root manifest");
-        fs::write(
-            project.join("src/main.ax"),
-            "import \"core/math.ax\"\nprint answer()\n",
-        )
-        .expect("write root source");
-        let manifest = load_manifest(&project).expect("load root manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
-        )
-        .expect("write root lockfile");
-
-        let error = check_project(&project).expect_err("incompatible version should fail");
-        assert_eq!(error.kind, "manifest");
-        assert!(
-            error
-                .message
-                .contains("version constraint \"^0.2.0\" is incompatible")
-        );
-    fn publish_manifest_contract_validates_registry_metadata() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("publish-contract");
-        create_project(&project, Some("publish-contract-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[publish]\nregistry = \"https://registry.example.test/index\"\nchecksum = \"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\ninclude = [\"src\", \"axiom.toml\"]\n",
-                render_manifest("publish-contract-app")
-            ),
-        )
-        .expect("write publish manifest");
-
-        let manifest = load_manifest(&project).expect("load publish manifest");
-        assert_eq!(
-            manifest.publish.registry.as_deref(),
-            Some("https://registry.example.test/index")
-        );
-        assert_eq!(manifest.publish.include, vec!["src", "axiom.toml"]);
-
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.1.0\" }}\n",
-                render_manifest("versioned-dependency-app")
-            ),
-        )
-        .expect("write compatible root manifest");
-        let manifest = load_manifest(&project).expect("load compatible root manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("compatible root lockfile"),
-        )
-        .expect("write compatible root lockfile");
-        check_project(&project).expect("compatible version should pass");
-
-        fs::write(
-            dependency.join("axiom.toml"),
-            "[package]\nname = \"versioned-core\"\nversion = \"0.0.4\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
-        )
-        .expect("write 0.0.x dependency manifest");
-        let dependency_manifest = load_manifest(&dependency).expect("load 0.0.x dependency");
-        fs::write(
-            dependency.join("axiom.lock"),
-            render_lockfile_for_project(&dependency, &dependency_manifest)
-                .expect("0.0.x dependency lockfile"),
-        )
-        .expect("write 0.0.x dependency lockfile");
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.0.3\" }}\n",
-                render_manifest("versioned-dependency-app")
-            ),
-        )
-        .expect("write 0.0.x root manifest");
-        let manifest = load_manifest(&project).expect("load 0.0.x root manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &manifest).expect("0.0.x root lockfile"),
-        )
-        .expect("write 0.0.x root lockfile");
-
-        let error = check_project(&project).expect_err("^0.0.3 must reject 0.0.4");
-        assert_eq!(error.kind, "manifest");
-        assert!(
-            error
-                .message
-                .contains("version constraint \"^0.0.3\" is incompatible")
-        );
-                "{}\n[publish]\nregistry = \"http://registry.example.test/index\"\nchecksum = \"sha256:not-a-real-checksum\"\n",
-                render_manifest("publish-contract-app")
-            ),
-        )
-        .expect("write invalid publish manifest");
-        let error = load_manifest(&project).expect_err("invalid registry should fail");
-        assert_eq!(error.kind, "manifest");
-        assert!(error.message.contains("publish.registry"));
-    }
-
-    #[test]
-    fn publish_manifest_rejects_malformed_registry_sources() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("publish-registry-invalid");
-        create_project(&project, Some("publish-registry-invalid-app")).expect("create project");
-
-        for registry in ["https://", "https://not a host", "file:"] {
-            fs::write(
-                project.join("axiom.toml"),
-                format!(
-                    "{}\n[publish]\nregistry = \"{registry}\"\n",
-                    render_manifest("publish-registry-invalid-app")
-                ),
-            )
-            .expect("write invalid publish manifest");
-
-            let error = load_manifest(&project).expect_err("malformed registry should fail");
-            assert_eq!(error.kind, "manifest");
-            assert!(error.message.contains("publish.registry"));
-        }
-    }
-
-    #[test]
     fn dependency_package_must_enable_its_own_capabilities() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("dep-cap-root");
@@ -3015,18 +2699,11 @@ crypto = false
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
-
-        assert_eq!(caps.len(), 8);
-        assert!(caps.iter().all(|cap| !cap.enabled));
-        let project_caps = project_capabilities(&project).expect("project capabilities");
-        assert_eq!(project_caps.len(), 8);
-
     }
 
     #[test]
@@ -3064,14 +2741,6 @@ crypto = false
         fs::write(
             project.join("axiom.toml"),
             "[package]\nname = \"caps-policy-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\ndeny_by_default = true\nunsafe_opt_ins = [\"ffi\"]\nowners = { fs = \"platform\", ffi = \"runtime\" }\nrationale = { fs = \"read package fixtures\", ffi = \"native host bridge migration\" }\n",
-    fn capability_view_includes_effective_fs_root_scope() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("caps-fs");
-        create_project(&project, Some("caps-fs-app")).expect("create project");
-        fs::create_dir_all(project.join("data")).expect("create fs root");
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"caps-fs-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n",
         )
         .expect("write manifest");
 
@@ -3131,184 +2800,6 @@ crypto = false
                 .message
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
-
-    }
-
-    #[test]
-    fn unrestricted_env_requires_unsafe_rationale() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("caps-env-unrestricted");
-        create_project(&project, Some("caps-env-unrestricted-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"caps-env-unrestricted-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv_unrestricted = true\n",
-        )
-        .expect("write manifest");
-
-        let error = load_manifest(&project).expect_err("unsafe rationale should be required");
-        assert_eq!(error.kind, "manifest");
-        assert!(
-            error
-                .message
-                .contains("capabilities.unsafe_rationale is required")
-        );
-    }
-
-    #[test]
-    fn explicit_unrestricted_env_requires_rationale_with_legacy_env_bool() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("caps-env-explicit-and-legacy");
-        create_project(&project, Some("caps-env-explicit-and-legacy-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"caps-env-explicit-and-legacy-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv = true\nenv_unrestricted = true\n",
-        )
-        .expect("write manifest");
-
-        let error = load_manifest(&project)
-            .expect_err("explicit env_unrestricted should require unsafe rationale");
-        assert_eq!(error.kind, "manifest");
-        assert!(
-            error
-                .message
-                .contains("capabilities.unsafe_rationale is required")
-        );
-    }
-
-    #[test]
-    fn unrestricted_env_rationale_is_reported_in_caps() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("caps-env-rationale");
-        create_project(&project, Some("caps-env-rationale-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"caps-env-rationale-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv_unrestricted = true\nunsafe_rationale = \"migration reads audited CI variables\"\n",
-        )
-        .expect("write manifest");
-
-        let manifest = load_manifest(&project).expect("load manifest");
-        assert_eq!(
-            manifest.capabilities.unsafe_rationale.as_deref(),
-            Some("migration reads audited CI variables")
-        );
-        let caps = project_capabilities(&project).expect("project capabilities");
-        let env = caps
-            .iter()
-            .find(|cap| cap.name == "env")
-            .expect("env capability");
-        assert!(env.enabled);
-        assert!(env.unsafe_unrestricted);
-        assert_eq!(
-            env.unsafe_rationale.as_deref(),
-            Some("migration reads audited CI variables")
-        );
-        let fs_capability = caps
-            .iter()
-            .find(|cap| cap.name == "fs")
-            .expect("fs capability");
-        assert!(fs_capability.enabled);
-        assert_eq!(fs_capability.configured_root.as_deref(), Some("data"));
-        let canonical_data = fs::canonicalize(project.join("data"))
-            .expect("canonical fs root")
-            .to_string_lossy()
-            .into_owned();
-        let canonical_project = fs::canonicalize(&project)
-            .expect("canonical package root")
-            .to_string_lossy()
-            .into_owned();
-        assert_eq!(
-            fs_capability.effective_root.as_deref(),
-            Some(canonical_data.as_str())
-        );
-        assert_eq!(
-            fs_capability.package_root.as_deref(),
-            Some(canonical_project.as_str())
-        );
-
-        let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][0]["name"], "fs");
-        assert_eq!(payload["capabilities"][0]["configured_root"], "data");
-        assert_eq!(payload["capabilities"][0]["effective_root"], canonical_data);
-        assert_eq!(payload["capabilities"][0]["package_root"], canonical_project);
-    }
-
-    #[test]
-    fn capability_view_includes_fs_write_root_scope() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("caps-fs-write");
-        create_project(&project, Some("caps-fs-write-app")).expect("create project");
-        fs::create_dir_all(project.join("data")).expect("create fs root");
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"caps-fs-write-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n",
-        )
-        .expect("write manifest");
-
-        let caps = project_capabilities(&project).expect("project capabilities");
-        let fs_capability = caps
-            .iter()
-            .find(|cap| cap.name == "fs")
-            .expect("fs capability");
-        assert!(!fs_capability.enabled);
-        assert!(fs_capability.configured_root.is_none());
-
-        let fs_write_capability = caps
-            .iter()
-            .find(|cap| cap.name == "fs:write")
-            .expect("fs:write capability");
-        assert!(fs_write_capability.enabled);
-        assert_eq!(fs_write_capability.configured_root.as_deref(), Some("data"));
-        let canonical_data = fs::canonicalize(project.join("data"))
-            .expect("canonical fs root")
-            .to_string_lossy()
-            .into_owned();
-        let canonical_project = fs::canonicalize(&project)
-            .expect("canonical package root")
-            .to_string_lossy()
-            .into_owned();
-        assert_eq!(
-            fs_write_capability.effective_root.as_deref(),
-            Some(canonical_data.as_str())
-        );
-        assert_eq!(
-            fs_write_capability.package_root.as_deref(),
-            Some(canonical_project.as_str())
-        );
-
-        let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][1]["name"], "fs:write");
-        assert_eq!(payload["capabilities"][1]["configured_root"], "data");
-        assert_eq!(payload["capabilities"][1]["effective_root"], canonical_data);
-        assert_eq!(payload["capabilities"][1]["package_root"], canonical_project);
-    }
-
-    #[test]
-    fn capability_view_reports_unsafe_env_grants() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("caps-env-unrestricted");
-        create_project(&project, Some("caps-env-unrestricted-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"caps-env-unrestricted-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv_unrestricted = true\n",
-        )
-        .expect("write manifest");
-
-        let manifest = load_manifest(&project).expect("load manifest");
-        assert_eq!(manifest.capabilities.warnings().len(), 1);
-        let caps = project_capabilities(&project).expect("project capabilities");
-        let env = caps
-            .iter()
-            .find(|cap| cap.name == "env")
-            .expect("env capability");
-        assert!(env.enabled);
-        assert!(env.allowed.is_empty());
-        assert!(env.unsafe_unrestricted);
-
-        let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][3]["name"], "env");
-        assert!(payload["capabilities"][3]["allowed"].is_null());
-        assert_eq!(payload["capabilities"][3]["unsafe_unrestricted"], true);
-
     }
 
     #[test]
@@ -3415,33 +2906,8 @@ print strlen("hello")
         assert!(
             error
                 .message
-                .contains("requires [capabilities].env = [\"PATH\"]")
+                .contains("requires [capabilities].env = [\"NAME\"]")
         );
-    }
-
-    #[test]
-    fn env_denial_diagnostic_names_allowlist_entry_without_env_value() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("env-denied-secret-safe");
-        create_project(&project, Some("env-denied-secret-safe-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "let value: Option<string> = env_get(\"AWS_SECRET_ACCESS_KEY\")\nprint \"never\"\n",
-        )
-        .expect("write source");
-
-        let error = check_project(&project).expect_err("env capability should be required");
-        let payload = json_contract::error("check", &error);
-        let payload = json_contract::to_pretty_string(&payload).expect("serialize error payload");
-        assert_eq!(error.kind, "capability");
-        assert!(
-            error
-                .message
-                .contains("requires [capabilities].env = [\"AWS_SECRET_ACCESS_KEY\"]")
-        );
-        assert!(payload.contains("AWS_SECRET_ACCESS_KEY"));
-        assert!(!error.message.contains("blocked-secret-value"));
-        assert!(!payload.contains("blocked-secret-value"));
     }
 
     #[test]
@@ -3700,32 +3166,6 @@ print strlen("hello")
             "inside ok\nabsolute denied\ntraversal denied\nsymlink denied\nlarge denied\n",
         )
         .expect("write golden");
-        let caps = project_capabilities(&project).expect("project capabilities");
-        let fs_capability = caps
-            .iter()
-            .find(|cap| cap.name == "fs")
-            .expect("fs capability");
-        let canonical_data = fs::canonicalize(&data)
-            .expect("canonical fs root")
-            .to_string_lossy()
-            .into_owned();
-        let canonical_project = fs::canonicalize(&project)
-            .expect("canonical package root")
-            .to_string_lossy()
-            .into_owned();
-        assert_eq!(fs_capability.configured_root.as_deref(), Some("data"));
-        assert_eq!(
-            fs_capability.effective_root.as_deref(),
-            Some(canonical_data.as_str())
-        );
-        assert_eq!(
-            fs_capability.package_root.as_deref(),
-            Some(canonical_project.as_str())
-        );
-        assert!(
-            canonical_data.starts_with(&canonical_project),
-            "reported fs root must stay within reported package root"
-        );
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
@@ -5885,18 +5325,11 @@ print serve_once("127.0.0.1:18080", "hello")
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
                 kind: TestKind::Unit,
-
-                stderr: None,
-                expected_error: None,
-                capabilities: Vec::new(),
-                package: None,
-
             }]
         );
     }
 
     #[test]
-
     fn manifest_parses_richer_test_kinds() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("typed-tests");
@@ -5912,124 +5345,9 @@ print serve_once("127.0.0.1:18080", "hello")
 
         let manifest = load_manifest(&project).expect("load manifest");
         assert_eq!(manifest.tests[0].kind, TestKind::Table);
-    fn manifest_rejects_reserved_registry_publish_fields() {
-        let dir = tempdir().expect("tempdir");
-
-        let root_registry = dir.path().join("root-registry");
-        create_project(&root_registry, Some("root-registry-app")).expect("create project");
-        fs::write(
-            root_registry.join("axiom.toml"),
-            format!(
-                "{}\n[registry]\nsource = \"https://registry.example\"\n",
-                render_manifest("root-registry-app")
-            ),
-        )
-        .expect("write manifest");
-        let err = load_manifest(&root_registry).expect_err("reserved registry should fail");
-        assert!(err.message.contains("[registry] is reserved"));
-
-        let package_checksum = dir.path().join("package-checksum");
-        create_project(&package_checksum, Some("package-checksum-app")).expect("create project");
-        fs::write(
-            package_checksum.join("axiom.toml"),
-            "[package]\nname = \"package-checksum-app\"\nversion = \"0.1.0\"\nchecksum = \"sha256:abc\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
-        )
-        .expect("write manifest");
-        let err = load_manifest(&package_checksum).expect_err("reserved checksum should fail");
-        assert!(err.message.contains("package.checksum is reserved"));
-
-        let dependency_version = dir.path().join("dependency-version");
-        create_project(&dependency_version, Some("dependency-version-app"))
-            .expect("create project");
-        fs::write(
-            dependency_version.join("axiom.toml"),
-            format!(
-                "{}\n[dependencies]\ncore = {{ version = \"1.0.0\", registry = \"default\" }}\n",
-                render_manifest("dependency-version-app")
-            ),
-        )
-        .expect("write manifest");
-        let err = load_manifest(&dependency_version).expect_err("reserved dependency should fail");
-        assert!(
-            err.message
-                .contains("dependencies.core.version is reserved")
-
-    fn manifest_parses_test_metadata_contract() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("tests-metadata");
-        create_project(&project, Some("tests-metadata-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[[tests]]\nname = \"alias-fail\"\nentry = \"src/alias_test.ax\"\npackage = \"tests-metadata-app\"\ncapabilities = [\"clock\", \"env\"]\nexpected_error = {{ kind = \"parse\", code = \"import_alias\", message = \"stage1 bootstrap does not support import aliases; import exported symbols directly\", path = \"src/alias_test.ax\", line = 1, column = 20 }}\n",
-                render_manifest("tests-metadata-app")
-            ),
-        )
-        .expect("write manifest");
-        let manifest = load_manifest(&project).expect("load manifest");
-        assert_eq!(manifest.tests.len(), 1);
-        let test = &manifest.tests[0];
-        assert_eq!(test.name, "alias-fail");
-        assert_eq!(test.entry, "src/alias_test.ax");
-        assert_eq!(test.package.as_deref(), Some("tests-metadata-app"));
-        assert_eq!(
-            test.capabilities,
-            vec![CapabilityKind::Clock, CapabilityKind::Env]
-        );
-        assert_eq!(
-            test.expected_error,
-            Some(ExpectedDiagnostic {
-                kind: String::from("parse"),
-                code: Some(String::from("import_alias")),
-                message: String::from(
-                    "stage1 bootstrap does not support import aliases; import exported symbols directly"
-                ),
-                path: String::from("src/alias_test.ax"),
-                line: 1,
-                column: 20,
-            })
-        );
     }
 
     #[test]
-
-    fn run_project_tests_reports_manifest_metadata_in_json() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("runner-metadata");
-        create_project(&project, Some("runner-metadata-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[[tests]]\nname = \"alias-fail\"\nentry = \"src/alias_test.ax\"\npackage = \"runner-metadata-app\"\ncapabilities = [\"clock\"]\nexpected_error = {{ kind = \"parse\", message = \"stage1 bootstrap does not support import aliases; import exported symbols directly\", path = \"src/alias_test.ax\", line = 1, column = 21 }}\n",
-                render_manifest("runner-metadata-app")
-            ),
-        )
-        .expect("write manifest");
-        fs::write(
-            project.join("src/alias_test.ax"),
-            "import \"support.ax\" as support\nprint 0\n",
-        )
-        .expect("write test");
-
-        let output = run_project_tests_with_options(
-            &project,
-            &TestOptions {
-                filter: Some(String::from("alias-fail")),
-                package: None,
-            },
-        )
-        .expect("run tests");
-        assert_eq!(output.passed, 1);
-        assert_eq!(output.failed, 0);
-        let payload = json_contract::test_success(&project, Some("alias-fail"), &output);
-        let case = &payload["cases"][0];
-        assert_eq!(case["expected_error"]["kind"], "parse");
-        assert_eq!(case["required_capabilities"][0], "clock");
-        assert_eq!(case["selected_package"], "runner-metadata-app");
-    }
-
-    #[test]
-
     fn run_project_tests_executes_manifest_cases() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner");
@@ -6140,62 +5458,8 @@ print serve_once("127.0.0.1:18080", "hello")
                 .as_ref()
                 .expect("error")
                 .message
-                .contains("stdout expected \"99\\n\", got \"42\\n\"")
+                .contains("expected \"99\\n\", got \"42\\n\"")
         );
-    }
-
-    #[test]
-    fn run_project_tests_reports_stdout_and_stderr_mismatches() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("runner-stream-fail");
-        create_project(&project, Some("runner-stream-fail-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[[tests]]\nname = \"io-smoke\"\nentry = \"src/main_test.ax\"\nstdout = \"false\\n\"\nstderr = \"wrong stderr\\n\"\n",
-                render_manifest("runner-stream-fail-app")
-            ),
-        )
-        .expect("write manifest");
-        fs::write(
-            project.join("src/main_test.ax"),
-            "import \"std/io.ax\"\nlet n: int = eprintln(\"actual stderr\")\nprint n > 0\n",
-        )
-        .expect("write test");
-
-        let output = run_project_tests(&project).expect("run tests");
-
-        assert_eq!(output.passed, 0);
-        assert_eq!(output.failed, 1);
-        let case = output.cases.first().expect("test case");
-        assert_eq!(case.stdout, "true\n");
-        assert_eq!(case.stderr, "actual stderr\n");
-        assert_eq!(case.expected_stdout.as_deref(), Some("false\n"));
-        assert_eq!(case.expected_stderr.as_deref(), Some("wrong stderr\n"));
-        let message = &case.error.as_ref().expect("error").message;
-        assert!(message.contains("stdout expected \"false\\n\", got \"true\\n\""));
-        assert!(message.contains("stderr expected \"wrong stderr\\n\", got \"actual stderr\\n\""));
-    }
-
-    #[test]
-    fn run_project_tests_uses_sibling_stderr_golden() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("runner-stderr-golden");
-        create_project(&project, Some("runner-stderr-golden-app")).expect("create project");
-        fs::write(
-            project.join("src/main_test.ax"),
-            "import \"std/io.ax\"\nlet n: int = eprintln(\"hello stderr\")\nprint n > 0\n",
-        )
-        .expect("write test");
-        fs::write(project.join("src/main_test.stdout"), "true\n").expect("write stdout");
-        fs::write(project.join("src/main_test.stderr"), "hello stderr\n").expect("write stderr");
-
-        let output = run_project_tests(&project).expect("run tests");
-
-        assert_eq!(output.passed, 1);
-        let case = output.cases.first().expect("test case");
-        assert_eq!(case.expected_stderr.as_deref(), Some("hello stderr\n"));
-        assert!(case.ok);
     }
 
     #[test]
@@ -6364,37 +5628,6 @@ print serve_once("127.0.0.1:18080", "hello")
         .expect("run benchmark smoke tests");
         assert_eq!(output.failed, 0);
         assert_eq!(output.kinds.get(&TestKind::Benchmark), Some(&1));
-    fn list_project_tests_reports_stable_names_paths_and_packages() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("runner-list");
-        create_project(&project, Some("runner-list-app")).expect("create project");
-        fs::write(
-            project.join("axiom.toml"),
-            format!(
-                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\nstdout = \"42\\n\"\n",
-                render_manifest("runner-list-app")
-            ),
-        )
-        .expect("write manifest");
-        fs::write(project.join("src/math_test.ax"), "print 42\n").expect("write test");
-
-        let output =
-            list_project_tests_with_options(&project, &TestOptions::default()).expect("list tests");
-
-        assert_eq!(output.total, 2);
-        assert_eq!(output.packages.len(), 1);
-        assert!(output.packages[0].ends_with("runner-list"));
-        assert!(output.cases.iter().any(|case| {
-            case.package.as_deref() == Some("runner-list-app")
-                && case.name == "math-smoke"
-                && case.entry == "src/math_test.ax"
-                && case.expected_stdout
-        }));
-        assert!(output.cases.iter().any(|case| {
-            case.package.as_deref() == Some("runner-list-app")
-                && case.name == "src/main_test"
-                && case.entry == "src/main_test.ax"
-        }));
     }
 
     #[test]
@@ -6511,18 +5744,6 @@ print serve_once("127.0.0.1:18080", "hello")
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
         assert_eq!(output.cases.len(), 36);
         assert_eq!(output.passed, 36);
-        assert_eq!(output.cases.len(), 29);
-        assert_eq!(output.passed, 29);
-        assert_eq!(output.cases.len(), 31);
-        assert_eq!(output.passed, 31);
-        assert_eq!(output.cases.len(), 26);
-        assert_eq!(output.passed, 26);
-        assert_eq!(output.cases.len(), 31);
-        assert_eq!(output.passed, 31);
-
-        assert_eq!(output.cases.len(), 35);
-        assert_eq!(output.passed, 35);
-
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -6530,19 +5751,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-
-                == 24
-
-                == 20
-                == 21
-                == 20
-                == 20
-                == 20
-
-                == 24
-
-                == 20
-
                 == 24
         );
         assert_eq!(
@@ -6552,16 +5760,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
             12
-            9
-            10
-            9
-            8
-            9
-            12
-            9
-            11
-            9
-
         );
     }
 
@@ -7352,106 +6550,6 @@ print takes_two(three)
     }
 
     #[test]
-    fn build_project_emits_native_binary_with_static_globals() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("static-globals");
-        create_project(&project, Some("static-globals-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "static LIMIT: int = 40 + 2\nstatic READY: bool = LIMIT == 42\nstatic LABEL: string = \"stage1\"\nprint LIMIT\nprint READY\nprint LABEL\n",
-        )
-        .expect("write source");
-        let built = build_project(&project).expect("build project with static globals");
-        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
-        assert!(generated.contains("static static_globals_app_main_LIMIT: i64 = 40 + 2;"));
-        assert!(generated.contains("static static_globals_app_main_READY: bool = 40 + 2 == 42;"));
-        assert!(
-            generated.contains("static static_globals_app_main_LABEL: &'static str = \"stage1\";")
-        );
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
-            "42\ntrue\nstage1\n"
-        );
-    }
-
-    #[test]
-    fn build_project_folds_static_string_comparisons() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("static-string-comparison");
-        create_project(&project, Some("static-string-comparison-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "static SAME: bool = \"a\" == \"a\"\nstatic DIFFERENT: bool = \"a\" != \"b\"\nprint SAME\nprint DIFFERENT\n",
-        )
-        .expect("write source");
-
-        let built = build_project(&project).expect("build project with static string comparisons");
-        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
-        assert!(generated.contains(
-            "static static_string_comparison_app_main_SAME: bool = true;"
-        ));
-        assert!(generated.contains(
-            "static static_string_comparison_app_main_DIFFERENT: bool = true;"
-        ));
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\n");
-    }
-
-    #[test]
-    fn build_project_preserves_static_source_names_for_recursion_tracking() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("static-source-names");
-        create_project(&project, Some("p")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "static A: int = 1\nstatic p_main_A: int = A\nprint A\nprint p_main_A\n",
-        )
-        .expect("write source");
-
-        let built = build_project(&project).expect("static names should not false-recurse");
-        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
-        assert!(generated.contains("static p_main_A: i64 = 1;"));
-        assert!(generated.contains("static p_main_p_main_A: i64 = 1;"));
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n1\n");
-    }
-
-    #[test]
-    fn build_project_emits_native_binary_with_imported_public_static_globals() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("public-static-globals");
-        create_project(&project, Some("public-static-globals-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "import \"values.ax\"\nprint LIMIT\nprint READY\n",
-        )
-        .expect("write main");
-        fs::write(
-            project.join("src/values.ax"),
-            "pub static LIMIT: int = 40 + 2\npub static READY: bool = LIMIT == 42\n",
-        )
-        .expect("write values");
-        let built = build_project(&project).expect("build project with imported static globals");
-        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
-        assert!(generated.contains("static public_static_globals_app_values_LIMIT: i64 = 40 + 2;"));
-        assert!(
-            generated
-                .contains("static public_static_globals_app_values_READY: bool = 40 + 2 == 42;")
-        );
-        let output = compiled_binary_command(&built.binary)
-            .output()
-            .expect("run compiled binary");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\n");
-    }
-
-    #[test]
     fn check_project_rejects_missing_import() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-import");
@@ -7754,25 +6852,6 @@ print takes_two(three)
     }
 
     #[test]
-    fn check_project_rejects_static_type_mismatch() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("static-type-mismatch");
-        create_project(&project, Some("static-type-mismatch-app")).expect("create project");
-        fs::write(
-            project.join("src/main.ax"),
-            "static READY: bool = 42\nprint READY\n",
-        )
-        .expect("write source");
-        let error = check_project(&project).expect_err("static type mismatch should fail");
-        assert!(
-            error
-                .message
-                .contains("static \"READY\" expects bool, got int")
-        );
-        assert_eq!(error.kind, "type");
-    }
-
-    #[test]
     fn check_project_rejects_type_alias_inside_function_block() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("block-type-alias");
@@ -7805,7 +6884,7 @@ print takes_two(three)
         assert!(
             error
                 .message
-                .contains("only supports top-level const/static declarations")
+                .contains("only supports top-level const declarations")
         );
         assert_eq!(error.kind, "parse");
     }
@@ -9064,49 +8143,6 @@ print 0
     }
 
     #[test]
-    fn check_project_reports_import_cycle_path_and_stable_code() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("import-cycle");
-        create_project(&project, Some("import-cycle-app")).expect("create project");
-        let main = project.join("src/main.ax");
-        let alpha = project.join("src/alpha.ax");
-        let beta = project.join("src/beta.ax");
-        fs::write(&main, "import \"alpha.ax\"\n\nprint alpha_value()\n").expect("write main");
-        fs::write(
-            &alpha,
-            "import \"beta.ax\"\n\npub fn alpha_value(): int {\nreturn beta_value()\n}\n",
-        )
-        .expect("write alpha");
-        fs::write(
-            &beta,
-            "import \"alpha.ax\"\n\npub fn beta_value(): int {\nreturn 7\n}\n",
-        )
-        .expect("write beta");
-
-        let error = check_project(&project).expect_err("import cycle should fail");
-        assert_eq!(error.kind, "import");
-        assert_eq!(error.code.as_deref(), Some("import_cycle"));
-        assert!(error.message.contains("circular import detected:"));
-        assert!(error.message.contains(&alpha.display().to_string()));
-        assert!(error.message.contains(&beta.display().to_string()));
-        assert!(error.path.as_deref().unwrap().ends_with("src/alpha.ax"));
-        assert_eq!(error.related.len(), 2);
-        let related_paths = error
-            .related
-            .iter()
-            .map(|related| related.path.as_deref().unwrap_or_default())
-            .collect::<Vec<_>>();
-        assert!(related_paths.iter().any(|path| path.ends_with("src/alpha.ax")));
-        assert!(related_paths.iter().any(|path| path.ends_with("src/beta.ax")));
-        assert!(
-            error
-                .related
-                .iter()
-                .all(|related| related.code.as_deref() == Some("import_cycle_member"))
-        );
-    }
-
-    #[test]
     fn build_project_emits_native_binary_from_imported_payload_enums() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("payload-enum-modules");
@@ -9261,94 +8297,6 @@ print 0
     }
 
     #[test]
-    fn build_project_locked_offline_succeeds_for_local_graph() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("locked-offline-build");
-        create_project(&project, Some("locked-offline-app")).expect("create project");
-
-        let output = build_project_with_options(
-            &project,
-            &BuildOptions {
-                locked: true,
-                offline: true,
-                ..BuildOptions::default()
-            },
-        )
-        .expect("build local project in locked offline mode");
-
-        assert!(Path::new(&output.binary).exists());
-    }
-
-    #[test]
-    fn build_project_offline_requires_locked() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("offline-without-locked");
-        create_project(&project, Some("offline-without-locked-app")).expect("create project");
-
-        let error = build_project_with_options(
-            &project,
-            &BuildOptions {
-                offline: true,
-                ..BuildOptions::default()
-            },
-        )
-        .expect_err("offline without locked should fail");
-
-        assert_eq!(error.kind, "build");
-        assert!(error.message.contains("offline builds require --locked"));
-    }
-
-    #[test]
-    fn build_project_locked_offline_rejects_missing_lockfile_without_writing_it() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("missing-lockfile");
-        create_project(&project, Some("missing-lockfile-app")).expect("create project");
-        let lockfile = lockfile_path(&project);
-        fs::remove_file(&lockfile).expect("remove lockfile");
-
-        let error = build_project_with_options(
-            &project,
-            &BuildOptions {
-                locked: true,
-                offline: true,
-                ..BuildOptions::default()
-            },
-        )
-        .expect_err("missing lockfile should fail");
-
-        assert_eq!(error.kind, "lockfile");
-        assert!(!lockfile.exists());
-    }
-
-    #[test]
-    fn build_project_locked_offline_rejects_stale_lockfile_without_rewriting_it() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("stale-lockfile");
-        create_project(&project, Some("stale-lockfile-app")).expect("create project");
-        let lockfile = lockfile_path(&project);
-        let stale_lockfile = fs::read_to_string(&lockfile)
-            .expect("read lockfile")
-            .replace("stale-lockfile-app", "other-app");
-        fs::write(&lockfile, &stale_lockfile).expect("write stale lockfile");
-
-        let error = build_project_with_options(
-            &project,
-            &BuildOptions {
-                locked: true,
-                offline: true,
-                ..BuildOptions::default()
-            },
-        )
-        .expect_err("stale lockfile should fail");
-
-        assert_eq!(error.kind, "lockfile");
-        assert_eq!(
-            fs::read_to_string(&lockfile).expect("read stale lockfile"),
-            stale_lockfile
-        );
-    }
-
-    #[test]
     fn build_project_wasm_alias_emits_wasm_artifact() {
         if !rust_target_installed("wasm32-wasip1") {
             eprintln!("skipping wasm build test; wasm32-wasip1 target is not installed");
@@ -9409,9 +8357,6 @@ print 0
         assert!(debug.packages[0].debug);
         let debug_map = PathBuf::from(debug.debug_map.as_ref().expect("debug map path"));
         assert!(debug_map.exists());
-        let debug_manifest =
-            PathBuf::from(debug.debug_manifest.as_ref().expect("debug manifest path"));
-        assert!(debug_manifest.exists());
         assert_eq!(debug.cache_hits, 0);
         assert_eq!(debug.cache_misses, 1);
 
@@ -9433,23 +8378,6 @@ print 0
         assert_eq!(map["mappings"][0]["line"], 1);
         assert_eq!(map["mappings"][0]["column"], 1);
         assert!(map["mappings"][0]["generated_line"].is_u64());
-        let manifest: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(&debug_manifest).expect("read debug manifest"),
-        )
-        .expect("parse debug manifest");
-        assert_eq!(manifest["schema_version"], "axiom.stage1.debug_manifest.v1");
-        assert_eq!(manifest["binary"], debug.binary);
-        assert_eq!(manifest["generated_rust"], debug.generated_rust);
-        assert_eq!(manifest["debug_map"], debug_map.display().to_string());
-        assert_eq!(manifest["rustc"]["debuginfo"], 2);
-        assert_eq!(manifest["rustc"]["opt_level"], 0);
-        assert_eq!(manifest["rustc"]["axiom_dwarf"], false);
-        assert_eq!(manifest["source_files"][0]["path"], source);
-        assert_eq!(manifest["source_files"][0]["line_count"], 2);
-        assert_eq!(manifest["source_files"][0]["mapping_count"], 2);
-        assert!(manifest["source_files"][0]["source_hash"].is_string());
-        assert!(manifest["binary_hash"].is_string());
-        assert!(manifest["generated_rust_hash"].is_string());
 
         if let Ok(readelf) = which::which("readelf") {
             let output = Command::new(readelf)
@@ -9542,7 +8470,6 @@ print 0
         );
 
         fs::remove_file(&debug_map).expect("remove debug map");
-        fs::remove_file(&debug_manifest).expect("remove debug manifest");
         let cached_debug = build_project_with_options(
             &project,
             &BuildOptions {
@@ -9557,7 +8484,6 @@ print 0
         assert_eq!(cached_debug.cache_hits, 1);
         assert_eq!(cached_debug.cache_misses, 0);
         assert!(debug_map.exists());
-        assert!(debug_manifest.exists());
     }
 
     #[test]
@@ -9678,95 +8604,6 @@ print 0
     }
 
     #[test]
-    fn check_json_can_include_package_public_api_exports() {
-        let dir = tempdir().expect("tempdir");
-        let project = dir.path().join("public-api-workspace");
-        let core = project.join("deps/core");
-        create_project(&project, Some("public-api-app")).expect("create root project");
-        create_project(&core, Some("public-api-core")).expect("create core project");
-
-        fs::write(
-            project.join("axiom.toml"),
-            "[package]\nname = \"public-api-app\"\nversion = \"0.1.0\"\n\n[workspace]\nmembers = [\"deps/core\"]\n\n[dependencies]\ncore = { path = \"deps/core\" }\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
-        )
-        .expect("write root manifest");
-        fs::write(
-            project.join("src/main.ax"),
-            "import \"core/main.ax\"\n\npub fn root_answer(): int {\nreturn answer()\n}\n\nprint root_answer()\n",
-        )
-        .expect("write root source");
-        fs::write(
-            core.join("src/main.ax"),
-            "pub const LIMIT: int = 7\npub type Id = int\n\npub struct Widget {\nlabel: string\n}\n\npub enum Status {\nReady\n}\n\npub fn answer(): int {\nreturn LIMIT\n}\n\npub fn use_map(values: {string: int}): {string: int} {\nreturn values\n}\n\nimpl Widget {\npub fn label(self): string {\nreturn self.label\n}\n}\n",
-        )
-        .expect("write core source");
-
-        let core_manifest = load_manifest(&core).expect("load core manifest");
-        fs::write(
-            core.join("axiom.lock"),
-            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
-        )
-        .expect("write core lockfile");
-        let root_manifest = load_manifest(&project).expect("load root manifest");
-        fs::write(
-            project.join("axiom.lock"),
-            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile"),
-        )
-        .expect("write root lockfile");
-
-        let output = check_project_with_options(
-            &project,
-            &CheckOptions {
-                package: None,
-                include_exports: true,
-            },
-        )
-        .expect("check public api workspace");
-        let core_package = output
-            .packages
-            .iter()
-            .find(|package| package.package_root.ends_with("deps/core"))
-            .expect("core package exports");
-        let exported = core_package
-            .exports
-            .iter()
-            .map(|export| (export.kind.as_str(), export.name.as_str()))
-            .collect::<std::collections::BTreeSet<_>>();
-        assert!(exported.contains(&("const", "LIMIT")));
-        assert!(exported.contains(&("type_alias", "Id")));
-        assert!(exported.contains(&("struct", "Widget")));
-        assert!(exported.contains(&("enum", "Status")));
-        assert!(exported.contains(&("function", "answer")));
-        assert!(exported.contains(&("function", "label")));
-        assert!(exported.contains(&("function", "use_map")));
-        let signatures = core_package
-            .exports
-            .iter()
-            .map(|export| (export.name.as_str(), export.signature.as_deref()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(
-            signatures.get("label").copied().flatten(),
-            Some("fn Widget.label(self): string")
-        );
-        assert_eq!(
-            signatures.get("use_map").copied().flatten(),
-            Some("fn use_map(values: {string: int}): {string: int}")
-        );
-
-        let payload = json_contract::check_success(&project, &output);
-        assert!(payload["exports"].is_array());
-        let root_exports = payload["exports"]
-            .as_array()
-            .expect("top-level root exports array");
-        assert!(root_exports.iter().any(|export| {
-            export["kind"] == "function"
-                && export["name"] == "root_answer"
-                && export["signature"] == "fn root_answer(): int"
-        }));
-        assert!(payload["packages"][1]["exports"].is_array());
-    }
-
-    #[test]
     fn json_contract_build_payload_includes_target() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("json-build");
@@ -9778,10 +8615,8 @@ print 0
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
-
                 locked: true,
                 offline: true,
-
                 ..BuildOptions::default()
             },
         )
@@ -9794,10 +8629,8 @@ print 0
         );
         assert_eq!(payload["command"], "build");
         assert_eq!(payload["backend"], "generated-rust");
-
         assert_eq!(payload["locked"], true);
         assert_eq!(payload["offline"], true);
-
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
@@ -9812,12 +8645,6 @@ print 0
             payload["packages"][0]["cache_key"]["lockfile_hash"],
             payload["cache_key"]["lockfile_hash"]
         );
-
-        assert!(payload["target"].is_string());
-        assert_eq!(payload["debug"], true);
-        assert!(payload["debug_map"].is_string());
-        assert!(payload["debug_manifest"].is_string());
-
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());

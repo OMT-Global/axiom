@@ -10,7 +10,6 @@ pub struct Program {
     pub path: String,
     pub structs: Vec<StructDef>,
     pub enums: Vec<EnumDef>,
-    pub statics: Vec<StaticDef>,
     pub functions: Vec<Function>,
     pub stmts: Vec<Stmt>,
 }
@@ -38,13 +37,6 @@ pub struct EnumVariantDef {
     pub name: String,
     pub payload_tys: Vec<Type>,
     pub payload_names: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct StaticDef {
-    pub name: String,
-    pub ty: Type,
-    pub expr: Expr,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -451,10 +443,6 @@ struct VariantInfo {
 
 const OWNERSHIP_CLOSURE_MOVE_CAPTURED_NON_COPY: &str = "closure_move_captured_non_copy";
 const OWNERSHIP_CLOSURE_BORROWED_SLICE_RETURN: &str = "closure_borrowed_slice_return";
-
-const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
-const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str = "borrow_return_requires_param_origin";
-const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
 const OWNERSHIP_USE_AFTER_MOVE: &str = "use_after_move";
 
 fn function_symbol_name(function: &syntax::Function) -> String {
@@ -557,7 +545,6 @@ fn lower_with_capabilities_impl(
         &enum_names,
         &aliases,
         &consts,
-
     )
     .map_err(single_diagnostic)?;
     let functions =
@@ -605,14 +592,6 @@ fn lower_with_capabilities_impl(
         current_return: None,
         current_borrow_return_params: HashSet::new(),
     };
-    let statics = match lower_static_decls(&program.consts, &structs, &enums, &aliases, &ctx) {
-        Ok(statics) => statics,
-        Err(error) if recover => {
-            append_diagnostic(&mut diagnostics, error);
-            Vec::new()
-        }
-        Err(error) => return Err(single_diagnostic(error)),
-    };
     let mut env = HashMap::new();
     let stmts = if recover {
         let (stmts, mut block_diagnostics, _) =
@@ -632,7 +611,6 @@ fn lower_with_capabilities_impl(
         path: program.path.clone(),
         structs: lowered_structs,
         enums: lowered_enums,
-        statics,
         functions: lowered_functions,
         stmts,
     })
@@ -889,7 +867,6 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -898,10 +875,6 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
-
-        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -949,8 +922,6 @@ fn type_has_unboxed_recursive_path(
         | Type::Map(_, _)
         | Type::Array(_, _)
         | Type::Fn(_, _) => false,
-        Type::Slice(_) | Type::MutSlice(_) | Type::Map(_, _) | Type::Array(_, _) => false,
-
         Type::Option(inner)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -2103,7 +2074,6 @@ fn monomorphize_aggregates(program: syntax::Program) -> Result<syntax::Program, 
                     &mut queue,
                     &mut queued,
                 )?,
-                is_static: constant.is_static,
                 visibility: constant.visibility,
                 line: constant.line,
                 column: constant.column,
@@ -2773,7 +2743,6 @@ fn rewrite_aggregate_type_name(
                 column,
             )?),
         ),
-
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
@@ -3776,7 +3745,7 @@ fn rewrite_expr_generic_calls(
                 }
                 monomorphized_function_name(name, &type_args)
             } else {
-                if !type_args.is_empty() && !preserves_intrinsic_type_args(name) {
+                if !type_args.is_empty() && !is_async_runtime_intrinsic(name) {
                     return Err(Diagnostic::new(
                         "type",
                         format!("function {:?} is not generic", name),
@@ -3785,7 +3754,7 @@ fn rewrite_expr_generic_calls(
                 }
                 name.clone()
             };
-            let keep_type_args = preserves_intrinsic_type_args(name.as_str());
+            let keep_type_args = is_async_runtime_intrinsic(name.as_str());
             syntax::Expr::Call {
                 name,
                 type_args: if keep_type_args {
@@ -4253,10 +4222,6 @@ fn is_async_runtime_intrinsic(name: &str) -> bool {
     )
 }
 
-fn preserves_intrinsic_type_args(name: &str) -> bool {
-    is_async_runtime_intrinsic(name) || matches!(name, "map_get" | "map_contains_key")
-}
-
 fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
     match ty {
         syntax::TypeName::Int => String::from("int"),
@@ -4323,9 +4288,6 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
         .collect()
 }
 
-fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
-    Diagnostic::new("ownership", message).with_code(code)
-}
 impl Type {
     fn is_error(&self) -> bool {
         matches!(self, Type::Error)
@@ -4810,60 +4772,6 @@ fn collect_method_signatures(
         }
     }
     Ok(methods)
-}
-
-fn lower_static_decls(
-    consts: &[syntax::ConstDecl],
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    aliases: &HashMap<String, syntax::TypeAliasDecl>,
-    ctx: &LowerContext<'_>,
-) -> Result<Vec<StaticDef>, Diagnostic> {
-    let mut lowered = Vec::new();
-    for decl in consts.iter().filter(|decl| decl.is_static) {
-        let ty = lower_type(&decl.ty, structs, enums, aliases, decl.line, decl.column)?;
-        let mut env = HashMap::new();
-        let mut expr = lower_expr_with_expected(&decl.expr, Some(&ty), &mut env, ctx)?;
-        if expr.ty() != &ty {
-            return Err(Diagnostic::new(
-                "type",
-                format!("static {:?} expects {}, got {}", decl.name, ty, expr.ty()),
-            )
-            .with_span(decl.line, decl.column));
-        }
-        if matches!(ty, Type::Bool) {
-            if let Some(value) = static_bool_value(&expr) {
-                expr = Expr::Literal {
-                    ty: Type::Bool,
-                    value: LiteralValue::Bool(value),
-                };
-            }
-        }
-        if matches!(ty, Type::String)
-            && !matches!(
-                expr,
-                Expr::Literal {
-                    value: LiteralValue::String(_),
-                    ..
-                }
-            )
-        {
-            return Err(Diagnostic::new(
-                "type",
-                format!(
-                    "static {:?} string initializers must be string literals in stage1",
-                    decl.name
-                ),
-            )
-            .with_span(decl.line, decl.column));
-        }
-        lowered.push(StaticDef {
-            name: decl.name.clone(),
-            ty,
-            expr,
-        });
-    }
-    Ok(lowered)
 }
 
 fn lower_function(
@@ -5520,7 +5428,6 @@ fn lower_match_stmt(
         span: SourceSpan { line, column },
     })
 }
-
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5560,7 +5467,6 @@ fn lower_stmt(
             let expected_array_len = declared_array_len(ty, ctx, *line, *column)?;
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
-
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5577,17 +5483,6 @@ fn lower_stmt(
             }
             if !type_assignable_to(&actual, &expected) && !actual.is_error() && !expected.is_error()
             {
-
-            if actual != expected && !actual.is_error() && !expected.is_error() {
-
-            if actual != expected && !actual.is_error() && !expected.is_error() {
-
-            if actual != expected && !actual.is_error() && !expected.is_error() {
-
-            if actual != expected && !actual.is_error() && !expected.is_error() {
-
-            if actual != expected && !actual.is_error() && !expected.is_error() {
-
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -6421,9 +6316,6 @@ fn lower_expr_with_expected_inner(
                     name, type_args, args, *line, *column, env, ctx,
                 );
             }
-            if name == "map_get" || name == "map_contains_key" {
-                return lower_map_lookup_intrinsic(name, type_args, args, *line, *column, env, ctx);
-            }
             if !type_args.is_empty() {
                 return Err(
                     Diagnostic::new("type", format!("function {name:?} is not generic"))
@@ -6589,10 +6481,7 @@ fn lower_expr_with_expected_inner(
                     0
                 };
                 let lhs = lower_expr(&args[value_start], env, ctx)?;
-
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String | Type::Str) {
-
-                if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -6914,74 +6803,6 @@ fn lower_expr_with_expected_inner(
                     name: name.clone(),
                     args: lowered_args,
                     ty,
-            if name == "cli_args" || name == "cli_arg_count" {
-                if !args.is_empty() {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!("{name} expects 0 arguments, got {}", args.len()),
-                    )
-                    .with_span(*line, *column));
-                }
-                return Ok(Expr::Call {
-                    name: name.clone(),
-                    args: Vec::new(),
-                    ty: if name == "cli_args" {
-                        Type::Array(Box::new(Type::String))
-                    } else {
-                        Type::Int
-                    },
-                });
-            }
-            if name == "cli_arg" {
-                if args.len() != 1 {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!("cli_arg expects 1 argument, got {}", args.len()),
-                    )
-                    .with_span(*line, *column));
-                }
-                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
-                if lowered.ty() != &Type::Int {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!("cli_arg expects an int argument, got {}", lowered.ty()),
-                    )
-                    .with_span(args[0].line(), args[0].column()));
-                }
-                return Ok(Expr::Call {
-                    name: name.clone(),
-                    args: vec![lowered],
-                    ty: Type::Option(Box::new(Type::String)),
-            if matches!(
-                name.as_str(),
-                "encoding_url_component_encode"
-                    | "encoding_url_component_decode"
-                    | "encoding_path_segment_encode"
-            ) {
-                if args.len() != 1 {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!("{name} expects 1 argument, got {}", args.len()),
-                    )
-                    .with_span(*line, *column));
-                }
-                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
-                if lowered.ty() != &Type::String {
-                    return Err(Diagnostic::new(
-                        "type",
-                        format!("{name} expects a string argument, got {}", lowered.ty()),
-                    )
-                    .with_span(args[0].line(), args[0].column()));
-                }
-                move_lowered_value(&lowered, env)?;
-                return Ok(Expr::Call {
-                    name: name.clone(),
-                    args: vec![lowered],
-                    ty: if name == "encoding_url_component_decode" {
-                        Type::Option(Box::new(Type::String))
-                    } else {
-                        Type::String
-                    },
                 });
             }
             if name == "fs_read" {
@@ -7843,8 +7664,6 @@ fn lower_expr_with_expected_inner(
                         ctx,
                         allow_temporary_string_borrow,
                     )?;
-                for (arg, expected) in args.iter().zip(signature.params.iter()) {
-                    let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
                     if !type_assignable_to(lowered.ty(), expected) {
                         return Err(Diagnostic::new(
                             "type",
@@ -9357,91 +9176,6 @@ fn lower_async_runtime_intrinsic(
     })
 }
 
-fn lower_map_lookup_intrinsic(
-    name: &str,
-    type_args: &[syntax::TypeName],
-    args: &[syntax::Expr],
-    line: usize,
-    column: usize,
-    env: &mut HashMap<String, Binding>,
-    ctx: &LowerContext<'_>,
-) -> Result<Expr, Diagnostic> {
-    if !type_args.is_empty() && type_args.len() != 2 {
-        return Err(Diagnostic::new(
-            "type",
-            format!(
-                "{name} expects 0 or 2 type arguments, got {}",
-                type_args.len()
-            ),
-        )
-        .with_span(line, column));
-    }
-    if args.len() != 2 {
-        return Err(Diagnostic::new(
-            "type",
-            format!("{name} expects 2 arguments, got {}", args.len()),
-        )
-        .with_span(line, column));
-    }
-    let lowered_map = lower_expr(&args[0], env, ctx)?;
-    let Type::Map(key_ty, value_ty) = lowered_map.ty() else {
-        return Err(Diagnostic::new(
-            "type",
-            format!("{name} expects a map value, got {}", lowered_map.ty()),
-        )
-        .with_span(args[0].line(), args[0].column()));
-    };
-    let key_ty = (*key_ty.clone()).clone();
-    let value_ty = (*value_ty.clone()).clone();
-    if let [expected_key, expected_value] = type_args {
-        let expected_key = lower_type(
-            expected_key,
-            ctx.structs,
-            ctx.enums,
-            ctx.aliases,
-            line,
-            column,
-        )?;
-        let expected_value = lower_type(
-            expected_value,
-            ctx.structs,
-            ctx.enums,
-            ctx.aliases,
-            line,
-            column,
-        )?;
-        if expected_key != key_ty || expected_value != value_ty {
-            return Err(Diagnostic::new(
-                "type",
-                format!(
-                    "{name} type arguments expect {{{expected_key}: {expected_value}}}, got {}",
-                    lowered_map.ty()
-                ),
-            )
-            .with_span(line, column));
-        }
-    }
-    let lowered_key = lower_expr_with_expected(&args[1], Some(&key_ty), env, ctx)?;
-    if lowered_key.ty() != &key_ty {
-        return Err(Diagnostic::new(
-            "type",
-            format!("{name} expects key type {key_ty}, got {}", lowered_key.ty()),
-        )
-        .with_span(args[1].line(), args[1].column()));
-    }
-    move_lowered_value(&lowered_map, env)?;
-    move_lowered_value(&lowered_key, env)?;
-    Ok(Expr::Call {
-        name: name.to_string(),
-        args: vec![lowered_map, lowered_key],
-        ty: if name == "map_get" {
-            Type::Option(Box::new(value_ty))
-        } else {
-            Type::Bool
-        },
-    })
-}
-
 fn lower_projection_base_expr(
     expr: &syntax::Expr,
     env: &mut HashMap<String, Binding>,
@@ -10227,9 +9961,6 @@ fn explicit_return_lifetime(ty: &syntax::TypeName) -> Option<&str> {
         | syntax::TypeName::Bool
         | syntax::TypeName::String
         | syntax::TypeName::Str => None,
-
-        | syntax::TypeName::Bool
-        | syntax::TypeName::String => None,
     }
 }
 
@@ -10255,14 +9986,11 @@ fn type_has_lifetime(ty: &syntax::TypeName, lifetime: &str) -> bool {
             params.iter().any(|arg| type_has_lifetime(arg, lifetime))
                 || type_has_lifetime(return_ty, lifetime)
         }
-
         syntax::TypeName::Int
         | syntax::TypeName::Numeric(_)
         | syntax::TypeName::Bool
         | syntax::TypeName::String
         | syntax::TypeName::Str => false,
-
-        syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
     }
 }
 
@@ -10276,302 +10004,6 @@ fn explicit_borrow_return_params(function: &syntax::Function) -> Option<Vec<usiz
             .filter_map(|(index, param)| type_has_lifetime(&param.ty, lifetime).then_some(index))
             .collect(),
     )
-}
-
-fn contains_borrowed_slice_type_inner(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    visiting_structs: &mut HashSet<String>,
-    visiting_enums: &mut HashSet<String>,
-) -> bool {
-    match ty {
-        Type::Slice(_) | Type::MutSlice(_) => true,
-        Type::Option(inner) => contains_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Result(ok, err) => {
-            contains_borrowed_slice_type_inner(ok, structs, enums, visiting_structs, visiting_enums)
-                || contains_borrowed_slice_type_inner(
-                    err,
-                    structs,
-                    enums,
-                    visiting_structs,
-                    visiting_enums,
-                )
-        }
-        Type::Tuple(elements) => elements.iter().any(|element| {
-            contains_borrowed_slice_type_inner(
-                element,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }),
-        Type::Map(key, value) => {
-            contains_borrowed_slice_type_inner(
-                key,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            ) || contains_borrowed_slice_type_inner(
-                value,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Array(inner)
-
-        Type::Array(inner, _)
-        | Type::Task(inner)
-        | Type::JoinHandle(inner)
-        | Type::AsyncChannel(inner)
-        | Type::SelectResult(inner) => contains_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Fn(params, return_ty) => {
-            params.iter().any(|param| {
-                contains_borrowed_slice_type_inner(
-                    param,
-                    structs,
-                    enums,
-                    visiting_structs,
-                    visiting_enums,
-                )
-            }) || contains_borrowed_slice_type_inner(
-                return_ty,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Struct(name) => {
-            if !visiting_structs.insert(name.clone()) {
-                return false;
-            }
-            let contains = structs.get(name).is_some_and(|struct_def| {
-                struct_def.fields.iter().any(|field| {
-                    contains_borrowed_slice_type_inner(
-                        &field.ty,
-                        structs,
-                        enums,
-                        visiting_structs,
-                        visiting_enums,
-                    )
-                })
-            });
-            visiting_structs.remove(name);
-            contains
-        }
-        Type::Enum(name) => {
-            if !visiting_enums.insert(name.clone()) {
-                return false;
-            }
-            let contains = enums.get(name).is_some_and(|enum_def| {
-                enum_def.variants.iter().any(|variant| {
-                    variant.payload_tys.iter().any(|payload_ty| {
-                        contains_borrowed_slice_type_inner(
-                            payload_ty,
-                            structs,
-                            enums,
-                            visiting_structs,
-                            visiting_enums,
-                        )
-                    })
-                })
-            });
-            visiting_enums.remove(name);
-            contains
-        }
-        Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
-            false
-        }
-    }
-}
-
-fn contains_mut_borrowed_slice_type_inner(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    visiting_structs: &mut HashSet<String>,
-    visiting_enums: &mut HashSet<String>,
-) -> bool {
-    match ty {
-        Type::MutSlice(_) => true,
-        Type::Error
-        | Type::Slice(_)
-        | Type::Int
-        | Type::Bool
-        | Type::String
-        | Type::Ptr(_)
-        | Type::MutPtr(_) => false,
-        Type::Option(inner) => contains_mut_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Result(ok, err) => {
-            contains_mut_borrowed_slice_type_inner(
-                ok,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            ) || contains_mut_borrowed_slice_type_inner(
-                err,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Tuple(elements) => elements.iter().any(|element| {
-            contains_mut_borrowed_slice_type_inner(
-                element,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }),
-        Type::Map(key, value) => {
-            contains_mut_borrowed_slice_type_inner(
-                key,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            ) || contains_mut_borrowed_slice_type_inner(
-                value,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Array(inner)
-        Type::Array(inner, _)
-        | Type::Task(inner)
-        | Type::JoinHandle(inner)
-        | Type::AsyncChannel(inner)
-        | Type::SelectResult(inner) => contains_mut_borrowed_slice_type_inner(
-            inner,
-            structs,
-            enums,
-            visiting_structs,
-            visiting_enums,
-        ),
-        Type::Fn(params, return_ty) => {
-            params.iter().any(|param| {
-                contains_mut_borrowed_slice_type_inner(
-                    param,
-                    structs,
-                    enums,
-                    visiting_structs,
-                    visiting_enums,
-                )
-            }) || contains_mut_borrowed_slice_type_inner(
-                return_ty,
-                structs,
-                enums,
-                visiting_structs,
-                visiting_enums,
-            )
-        }
-        Type::Struct(name) => {
-            if !visiting_structs.insert(name.clone()) {
-                return false;
-            }
-            let contains = structs.get(name).is_some_and(|struct_def| {
-                struct_def.fields.iter().any(|field| {
-                    contains_mut_borrowed_slice_type_inner(
-                        &field.ty,
-                        structs,
-                        enums,
-                        visiting_structs,
-                        visiting_enums,
-                    )
-                })
-            });
-            visiting_structs.remove(name);
-            contains
-        }
-        Type::Enum(name) => {
-            if !visiting_enums.insert(name.clone()) {
-                return false;
-            }
-            let contains = enums.get(name).is_some_and(|enum_def| {
-                enum_def.variants.iter().any(|variant| {
-                    variant.payload_tys.iter().any(|payload_ty| {
-                        contains_mut_borrowed_slice_type_inner(
-                            payload_ty,
-                            structs,
-                            enums,
-                            visiting_structs,
-                            visiting_enums,
-                        )
-                    })
-                })
-            });
-            visiting_enums.remove(name);
-            contains
-        }
-    }
-}
-
-fn classify_borrow_return(
-    params: &[Type],
-    return_ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-    line: usize,
-    column: usize,
-) -> Result<Vec<usize>, Diagnostic> {
-    if !contains_borrowed_slice_type(return_ty, structs, enums) {
-        return Ok(Vec::new());
-    }
-    let matches = params
-        .iter()
-        .enumerate()
-        .filter_map(|(index, ty)| contains_borrowed_slice_type(ty, structs, enums).then_some(index))
-        .collect::<Vec<_>>();
-    if matches.is_empty() {
-        return Err(Diagnostic::new(
-            "type",
-            "borrowed return functions must take at least one borrowed parameter in stage1",
-        )
-        .with_span(line, column));
-    }
-    Ok(matches)
-}
-
-fn borrow_kind_for_type(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-) -> Option<BorrowKind> {
-    if contains_mut_borrowed_slice_type(ty, structs, enums) {
-        Some(BorrowKind::Mutable)
-    } else if contains_borrowed_slice_type(ty, structs, enums) {
-        Some(BorrowKind::Shared)
-    } else {
-        None
-    }
 }
 
 fn increment_active_borrows(
@@ -10593,43 +10025,6 @@ fn increment_active_borrows(
             borrow_kind,
             BorrowSourceSpan::new(line, column),
         )?;
-
-        match borrow_kind {
-            BorrowKind::Shared if binding.active_mut_borrow_count > 0 => {
-                return Err(ownership_error(
-                    OWNERSHIP_SHARED_BORROW_WHILE_MUTABLE_LIVE,
-                    format!(
-                        "cannot create shared borrow of value {owner_name:?} while a mutable borrow is still live"
-                    ),
-                )
-                .with_span(line, column));
-            }
-            BorrowKind::Mutable if binding.active_mut_borrow_count > 0 => {
-                return Err(ownership_error(
-                    OWNERSHIP_MUTABLE_BORROW_WHILE_MUTABLE_LIVE,
-                    format!(
-                        "cannot create mutable borrow of value {owner_name:?} while another mutable borrow is still live"
-                    ),
-                )
-                .with_span(line, column));
-            }
-            BorrowKind::Mutable if binding.active_borrow_count > 0 => {
-                return Err(ownership_error(
-                    OWNERSHIP_MUTABLE_BORROW_WHILE_SHARED_LIVE,
-                    format!(
-                        "cannot create mutable borrow of value {owner_name:?} while a shared borrow is still live"
-                    ),
-                )
-                .with_help("drop the shared borrow before creating a mutable borrow")
-                .with_span(line, column));
-            }
-            _ => {}
-        }
-        binding.active_borrow_count += 1;
-        if matches!(borrow_kind, BorrowKind::Mutable) {
-            binding.active_mut_borrow_count += 1;
-        }
-
     }
     Ok(())
 }
@@ -10931,7 +10326,6 @@ fn lower_type_inner<T, U>(
                 return_ty, structs, enums, aliases, consts, resolving, line, column,
             )?),
         )),
-
     }
 }
 
