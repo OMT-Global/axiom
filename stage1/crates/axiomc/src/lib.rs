@@ -2,30 +2,7 @@ pub mod borrowck;
 pub mod codegen;
 pub mod dap;
 pub mod diagnostic_catalog;
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -48,35 +25,12 @@ mod tests {
     use crate::manifest::{
         CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
         render_manifest,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
         CapabilityConfig, CapabilityKind, ExpectedDiagnostic, TestTarget, capability_descriptors,
         load_manifest, render_manifest,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
         lockfile_path, render_manifest,
-=======
-=======
+
     };
     use crate::mir;
     use crate::new_project::{WorkloadTemplate, create_project, create_project_with_template};
@@ -108,30 +62,22 @@ mod tests {
         crypto: bool,
     ) -> String {
         format!(
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
-=======
+
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-=======
+
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
-=======
-=======
-=======
+
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
-=======
+
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
         )
-=======
+
         let mut manifest = format!(
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         );
@@ -458,30 +404,7 @@ print borrowed
     }
 
     #[test]
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -3092,50 +3015,18 @@ crypto = false
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
+
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
         assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 8);
-=======
-=======
+
     }
 
     #[test]
@@ -3240,8 +3131,7 @@ crypto = false
                 .message
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
+
     }
 
     #[test]
@@ -3418,16 +3308,7 @@ crypto = false
         assert_eq!(payload["capabilities"][3]["name"], "env");
         assert!(payload["capabilities"][3]["allowed"].is_null());
         assert_eq!(payload["capabilities"][3]["unsafe_unrestricted"], true);
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     }
 
     #[test]
@@ -6004,55 +5885,18 @@ print serve_once("127.0.0.1:18080", "hello")
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
                 kind: TestKind::Unit,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
                 stderr: None,
                 expected_error: None,
                 capabilities: Vec::new(),
                 package: None,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
             }]
         );
     }
 
     #[test]
-<<<<<<< HEAD
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     fn manifest_parses_richer_test_kinds() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("typed-tests");
@@ -6109,7 +5953,7 @@ print serve_once("127.0.0.1:18080", "hello")
         assert!(
             err.message
                 .contains("dependencies.core.version is reserved")
-=======
+
     fn manifest_parses_test_metadata_contract() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("tests-metadata");
@@ -6148,19 +5992,7 @@ print serve_once("127.0.0.1:18080", "hello")
     }
 
     #[test]
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     fn run_project_tests_reports_manifest_metadata_in_json() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner-metadata");
@@ -6197,20 +6029,7 @@ print serve_once("127.0.0.1:18080", "hello")
     }
 
     #[test]
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
     fn run_project_tests_executes_manifest_cases() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner");
@@ -6700,14 +6519,10 @@ print serve_once("127.0.0.1:18080", "hello")
         assert_eq!(output.passed, 26);
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
+
         assert_eq!(output.cases.len(), 35);
         assert_eq!(output.passed, 35);
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -6715,21 +6530,19 @@ print serve_once("127.0.0.1:18080", "hello")
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-<<<<<<< HEAD
-<<<<<<< HEAD
+
                 == 24
-<<<<<<< HEAD
-<<<<<<< HEAD
+
                 == 20
                 == 21
                 == 20
                 == 20
                 == 20
-=======
+
                 == 24
-=======
+
                 == 20
-=======
+
                 == 24
         );
         assert_eq!(
@@ -6748,7 +6561,7 @@ print serve_once("127.0.0.1:18080", "hello")
             9
             11
             9
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         );
     }
 
@@ -9965,10 +9778,10 @@ print 0
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
-<<<<<<< HEAD
+
                 locked: true,
                 offline: true,
-=======
+
                 ..BuildOptions::default()
             },
         )
@@ -9981,13 +9794,10 @@ print 0
         );
         assert_eq!(payload["command"], "build");
         assert_eq!(payload["backend"], "generated-rust");
-<<<<<<< HEAD
-<<<<<<< HEAD
+
         assert_eq!(payload["locked"], true);
         assert_eq!(payload["offline"], true);
-<<<<<<< HEAD
-=======
-=======
+
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
@@ -10002,13 +9812,12 @@ print 0
             payload["packages"][0]["cache_key"]["lockfile_hash"],
             payload["cache_key"]["lockfile_hash"]
         );
-<<<<<<< HEAD
-=======
+
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());
         assert!(payload["debug_manifest"].is_string());
-=======
+
         assert!(payload["cache_hits"].is_u64());
         assert!(payload["cache_misses"].is_u64());
         assert!(payload["duration_ms"].is_u64());
@@ -10280,17 +10089,6 @@ print next.value
         assert!(error.message.contains("must be called as"));
         assert!(error.message.contains(".new()"));
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
 
     // AG2: deterministic monomorphized symbol naming (#337)
     // These snapshot tests lock the exact symbol names produced for nested generics,
@@ -10404,14 +10202,6 @@ print c
             "echo<int> must be emitted exactly once regardless of call-site count"
         );
     }
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
 
     #[test]
     fn hir_recovery_collects_independent_type_errors_in_source_order() {

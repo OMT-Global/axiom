@@ -16,11 +16,10 @@ The Rust compiler is intentionally small in this bootstrap slice:
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with sixteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url): Option<string>` plus intermediate loopback-only server primitives: `serve_once(bind, body): bool` and a route-shaped `serve(bind, route(path, body), max_requests): bool` helper on top of the `http_get`, `http_serve_once`, and `http_serve_route` intrinsics. The client path implements blocking HTTP/1.0 for `http://` and `https://` URLs; the server path can bind only loopback sockets, route simple GET/HEAD paths to plain-text responses, handle a bounded request lifecycle, and fan accepted requests out to native worker threads. This is still an intermediate AG4.3/#97 slice rather than the final async-runtime listen/accept/respond API. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, `std/async.ax`, and `std/regex.ax`. `std/regex.ax` exposes `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`, and `replace_all(pattern, text, replacement): string` over a deterministic NFA-state engine supporting anchors, `.`, `?`, `*`, `+`, escaped literals, and character classes/ranges without backtracking.
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with fifteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, and `std/async.ax`.
 - Supported source subset is top-level `import`, `pub const`, `const`, `pub static`, `static`, `pub type`, `type`, `pub struct`, `struct`, `pub enum`, `enum`, `pub fn`, `fn`, `let`, `print`, `panic`, `if` / `else`, `while`, statement-level `match`, `return`, variables, bare enum variants, tuple-style enum constructors, named-payload enum constructors, payload-binding match arms, named-payload match arms, `Option<T>`, `Result<T, E>`, `Some`, `None`, `Ok`, `Err`, postfix `?` error propagation on `Option<T>` / `Result<T, E>`, the built-in polymorphic collection helpers `len(...)`, `first(...)`, and `last(...)`, function calls, named struct types, named enum types, generic struct and enum definitions with explicit type arguments, transparent type aliases, scalar `const` declarations with compile-time evaluation, scalar `static` declarations lowered to Rust static globals, tuple types, tuple literals, tuple indexing, map types, map literals, map indexing, array types, array literals, array indexing, borrowed array slice expressions, borrowed slice types, borrowed slices stored inside named structs and enum payloads, borrowed-return aggregates backed by one or more borrowed parameters, struct literals, field access, `+` on `int`/`string`, and scalar comparisons.
->>>>>>> origin/codex/issue-395-effective-fs-roots
+
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with sixteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, `std/async.ax`, and `std/regex.ax`. `std/regex.ax` exposes `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`, and `replace_all(pattern, text, replacement): string` over a deterministic NFA-state engine supporting anchors, `.`, `?`, `*`, `+`, escaped literals, and character classes/ranges without backtracking.
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with fifteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. Env denial diagnostics only name the missing allowlist entry and do not read or print environment values. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, and `std/async.ax`.
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/worker-c-issue-361
+
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with sixteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, `std/async.ax`, and `std/regex.ax`. `std/regex.ax` exposes `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`, and `replace_all(pattern, text, replacement): string` over a deterministic NFA-state engine supporting anchors, `.`, `?`, `*`, `+`, escaped literals, and character classes/ranges without backtracking.
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with fifteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, and `std/async.ax`.
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with sixteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, `std/async.ax`, and `std/regex.ax`. `std/regex.ax` exposes `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`, and `replace_all(pattern, text, replacement): string` over a deterministic NFA-state engine supporting anchors, `.`, `?`, `*`, `+`, escaped literals, and character classes/ranges without backtracking.
@@ -101,7 +100,7 @@ The command also accepts `--filter <pattern>` to run a subset of discovered
 tests by test name or entry path, and the default CLI summary prints `passed` /
 `failed` / `skipped` counts. Workspace-only roots are supported as long as
 build/run commands select a concrete member package with `-p/--package`.
-<<<<<<< HEAD
+
 `*.stdout` golden file when present. A sibling `*.stderr` file can also pin the
 expected stderr stream, and manifest-declared `[[tests]]` entries support inline
 `stdout` and `stderr` expectations. JSON output includes actual and expected
@@ -127,19 +126,6 @@ package, test name, and entry path columns, while `--json` adds stable package
 membership plus golden-output and compile-fail markers for automation. Workspace
 only roots are now supported as long as build/run commands select a concrete
 member package with `-p/--package`.
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
-=======
 
 ## JSON contract
 
@@ -153,12 +139,7 @@ Successful payloads always include `ok`, `command`, and `project`, while
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
 requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 with generated source-position markers. Build JSON carries both `cache_key`
 metadata with the cache schema version, compiler key, target, debug mode,
 manifest hash, lockfile hash, generated Rust hash, and per-source hashes used
@@ -169,30 +150,23 @@ sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
+
 with generated source-position markers. Build JSON also carries `metadata` for
 cache-key inspection: requested/resolved `target`, `debug`, package `lockfile`,
 `lockfile_hash`, and aggregate `source_hash`. Debug builds also report `debug_map`,
 a JSON sidecar that maps generated Rust statement lines back to Axiom
-<<<<<<< HEAD
+
 file/line/column positions. `axiomc build --timings` prints total build time,
 cache hit/miss counts, and per-package compile timing/cache status for the
 incremental generated-Rust cache.
-=======
-=======
-=======
-=======
+
 file/line/column positions, plus `debug_manifest`, a JSON sidecar that binds
 the native binary hash, generated Rust hash, rustc debug-mode settings, source
 file hashes, and mapping counts for debugger/tooling consumers.
 `axiomc build --timings` prints total build time, cache hit/miss counts, and
 per-package compile timing/cache status for the incremental generated-Rust
 cache.
-=======
+
 Parser diagnostics now preserve additional recovered top-level parse errors in
 the error payload's `related` array when possible, so editor tooling can show
 more than the first syntax error without waiting for full checker recovery.
@@ -240,17 +214,9 @@ still far from the stated 1.0 target for service and agent workloads.
 
 - `axiom.toml` and `axiom.lock` now support deterministic local path dependency graphs, package-root workspace members, workspace-only roots, `-p/--package` selection for member-targeted build/run/test flows, and `axiomc build --locked --offline` validation that refuses missing or stale lockfiles without rewriting them.
 - The current import model is still intentionally small: package-local relative path imports plus dependency-prefixed imports like `core/math.ax`, direct `pub struct` / `pub enum` / `pub fn` exports only, and explicit parser diagnostics for unsupported aliases, re-exports, and namespace-qualified calls.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
+
 - `axiomc publish` now validates the lockfile and stages a deterministic signed archive into a local static-registry tree for `axiomc registry-index`; there is still no hosted registry service, version resolution, trust-root management, or offline package verification beyond this bootstrap shape.
-=======
+
 - There is no package registry flow, no version resolution, and no offline lockfile validation beyond the bootstrap lockfile shape. Registry and publish manifest fields are reserved and rejected until `axiomc publish` and remote package resolution are implemented.
 
 ### Runtime and standard library gaps
@@ -259,13 +225,9 @@ still far from the stated 1.0 target for service and agent workloads.
 
 - The stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`, `std/crypto_mac.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface), `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic), `std/json.ax` (ungated scalar/string JSON helpers plus manual object/field builders), `std/collections.ax` (generic borrowed-slice helpers built on AG2 generic functions), `std/string_builder.ax` (owned string accumulator), `std/log.ax` (deterministic JSON-line logging over stderr), `std/sync.ax` (ownership-shaped mutex guards, one-shot cells, and single-slot nonblocking channels), and `std/async.ax` (deterministic task, join, channel, cancellation, timeout, and select wrappers). The `net` socket floor is intentionally loopback-only in stage1: the one-shot TCP and UDP listen helpers bind `127.0.0.1:0`, dial/send helpers reject non-loopback targets, payloads are bounded to 64 KiB, and timeouts are clamped to 1-30000 ms. The `fs` capability is scoped: `fs_read` resolves relative paths from the package root, bounds them to the package root by default or `[capabilities] fs_root = "<relative package path>"`, canonicalizes targets to reject traversal and symlink escapes, and refuses files larger than 64 MiB.
 - The stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`, `std/crypto_mac.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface), `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic), `std/json.ax` (ungated scalar/string JSON helpers plus manual object/field builders), `std/collections.ax` (generic borrowed-slice helpers built on AG2 generic functions), `std/string_builder.ax` (owned string accumulator), `std/log.ax` (deterministic JSON-line logging over stderr), `std/sync.ax` (ownership-shaped mutex guards, one-shot cells, and single-slot nonblocking channels), `std/async.ax` (deterministic task, join, channel, cancellation, timeout, and select wrappers), and `std/regex.ax` (linear-time matching helpers for common regex constructs). The `net` socket floor is intentionally loopback-only in stage1: the one-shot TCP and UDP listen helpers bind `127.0.0.1:0`, dial/send helpers reject non-loopback targets, payloads are bounded to 64 KiB, and timeouts are clamped to 1-30000 ms. The `fs` capability is scoped: `fs_read` resolves relative paths from the package root, bounds them to the package root by default or `[capabilities] fs_root = "<relative package path>"`, canonicalizes targets to reject traversal and symlink escapes, and refuses files larger than 64 MiB.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
+
 - The stdlib surface now covers every stage1 capability-gated intrinsic with a thin wrapper module (`std/time.ax`, `std/env.ax`, `std/fs.ax`, `std/net.ax`, `std/process.ax`, `std/crypto_hash.ax`, `std/crypto_mac.ax`), plus `std/http.ax` (first stdlib module with a brand-new capability-gated intrinsic `http_get` sharing the existing `net` surface), `std/io.ax` (first ungated stdlib module, `eprintln` on top of the new `io_eprintln` intrinsic), `std/json.ax` (ungated scalar/string JSON helpers plus manual object/field builders), `std/collections.ax` (generic borrowed-slice helpers built on AG2 generic functions), `std/string_builder.ax` (owned string accumulator), `std/log.ax` (deterministic JSON-line logging over stderr), `std/sync.ax` (ownership-shaped mutex guards, one-shot cells, and single-slot nonblocking channels), and `std/async.ax` (deterministic task, join, channel, cancellation, timeout, and select wrappers). The `net` socket floor is intentionally loopback-only in stage1: the one-shot TCP and UDP listen helpers bind `127.0.0.1:0`, dial/send helpers reject non-loopback targets, payloads are bounded to 64 KiB, and timeouts are clamped to 1-30000 ms. The `fs` capability is scoped: `fs_read` resolves relative paths from the package root, bounds them to the package root by default or `[capabilities] fs_root = "<relative package path>"`, canonicalizes targets to reject traversal and symlink escapes, and refuses files larger than 64 MiB.
-=======
-=======
+
 - Capability-aware integration is now in place for the current stage1 runtime surface: compiler-known intrinsics enforce all six manifest flags, stdlib wrappers preserve that enforcement against the importing package's manifest, capability-denied programs fail before native execution, and the Rust suite covers cross-package capability interactions (`dependency_package_must_enable_its_own_capabilities`) plus per-wrapper denial paths.
 - No host-thread scheduler, blocking channel wakeups, real timers, or service-grade I/O surface exists.
 
@@ -288,13 +250,7 @@ still far from the stated 1.0 target for service and agent workloads.
   emits generated Rust source markers, and writes a JSON source-map sidecar for
   Axiom file/line/column positions; full Axiom-native debugger stepping remains
   a direct-backend follow-on.
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/worker-h-issue-414
+
   Axiom file/line/column positions. It also writes a debug manifest sidecar
   that ties the native binary to the generated Rust, the source map, and the
   hashed `.ax` source files. The manifest is an explicit generated-Rust bridge:
@@ -343,28 +299,12 @@ Current proof points:
 - `stage1/examples/proof_cli` closes the first AG5.3 proof workload with a multi-package CLI fixture that pulls command and render helpers from separate local packages while staying fully inside the `axiomc` workflow and exercising capability-gated `std/env.ax` and `std/time.ax`.
 - `stage1/examples/proof_worker` closes the queue-style AG5.3 proof workload with a deterministic worker fixture built on `std/async.ax`, `std/env.ax`, and `std/time.ax`.
 - `stage1/examples/proof_http_service` is a checked-in HTTP-shaped response fixture that routes request metadata from `std/env.ax`, stamps liveness with `std/time.ax`, and renders the response body through `std/json.ax`; it remains a fixture for the small-service AG5.3 workload while AG4.3/#97 continues toward a fuller async-runtime listen/accept/respond server API.
-<<<<<<< HEAD
+
 - `stage1/examples/stdlib_http` extends AG4.1 with `import "std/http.ax"`, bringing `get(url)` into scope on top of a new blocking HTTP/1.0 client for `http://` and `https://` URLs; it shares the importing package's `[capabilities] net` flag with `std/net.ax` and keeps its smoke deterministic by pointing at a closed local port so the `None` branch always fires.
 - `stage1/examples/proof_cli` closes the first AG5.3 proof workload with a multi-package CLI fixture that pulls command and render helpers from separate local packages while staying fully inside the `axiomc` workflow and exercising capability-gated `std/env.ax` and `std/time.ax`.
 - `stage1/examples/proof_worker` closes the queue-style AG5.3 proof workload with a deterministic worker fixture built on `std/async.ax`, `std/env.ax`, and `std/time.ax`.
 - `stage1/examples/proof_http_service` closes the small-service AG5.3 proof workload with a checked-in HTTP response fixture that routes request metadata from `std/env.ax`, stamps liveness with `std/time.ax`, and renders the response body through `std/json.ax`.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
 - `stage1/examples/arrays`, `stage1/examples/maps`, `stage1/examples/tuples`,
   and `stage1/examples/structs` cover the current structured-data floor.
 - `stage1/examples/slices`, `stage1/examples/borrowed_shapes`, `stage1/examples/enums`,

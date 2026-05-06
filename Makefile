@@ -1,11 +1,8 @@
-<<<<<<< HEAD
+
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
->>>>>>> origin/codex/issue-380-doc-json
->>>>>>> origin/codex/issue-376-doctor-json
->>>>>>> origin/codex/issue-377-inspect-symbols
->>>>>>> origin/codex/issue-378-inspect-graph
+
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal stage1-run
->>>>>>> origin/codex/issue-408-cli-args
+
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal stage1-run
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
@@ -24,7 +21,7 @@
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal stage1-run
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench stage1-bench-update-baseline stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
-=======
+
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test python-exit-readiness python-exit-readiness-github stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
 
 test: docs-python-exit python-exit-readiness stage1-test
@@ -70,22 +67,17 @@ stage1-bench-gate:
 	python3 scripts/ci/check-stage1-benchmarks.py
 	python3 scripts/ci/report-stage1-reference-comparison.py
 
-=======
 mutation-survivor-report:
 	python3 scripts/ci/render-mutation-survivor-report.py \
 		--input .axiom-build/reports/mutation-rust-smoke.json \
 		--output .axiom-build/reports/mutation-survivors.md
 
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-427-python-exit-readiness
 stage1-crap-proposal:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py --output stage1/quality/crap-threshold-proposal.json
 
 mutation-rust-smoke:
 	bash scripts/ci/run-mutation-rust-smoke.sh
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
+
 stage1-crap-thresholds:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py
 
@@ -93,8 +85,7 @@ stage1-crap-thresholds-test:
 	bash scripts/ci/test-propose-stage1-crap-thresholds.sh
 stage1-bench:
 	python3 scripts/ci/run-stage1-bench-harness.py --output .axiom-build/reports/stage1-bench.json
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
+
 stage1-crap-proposal:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py --output stage1/quality/crap-threshold-proposal.json
 stage1-crap-proposal:
@@ -103,7 +94,7 @@ stage1-crap-proposal:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py --output stage1/quality/crap-threshold-proposal.json
 stage1-crap-proposal:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py --output stage1/quality/crap-threshold-proposal.json
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
@@ -179,33 +170,12 @@ stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_json --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_json --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_json
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_regex --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_regex --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_regex
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_regex --json
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_testing --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_testing --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_testing

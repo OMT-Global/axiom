@@ -33,8 +33,7 @@ Current executable fixtures cover:
   borrowed slices.
 - `ownership_borrowing`: borrow-safe parameter, aggregate, borrowed-return,
   projection move, and dependency-boundary execution.
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/issue-387-capability-validation
+
 - `comparison_package_imports`: Axiom-owned Go/Rust-style comparison fixture
   for explicit package imports and cross-module function calls.
 - `comparison_package_resources`: Axiom-owned Go/Rust-style comparison fixture
@@ -46,34 +45,15 @@ Current executable fixtures cover:
   successfully.
 - `package_visibility`: `pub(pkg)` items imported across sibling modules within
   the same package.
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-343
+
 - `comparison_strict_typing`: Axiom-owned comparison fixture for explicit
   scalar typing and bool-only control flow.
 - `comparison_package_imports`: Axiom-owned comparison fixture for package-local
   imports and typed function boundaries.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 - `type_system_aggregates`: typed aggregate coverage for generic wrappers,
   structs, enums, tuples, arrays, maps, `Option`, and `Result`.
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
 Packages under `fail/` are compile-fail fixtures. Each package is a complete
 stage1 project with `axiom.toml`, `axiom.lock`, source, and
 `expected-error.json`. The conformance runner checks the diagnostic kind, code,

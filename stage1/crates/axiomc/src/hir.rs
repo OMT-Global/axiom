@@ -451,11 +451,7 @@ struct VariantInfo {
 
 const OWNERSHIP_CLOSURE_MOVE_CAPTURED_NON_COPY: &str = "closure_move_captured_non_copy";
 const OWNERSHIP_CLOSURE_BORROWED_SLICE_RETURN: &str = "closure_borrowed_slice_return";
-=======
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
 const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str = "borrow_return_requires_param_origin";
 const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
@@ -561,26 +557,7 @@ fn lower_with_capabilities_impl(
         &enum_names,
         &aliases,
         &consts,
->>>>>>> origin/codex/issue-377-inspect-symbols
->>>>>>> origin/codex/issue-378-inspect-graph
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
+
     )
     .map_err(single_diagnostic)?;
     let functions =
@@ -912,28 +889,7 @@ fn type_has_unboxed_recursive_path(
     visiting: &mut HashSet<AggregateRef>,
 ) -> bool {
     match ty {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -942,27 +898,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
         Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
             false
         }
@@ -1014,11 +950,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Array(_, _)
         | Type::Fn(_, _) => false,
         Type::Slice(_) | Type::MutSlice(_) | Type::Map(_, _) | Type::Array(_, _) => false,
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         Type::Option(inner)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -2841,9 +2773,7 @@ fn rewrite_aggregate_type_name(
                 column,
             )?),
         ),
-<<<<<<< HEAD
-=======
-=======
+
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
@@ -4392,7 +4322,7 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect()
 }
-=======
+
 fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new("ownership", message).with_code(code)
 }
@@ -5590,28 +5520,7 @@ fn lower_match_stmt(
         span: SourceSpan { line, column },
     })
 }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-378-inspect-graph
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
-=======
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5651,16 +5560,7 @@ fn lower_stmt(
             let expected_array_len = declared_array_len(ty, ctx, *line, *column)?;
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5677,33 +5577,17 @@ fn lower_stmt(
             }
             if !type_assignable_to(&actual, &expected) && !actual.is_error() && !expected.is_error()
             {
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             if actual != expected && !actual.is_error() && !expected.is_error() {
-=======
-=======
-=======
-=======
-=======
+
             if actual != expected && !actual.is_error() && !expected.is_error() {
-=======
-=======
+
             if actual != expected && !actual.is_error() && !expected.is_error() {
-=======
-=======
-=======
-=======
+
             if actual != expected && !actual.is_error() && !expected.is_error() {
-=======
-=======
-=======
-=======
+
             if actual != expected && !actual.is_error() && !expected.is_error() {
-=======
+
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -6705,9 +6589,9 @@ fn lower_expr_with_expected_inner(
                     0
                 };
                 let lhs = lower_expr(&args[value_start], env, ctx)?;
-<<<<<<< HEAD
+
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String | Type::Str) {
-=======
+
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
                         "type",
@@ -10343,9 +10227,7 @@ fn explicit_return_lifetime(ty: &syntax::TypeName) -> Option<&str> {
         | syntax::TypeName::Bool
         | syntax::TypeName::String
         | syntax::TypeName::Str => None,
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         | syntax::TypeName::Bool
         | syntax::TypeName::String => None,
     }
@@ -10373,13 +10255,13 @@ fn type_has_lifetime(ty: &syntax::TypeName, lifetime: &str) -> bool {
             params.iter().any(|arg| type_has_lifetime(arg, lifetime))
                 || type_has_lifetime(return_ty, lifetime)
         }
-<<<<<<< HEAD
+
         syntax::TypeName::Int
         | syntax::TypeName::Numeric(_)
         | syntax::TypeName::Bool
         | syntax::TypeName::String
         | syntax::TypeName::Str => false,
-=======
+
         syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
     }
 }
@@ -10396,7 +10278,6 @@ fn explicit_borrow_return_params(function: &syntax::Function) -> Option<Vec<usiz
     )
 }
 
-=======
 fn contains_borrowed_slice_type_inner(
     ty: &Type,
     structs: &HashMap<String, StructDef>,
@@ -10448,7 +10329,7 @@ fn contains_borrowed_slice_type_inner(
             )
         }
         Type::Array(inner)
->>>>>>> origin/codex/worker-f-issue-341
+
         Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -10692,7 +10573,7 @@ fn borrow_kind_for_type(
         None
     }
 }
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 fn increment_active_borrows(
     owner_names: &HashSet<String>,
     env: &mut HashMap<String, Binding>,
@@ -10712,7 +10593,7 @@ fn increment_active_borrows(
             borrow_kind,
             BorrowSourceSpan::new(line, column),
         )?;
-<<<<<<< HEAD
+
         match borrow_kind {
             BorrowKind::Shared if binding.active_mut_borrow_count > 0 => {
                 return Err(ownership_error(
@@ -10748,7 +10629,7 @@ fn increment_active_borrows(
         if matches!(borrow_kind, BorrowKind::Mutable) {
             binding.active_mut_borrow_count += 1;
         }
-=======
+
     }
     Ok(())
 }
@@ -11050,13 +10931,7 @@ fn lower_type_inner<T, U>(
                 return_ty, structs, enums, aliases, consts, resolving, line, column,
             )?),
         )),
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
+
     }
 }
 

@@ -8,12 +8,12 @@ when an LCOV report is supplied, folds line coverage into the CRAP formula:
 
 Use --enforce only after the proposal is accepted; the default exit code is zero.
 """
->>>>>>> origin/codex/issue-425-crap-thresholds
+
 from __future__ import annotations
 
 import argparse
 import json
-<<<<<<< HEAD
+
 import math
 import re
 import statistics
@@ -28,7 +28,7 @@ DECISION_RE = re.compile(
     r"\b(if|else\s+if|match|while|for|loop)\b|&&|\|\||\?"
 )
 FN_RE = re.compile(r"^(?P<indent>\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
-=======
+
 import re
 import sys
 from dataclasses import dataclass
@@ -38,7 +38,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_ROOT = REPO_ROOT / "stage1/crates/axiomc/src"
 DEFAULT_THRESHOLD = 30.0
 BRANCH_TOKENS = ("if ", "if(", "match ", "for ", "while ", "&&", "||", "?")
-
 
 @dataclass(frozen=True)
 class FunctionMetric:
@@ -51,10 +50,8 @@ class FunctionMetric:
     coverage_percent: float | None
     crap: float
 
-
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
-
 
 def code_chars(line: str) -> str:
     """Return a line with string/char literals and line comments neutralized."""
@@ -90,18 +87,15 @@ def code_chars(line: str) -> str:
         index += 1
     return "".join(out)
 
-
 def count_delta(line: str) -> int:
     code = code_chars(line)
     return code.count("{") - code.count("}")
-
 
 def complexity_for(lines: list[str]) -> int:
     total = 1
     for line in lines:
         total += len(DECISION_RE.findall(code_chars(line)))
     return total
-
 
 def parse_functions(path: Path, root: Path) -> list[tuple[str, str, int, int, list[str]]]:
     text = path.read_text(encoding="utf-8").splitlines()
@@ -134,7 +128,6 @@ def parse_functions(path: Path, root: Path) -> list[tuple[str, str, int, int, li
         index = cursor + 1
     return functions
 
-
 def parse_lcov(path: Path | None, root: Path) -> dict[str, dict[int, int]]:
     if path is None:
         return {}
@@ -155,7 +148,6 @@ def parse_lcov(path: Path | None, root: Path) -> dict[str, dict[int, int]]:
             current = None
     return coverage
 
-
 def function_coverage(path: str, start: int, end: int, lcov: dict[str, dict[int, int]]) -> float | None:
     lines = lcov.get(path)
     if not lines:
@@ -166,11 +158,9 @@ def function_coverage(path: str, start: int, end: int, lcov: dict[str, dict[int,
     covered = sum(1 for line in executable if lines[line] > 0)
     return covered / len(executable) * 100.0
 
-
 def crap_score(complexity: int, coverage_percent: float | None) -> float:
     coverage = 0.0 if coverage_percent is None else coverage_percent / 100.0
     return complexity**2 * (1.0 - coverage) ** 3 + complexity
-
 
 def percentile(values: list[float], pct: float) -> float:
     if not values:
@@ -178,7 +168,6 @@ def percentile(values: list[float], pct: float) -> float:
     if len(values) == 1:
         return values[0]
     return float(statistics.quantiles(values, n=100, method="inclusive")[int(pct) - 1])
-
 
 def propose(metrics: list[FunctionMetric], *, watch_floor: float) -> dict:
     scores = [metric.crap for metric in metrics]
@@ -222,7 +211,6 @@ def propose(metrics: list[FunctionMetric], *, watch_floor: float) -> dict:
         },
         "hotspots": [asdict(metric) for metric in sorted(metrics, key=lambda item: item.crap, reverse=True)[:20]],
     }
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -282,7 +270,6 @@ def main(argv: list[str] | None = None) -> int:
         uncovered = 1.0 - self.coverage
         return (self.complexity**2 * uncovered**3) + self.complexity
 
-
 def function_ranges(source: str) -> list[tuple[str, int, str]]:
     matches = list(
         re.finditer(
@@ -298,14 +285,12 @@ def function_ranges(source: str) -> list[tuple[str, int, str]]:
         ranges.append((match.group(1), line, source[start:end]))
     return ranges
 
-
 def cyclomatic_complexity(body: str) -> int:
     complexity = 1
     for token in BRANCH_TOKENS:
         complexity += body.count(token)
     complexity += body.count("=>")
     return complexity
-
 
 def collect_metrics(source_root: Path, default_coverage: float) -> list[FunctionMetric]:
     metrics: list[FunctionMetric] = []
@@ -322,7 +307,6 @@ def collect_metrics(source_root: Path, default_coverage: float) -> list[Function
                 )
             )
     return metrics
-
 
 def proposal(metrics: list[FunctionMetric], threshold: float, max_hotspots: int, source_root: Path) -> dict:
     hotspots = sorted(metrics, key=lambda metric: metric.crap, reverse=True)[:max_hotspots]
@@ -359,7 +343,6 @@ def proposal(metrics: list[FunctionMetric], threshold: float, max_hotspots: int,
         },
     }
 
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Propose non-blocking CRAP thresholds for stage1 hotspots.")
     parser.add_argument("--source-root", type=Path, default=DEFAULT_SOURCE_ROOT)
@@ -376,7 +359,6 @@ def main() -> int:
     if args.enforce and report["summary"]["hotspots_over_threshold"] > 0:
         return 1
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

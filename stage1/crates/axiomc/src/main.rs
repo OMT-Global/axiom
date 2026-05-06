@@ -5,34 +5,12 @@ use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
 use axiomc::manifest::CapabilityDescriptor;
->>>>>>> origin/codex/issue-376-doctor-json
->>>>>>> origin/codex/issue-377-inspect-symbols
+
 use axiomc::lockfile::{expected_lockfile_for_project, validate_lockfile};
 use axiomc::manifest::{load_manifest, manifest_path};
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
+
 use axiomc::manifest::{entry_path, load_manifest};
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 use axiomc::new_project::create_project;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -46,23 +24,7 @@ use axiomc::project::{
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
 };
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
@@ -74,33 +36,15 @@ use axiomc::project::{
     BuildOutput, CheckOptions, RunOptions, TestOptions,
 };
 use axiomc::registry::{load_registry_index, render_registry_index};
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-<<<<<<< HEAD
+
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -223,7 +167,7 @@ enum Command {
     Pkg {
         #[command(subcommand)]
         command: PkgCommand,
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     },
     /// Format .ax source files with the canonical stage1 style.
     Fmt {
@@ -264,26 +208,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
-=======
-=======
->>>>>>> origin/codex/agent-o-debug-info
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -294,9 +219,7 @@ enum Command {
         #[arg(long)]
         allow_overwrite: bool,
     },
-=======
-=======
->>>>>>> origin/codex/worker-h-issue-414
+
     /// Build a static package-registry index from package release folders.
     RegistryIndex {
         packages_dir: PathBuf,
@@ -311,27 +234,14 @@ enum Command {
     Lsp,
     /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
     Dap,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 #[derive(Debug, Subcommand)]
 enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 }
 
 #[derive(Debug, Subcommand)]
@@ -349,21 +259,7 @@ enum PkgCommand {
         #[arg(long)]
         json: bool,
     },
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 }
 
 fn main() {
@@ -535,7 +431,7 @@ fn main() {
                     Err(error) => print_error("test", error, json),
                 }
                 if ok { 0 } else { 1 }
->>>>>>> origin/codex/worker-h-issue-414
+
                 if ok {
                     0
                 } else {
@@ -698,9 +594,7 @@ fn main() {
                 json,
             ),
         },
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/worker-f-issue-341
+
         Command::Pkg { command } => match command {
             PkgCommand::Graph { path, json } => match package_graph_metadata(&path) {
                 Ok(output) => {
@@ -820,7 +714,7 @@ fn main() {
                     }
                 }
                 if report.failed == 0 { 0 } else { 1 }
->>>>>>> origin/codex/worker-h-issue-414
+
                 if report.failed == 0 {
                     0
                 } else {
@@ -848,8 +742,7 @@ fn main() {
             Ok(()) => 0,
             Err(error) => print_error("repl", error, json),
         },
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         Command::Publish {
             path,
             registry_dir,
@@ -918,20 +811,7 @@ fn main() {
             Ok(()) => 0,
             Err(error) => print_error("dap", error, false),
         },
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
     };
     std::process::exit(code);
 }
@@ -2722,8 +2602,7 @@ mod tests {
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
         assert!(help.contains("Start a small stage1 scratch REPL"));
         assert!(help.contains("Pack, sign, and publish a stage1 package"));
->>>>>>> origin/codex/issue-408-cli-args
->>>>>>> origin/codex/worker-h-issue-414
+
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
     }
@@ -2798,13 +2677,9 @@ mod tests {
             }
             other => panic!("expected caps diff command with path, got {other:?}"),
         }
-<<<<<<< HEAD
+
         assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
+
     }
 
     fn build_output(debug_map: Option<String>, debug_manifest: Option<String>) -> BuildOutput {
@@ -2812,33 +2687,7 @@ mod tests {
             backend: NativeBackendKind::GeneratedRust,
             locked: false,
             offline: false,
->>>>>>> origin/codex/issue-381-test-list
->>>>>>> origin/codex/issue-408-cli-args
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/worker-h-issue-414
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2848,27 +2697,7 @@ mod tests {
             statement_count: 1,
             target: None,
             debug: true,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
+
             cache_key: axiomc::project::BuildCacheMetadata {
                 version: 1,
                 compiler: String::from("stage1"),
@@ -2879,19 +2708,7 @@ mod tests {
                 generated_rust_hash: String::from("rust-hash"),
                 sources: Vec::new(),
             },
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
             metadata: axiomc::project::BuildMetadata {
                 target: None,
                 debug: true,
@@ -2907,8 +2724,7 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     fn build_json_includes_target_debug_and_cache_key_metadata() {
         let payload = json_contract::build_success(
             Path::new("stage1/examples/hello"),
@@ -2935,7 +2751,7 @@ mod tests {
 
     #[test]
     fn build_summary_mentions_debug_map_when_available() {
-=======
+
     fn build_summary_mentions_debug_artifacts_when_available() {
         assert_eq!(
             build_summary_lines(
@@ -2958,25 +2774,7 @@ mod tests {
         assert_eq!(
             build_summary_lines(&build_output(None), false),
             vec![String::from("wrote dist/app (backend=generated-rust)")]
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
             build_summary_lines(&build_output(None, None), false),
             vec![String::from("wrote dist/app (backend=generated-rust)")]
         );
@@ -3135,11 +2933,7 @@ mod tests {
         assert_eq!(
             parse_rustc_host_target(version).as_deref(),
             Some("aarch64-apple-darwin")
-=======
-=======
-=======
-=======
-=======
+
         );
     }
 

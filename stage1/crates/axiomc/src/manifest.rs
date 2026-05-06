@@ -6,29 +6,7 @@ use std::path::{Path, PathBuf};
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
->>>>>>> origin/codex/issue-380-doc-json
->>>>>>> origin/codex/issue-376-doctor-json
->>>>>>> origin/codex/issue-377-inspect-symbols
->>>>>>> origin/codex/issue-378-inspect-graph
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
+
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -93,22 +71,7 @@ pub enum TestKind {
     Property,
     Snapshot,
     Benchmark,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     pub stderr: Option<String>,
 }
 
@@ -120,8 +83,7 @@ pub struct PublishSection {
     pub checksum: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<String>,
-=======
-=======
+
     pub expected_error: Option<ExpectedDiagnostic>,
     pub capabilities: Vec<CapabilityKind>,
     pub package: Option<String>,
@@ -135,20 +97,7 @@ pub struct ExpectedDiagnostic {
     pub path: String,
     pub line: usize,
     pub column: usize,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -169,9 +118,7 @@ pub struct CapabilityConfig {
     pub crypto: bool,
     pub ffi: bool,
     pub async_runtime: bool,
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
+
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
@@ -217,8 +164,7 @@ pub struct CapabilityDescriptor {
     pub rationale: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,14 +222,7 @@ struct RawTestTarget {
     name: Option<String>,
     entry: Option<String>,
     stdout: Option<String>,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     kind: Option<String>,
     stderr: Option<String>,
     kind: Option<String>,
@@ -298,14 +237,7 @@ struct RawPublishSection {
     expected_error: Option<ExpectedDiagnostic>,
     capabilities: Option<Vec<CapabilityKind>>,
     package: Option<String>,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
     kind: Option<String>,
 }
 
@@ -325,13 +257,7 @@ struct RawCapabilityConfig {
     ffi: Option<bool>,
     #[serde(rename = "async")]
     async_runtime: Option<bool>,
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
+
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -433,38 +359,27 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         })
         .collect()
 }
 
 pub fn render_manifest(name: &str) -> String {
     format!(
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-=======
+
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-=======
-=======
+
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-=======
+
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-=======
-=======
-=======
+
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
-=======
+
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
     )
 }
@@ -614,9 +529,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             crypto: capabilities.crypto.unwrap_or(false),
             ffi: capabilities.ffi.unwrap_or(false),
             async_runtime: capabilities.async_runtime.unwrap_or(false),
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
+
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
@@ -980,37 +893,20 @@ fn normalize_tests(
             name,
             entry,
             stdout: raw_test.stdout,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             stderr: raw_test.stderr,
             expected_error: raw_test.expected_error,
             capabilities,
             package,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
         });
     }
     Ok(tests)
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/issue-369-check-fixtures
-=======
 fn normalize_test_kind(
     value: Option<String>,
     path: &Path,
@@ -1030,7 +926,7 @@ fn normalize_test_kind(
         )
         .with_path(path.display().to_string())),
     }
-=======
+
 fn normalize_publish(raw: RawPublishSection, path: &Path) -> Result<PublishSection, Diagnostic> {
     let registry = match raw.registry {
         Some(registry) => {
@@ -1108,7 +1004,7 @@ fn validate_sha256_checksum(path: &Path, checksum: &str) -> Result<(), Diagnosti
         "publish.checksum must use sha256:<64 lowercase hex characters>",
     )
     .with_path(path.display().to_string()))
-=======
+
 fn normalize_optional_name(
     path: &Path,
     field_name: &str,

@@ -272,12 +272,7 @@ pub enum TypeName {
     Map(Box<TypeName>, Box<TypeName>),
     Array(Box<TypeName>, Option<String>),
     Fn(Vec<TypeName>, Box<TypeName>),
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1455,33 +1450,18 @@ fn parse_const_or_static_decl(
     let column = visibility_column + keyword.len() + 1;
     let colon = find_top_level_char(header, ':').ok_or_else(|| {
         Diagnostic::new("parse", "const/static declaration is missing ':'")
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     let column = visibility_column + keyword_len;
     let colon = find_top_level_char(header, ':').ok_or_else(|| {
         Diagnostic::new("parse", format!("{keyword} declaration is missing ':'"))
-=======
-=======
-=======
-=======
-=======
-=======
+
             .with_path(path.display().to_string())
             .with_span(line_no, column)
     })?;
     let equals = find_top_level_char(header, '=').ok_or_else(|| {
         Diagnostic::new("parse", "const/static declaration is missing '='")
         Diagnostic::new("parse", format!("{keyword} declaration is missing '='"))
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
             .with_path(path.display().to_string())
             .with_span(line_no, column)
     })?;
@@ -1489,19 +1469,9 @@ fn parse_const_or_static_decl(
         return Err(Diagnostic::new(
             "parse",
             "const/static declaration must use `const NAME: Type = expr` or `static NAME: Type = expr` syntax",
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             format!("{keyword} declaration must use `{keyword} NAME: Type = expr` syntax"),
-=======
-=======
-=======
-=======
-=======
-=======
+
         )
         .with_path(path.display().to_string())
         .with_span(line_no, column));
@@ -1512,10 +1482,9 @@ fn parse_const_or_static_decl(
     if ty_text.is_empty() {
         return Err(
             Diagnostic::new("parse", "const/static declaration is missing a type")
-<<<<<<< HEAD
+
             Diagnostic::new("parse", format!("{keyword} declaration is missing a type"))
->>>>>>> origin/codex/issue-387-capability-validation
-=======
+
                 .with_path(path.display().to_string())
                 .with_span(line_no, column + colon + 1),
         );
@@ -2317,8 +2286,7 @@ fn parse_type_name(
         .with_path(path.display().to_string())
         .with_span(line_no, column));
     }
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     if raw.starts_with("&mut [")
         && raw.ends_with(']')
         && matches!(find_matching_square(raw, 5), Some(close) if close == raw.len() - 1)
@@ -2566,8 +2534,7 @@ fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
     if raw.starts_with('|') {
         return parse_term(raw, path, line_no, column);
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     if let Some(split_index) = find_top_level_as(raw) {
         let lhs_raw = raw[..split_index].trim();
         let ty_raw = raw[split_index + 4..].trim();
@@ -2585,11 +2552,7 @@ fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
             column,
         });
     }
->>>>>>> origin/codex/issue-424-survivor-report
-=======
->>>>>>> origin/codex/worker-f-issue-341
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
     if let Some((op, split_index)) = find_compare_operator(raw) {
         let lhs_raw = raw[..split_index].trim();
         let rhs_offset = split_index + op.lexeme().len();
@@ -2880,9 +2843,6 @@ fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
     })
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 const NUMERIC_LITERAL_SUFFIXES: &[&str] = &[
     "isize", "usize", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
 ];
@@ -3007,9 +2967,7 @@ fn find_top_level_as(raw: &str) -> Option<usize> {
     }
     None
 }
-=======
-=======
-=======
+
 fn parse_closure_expr(
     raw: &str,
     path: &Path,
@@ -3303,9 +3261,6 @@ fn collect_lifetime_uses(ty: &TypeName, found: &mut Vec<String>) {
     }
 }
 
-<<<<<<< HEAD
->>>>>>> origin/codex/worker-f-issue-341
-=======
 fn parse_function_name<'a>(
     raw: &'a str,
     path: &Path,

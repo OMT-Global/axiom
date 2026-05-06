@@ -3,20 +3,7 @@ use crate::manifest::CapabilityDescriptor;
 use crate::project::{BuildOutput, CheckOutput, TestListOutput, TestOutput};
 use serde::Serialize;
 use serde_json::{Value, json};
->>>>>>> origin/codex/issue-380-doc-json
->>>>>>> origin/codex/issue-376-doctor-json
->>>>>>> origin/codex/issue-377-inspect-symbols
->>>>>>> origin/codex/issue-378-inspect-graph
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-343
+
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -47,30 +34,7 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "backend": output.backend,
         "locked": output.locked,
         "offline": output.offline,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
->>>>>>> origin/codex/agent-o-debug-info
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,
@@ -80,23 +44,9 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "statement_count": output.statement_count,
         "target": output.target,
         "debug": output.debug,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-422-comparison-gate
-=======
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         "cache_key": output.cache_key,
-=======
-=======
-=======
-=======
-=======
-=======
+
         "metadata": output.metadata,
         "cache_hits": output.cache_hits,
         "cache_misses": output.cache_misses,

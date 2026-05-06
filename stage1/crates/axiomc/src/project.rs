@@ -10,25 +10,11 @@ use crate::manifest::{
     load_manifest, manifest_path, out_dir_path,
     PublishSection, binary_path_for_target, capability_descriptors, entry_path,
     generated_rust_path, load_manifest, manifest_path, out_dir_path,
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
+
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, ExpectedDiagnostic,
     Manifest, PackageSection, binary_path_for_target, capability_descriptors, entry_path,
     generated_rust_path, load_manifest, manifest_path, out_dir_path,
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 };
 use crate::mir;
 use crate::stdlib;
@@ -100,31 +86,9 @@ pub struct BuiltPackage {
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
+
     pub cache_key: BuildCacheMetadata,
-=======
-=======
-=======
-=======
->>>>>>> origin/codex/issue-409-proof-cli
-=======
->>>>>>> origin/codex/issue-410-proof-worker
-=======
->>>>>>> origin/codex/worker-f-issue-341
-=======
->>>>>>> origin/codex/worker-f-issue-343
+
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -135,12 +99,7 @@ pub struct BuildOutput {
     pub backend: NativeBackendKind,
     pub locked: bool,
     pub offline: bool,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
+
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -151,13 +110,7 @@ pub struct BuildOutput {
     pub target: Option<String>,
     pub debug: bool,
     pub cache_key: BuildCacheMetadata,
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
+
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
     pub cache_misses: usize,
@@ -433,12 +386,9 @@ pub fn build_project_with_options(
             statement_count: analyzed.mir.statement_count(),
             target: resolved_target.clone(),
             debug: options.debug,
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
             cache_key: report.cache_key,
-=======
-=======
+
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -462,18 +412,7 @@ pub fn build_project_with_options(
         backend: options.backend,
         locked: options.locked,
         offline: options.offline,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-=======
-=======
-=======
-=======
+
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -484,13 +423,7 @@ pub fn build_project_with_options(
         target: root.target,
         debug: root.debug,
         cache_key: root.cache_key,
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
+
         metadata: root.metadata,
         cache_hits,
         cache_misses,
@@ -540,7 +473,7 @@ pub fn run_project_with_options(
             locked: true,
             offline: true,
             ..BuildOptions::default()
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
         },
     )?;
     let build_output_dir = Path::new(&built.generated_rust).parent().ok_or_else(|| {
@@ -828,34 +761,14 @@ fn collect_discovered_tests(
             name: relative.with_extension("").display().to_string(),
             entry: relative.display().to_string(),
             stdout,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
             kind,
             stderr,
             kind,
             expected_error: None,
             capabilities: Vec::new(),
             package: None,
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
             kind,
         });
     }
@@ -1210,12 +1123,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             crypto: true,
             ffi: false,
             async_runtime: true,
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
+
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1584,17 +1492,6 @@ fn build_artifacts(
     })
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-427-python-exit-readiness
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1615,13 +1512,7 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
 fn build_metadata(package_root: &Path, cache: &BuildCacheFile) -> BuildMetadata {
     BuildMetadata {
         target: cache.target.clone(),
@@ -2622,13 +2513,13 @@ fn load_module_recursive(
     visiting: &mut Vec<PathBuf>,
 ) -> Result<(), Diagnostic> {
     let module_path = normalize_path(module_path);
-<<<<<<< HEAD
+
     if visiting.contains(&module_path) {
         let relative = relative_diagnostic_path(package_root, &module_path.display().to_string());
         return Err(Diagnostic::new(
             "import",
             format!("circular import detected at {relative}"),
-=======
+
     if let Some(cycle_start) = visiting.iter().position(|path| path == &module_path) {
         let mut cycle = visiting[cycle_start..].to_vec();
         cycle.push(module_path.clone());
@@ -2922,10 +2813,7 @@ fn validate_expr_capabilities(
         syntax::Expr::Closure { body, .. } => {
             validate_expr_capabilities(module_path, body, capabilities)
         }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     }
 }
 
@@ -2935,10 +2823,7 @@ fn env_capability_requirement(args: &[syntax::Expr]) -> String {
             format!("[capabilities].env = [{name:?}] or env_unrestricted = true")
         }
         _ => String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true"),
-=======
-=======
-=======
-=======
+
     }
 }
 
@@ -3317,7 +3202,7 @@ fn flatten_modules(
                 &module.path,
                 &mut HashSet::new(),
             )?;
-<<<<<<< HEAD
+
             flattened_consts.push(const_decl.clone());
             if const_decl.is_static {
                 let mut rewritten = module_symbols
@@ -3329,7 +3214,7 @@ fn flatten_modules(
                 rewritten.name = format!("{}_{}", module_symbols.module_id, const_decl.name);
                 flattened_consts.push(rewritten);
             }
-=======
+
             flattened_consts.push(const_decl.clone());
         }
 
@@ -5113,8 +4998,7 @@ fn rewrite_type_name(
                 column,
             )?),
         )),
-<<<<<<< HEAD
-=======
+
     }
 }
 

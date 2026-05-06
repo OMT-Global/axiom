@@ -1,8 +1,7 @@
 worker
 handled reconcile
 true
-<<<<<<< HEAD
+
 default
 1
->>>>>>> origin/codex/worker-f-issue-341
-=======
+

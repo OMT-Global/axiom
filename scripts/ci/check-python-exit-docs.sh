@@ -116,7 +116,6 @@ if grep -Eiq '(^|[^[:alpha:]])(python|stage0)([^[:alpha:]]|$)' <<< "$quickstart_
   exit 1
 fi
 
-
 python3 - "$readiness_doc" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 readiness_doc = sys.argv[1]
@@ -158,9 +157,7 @@ open_blockers = [issue for issue in required_issues if states[issue] != "closed"
 if open_blockers:
     print("Python deletion blocked by open readiness issues: " + ", ".join(f"#{issue}" for issue in open_blockers), file=sys.stderr); sys.exit(1)
 PY
-<<<<<<< HEAD
->>>>>>> origin/codex/worker-a-issue-379-fmt-json
-=======
+
 if awk -F '|' '
   /^## Command And Runtime Matrix/ { in_matrix = 1; next }
   /^## / && in_matrix { in_matrix = 0 }

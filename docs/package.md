@@ -11,30 +11,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/h
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
->>>>>>> origin/codex/issue-406-collection-lookup
->>>>>>> origin/codex/issue-383-new-templates
->>>>>>> origin/codex/agent-g-regex
->>>>>>> origin/codex/agent-f-fs
->>>>>>> origin/codex/agent-i-language-slice
->>>>>>> origin/codex/issue-387-capability-validation
->>>>>>> origin/codex/issue-395-effective-fs-roots
->>>>>>> origin/codex/worker-h-issue-413
->>>>>>> origin/codex/worker-j-issue-362
->>>>>>> origin/codex/worker-j-issue-363
->>>>>>> origin/codex/issue-369-check-fixtures
->>>>>>> origin/codex/issue-370-command-fixtures
->>>>>>> origin/codex/issue-418-schema-metadata
->>>>>>> origin/codex/issue-422-comparison-gate
->>>>>>> origin/codex/issue-425-crap-thresholds
->>>>>>> origin/codex/issue-423-mutation-smoke
->>>>>>> origin/codex/issue-424-survivor-report
->>>>>>> origin/codex/issue-409-proof-cli
->>>>>>> origin/codex/issue-410-proof-worker
->>>>>>> origin/codex/worker-f-issue-341
->>>>>>> origin/codex/worker-f-issue-343
->>>>>>> origin/codex/worker-c-issue-361
->>>>>>> origin/codex/agent-o-debug-info
->>>>>>> origin/codex/issue-427-python-exit-readiness
+
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- pkg graph stage1/examples/workspace_only --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
@@ -53,7 +30,6 @@ The current stage1 examples document the supported manifest surface:
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
 
-<<<<<<< HEAD
 `axiomc caps <package> --json` reports the declared capability surface. When
 filesystem access is enabled, the `fs` capability includes the manifest-relative
 `configured_root` and canonical `effective_root` so operators can inspect the
@@ -90,20 +66,7 @@ registry.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
+
 `axiomc pkg graph <path> --json` prints the resolved local package graph without
 mutating manifests or lockfiles. The JSON lists each package root, package
 identity, workspace members, local dependencies, build entrypoint, capabilities,
@@ -126,17 +89,6 @@ These schemas are intentionally metadata for editor completion, validation, and
 agent contract discovery. The compiler remains the source of truth for semantic
 checks such as dependency graph validity, capability enforcement, and source
 analysis.
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
 
 ## Publish and Static Registry Groundwork
 
@@ -150,18 +102,9 @@ analysis.
 
 The generated index records per-release capability manifests, archive/signature URLs,
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is publish and registry-index groundwork for a future hosted registry service, not the hosted service itself.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.
-<<<<<<< HEAD
+
 ## Registry And Publish Contract
 
 The local manifest contract reserves the package-registry surface without
@@ -195,14 +138,4 @@ resolution exist, manifests must not contain `[registry]`, `[publish]`,
 `package.checksum`, `package.registry`, `package.source`, or dependency
 `version`/`checksum`/`registry`/`source` fields. The parser rejects them instead
 of silently treating a registry package as a local package.
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
-=======
+
