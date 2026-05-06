@@ -2891,7 +2891,7 @@ fn explicit_return_lifetime(ty: &TypeName) -> Option<&str> {
         TypeName::LifetimeSlice(lifetime, _) | TypeName::LifetimeMutSlice(lifetime, _) => {
             Some(lifetime.as_str())
         }
-        TypeName::Option(inner) | TypeName::Array(inner) => explicit_return_lifetime(inner),
+        TypeName::Option(inner) | TypeName::Array(inner, _) => explicit_return_lifetime(inner),
         TypeName::Result(ok, err) | TypeName::Map(ok, err) => {
             explicit_return_lifetime(ok).or_else(|| explicit_return_lifetime(err))
         }
@@ -2920,7 +2920,7 @@ fn type_uses_lifetime(ty: &TypeName, lifetime: &str) -> bool {
         | TypeName::Slice(inner)
         | TypeName::MutSlice(inner)
         | TypeName::Option(inner)
-        | TypeName::Array(inner) => type_uses_lifetime(inner, lifetime),
+        | TypeName::Array(inner, _) => type_uses_lifetime(inner, lifetime),
         TypeName::Result(ok, err) | TypeName::Map(ok, err) => {
             type_uses_lifetime(ok, lifetime) || type_uses_lifetime(err, lifetime)
         }
@@ -2940,7 +2940,7 @@ fn type_contains_borrowed_slice(ty: &TypeName) -> bool {
         TypeName::Ptr(inner)
         | TypeName::MutPtr(inner)
         | TypeName::Option(inner)
-        | TypeName::Array(inner) => type_contains_borrowed_slice(inner),
+        | TypeName::Array(inner, _) => type_contains_borrowed_slice(inner),
         TypeName::Result(ok, err) | TypeName::Map(ok, err) => {
             type_contains_borrowed_slice(ok) || type_contains_borrowed_slice(err)
         }
@@ -2966,7 +2966,7 @@ fn collect_lifetime_uses(ty: &TypeName, found: &mut Vec<String>) {
         | TypeName::Slice(inner)
         | TypeName::MutSlice(inner)
         | TypeName::Option(inner)
-        | TypeName::Array(inner) => collect_lifetime_uses(inner, found),
+        | TypeName::Array(inner, _) => collect_lifetime_uses(inner, found),
         TypeName::Result(ok, err) | TypeName::Map(ok, err) => {
             collect_lifetime_uses(ok, found);
             collect_lifetime_uses(err, found);

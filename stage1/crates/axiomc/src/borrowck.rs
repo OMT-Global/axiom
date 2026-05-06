@@ -254,7 +254,7 @@ fn contains_borrowed_slice_type_inner(
                 visiting_enums,
             )
         }
-        Type::Array(inner)
+        Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
         | Type::AsyncChannel(inner)
@@ -371,7 +371,7 @@ fn contains_mut_borrowed_slice_type_inner(
                 visiting_enums,
             )
         }
-        Type::Array(inner)
+        Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
         | Type::AsyncChannel(inner)
