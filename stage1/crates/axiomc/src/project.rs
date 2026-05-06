@@ -781,6 +781,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             clock: true,
             crypto: true,
             ffi: false,
+            async_runtime: true,
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1992,6 +1993,22 @@ fn validate_stmt_capabilities(
                 }
             }
         }
+        syntax::Stmt::IfLet {
+            expr,
+            then_block,
+            else_block,
+            ..
+        } => {
+            validate_expr_capabilities(module_path, expr, capabilities)?;
+            for stmt in then_block {
+                validate_stmt_capabilities(module_path, stmt, capabilities)?;
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    validate_stmt_capabilities(module_path, stmt, capabilities)?;
+                }
+            }
+        }
         syntax::Stmt::While { cond, body, .. } => {
             validate_expr_capabilities(module_path, cond, capabilities)?;
             for stmt in body {
@@ -2099,6 +2116,9 @@ fn validate_expr_capabilities(
         syntax::Expr::Index { base, index, .. } => {
             validate_expr_capabilities(module_path, base, capabilities)?;
             validate_expr_capabilities(module_path, index, capabilities)
+        }
+        syntax::Expr::Closure { body, .. } => {
+            validate_expr_capabilities(module_path, body, capabilities)
         }
     }
 }
@@ -3161,6 +3181,70 @@ fn rewrite_stmt(
             line: *line,
             column: *column,
         },
+        syntax::Stmt::IfLet {
+            variant,
+            bindings,
+            is_named,
+            expr,
+            then_block,
+            else_block,
+            line,
+            column,
+        } => syntax::Stmt::IfLet {
+            variant: variant.clone(),
+            bindings: bindings.clone(),
+            is_named: *is_named,
+            expr: rewrite_expr(
+                expr,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?,
+            then_block: then_block
+                .iter()
+                .map(|stmt| {
+                    rewrite_stmt(
+                        stmt,
+                        visible_functions,
+                        visible_consts,
+                        visible_structs,
+                        visible_types,
+                        private_imported,
+                        private_imported_consts,
+                        private_imported_types,
+                        module_path,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            else_block: else_block
+                .as_ref()
+                .map(|block| {
+                    block
+                        .iter()
+                        .map(|stmt| {
+                            rewrite_stmt(
+                                stmt,
+                                visible_functions,
+                                visible_consts,
+                                visible_structs,
+                                visible_types,
+                                private_imported,
+                                private_imported_consts,
+                                private_imported_types,
+                                module_path,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?,
+            line: *line,
+            column: *column,
+        },
         syntax::Stmt::While {
             cond,
             body,
@@ -3805,6 +3889,44 @@ fn rewrite_expr(
             line: *line,
             column: *column,
         },
+        syntax::Expr::Closure {
+            params,
+            body,
+            line,
+            column,
+        } => syntax::Expr::Closure {
+            params: params
+                .iter()
+                .map(|param| {
+                    Ok(syntax::Param {
+                        name: param.name.clone(),
+                        ty: rewrite_type_name(
+                            &param.ty,
+                            visible_types,
+                            private_imported_types,
+                            module_path,
+                            param.line,
+                            param.column,
+                        )?,
+                        line: param.line,
+                        column: param.column,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+            body: Box::new(rewrite_expr(
+                body,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
     })
 }
 
@@ -3957,6 +4079,29 @@ fn rewrite_type_name(
                 column,
             )?),
             len.clone(),
+        )),
+        syntax::TypeName::Fn(params, return_ty) => Ok(syntax::TypeName::Fn(
+            params
+                .iter()
+                .map(|param| {
+                    rewrite_type_name(
+                        param,
+                        visible_types,
+                        private_imported_types,
+                        module_path,
+                        line,
+                        column,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Box::new(rewrite_type_name(
+                return_ty,
+                visible_types,
+                private_imported_types,
+                module_path,
+                line,
+                column,
+            )?),
         )),
     }
 }
@@ -4488,6 +4633,7 @@ fn stmt_line(stmt: &syntax::Stmt) -> usize {
         | syntax::Stmt::Panic { line, .. }
         | syntax::Stmt::Defer { line, .. }
         | syntax::Stmt::If { line, .. }
+        | syntax::Stmt::IfLet { line, .. }
         | syntax::Stmt::While { line, .. }
         | syntax::Stmt::Match { line, .. }
         | syntax::Stmt::Return { line, .. } => *line,
@@ -4501,6 +4647,7 @@ fn stmt_column(stmt: &syntax::Stmt) -> usize {
         | syntax::Stmt::Panic { column, .. }
         | syntax::Stmt::Defer { column, .. }
         | syntax::Stmt::If { column, .. }
+        | syntax::Stmt::IfLet { column, .. }
         | syntax::Stmt::While { column, .. }
         | syntax::Stmt::Match { column, .. }
         | syntax::Stmt::Return { column, .. } => *column,

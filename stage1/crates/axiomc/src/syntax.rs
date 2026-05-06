@@ -155,6 +155,16 @@ pub enum Stmt {
         line: usize,
         column: usize,
     },
+    IfLet {
+        variant: String,
+        bindings: Vec<String>,
+        is_named: bool,
+        expr: Expr,
+        then_block: Vec<Stmt>,
+        else_block: Option<Vec<Stmt>>,
+        line: usize,
+        column: usize,
+    },
     While {
         cond: Expr,
         body: Vec<Stmt>,
@@ -258,6 +268,7 @@ pub enum TypeName {
     Tuple(Vec<TypeName>),
     Map(Box<TypeName>, Box<TypeName>),
     Array(Box<TypeName>, Option<String>),
+    Fn(Vec<TypeName>, Box<TypeName>),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -355,6 +366,12 @@ pub enum Expr {
     Index {
         base: Box<Expr>,
         index: Box<Expr>,
+        line: usize,
+        column: usize,
+    },
+    Closure {
+        params: Vec<Param>,
+        body: Box<Expr>,
         line: usize,
         column: usize,
     },
@@ -1772,6 +1789,9 @@ fn parse_if_stmt(lines: &[&str], index: &mut usize, path: &Path) -> Result<Stmt,
                 .with_path(path.display().to_string())
                 .with_span(line_no, 1)
         })?;
+    if let Some(pattern_raw) = cond_raw.strip_prefix("let ") {
+        return parse_if_let_stmt(lines, index, path, line_no, pattern_raw);
+    }
     let cond = parse_expr(cond_raw, path, line_no, 4)?;
     *index += 1;
     let then_block = parse_stmt_list(lines, index, path)?;
@@ -1798,6 +1818,137 @@ fn parse_if_stmt(lines: &[&str], index: &mut usize, path: &Path) -> Result<Stmt,
         line: line_no,
         column: 1,
     })
+}
+
+fn parse_if_let_stmt(
+    lines: &[&str],
+    index: &mut usize,
+    path: &Path,
+    line_no: usize,
+    pattern_raw: &str,
+) -> Result<Stmt, Diagnostic> {
+    let equals = find_top_level_char(pattern_raw, '=').ok_or_else(|| {
+        Diagnostic::new(
+            "parse",
+            "if let statement must use `if let <Variant>(...) = <expr> {` syntax",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, 4)
+    })?;
+    let pattern = pattern_raw[..equals].trim();
+    let expr_raw = pattern_raw[equals + 1..].trim();
+    if pattern.is_empty() || expr_raw.is_empty() {
+        return Err(Diagnostic::new(
+            "parse",
+            "if let statement must include both a pattern and an expression",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, 4));
+    }
+    let (variant, bindings, is_named) = parse_match_pattern(pattern, path, line_no)?;
+    let expr = parse_expr(expr_raw, path, line_no, 4 + equals + 1)?;
+    *index += 1;
+    let then_block = parse_stmt_list(lines, index, path)?;
+    skip_blank_lines(lines, index);
+    let else_block = if *index < lines.len() {
+        match lines[*index].trim() {
+            "} else {" => {
+                *index += 1;
+                Some(parse_stmt_list(lines, index, path)?)
+            }
+            "else {" => {
+                *index += 1;
+                Some(parse_stmt_list(lines, index, path)?)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    Ok(Stmt::IfLet {
+        variant,
+        bindings,
+        is_named,
+        expr,
+        then_block,
+        else_block,
+        line: line_no,
+        column: 1,
+    })
+}
+
+fn parse_match_pattern(
+    pattern: &str,
+    path: &Path,
+    line_no: usize,
+) -> Result<(String, Vec<String>, bool), Diagnostic> {
+    if pattern.starts_with('(') {
+        return Err(
+            Diagnostic::new("parse", "nested match patterns are not supported yet")
+                .with_path(path.display().to_string())
+                .with_span(line_no, 1),
+        );
+    }
+    if pattern.ends_with('}')
+        && let Some(open_brace) = find_top_level_char(pattern, '{')
+        && matches!(find_matching_brace(pattern, open_brace), Some(close) if close == pattern.len() - 1)
+    {
+        let name = pattern[..open_brace].trim();
+        validate_ident(name, path, line_no, 1)?;
+        let bindings_raw = &pattern[open_brace + 1..pattern.len() - 1];
+        let bindings = parse_match_bindings(bindings_raw, open_brace, path, line_no)?;
+        Ok((name.to_string(), bindings, true))
+    } else if pattern.ends_with(')')
+        && let Some(open_paren) = find_top_level_char(pattern, '(')
+        && matches!(find_matching_paren(pattern, open_paren), Some(close) if close == pattern.len() - 1)
+    {
+        let name = pattern[..open_paren].trim();
+        validate_ident(name, path, line_no, 1)?;
+        let bindings_raw = &pattern[open_paren + 1..pattern.len() - 1];
+        let bindings = parse_match_bindings(bindings_raw, open_paren, path, line_no)?;
+        Ok((name.to_string(), bindings, false))
+    } else {
+        validate_ident(pattern, path, line_no, 1)?;
+        Ok((pattern.to_string(), Vec::new(), false))
+    }
+}
+
+fn parse_match_bindings(
+    bindings_raw: &str,
+    open_delim: usize,
+    path: &Path,
+    line_no: usize,
+) -> Result<Vec<String>, Diagnostic> {
+    if bindings_raw.trim().is_empty() {
+        return Err(Diagnostic::new("parse", "match arm binding is empty")
+            .with_path(path.display().to_string())
+            .with_span(line_no, open_delim + 2));
+    }
+    split_top_level_with_offsets(bindings_raw, ',')
+        .into_iter()
+        .map(|(binding_offset, raw_binding)| {
+            let binding = raw_binding.trim();
+            let leading_ws = raw_binding
+                .len()
+                .saturating_sub(raw_binding.trim_start().len());
+            let binding_column = open_delim + 2 + binding_offset + leading_ws;
+            if binding.is_empty() {
+                return Err(Diagnostic::new("parse", "match arm binding is empty")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, binding_column));
+            }
+            if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
+                return Err(Diagnostic::new(
+                    "parse",
+                    "nested match patterns are not supported yet",
+                )
+                .with_path(path.display().to_string())
+                .with_span(line_no, binding_column + nested_offset));
+            }
+            validate_ident(binding, path, line_no, binding_column)?;
+            Ok(binding.to_string())
+        })
+        .collect()
 }
 
 fn parse_while_stmt(lines: &[&str], index: &mut usize, path: &Path) -> Result<Stmt, Diagnostic> {
@@ -2011,6 +2162,36 @@ fn parse_type_name(
     line_no: usize,
     column: usize,
 ) -> Result<TypeName, Diagnostic> {
+    if raw.starts_with("fn(") {
+        let open = 2;
+        let close = find_matching_paren(raw, open).ok_or_else(|| {
+            Diagnostic::new("parse", "function type must use `fn(args): return` syntax")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column)
+        })?;
+        let after = raw[close + 1..].trim_start();
+        let Some(return_raw) = after.strip_prefix(':') else {
+            return Err(
+                Diagnostic::new("parse", "function type is missing `: return`")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + close + 1),
+            );
+        };
+        let params_raw = raw[open + 1..close].trim();
+        let mut params = Vec::new();
+        if !params_raw.is_empty() {
+            for param_raw in split_top_level_type(params_raw, ',') {
+                params.push(parse_type_name(
+                    param_raw.trim(),
+                    path,
+                    line_no,
+                    column + open + 1,
+                )?);
+            }
+        }
+        let return_ty = parse_type_name(return_raw.trim(), path, line_no, column + close + 2)?;
+        return Ok(TypeName::Fn(params, Box::new(return_ty)));
+    }
     if raw.starts_with("&mut [")
         && raw.ends_with(']')
         && matches!(find_matching_square(raw, 5), Some(close) if close == raw.len() - 1)
@@ -2255,6 +2436,9 @@ fn parse_type_name(
 
 fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<Expr, Diagnostic> {
     let raw = raw.trim();
+    if raw.starts_with('|') {
+        return parse_term(raw, path, line_no, column);
+    }
     if let Some(split_index) = find_top_level_as(raw) {
         let lhs_raw = raw[..split_index].trim();
         let ty_raw = raw[split_index + 4..].trim();
@@ -2313,6 +2497,9 @@ fn parse_add(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<Ex
 }
 
 fn parse_term(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<Expr, Diagnostic> {
+    if let Some(closure) = parse_closure_expr(raw, path, line_no, column)? {
+        return Ok(closure);
+    }
     if raw.is_empty() {
         return Err(Diagnostic::new("parse", "expression is empty")
             .with_path(path.display().to_string())
@@ -2680,6 +2867,95 @@ fn find_top_level_as(raw: &str) -> Option<usize> {
             return Some(index);
         }
         index += 1;
+    }
+    None
+}
+
+fn parse_closure_expr(
+    raw: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<Option<Expr>, Diagnostic> {
+    if !raw.starts_with('|') {
+        return Ok(None);
+    }
+    let Some(close_bar) = find_closure_param_bar(raw) else {
+        return Err(
+            Diagnostic::new("parse", "closure parameters must be closed with `|`")
+                .with_path(path.display().to_string())
+                .with_span(line_no, column),
+        );
+    };
+    let params_raw = raw[1..close_bar].trim();
+    let body_raw = raw[close_bar + 1..].trim();
+    if body_raw.is_empty() {
+        return Err(Diagnostic::new("parse", "closure body is empty")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + close_bar + 1));
+    }
+    let mut params = Vec::new();
+    if !params_raw.is_empty() {
+        for param_text in split_top_level(params_raw, ',') {
+            let colon = find_top_level_char(param_text, ':').ok_or_else(|| {
+                Diagnostic::new("parse", "closure parameter must use `name: type` syntax")
+                    .with_path(path.display().to_string())
+                    .with_span(line_no, column + 1)
+            })?;
+            let name = param_text[..colon].trim();
+            validate_ident(name, path, line_no, column + 1)?;
+            let ty = parse_type_name(
+                param_text[colon + 1..].trim(),
+                path,
+                line_no,
+                column + colon + 2,
+            )?;
+            params.push(Param {
+                name: name.to_string(),
+                ty,
+                line: line_no,
+                column: column + 1,
+            });
+        }
+    }
+    let body_text = if body_raw.starts_with('{')
+        && body_raw.ends_with('}')
+        && matches!(find_matching_brace(body_raw, 0), Some(close) if close == body_raw.len() - 1)
+    {
+        body_raw[1..body_raw.len() - 1].trim()
+    } else {
+        body_raw
+    };
+    let body = parse_expr(body_text, path, line_no, column + close_bar + 1)?;
+    Ok(Some(Expr::Closure {
+        params,
+        body: Box::new(body),
+        line: line_no,
+        column,
+    }))
+}
+
+fn find_closure_param_bar(raw: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, ch) in raw.char_indices().skip(1) {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            continue;
+        }
+        if ch == '|' {
+            return Some(index);
+        }
     }
     None
 }
