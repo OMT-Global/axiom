@@ -25,6 +25,8 @@ Current executable fixtures cover:
   and `if let` control flow, including ignored fallback payloads.
 - `collection_operations`: standard collection helpers over arrays and
   borrowed slices.
+- `ownership_borrowing`: borrow-safe parameter, aggregate, borrowed-return,
+  projection move, and dependency-boundary execution.
 - `comparison_package_imports`: Axiom-owned Go/Rust-style comparison fixture
   for explicit package imports and cross-module function calls.
 - `comparison_package_resources`: Axiom-owned Go/Rust-style comparison fixture

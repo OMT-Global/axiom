@@ -166,6 +166,16 @@ version = "0.1.0"
 source = "path:pass/outcome_control_flow"
 
 [[package]]
+name = "conformance-ownership-borrowing"
+version = "0.1.0"
+source = "path:pass/ownership_borrowing"
+
+[[package]]
+name = "borrow-core"
+version = "0.1.0"
+source = "path:pass/ownership_borrowing/deps/core"
+
+[[package]]
 name = "conformance-package-local-modules"
 version = "0.1.0"
 source = "path:pass/package_local_modules"
@@ -179,4 +189,3 @@ source = "path:pass/package_visibility"
 name = "conformance-struct-field-access"
 version = "0.1.0"
 source = "path:pass/struct_field_access"
-
