@@ -275,7 +275,9 @@ impl PartialEq for Type {
             (Type::Error, Type::Error)
             | (Type::Int, Type::Int)
             | (Type::Bool, Type::Bool)
-            | (Type::String, Type::String) => true,
+            | (Type::String, Type::String)
+            | (Type::Str, Type::Str) => true,
+            (Type::Numeric(lhs), Type::Numeric(rhs)) => lhs == rhs,
             (Type::Struct(lhs), Type::Struct(rhs)) | (Type::Enum(lhs), Type::Enum(rhs)) => {
                 lhs == rhs
             }
@@ -7534,7 +7536,7 @@ fn lower_expr_with_expected_inner(
                     let mut lowered_args = Vec::new();
                     for (arg, expected) in args.iter().zip(param_tys.iter()) {
                         let lowered = lower_expr_with_expected(arg, Some(expected), env, ctx)?;
-                        if lowered.ty() != expected {
+                        if !type_assignable_to(lowered.ty(), expected) {
                             return Err(Diagnostic::new(
                                 "type",
                                 format!(
@@ -7628,7 +7630,7 @@ fn lower_expr_with_expected_inner(
                 let lowered = lower_expr_with_expected(&args[0], inner_expected, env, ctx)?;
                 let inner_ty = lowered.ty().clone();
                 if let Some(expected_inner) = inner_expected
-                    && &inner_ty != expected_inner
+                    && !type_assignable_to(&inner_ty, expected_inner)
                 {
                     return Err(Diagnostic::new(
                         "type",
@@ -7665,7 +7667,7 @@ fn lower_expr_with_expected_inner(
                     .with_span(*line, *column));
                 };
                 let lowered = lower_expr_with_expected(&args[0], Some(ok_ty.as_ref()), env, ctx)?;
-                if lowered.ty() != ok_ty.as_ref() {
+                if !type_assignable_to(lowered.ty(), ok_ty.as_ref()) {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -7702,7 +7704,7 @@ fn lower_expr_with_expected_inner(
                     .with_span(*line, *column));
                 };
                 let lowered = lower_expr_with_expected(&args[0], Some(err_ty.as_ref()), env, ctx)?;
-                if lowered.ty() != err_ty.as_ref() {
+                if !type_assignable_to(lowered.ty(), err_ty.as_ref()) {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -7794,7 +7796,7 @@ fn lower_expr_with_expected_inner(
                         ctx,
                         allow_temporary_string_borrow,
                     )?;
-                    if lowered.ty() != expected {
+                    if !type_assignable_to(lowered.ty(), expected) {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -7923,7 +7925,7 @@ fn lower_expr_with_expected_inner(
                     ctx,
                     allow_temporary_string_borrow,
                 )?;
-                if lowered.ty() != expected {
+                if !type_assignable_to(lowered.ty(), expected) {
                     return Err(Diagnostic::new(
                         "type",
                         format!(
@@ -8510,7 +8512,7 @@ fn lower_expr_with_expected_inner(
             for element in elements {
                 let lowered = lower_expr_with_expected(element, expected_element, env, ctx)?;
                 if let Some(expected) = element_ty.as_ref() {
-                    if lowered.ty() != expected {
+                    if !type_assignable_to(lowered.ty(), expected) {
                         return Err(Diagnostic::new(
                             "type",
                             format!(
@@ -9339,7 +9341,7 @@ fn lower_variant_constructor(
     let mut lowered_payloads = Vec::new();
     for (arg, expected) in args.iter().zip(variant.payload_tys.iter()) {
         let lowered = lower_call_arg_with_expected(arg, Some(expected), env, ctx, false)?;
-        if lowered.ty() != expected {
+        if !type_assignable_to(lowered.ty(), expected) {
             return Err(Diagnostic::new(
                 "type",
                 format!(
@@ -9400,7 +9402,7 @@ fn lower_named_variant_constructor(
         }
         let expected = &variant.payload_tys[position];
         let lowered = lower_expr_with_expected(&field.expr, Some(expected), env, ctx)?;
-        if lowered.ty() != expected {
+        if !type_assignable_to(lowered.ty(), expected) {
             return Err(Diagnostic::new(
                 "type",
                 format!(
