@@ -20,6 +20,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/worker-h-issue-413
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
+>>>>>>> origin/codex/issue-369-check-fixtures
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -91,6 +92,7 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub stderr: Option<String>,
 =======
 =======
@@ -122,6 +124,7 @@ pub struct ExpectedDiagnostic {
     pub path: String,
     pub line: usize,
     pub column: usize,
+=======
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -142,6 +145,7 @@ pub struct CapabilityConfig {
     pub crypto: bool,
     pub ffi: bool,
     pub async_runtime: bool,
+>>>>>>> origin/codex/issue-369-check-fixtures
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
@@ -185,8 +189,10 @@ pub struct CapabilityDescriptor {
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
+<<<<<<< HEAD
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
+=======
 }
 
 #[derive(Debug, Deserialize)]
@@ -258,12 +264,13 @@ struct RawPublishSection {
     checksum: Option<String>,
     include: Option<Vec<String>>,
 =======
-=======
     kind: Option<String>,
 =======
     expected_error: Option<ExpectedDiagnostic>,
     capabilities: Option<Vec<CapabilityKind>>,
     package: Option<String>,
+=======
+    kind: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -286,6 +293,7 @@ struct RawCapabilityConfig {
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
+>>>>>>> origin/codex/issue-369-check-fixtures
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -384,9 +392,11 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             unsafe_opt_in: config.unsafe_opt_ins.iter().any(|name| name == kind.name()),
             owner: config.owners.get(kind.name()).cloned(),
             rationale: config.rationale.get(kind.name()).cloned(),
+<<<<<<< HEAD
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
+=======
         })
         .collect()
 }
@@ -549,6 +559,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             crypto: capabilities.crypto.unwrap_or(false),
             ffi: capabilities.ffi.unwrap_or(false),
             async_runtime: capabilities.async_runtime.unwrap_or(false),
+>>>>>>> origin/codex/issue-369-check-fixtures
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
@@ -913,6 +924,7 @@ fn normalize_tests(
             entry,
             stdout: raw_test.stdout,
 <<<<<<< HEAD
+<<<<<<< HEAD
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -925,6 +937,8 @@ fn normalize_tests(
             expected_error: raw_test.expected_error,
             capabilities,
             package,
+=======
+            kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
         });
     }
     Ok(tests)
@@ -932,7 +946,10 @@ fn normalize_tests(
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> origin/codex/worker-j-issue-362
+=======
+>>>>>>> origin/codex/issue-369-check-fixtures
 fn normalize_test_kind(
     value: Option<String>,
     path: &Path,

@@ -11,7 +11,6 @@ members = [
   "fail/comparison_strict_type_mismatch",
   "fail/for_loop_requires_iteration_protocol",
 <<<<<<< HEAD
-=======
   "fail/for_loop_requires_iteration_protocol",
   "fail/comparison_owned_resource_move",
   "fail/comparison_predictable_diagnostic",
@@ -22,6 +21,10 @@ members = [
   "fail/import_path_escape",
   "fail/import_reserved_namespace",
   "fail/import_unsupported_alias",
+=======
+  "fail/for_loop_requires_iteration_protocol",
+  "fail/comparison_owned_resource_move",
+  "fail/comparison_predictable_diagnostic",
   "fail/match_guard_not_supported",
   "fail/mutable_borrow_while_shared_live",
   "fail/named_nested_match_pattern_not_supported",

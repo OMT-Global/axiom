@@ -53,6 +53,7 @@ stage1-crap-proposal:
 mutation-rust-smoke:
 	bash scripts/ci/run-mutation-rust-smoke.sh
 >>>>>>> origin/codex/worker-j-issue-363
+>>>>>>> origin/codex/issue-369-check-fixtures
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json
@@ -133,10 +134,12 @@ stage1-smoke:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/stdlib_regex --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/stdlib_regex --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/stdlib_regex
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_regex --json
+=======
 =======
 =======
 =======
