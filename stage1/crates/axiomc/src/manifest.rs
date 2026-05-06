@@ -101,7 +101,6 @@ pub enum TestKind {
 <<<<<<< HEAD
     pub stderr: Option<String>,
 =======
-=======
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -128,6 +127,7 @@ pub struct ExpectedDiagnostic {
     pub path: String,
     pub line: usize,
     pub column: usize,
+=======
 =======
 =======
 =======
@@ -427,12 +427,12 @@ pub fn render_manifest(name: &str) -> String {
 <<<<<<< HEAD
 <<<<<<< HEAD
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
-=======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
 =======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
 =======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
+=======
 =======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
     )
@@ -958,10 +958,10 @@ fn normalize_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
             stderr: raw_test.stderr,
-=======
             expected_error: raw_test.expected_error,
             capabilities,
             package,
+=======
 =======
 =======
 =======

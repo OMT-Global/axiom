@@ -453,6 +453,7 @@ const OWNERSHIP_CLOSURE_MOVE_CAPTURED_NON_COPY: &str = "closure_move_captured_no
 const OWNERSHIP_CLOSURE_BORROWED_SLICE_RETURN: &str = "closure_borrowed_slice_return";
 =======
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
 const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str = "borrow_return_requires_param_origin";
 const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
@@ -558,7 +559,6 @@ fn lower_with_capabilities_impl(
         &enum_names,
         &aliases,
         &consts,
->>>>>>> origin/codex/worker-a-issue-379-fmt-json
 >>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
@@ -1001,6 +1001,7 @@ fn type_has_unboxed_recursive_path(
         Type::Slice(_) | Type::MutSlice(_) | Type::Map(_, _) | Type::Array(_, _) => false,
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
         Type::Option(inner)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -2824,9 +2825,11 @@ fn rewrite_aggregate_type_name(
             )?),
         ),
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
->>>>>>> origin/codex/issue-423-mutation-smoke
+=======
+>>>>>>> origin/codex/issue-424-survivor-report
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
@@ -5323,7 +5326,6 @@ fn validate_const_array_lengths_in_type(
     }
 }
 
-<<<<<<< HEAD
 fn lower_match_stmt(
     expr: &syntax::Expr,
     arms: Vec<MatchArmInput>,
@@ -5576,6 +5578,7 @@ fn lower_match_stmt(
 }
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
@@ -5593,7 +5596,7 @@ fn lower_match_stmt(
 >>>>>>> origin/codex/issue-422-comparison-gate
 =======
 =======
->>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5645,7 +5648,6 @@ fn lower_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5665,6 +5667,15 @@ fn lower_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+=======
+=======
+=======
+            if actual != expected && !actual.is_error() && !expected.is_error() {
+=======
+=======
+=======
 =======
 =======
 =======
@@ -5673,16 +5684,8 @@ fn lower_stmt(
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
 =======
-=======
-=======
-=======
-=======
-=======
-=======
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
-=======
-            if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
                 return Err(Diagnostic::new(
                     "type",
@@ -10324,6 +10327,7 @@ fn explicit_return_lifetime(ty: &syntax::TypeName) -> Option<&str> {
         | syntax::TypeName::String
         | syntax::TypeName::Str => None,
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
         | syntax::TypeName::Bool
         | syntax::TypeName::String => None,
     }
@@ -10352,11 +10356,13 @@ fn type_has_lifetime(ty: &syntax::TypeName, lifetime: &str) -> bool {
                 || type_has_lifetime(return_ty, lifetime)
         }
 <<<<<<< HEAD
+<<<<<<< HEAD
         syntax::TypeName::Int
         | syntax::TypeName::Numeric(_)
         | syntax::TypeName::Bool
         | syntax::TypeName::String
         | syntax::TypeName::Str => false,
+=======
 =======
         syntax::TypeName::Int | syntax::TypeName::Bool | syntax::TypeName::String => false,
     }
@@ -10637,6 +10643,7 @@ fn borrow_kind_for_type(
 }
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 fn increment_active_borrows(
     owner_names: &HashSet<String>,
     env: &mut HashMap<String, Binding>,
@@ -10653,6 +10660,8 @@ fn increment_active_borrows(
         })?;
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
         binding.borrow_state.begin_borrow(
             owner_name,
@@ -10695,6 +10704,7 @@ fn increment_active_borrows(
             binding.active_mut_borrow_count += 1;
         }
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
     }
     Ok(())
 }
@@ -10998,6 +11008,8 @@ fn lower_type_inner<T, U>(
         )),
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
     }

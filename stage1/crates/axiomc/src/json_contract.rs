@@ -58,9 +58,9 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-425-crap-thresholds
-=======
 >>>>>>> origin/codex/issue-423-mutation-smoke
+=======
+>>>>>>> origin/codex/issue-424-survivor-report
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

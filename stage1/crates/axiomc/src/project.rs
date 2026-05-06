@@ -21,6 +21,7 @@ use crate::manifest::{
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-425-crap-thresholds
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 };
 use crate::mir;
 use crate::stdlib;
@@ -83,6 +84,8 @@ pub struct BuiltPackage {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
     pub cache_key: BuildCacheMetadata,
@@ -348,6 +351,7 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
             cache_key: report.cache_key,
 =======
             metadata: report.metadata,
@@ -377,6 +381,8 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======
@@ -728,10 +734,10 @@ fn collect_discovered_tests(
             kind,
             stderr,
             kind,
-=======
             expected_error: None,
             capabilities: Vec::new(),
             package: None,
+=======
 =======
 =======
 =======
@@ -1386,6 +1392,7 @@ fn build_artifacts(
 <<<<<<< HEAD
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -2581,6 +2588,7 @@ fn validate_expr_capabilities(
         }
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     }
 }
 
@@ -2590,6 +2598,7 @@ fn env_capability_requirement(args: &[syntax::Expr]) -> String {
             format!("[capabilities].env = [{name:?}] or env_unrestricted = true")
         }
         _ => String::from("[capabilities].env = [\"NAME\"] or env_unrestricted = true"),
+=======
 =======
 =======
     }

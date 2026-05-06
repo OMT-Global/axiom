@@ -24,6 +24,7 @@ use axiomc::manifest::{load_manifest, manifest_path};
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-425-crap-thresholds
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 use axiomc::new_project::create_project;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -78,10 +79,12 @@ use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+<<<<<<< HEAD
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
->>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
+=======
+>>>>>>> origin/codex/issue-424-survivor-report
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -282,7 +285,6 @@ enum Command {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
 }
 
 <<<<<<< HEAD
@@ -291,6 +293,7 @@ enum Command {
 enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 }
@@ -319,9 +322,9 @@ enum InspectCommand {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-425-crap-thresholds
-=======
 >>>>>>> origin/codex/issue-423-mutation-smoke
+=======
+>>>>>>> origin/codex/issue-424-survivor-report
 }
 
 fn main() {
@@ -628,6 +631,7 @@ fn main() {
         },
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
         Command::Fmt { path, check } => match format_axiom_sources(&path, check) {
         }
         Command::Fmt { path, check, json } => match format_axiom_sources(&path, check) {
@@ -809,6 +813,8 @@ fn main() {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======
@@ -2658,7 +2664,7 @@ mod tests {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2684,6 +2690,7 @@ mod tests {
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-425-crap-thresholds
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2703,6 +2710,8 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
             cache_key: axiomc::project::BuildCacheMetadata {
@@ -2791,7 +2800,6 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-=======
 =======
 =======
 =======
@@ -2954,6 +2962,7 @@ mod tests {
         assert_eq!(
             parse_rustc_host_target(version).as_deref(),
             Some("aarch64-apple-darwin")
+=======
 =======
 =======
         );

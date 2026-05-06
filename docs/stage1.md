@@ -157,6 +157,7 @@ requested Rust target triple when `--target <triple>` is used and report
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> origin/codex/issue-423-mutation-smoke
+>>>>>>> origin/codex/issue-424-survivor-report
 with generated source-position markers. Build JSON carries both `cache_key`
 metadata with the cache schema version, compiler key, target, debug mode,
 manifest hash, lockfile hash, generated Rust hash, and per-source hashes used
@@ -167,6 +168,7 @@ sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
 =======
@@ -180,6 +182,7 @@ a JSON sidecar that maps generated Rust statement lines back to Axiom
 file/line/column positions. `axiomc build --timings` prints total build time,
 cache hit/miss counts, and per-package compile timing/cache status for the
 incremental generated-Rust cache.
+=======
 =======
 =======
 Parser diagnostics now preserve additional recovered top-level parse errors in
