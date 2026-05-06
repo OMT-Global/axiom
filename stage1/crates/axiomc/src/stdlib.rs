@@ -9,6 +9,7 @@
 //! `hir::lower_with_capabilities`.
 //!
 //! Today this provides sixteen stdlib modules. Six are thin wrappers over
+//! Today this provides fifteen stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,

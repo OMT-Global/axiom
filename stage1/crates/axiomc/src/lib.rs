@@ -30,8 +30,9 @@ mod tests {
     use crate::project::{
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
-        run_project_tests_with_options, run_project_with_options,
+        command_for_build_output, command_for_executable, list_project_tests_with_options,
+        project_capabilities, run_project_tests, run_project_tests_with_options,
+        run_project_with_options,
     };
     use crate::syntax::{Stmt, TypeName, Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
@@ -235,7 +236,6 @@ mod tests {
 
     #[test]
 <<<<<<< HEAD
-<<<<<<< HEAD
     fn parser_distinguishes_owned_string_from_borrowed_str() {
         let source = r#"fn read(label: &str): int {
 print label
@@ -363,7 +363,6 @@ print borrowed
     }
 
     #[test]
-=======
 =======
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
@@ -2814,7 +2813,6 @@ crypto = false
                 .message
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
->>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
     }
@@ -5700,6 +5698,37 @@ print serve_once("127.0.0.1:18080", "hello")
         .expect("run benchmark smoke tests");
         assert_eq!(output.failed, 0);
         assert_eq!(output.kinds.get(&TestKind::Benchmark), Some(&1));
+    fn list_project_tests_reports_stable_names_paths_and_packages() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-list");
+        create_project(&project, Some("runner-list-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[[tests]]\nname = \"math-smoke\"\nentry = \"src/math_test.ax\"\nstdout = \"42\\n\"\n",
+                render_manifest("runner-list-app")
+            ),
+        )
+        .expect("write manifest");
+        fs::write(project.join("src/math_test.ax"), "print 42\n").expect("write test");
+
+        let output =
+            list_project_tests_with_options(&project, &TestOptions::default()).expect("list tests");
+
+        assert_eq!(output.total, 2);
+        assert_eq!(output.packages.len(), 1);
+        assert!(output.packages[0].ends_with("runner-list"));
+        assert!(output.cases.iter().any(|case| {
+            case.package.as_deref() == Some("runner-list-app")
+                && case.name == "math-smoke"
+                && case.entry == "src/math_test.ax"
+                && case.expected_stdout
+        }));
+        assert!(output.cases.iter().any(|case| {
+            case.package.as_deref() == Some("runner-list-app")
+                && case.name == "src/main_test"
+                && case.entry == "src/main_test.ax"
+        }));
     }
 
     #[test]
@@ -5827,9 +5856,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 .count()
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
                 == 24
-=======
 =======
 =======
                 == 20
@@ -5841,7 +5868,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
             12
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
             9
         );
@@ -8713,8 +8739,11 @@ print 0
         );
         assert_eq!(payload["command"], "build");
         assert_eq!(payload["backend"], "generated-rust");
+<<<<<<< HEAD
         assert_eq!(payload["locked"], true);
         assert_eq!(payload["offline"], true);
+=======
+>>>>>>> origin/codex/issue-381-test-list
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());

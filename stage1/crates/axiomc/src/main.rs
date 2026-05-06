@@ -4,9 +4,7 @@ use axiomc::diagnostic_catalog::{DiagnosticCodeInfo, diagnostic_code_info};
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
-=======
 use axiomc::manifest::CapabilityDescriptor;
->>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 use axiomc::lockfile::{expected_lockfile_for_project, validate_lockfile};
@@ -20,6 +18,18 @@ use axiomc::project::{
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
 };
+=======
+use axiomc::diagnostics::Diagnostic;
+use axiomc::json_contract;
+use axiomc::lsp;
+use axiomc::new_project::create_project;
+use axiomc::project::{
+    build_project_with_options, check_project_with_options, list_project_tests_with_options,
+    project_capabilities, run_project_tests_with_options, run_project_with_options, BuildOptions,
+    BuildOutput, CheckOptions, RunOptions, TestOptions,
+};
+use axiomc::registry::{load_registry_index, render_registry_index};
+>>>>>>> origin/codex/issue-381-test-list
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -89,6 +99,8 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        list: bool,
         #[arg(long)]
         filter: Option<String>,
         #[arg(long)]
@@ -175,6 +187,7 @@ enum Command {
         #[arg(long)]
         allow_overwrite: bool,
     },
+>>>>>>> origin/codex/issue-381-test-list
     /// Build a static package-registry index from package release folders.
     RegistryIndex {
         packages_dir: PathBuf,
@@ -193,11 +206,11 @@ enum Command {
 <<<<<<< HEAD
 }
 
+<<<<<<< HEAD
 #[derive(Debug, Subcommand)]
 enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
->>>>>>> origin/codex/issue-376-doctor-json
 =======
 }
 
@@ -212,6 +225,8 @@ enum InspectCommand {
         json: bool,
     },
 >>>>>>> origin/codex/issue-378-inspect-graph
+=======
+>>>>>>> origin/codex/issue-381-test-list
 }
 
 fn main() {
@@ -294,12 +309,12 @@ fn main() {
         Command::Test {
             path,
             json,
+            list,
             filter,
             include_benchmarks,
             package,
-        } => match run_project_tests_with_options(
-            &path,
-            &TestOptions {
+        } => {
+            let options = TestOptions {
                 filter: filter.clone(),
                 package: package.clone(),
                 include_benchmarks,
@@ -318,13 +333,26 @@ fn main() {
                         eprintln!("{status} {:?} {} ({})", case.kind, case.name, case.entry);
                         if let Some(error) = &case.error {
                             eprintln!("  {}", error);
+            };
+            if list {
+                match list_project_tests_with_options(&path, &options) {
+                    Ok(output) => {
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::test_list_success(&path, filter.as_deref(), &output)
+                            );
+                        } else {
+                            for case in &output.cases {
+                                let package =
+                                    case.package.as_deref().unwrap_or(&case.package_root);
+                                println!("{package}\t{}\t{}", case.name, case.entry);
+                            }
+                            eprintln!("listed: {} test(s)", output.total);
                         }
-                        eprintln!("  duration: {} ms", case.duration_ms);
+                        0
                     }
-                    eprintln!(
-                        "passed: {} failed: {} skipped: {} duration: {} ms",
-                        output.passed, output.failed, output.skipped, output.duration_ms
-                    );
+                    Err(error) => print_error("test", error, json),
                 }
                 if ok { 0 } else { 1 }
             }
@@ -345,6 +373,45 @@ fn main() {
                 } else {
                     match diff_caps_files(&old, &new) {
                         Ok(report) => match json_contract::to_pretty_string(&report) {
+            } else {
+                match run_project_tests_with_options(&path, &options) {
+                    Ok(output) => {
+                        let ok = output.failed == 0;
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::test_success(&path, filter.as_deref(), &output)
+                            );
+                        } else {
+                            for case in &output.cases {
+                                let status = if case.ok { "PASS" } else { "FAIL" };
+                                eprintln!("{status} {} ({})", case.name, case.entry);
+                                if let Some(error) = &case.error {
+                                    eprintln!("  {}", error);
+                                }
+                                eprintln!("  duration: {} ms", case.duration_ms);
+                            }
+                            eprintln!(
+                                "passed: {} failed: {} skipped: {} duration: {} ms",
+                                output.passed, output.failed, output.skipped, output.duration_ms
+                            );
+                        }
+                        if ok { 0 } else { 1 }
+                    }
+                    Err(error) => print_error("test", error, json),
+                }
+            }
+        }
+        Command::Caps { path, json } => {
+            let project = path.unwrap_or_else(|| PathBuf::from("."));
+            match project_capabilities(&project) {
+                Ok(capabilities) => {
+                    if json {
+                        println!("{}", json_contract::caps_success(&project, &capabilities));
+                        0
+                    } else {
+                        let payload = json_contract::caps_success(&project, &capabilities);
+                        match json_contract::to_pretty_string(&payload) {
                             Ok(output) => {
                                 println!("{output}");
                                 if report.escalated { 1 } else { 0 }
@@ -395,7 +462,6 @@ fn main() {
             }
         }
         Command::Inspect { command } => match command {
-<<<<<<< HEAD
             InspectCommand::Symbols { path, json } => match inspect_symbols(&path) {
             InspectCommand::Graph { path, json } => match inspect_graph(&path) {
                 Ok(report) => {
@@ -427,7 +493,6 @@ fn main() {
                 }
                 Err(error) => print_error("inspect graph", error, json),
             },
-=======
         Command::Explain { code, json } => match diagnostic_code_info(&code) {
             Some(info) => {
                 if json {
@@ -529,7 +594,14 @@ fn main() {
                         );
                     }
                 }
+<<<<<<< HEAD
                 if report.failed == 0 { 0 } else { 1 }
+=======
+                if report.failed == 0 {
+                    0
+                } else {
+                    1
+                }
             }
             Err(error) => print_error("bench", error, json),
         },
@@ -576,6 +648,7 @@ fn main() {
             }
             Err(error) => print_error("publish", error, false),
         },
+>>>>>>> origin/codex/issue-381-test-list
         Command::RegistryIndex {
             packages_dir,
             base_url,
@@ -616,10 +689,12 @@ fn main() {
             Ok(()) => 0,
             Err(error) => print_error("lsp", error, false),
         },
+<<<<<<< HEAD
         Command::Dap => match dap::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("dap", error, false),
         },
+=======
     };
     std::process::exit(code);
 }
@@ -833,7 +908,6 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
 }
 
 #[derive(Debug, Clone, Serialize)]
-<<<<<<< HEAD
 struct FormatEdit {
     action: String,
     line: usize,
@@ -1590,8 +1664,6 @@ fn normalize_for_graph(path: &Path) -> String {
         .display()
         .to_string()
 }
-
-=======
 fn explain_payload(info: &DiagnosticCodeInfo) -> serde_json::Value {
     serde_json::json!({
         "schema_version": json_contract::JSON_SCHEMA_VERSION,
@@ -2379,7 +2451,6 @@ mod tests {
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
         assert!(help.contains("Report local stage1 project and toolchain health"));
->>>>>>> origin/codex/issue-378-inspect-graph
         assert!(help.contains("Inspect project metadata for agent tooling"));
         assert!(help.contains("Explain a stable diagnostic code"));
         assert!(help.contains("Format .ax source files"));
@@ -2387,6 +2458,7 @@ mod tests {
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
         assert!(help.contains("Start a small stage1 scratch REPL"));
         assert!(help.contains("Pack, sign, and publish a stage1 package"));
+>>>>>>> origin/codex/issue-381-test-list
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
     }
@@ -2413,6 +2485,7 @@ mod tests {
             );
         let rendered = error.to_string();
         assert!(rendered.contains("unsupported backend \"direct-native\""));
+<<<<<<< HEAD
         assert!(
             rendered.contains(
                 "only generated-rust is implemented in this preparatory backend plumbing"
@@ -2462,8 +2535,10 @@ mod tests {
             }
             other => panic!("expected caps diff command with path, got {other:?}"),
         }
->>>>>>> origin/codex/issue-376-doctor-json
 =======
+=======
+        assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
+>>>>>>> origin/codex/issue-381-test-list
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2471,6 +2546,7 @@ mod tests {
             backend: NativeBackendKind::GeneratedRust,
             locked: false,
             offline: false,
+>>>>>>> origin/codex/issue-381-test-list
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2550,12 +2626,13 @@ mod tests {
             build_summary_lines(&build_output(None), false),
             vec![String::from("wrote dist/app (backend=generated-rust)")]
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
         );
     }
 
     #[test]
-<<<<<<< HEAD
     fn inspect_symbols_reports_public_symbols_and_capabilities() {
         let dir = tempfile::tempdir().expect("tempdir");
         let source_dir = dir.path().join("src");
@@ -2827,7 +2904,6 @@ mod tests {
         let report = inspect_graph(&project).expect("inspect graph");
 
         assert!(!report.cycles.is_empty());
-=======
     fn explain_text_includes_example_and_fix() {
         let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
         let text = explain_text(info);
@@ -2848,7 +2924,6 @@ mod tests {
         );
         assert_eq!(payload["command"], "explain");
         assert_eq!(payload["diagnostic"]["code"], "use_after_move");
->>>>>>> origin/codex/issue-375-explain-diagnostics
     }
 
     #[test]

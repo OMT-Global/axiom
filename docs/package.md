@@ -12,6 +12,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hel
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
+>>>>>>> origin/codex/issue-381-test-list
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
 ```
@@ -42,4 +43,7 @@ contract.
 - `axiom-registry.toml` with `yanked = true` and optional `yank_reason`
 
 The generated index records per-release capability manifests, archive/signature URLs,
+<<<<<<< HEAD
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is publish and registry-index groundwork for a future hosted registry service, not the hosted service itself.
+=======
+and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.

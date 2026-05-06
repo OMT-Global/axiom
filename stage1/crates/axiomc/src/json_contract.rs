@@ -1,6 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::manifest::CapabilityDescriptor;
-use crate::project::{BuildOutput, CheckOutput, TestOutput};
+use crate::project::{BuildOutput, CheckOutput, TestListOutput, TestOutput};
 use serde::Serialize;
 use serde_json::{Value, json};
 >>>>>>> origin/codex/issue-380-doc-json
@@ -36,6 +36,7 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "backend": output.backend,
         "locked": output.locked,
         "offline": output.offline,
+>>>>>>> origin/codex/issue-381-test-list
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,
@@ -55,7 +56,6 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-378-inspect-graph
         "metadata": output.metadata,
         "cache_hits": output.cache_hits,
         "cache_misses": output.cache_misses,
@@ -78,6 +78,21 @@ pub fn test_success(project: &Path, filter: Option<&str>, output: &TestOutput) -
         "skipped": output.skipped,
         "kinds": output.kinds,
         "duration_ms": output.duration_ms,
+        "cases": output.cases,
+    })
+}
+
+pub fn test_list_success(project: &Path, filter: Option<&str>, output: &TestListOutput) -> Value {
+    json!({
+        "schema_version": JSON_SCHEMA_VERSION,
+        "ok": true,
+        "command": "test",
+        "mode": "list",
+        "project": project.display().to_string(),
+        "manifest": output.manifest,
+        "packages": output.packages,
+        "filter": filter,
+        "total": output.total,
         "cases": output.cases,
     })
 }

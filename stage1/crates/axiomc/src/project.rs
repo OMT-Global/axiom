@@ -81,6 +81,7 @@ pub struct BuildOutput {
     pub backend: NativeBackendKind,
     pub locked: bool,
     pub offline: bool,
+>>>>>>> origin/codex/issue-381-test-list
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -149,6 +150,24 @@ pub struct TestCaseResult {
     pub expected_error: Option<ExpectedDiagnostic>,
     pub duration_ms: u64,
     pub error: Option<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TestCaseListing {
+    pub package_root: String,
+    pub package: Option<String>,
+    pub name: String,
+    pub entry: String,
+    pub expected_stdout: bool,
+    pub compile_fail: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TestListOutput {
+    pub manifest: String,
+    pub packages: Vec<String>,
+    pub cases: Vec<TestCaseListing>,
+    pub total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -300,7 +319,6 @@ pub fn build_project_with_options(
             target: resolved_target.clone(),
             debug: options.debug,
             cache_key: report.cache_key,
->>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
@@ -327,6 +345,7 @@ pub fn build_project_with_options(
         backend: options.backend,
         locked: options.locked,
         offline: options.offline,
+>>>>>>> origin/codex/issue-381-test-list
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -403,6 +422,70 @@ pub fn run_project_with_options(
 
 pub fn run_project_tests(project_root: &Path) -> Result<TestOutput, Diagnostic> {
     run_project_tests_with_options(project_root, &TestOptions::default())
+}
+
+pub fn list_project_tests_with_options(
+    project_root: &Path,
+    options: &TestOptions,
+) -> Result<TestListOutput, Diagnostic> {
+    let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
+    let graph = load_package_graph(&project_root)?;
+    validate_workspace_root_lockfile(&graph, &project_root)?;
+    let mut packages = Vec::new();
+    let mut cases = Vec::new();
+    for package_root in workspace_package_roots(&graph, &project_root, options.package.as_deref())?
+    {
+        let manifest = graph.context(&package_root)?.manifest.clone();
+        validate_lockfile(&package_root, &manifest)?;
+        let package = manifest
+            .package
+            .as_ref()
+            .map(|package| package.name.clone());
+        if expected_error_path(&package_root).exists() {
+            let case_name = package
+                .clone()
+                .unwrap_or_else(|| package_root.display().to_string());
+            let entry = manifest.build.entry.clone();
+            if options
+                .filter
+                .as_deref()
+                .map(|filter| case_name.contains(filter) || entry.contains(filter))
+                .unwrap_or(true)
+            {
+                packages.push(package_root.display().to_string());
+                cases.push(TestCaseListing {
+                    package_root: package_root.display().to_string(),
+                    package,
+                    name: case_name,
+                    entry,
+                    expected_stdout: false,
+                    compile_fail: true,
+                });
+            }
+            continue;
+        }
+        let tests = collect_test_targets(&package_root, &manifest, options.filter.as_deref())?;
+        if tests.is_empty() {
+            continue;
+        }
+        packages.push(package_root.display().to_string());
+        for test in tests {
+            cases.push(TestCaseListing {
+                package_root: package_root.display().to_string(),
+                package: package.clone(),
+                name: test.name,
+                entry: test.entry,
+                expected_stdout: test.stdout.is_some(),
+                compile_fail: false,
+            });
+        }
+    }
+    Ok(TestListOutput {
+        manifest: manifest_path(&project_root).display().to_string(),
+        packages,
+        total: cases.len(),
+        cases,
+    })
 }
 
 pub fn run_project_tests_with_options(
@@ -846,7 +929,6 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             crypto: true,
             ffi: false,
             async_runtime: true,
->>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
             deny_by_default: false,

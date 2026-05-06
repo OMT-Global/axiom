@@ -57,6 +57,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hel
 
 # Run discovered package tests
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --list --json
 
 # Inspect capability requirements
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
@@ -71,7 +72,10 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hel
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
+<<<<<<< HEAD
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_testing --include-benchmarks --json
+=======
+>>>>>>> origin/codex/issue-381-test-list
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 ```
 
