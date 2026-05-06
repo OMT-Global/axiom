@@ -17,6 +17,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+>>>>>>> origin/codex/worker-h-issue-413
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -59,6 +60,8 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DependencySpec {
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -84,7 +87,9 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub stderr: Option<String>,
+=======
 =======
 =======
 =======
@@ -112,6 +117,7 @@ pub struct CapabilityConfig {
     pub ffi: bool,
     pub async_runtime: bool,
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/worker-h-issue-413
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
@@ -155,8 +161,10 @@ pub struct CapabilityDescriptor {
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
+<<<<<<< HEAD
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
+=======
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,6 +204,7 @@ enum RawDependencySpec {
 #[derive(Debug, Deserialize)]
 struct RawDependencyDetail {
     path: Option<String>,
+    version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -237,6 +246,7 @@ struct RawCapabilityConfig {
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/worker-h-issue-413
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -335,9 +345,11 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             unsafe_opt_in: config.unsafe_opt_ins.iter().any(|name| name == kind.name()),
             owner: config.owners.get(kind.name()).cloned(),
             rationale: config.rationale.get(kind.name()).cloned(),
+<<<<<<< HEAD
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
+=======
         })
         .collect()
 }
@@ -503,6 +515,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             ffi: capabilities.ffi.unwrap_or(false),
             async_runtime: capabilities.async_runtime.unwrap_or(false),
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/worker-h-issue-413
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
@@ -714,16 +727,77 @@ fn normalize_dependencies(
                     .with_path(path.display().to_string()),
             );
         }
-        let raw_path = match raw_spec {
-            RawDependencySpec::Path(value) => value,
+        match raw_spec {
+            RawDependencySpec::Path(value) => {
+                validate_dependency_path(path, &format!("dependencies.{name}.path"), &value)?;
+                dependencies.insert(
+                    name,
+                    DependencySpec {
+                        path: value,
+                        version: None,
+                    },
+                );
+                continue;
+            }
             RawDependencySpec::Detailed(detail) => {
-                required_field(detail.path, path, &format!("dependencies.{name}.path"))?
+                let raw_path =
+                    required_field(detail.path, path, &format!("dependencies.{name}.path"))?;
+                validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
+                let version = normalize_dependency_version(
+                    path,
+                    &format!("dependencies.{name}.version"),
+                    detail.version,
+                )?;
+                dependencies.insert(
+                    name,
+                    DependencySpec {
+                        path: raw_path,
+                        version,
+                    },
+                );
             }
         };
-        validate_dependency_path(path, &format!("dependencies.{name}.path"), &raw_path)?;
-        dependencies.insert(name, DependencySpec { path: raw_path });
     }
     Ok(dependencies)
+}
+
+fn normalize_dependency_version(
+    path: &Path,
+    field_name: &str,
+    version: Option<String>,
+) -> Result<Option<String>, Diagnostic> {
+    let Some(version) = version else {
+        return Ok(None);
+    };
+    let version = required_field(Some(version), path, field_name)?;
+    validate_version_constraint(path, field_name, &version)?;
+    Ok(Some(version))
+}
+
+fn validate_version_constraint(
+    path: &Path,
+    field_name: &str,
+    version: &str,
+) -> Result<(), Diagnostic> {
+    if version == "*" {
+        return Ok(());
+    }
+    let candidate = version.strip_prefix('^').unwrap_or(version);
+    let parts = candidate.split('.').collect::<Vec<_>>();
+    if parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return Ok(());
+    }
+    Err(
+        Diagnostic::new(
+            "manifest",
+            format!("{field_name} must be '*', an exact MAJOR.MINOR.PATCH version, or a caret constraint like ^1.2.3"),
+        )
+        .with_path(path.display().to_string()),
+    )
 }
 
 fn normalize_tests(
@@ -751,7 +825,9 @@ fn normalize_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             stderr: raw_test.stderr,
+=======
 =======
 =======
 =======

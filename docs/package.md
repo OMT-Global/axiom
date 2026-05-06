@@ -19,6 +19,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+>>>>>>> origin/codex/worker-h-issue-413
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 =======
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
@@ -37,10 +38,23 @@ The current stage1 examples document the supported manifest surface:
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
 
+<<<<<<< HEAD
 `axiomc caps <package> --json` reports the declared capability surface. When
 filesystem access is enabled, the `fs` capability includes the manifest-relative
 `configured_root` and canonical `effective_root` so operators can inspect the
 actual package-local filesystem boundary before build or run.
+=======
+Local path dependencies may declare a bounded version constraint:
+
+```toml
+[dependencies]
+core = { path = "deps/core", version = "^0.1.0" }
+```
+
+Stage1 currently accepts `*`, exact `MAJOR.MINOR.PATCH`, and caret
+`^MAJOR.MINOR.PATCH` constraints. The compiler validates the constraint against
+the dependency package's `[package].version` while loading the local package
+graph and fails deterministically when the versions are incompatible.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.

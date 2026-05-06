@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/worker-h-issue-413
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -43,12 +44,14 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
->>>>>>> origin/codex/issue-387-capability-validation
 =======
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+=======
+>>>>>>> origin/codex/worker-h-issue-413
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

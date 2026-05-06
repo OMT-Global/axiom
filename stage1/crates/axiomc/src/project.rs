@@ -75,6 +75,7 @@ pub struct BuiltPackage {
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/worker-h-issue-413
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -89,12 +90,14 @@ pub struct BuildOutput {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
->>>>>>> origin/codex/issue-387-capability-validation
 =======
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+=======
+>>>>>>> origin/codex/worker-h-issue-413
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -330,6 +333,7 @@ pub fn build_project_with_options(
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/worker-h-issue-413
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -357,12 +361,14 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
->>>>>>> origin/codex/issue-387-capability-validation
 =======
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+=======
+>>>>>>> origin/codex/worker-h-issue-413
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -977,6 +983,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/worker-h-issue-413
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1053,6 +1060,13 @@ fn load_package_graph_recursive(
         }
         let dependency_root = canonicalize_existing_path(&dependency_root, "dependency path")?;
         load_package_graph_recursive(&dependency_root, graph, visiting)?;
+        validate_dependency_version(
+            &manifest_path(&project_root),
+            name,
+            spec,
+            graph,
+            &dependency_root,
+        )?;
         dependencies.insert(name.clone(), dependency_root);
     }
     for member_root in &workspace_members {
@@ -1070,6 +1084,76 @@ fn load_package_graph_recursive(
         },
     );
     Ok(())
+}
+
+fn validate_dependency_version(
+    manifest_path: &Path,
+    dependency_name: &str,
+    spec: &crate::manifest::DependencySpec,
+    graph: &PackageGraph,
+    dependency_root: &Path,
+) -> Result<(), Diagnostic> {
+    let Some(constraint) = spec.version.as_deref() else {
+        return Ok(());
+    };
+    let dependency = graph.context(dependency_root)?;
+    let package = dependency.manifest.package.as_ref().ok_or_else(|| {
+        Diagnostic::new(
+            "manifest",
+            format!(
+                "dependency {dependency_name:?} declares version constraint {constraint:?}, but {} has no [package] version",
+                manifest_path.display()
+            ),
+        )
+        .with_path(manifest_path.display().to_string())
+    })?;
+    if dependency_version_matches(constraint, &package.version) {
+        return Ok(());
+    }
+    Err(
+        Diagnostic::new(
+            "manifest",
+            format!(
+                "dependency {dependency_name:?} version constraint {constraint:?} is incompatible with package version {:?}",
+                package.version
+            ),
+        )
+        .with_path(manifest_path.display().to_string()),
+    )
+}
+
+fn dependency_version_matches(constraint: &str, version: &str) -> bool {
+    if constraint == "*" || constraint == version {
+        return true;
+    }
+    let Some(base) = constraint.strip_prefix('^') else {
+        return false;
+    };
+    let Some(base) = parse_semver_triplet(base) else {
+        return false;
+    };
+    let Some(version) = parse_semver_triplet(version) else {
+        return false;
+    };
+    if base.0 == 0 && base.1 == 0 {
+        version.0 == 0 && version.1 == 0 && version.2 == base.2
+    } else if base.0 == 0 {
+        version.0 == 0 && version.1 == base.1 && version >= base
+    } else {
+        version.0 == base.0 && version >= base
+    }
+}
+
+fn parse_semver_triplet(version: &str) -> Option<(u64, u64, u64)> {
+    let parts = version.split('.').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
 }
 
 fn resolve_workspace_members(
@@ -1271,6 +1355,7 @@ fn build_artifacts(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1291,6 +1376,7 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
+=======
 =======
 =======
 =======

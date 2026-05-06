@@ -9,6 +9,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+>>>>>>> origin/codex/worker-h-issue-413
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -68,16 +69,18 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
 =======
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
 =======
 >>>>>>> origin/codex/issue-387-capability-validation
 =======
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+=======
+>>>>>>> origin/codex/worker-h-issue-413
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
 =======
@@ -415,6 +418,7 @@ print borrowed
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/issue-395-effective-fs-roots
+>>>>>>> origin/codex/worker-h-issue-413
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2737,6 +2741,107 @@ crypto = false
     }
 
     #[test]
+    fn dependency_version_constraints_are_enforced() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("versioned-dependency-app");
+        let dependency = project.join("deps/core");
+        create_project(&project, Some("versioned-dependency-app")).expect("create root");
+        create_project(&dependency, Some("versioned-core")).expect("create dependency");
+
+        fs::write(
+            dependency.join("src/math.ax"),
+            "pub fn answer(): int {\nreturn 42\n}\n",
+        )
+        .expect("write dependency source");
+        let dependency_manifest = load_manifest(&dependency).expect("load dependency manifest");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("dependency lockfile"),
+        )
+        .expect("write dependency lockfile");
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.2.0\" }}\n",
+                render_manifest("versioned-dependency-app")
+            ),
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/math.ax\"\nprint answer()\n",
+        )
+        .expect("write root source");
+        let manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let error = check_project(&project).expect_err("incompatible version should fail");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("version constraint \"^0.2.0\" is incompatible")
+        );
+
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.1.0\" }}\n",
+                render_manifest("versioned-dependency-app")
+            ),
+        )
+        .expect("write compatible root manifest");
+        let manifest = load_manifest(&project).expect("load compatible root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("compatible root lockfile"),
+        )
+        .expect("write compatible root lockfile");
+        check_project(&project).expect("compatible version should pass");
+
+        fs::write(
+            dependency.join("axiom.toml"),
+            "[package]\nname = \"versioned-core\"\nversion = \"0.0.4\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write 0.0.x dependency manifest");
+        let dependency_manifest = load_manifest(&dependency).expect("load 0.0.x dependency");
+        fs::write(
+            dependency.join("axiom.lock"),
+            render_lockfile_for_project(&dependency, &dependency_manifest)
+                .expect("0.0.x dependency lockfile"),
+        )
+        .expect("write 0.0.x dependency lockfile");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"^0.0.3\" }}\n",
+                render_manifest("versioned-dependency-app")
+            ),
+        )
+        .expect("write 0.0.x root manifest");
+        let manifest = load_manifest(&project).expect("load 0.0.x root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("0.0.x root lockfile"),
+        )
+        .expect("write 0.0.x root lockfile");
+
+        let error = check_project(&project).expect_err("^0.0.3 must reject 0.0.4");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("version constraint \"^0.0.3\" is incompatible")
+        );
+    }
+
+    #[test]
     fn dependency_package_must_enable_its_own_capabilities() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("dep-cap-root");
@@ -2813,11 +2918,13 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
 =======
 =======
 =======
@@ -3114,6 +3221,7 @@ crypto = false
         assert_eq!(payload["capabilities"][3]["name"], "env");
         assert!(payload["capabilities"][3]["allowed"].is_null());
         assert_eq!(payload["capabilities"][3]["unsafe_unrestricted"], true);
+>>>>>>> origin/codex/worker-h-issue-413
     }
 
     #[test]
@@ -5695,7 +5803,9 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 stderr: None,
+=======
 =======
 =======
 =======
@@ -6209,6 +6319,7 @@ print serve_once("127.0.0.1:18080", "hello")
         assert_eq!(output.passed, 29);
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
+>>>>>>> origin/codex/worker-h-issue-413
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -6216,9 +6327,12 @@ print serve_once("127.0.0.1:18080", "hello")
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
+<<<<<<< HEAD
                 == 24
                 == 20
                 == 21
+=======
+                == 20
         );
         assert_eq!(
             output
@@ -6230,6 +6344,7 @@ print serve_once("127.0.0.1:18080", "hello")
             9
 >>>>>>> origin/codex/issue-387-capability-validation
             10
+            9
         );
     }
 
@@ -9517,7 +9632,6 @@ print next.value
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> origin/codex/agent-f-fs
-=======
 
     // AG2: deterministic monomorphized symbol naming (#337)
     // These snapshot tests lock the exact symbol names produced for nested generics,
@@ -9631,6 +9745,7 @@ print c
             "echo<int> must be emitted exactly once regardless of call-site count"
         );
     }
+=======
 =======
 =======
 =======

@@ -49,8 +49,8 @@ Current executable fixtures cover:
 - `comparison_package_imports`: Axiom-owned comparison fixture for package-local
   imports and typed function boundaries.
 =======
-=======
 >>>>>>> origin/codex/issue-387-capability-validation
+=======
 Packages under `fail/` are compile-fail fixtures. Each package is a complete
 stage1 project with `axiom.toml`, `axiom.lock`, source, and
 `expected-error.json`. The conformance runner checks the diagnostic kind, code,

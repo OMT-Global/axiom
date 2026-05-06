@@ -18,7 +18,6 @@ collecting timing data:
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_testing --include-benchmarks --json
 ```
 
-<<<<<<< HEAD
 ## Advisory Go/Rust/Axiom comparison gate
 
 The stage1 comparison report is intentionally non-blocking at first. It builds
@@ -49,10 +48,11 @@ variance is being measured; the existing benchmark gate still owns hard failures
 for obvious cold-build and warm-cache regressions against the checked-in Go and
 Rust reference builds.
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> origin/codex/agent-i-language-slice
-=======
 >>>>>>> origin/codex/issue-395-effective-fs-roots
 This closes the local benchmark-suite foundation. Go and Rust reference
 comparisons should be layered on top of this harness in CI once representative
 workloads are stable enough to treat as performance policy.
+=======
 =======
