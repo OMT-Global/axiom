@@ -8073,6 +8073,7 @@ fn lower_expr_with_expected(
                     ctx.structs,
                     ctx.enums,
                     ctx.aliases,
+                    ctx.consts,
                     param.line,
                     param.column,
                 )?;
