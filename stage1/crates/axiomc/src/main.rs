@@ -9,6 +9,7 @@ use axiomc::manifest::CapabilityDescriptor;
 >>>>>>> origin/codex/issue-377-inspect-symbols
 use axiomc::lockfile::{expected_lockfile_for_project, validate_lockfile};
 use axiomc::manifest::{load_manifest, manifest_path};
+>>>>>>> origin/codex/issue-406-collection-lookup
 use axiomc::new_project::create_project;
 use axiomc::project::{
     BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
@@ -18,6 +19,7 @@ use axiomc::project::{
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
 };
+<<<<<<< HEAD
 =======
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -29,8 +31,9 @@ use axiomc::project::{
     BuildOutput, CheckOptions, RunOptions, TestOptions,
 };
 use axiomc::registry::{load_registry_index, render_registry_index};
->>>>>>> origin/codex/issue-381-test-list
 >>>>>>> origin/codex/issue-408-cli-args
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -181,6 +184,7 @@ enum Command {
         json: bool,
     },
 <<<<<<< HEAD
+>>>>>>> origin/codex/issue-406-collection-lookup
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -192,7 +196,6 @@ enum Command {
         allow_overwrite: bool,
     },
 =======
->>>>>>> origin/codex/issue-408-cli-args
     /// Build a static package-registry index from package release folders.
     RegistryIndex {
         packages_dir: PathBuf,
@@ -228,10 +231,10 @@ enum InspectCommand {
         #[arg(long)]
         json: bool,
     },
-=======
 >>>>>>> origin/codex/issue-381-test-list
 =======
->>>>>>> origin/codex/issue-408-cli-args
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
 }
 
 fn main() {
@@ -609,9 +612,7 @@ fn main() {
                         );
                     }
                 }
-<<<<<<< HEAD
                 if report.failed == 0 { 0 } else { 1 }
-=======
                 if report.failed == 0 {
                     0
                 } else {
@@ -663,7 +664,6 @@ fn main() {
             }
             Err(error) => print_error("publish", error, false),
         },
->>>>>>> origin/codex/issue-381-test-list
 >>>>>>> origin/codex/issue-408-cli-args
         Command::RegistryIndex {
             packages_dir,
@@ -706,11 +706,11 @@ fn main() {
             Err(error) => print_error("lsp", error, false),
         },
 <<<<<<< HEAD
-<<<<<<< HEAD
         Command::Dap => match dap::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("dap", error, false),
         },
+<<<<<<< HEAD
 =======
 =======
     };
@@ -2504,12 +2504,12 @@ mod tests {
             );
         let rendered = error.to_string();
         assert!(rendered.contains("unsupported backend \"direct-native\""));
-<<<<<<< HEAD
         assert!(
             rendered.contains(
                 "only generated-rust is implemented in this preparatory backend plumbing"
             )
         );
+<<<<<<< HEAD
 <<<<<<< HEAD
     }
 
@@ -2555,11 +2555,11 @@ mod tests {
             other => panic!("expected caps diff command with path, got {other:?}"),
         }
 =======
-=======
         assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
 <<<<<<< HEAD
 =======
->>>>>>> origin/codex/issue-408-cli-args
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2569,6 +2569,7 @@ mod tests {
             offline: false,
 >>>>>>> origin/codex/issue-381-test-list
 >>>>>>> origin/codex/issue-408-cli-args
+>>>>>>> origin/codex/issue-406-collection-lookup
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2577,6 +2578,7 @@ mod tests {
             statement_count: 1,
             target: None,
             debug: true,
+<<<<<<< HEAD
 <<<<<<< HEAD
             cache_key: axiomc::project::BuildCacheMetadata {
                 version: 1,
@@ -2588,6 +2590,7 @@ mod tests {
                 generated_rust_hash: String::from("rust-hash"),
                 sources: Vec::new(),
             },
+=======
 =======
             metadata: axiomc::project::BuildMetadata {
                 target: None,

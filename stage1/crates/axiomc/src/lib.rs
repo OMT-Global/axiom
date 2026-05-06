@@ -2,6 +2,7 @@ pub mod borrowck;
 pub mod codegen;
 pub mod dap;
 pub mod diagnostic_catalog;
+>>>>>>> origin/codex/issue-406-collection-lookup
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -54,11 +55,13 @@ mod tests {
         crypto: bool,
     ) -> String {
         format!(
+<<<<<<< HEAD
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
->>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
     }
@@ -362,6 +365,7 @@ print borrowed
     }
 
     #[test]
+>>>>>>> origin/codex/issue-406-collection-lookup
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2754,11 +2758,13 @@ crypto = false
         create_project(&project, Some("caps-app")).expect("create project");
         let manifest = load_manifest(&project).expect("load manifest");
         let caps = capability_descriptors(&manifest.capabilities);
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
         assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
@@ -2860,6 +2866,7 @@ crypto = false
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
 >>>>>>> origin/codex/issue-378-inspect-graph
+>>>>>>> origin/codex/issue-406-collection-lookup
     }
 
     #[test]
@@ -5385,7 +5392,9 @@ print serve_once("127.0.0.1:18080", "hello")
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
                 kind: TestKind::Unit,
+<<<<<<< HEAD
                 stderr: None,
+=======
             }]
         );
     }
@@ -5911,6 +5920,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
             12
+>>>>>>> origin/codex/issue-406-collection-lookup
             9
         );
     }
@@ -8784,8 +8794,10 @@ print 0
 <<<<<<< HEAD
         assert_eq!(payload["locked"], true);
         assert_eq!(payload["offline"], true);
->>>>>>> origin/codex/issue-381-test-list
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());

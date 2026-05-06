@@ -890,6 +890,7 @@ fn axiom_regex_replace_all(pattern: String, text: String, replacement: String) -
     out.push_str("    };\n");
     out.push_str("    std::env::args().skip(1).nth(index)\n");
     out.push_str("}\n\n");
+>>>>>>> origin/codex/issue-406-collection-lookup
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
@@ -2157,6 +2158,14 @@ fn axiom_crypto_constant_time_eq(left: String, right: String) -> bool {
     out.push_str("        None => axiom_runtime_error(\"runtime\", \"map key not found\"),\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_map_lookup<K: Eq + std::hash::Hash, V>(mut values: HashMap<K, V>, key: K) -> Option<V> {\n");
+    out.push_str("    values.remove(&key)\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_map_contains_key<K: Eq + std::hash::Hash, V>(values: HashMap<K, V>, key: K) -> bool {\n");
+    out.push_str("    values.contains_key(&key)\n");
+    out.push_str("}\n\n");
     for enum_def in &program.enums {
         render_enum(enum_def, &type_context, &mut out);
         out.push('\n');
@@ -3234,6 +3243,22 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "json_stringify_string" => {
             format!("axiom_json_stringify_string({})", render_expr(&args[0]))
+        }
+<<<<<<< HEAD
+=======
+        Expr::Call { name, args, .. } if name == "map_get" => {
+            format!(
+                "axiom_map_lookup({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "map_contains_key" => {
+            format!(
+                "axiom_map_contains_key({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
         }
         Expr::Call { name, args, .. } if name == "regex_is_match" => {
             format!(

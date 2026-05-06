@@ -73,8 +73,8 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hel
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 <<<<<<< HEAD
+>>>>>>> origin/codex/issue-406-collection-lookup
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_testing --include-benchmarks --json
->>>>>>> origin/codex/issue-381-test-list
 =======
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 ```

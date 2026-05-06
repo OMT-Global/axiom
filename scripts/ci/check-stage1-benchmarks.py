@@ -31,6 +31,7 @@ CAPABILITY_NAMES = ["fs", "fs:write", "net", "process", "env", "clock", "crypto"
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
+>>>>>>> origin/codex/issue-406-collection-lookup
 
 
 @dataclass(frozen=True)
@@ -180,8 +181,10 @@ def compare_regression_baseline(report: dict, baseline: dict | None) -> list[str
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 def file_size(path: Path) -> int | None:
     return path.stat().st_size if path.exists() else None
+=======
 =======
 =======
 =======

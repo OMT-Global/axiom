@@ -71,6 +71,7 @@ pub struct BuiltPackage {
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
+>>>>>>> origin/codex/issue-406-collection-lookup
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -81,8 +82,10 @@ pub struct BuildOutput {
     pub backend: NativeBackendKind,
     pub locked: bool,
     pub offline: bool,
->>>>>>> origin/codex/issue-381-test-list
+<<<<<<< HEAD
 >>>>>>> origin/codex/issue-408-cli-args
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -323,6 +326,7 @@ pub fn build_project_with_options(
             cache_key: report.cache_key,
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
+>>>>>>> origin/codex/issue-406-collection-lookup
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -346,8 +350,10 @@ pub fn build_project_with_options(
         backend: options.backend,
         locked: options.locked,
         offline: options.offline,
->>>>>>> origin/codex/issue-381-test-list
+<<<<<<< HEAD
 >>>>>>> origin/codex/issue-408-cli-args
+=======
+>>>>>>> origin/codex/issue-406-collection-lookup
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -692,8 +698,9 @@ fn collect_discovered_tests(
             stdout,
 <<<<<<< HEAD
             kind,
-=======
             stderr,
+=======
+            kind,
         });
     }
     Ok(())
@@ -932,6 +939,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             ffi: false,
             async_runtime: true,
 >>>>>>> origin/codex/issue-378-inspect-graph
+>>>>>>> origin/codex/issue-406-collection-lookup
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1225,6 +1233,7 @@ fn build_artifacts(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1245,6 +1254,7 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
+=======
 =======
 =======
 =======
