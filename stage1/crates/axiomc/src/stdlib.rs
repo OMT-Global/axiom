@@ -22,6 +22,7 @@
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -90,6 +91,8 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======

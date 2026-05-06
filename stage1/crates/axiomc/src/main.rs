@@ -19,6 +19,7 @@ use axiomc::manifest::{load_manifest, manifest_path};
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
 use axiomc::new_project::create_project;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -32,6 +33,7 @@ use axiomc::project::{
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
 };
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -62,9 +64,10 @@ use axiomc::registry::{load_registry_index, render_registry_index};
 =======
 =======
 =======
->>>>>>> origin/codex/worker-j-issue-363
 =======
 >>>>>>> origin/codex/issue-369-check-fixtures
+=======
+>>>>>>> origin/codex/issue-370-command-fixtures
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -228,6 +231,7 @@ enum Command {
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -253,6 +257,7 @@ enum Command {
     Lsp,
     /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
     Dap,
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -295,9 +300,10 @@ enum InspectCommand {
 =======
 =======
 =======
->>>>>>> origin/codex/worker-j-issue-363
 =======
 >>>>>>> origin/codex/issue-369-check-fixtures
+=======
+>>>>>>> origin/codex/issue-370-command-fixtures
 }
 
 fn main() {
@@ -2634,7 +2640,7 @@ mod tests {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2655,6 +2661,7 @@ mod tests {
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2663,6 +2670,7 @@ mod tests {
             statement_count: 1,
             target: None,
             debug: true,
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -2680,6 +2688,7 @@ mod tests {
                 generated_rust_hash: String::from("rust-hash"),
                 sources: Vec::new(),
             },
+=======
 =======
 =======
 =======

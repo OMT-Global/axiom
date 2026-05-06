@@ -14,13 +14,13 @@ members = [
   "fail/for_loop_requires_iteration_protocol",
   "fail/comparison_owned_resource_move",
   "fail/comparison_predictable_diagnostic",
-=======
   "fail/import_cycle",
   "fail/import_duplicate_export",
   "fail/import_missing_module",
   "fail/import_path_escape",
   "fail/import_reserved_namespace",
   "fail/import_unsupported_alias",
+=======
 =======
   "fail/for_loop_requires_iteration_protocol",
   "fail/comparison_owned_resource_move",

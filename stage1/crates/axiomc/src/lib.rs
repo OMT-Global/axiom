@@ -13,6 +13,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -36,8 +37,10 @@ mod tests {
         CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
         render_manifest,
 <<<<<<< HEAD
+<<<<<<< HEAD
         CapabilityConfig, CapabilityKind, ExpectedDiagnostic, TestTarget, capability_descriptors,
         load_manifest, render_manifest,
+=======
 =======
     };
     use crate::mir;
@@ -424,6 +427,7 @@ print borrowed
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2973,11 +2977,13 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
 =======
 =======
 =======
@@ -3276,6 +3282,7 @@ crypto = false
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
     }
 
     #[test]
@@ -5859,6 +5866,7 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 stderr: None,
 =======
 =======
@@ -5870,6 +5878,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 capabilities: Vec::new(),
                 package: None,
 =======
+=======
             }]
         );
     }
@@ -5879,6 +5888,7 @@ print serve_once("127.0.0.1:18080", "hello")
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
     fn manifest_parses_richer_test_kinds() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("typed-tests");
@@ -5975,6 +5985,7 @@ print serve_once("127.0.0.1:18080", "hello")
 
     #[test]
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     fn run_project_tests_reports_manifest_metadata_in_json() {
         let dir = tempdir().expect("tempdir");
@@ -6013,7 +6024,8 @@ print serve_once("127.0.0.1:18080", "hello")
 
     #[test]
 =======
->>>>>>> origin/codex/issue-369-check-fixtures
+=======
+>>>>>>> origin/codex/issue-370-command-fixtures
     fn run_project_tests_executes_manifest_cases() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner");
@@ -6493,11 +6505,11 @@ print serve_once("127.0.0.1:18080", "hello")
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-<<<<<<< HEAD
         assert_eq!(output.cases.len(), 36);
         assert_eq!(output.passed, 36);
         assert_eq!(output.cases.len(), 29);
         assert_eq!(output.passed, 29);
+<<<<<<< HEAD
 <<<<<<< HEAD
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
@@ -6517,6 +6529,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 == 20
                 == 21
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
                 == 20
         );
         assert_eq!(
@@ -6526,11 +6539,13 @@ print serve_once("127.0.0.1:18080", "hello")
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
 <<<<<<< HEAD
+<<<<<<< HEAD
             12
             9
             10
             9
             8
+=======
 =======
             9
         );

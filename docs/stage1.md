@@ -131,6 +131,7 @@ member package with `-p/--package`.
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
 
 ## JSON contract
 
@@ -145,6 +146,7 @@ requested Rust target triple when `--target <triple>` is used and report
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 with generated source-position markers. Build JSON carries both `cache_key`
 metadata with the cache schema version, compiler key, target, debug mode,
 manifest hash, lockfile hash, generated Rust hash, and per-source hashes used
@@ -155,6 +157,7 @@ sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
+=======
 =======
 =======
 =======
@@ -184,6 +187,9 @@ stage1 checker.
 Checked-in `check --json` contract fixtures live under
 `stage1/json-fixtures/check/` and cover success, parse, type, ownership, and
 capability-denial payloads.
+Checked-in `build`, `test`, and `caps` JSON contract fixtures live under
+`stage1/json-fixtures/` and cover build target triples, build failures, test
+filters, duration fields, failing cases, and unsafe capability state.
 
 ## Current gaps
 

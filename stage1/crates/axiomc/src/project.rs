@@ -16,6 +16,7 @@ use crate::manifest::{
     Manifest, PackageSection, binary_path_for_target, capability_descriptors, entry_path,
     generated_rust_path, load_manifest, manifest_path, out_dir_path,
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
 };
 use crate::mir;
 use crate::stdlib;
@@ -74,8 +75,8 @@ pub struct BuiltPackage {
     pub target: Option<String>,
     pub debug: bool,
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub cache_key: BuildCacheMetadata,
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
@@ -84,6 +85,8 @@ pub struct BuiltPackage {
 >>>>>>> origin/codex/worker-h-issue-413
 =======
 >>>>>>> origin/codex/issue-369-check-fixtures
+=======
+>>>>>>> origin/codex/issue-370-command-fixtures
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -110,6 +113,7 @@ pub struct BuildOutput {
     pub debug: bool,
     pub cache_key: BuildCacheMetadata,
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
     pub cache_misses: usize,
@@ -331,10 +335,12 @@ pub fn build_project_with_options(
             statement_count: analyzed.mir.statement_count(),
             target: resolved_target.clone(),
             debug: options.debug,
+<<<<<<< HEAD
             cache_key: report.cache_key,
->>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
 >>>>>>> origin/codex/issue-369-check-fixtures
+=======
+>>>>>>> origin/codex/issue-370-command-fixtures
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -376,6 +382,7 @@ pub fn build_project_with_options(
         debug: root.debug,
         cache_key: root.cache_key,
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
         metadata: root.metadata,
         cache_hits,
         cache_misses,
@@ -706,6 +713,7 @@ fn collect_discovered_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             kind,
             stderr,
 =======
@@ -716,6 +724,7 @@ fn collect_discovered_tests(
             expected_error: None,
             capabilities: Vec::new(),
             package: None,
+=======
 =======
             kind,
         });
@@ -986,6 +995,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1359,6 +1369,7 @@ fn build_artifacts(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1379,6 +1390,7 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
+=======
 =======
 =======
 =======

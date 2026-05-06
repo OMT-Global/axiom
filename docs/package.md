@@ -22,6 +22,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
+>>>>>>> origin/codex/issue-370-command-fixtures
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
@@ -100,6 +101,7 @@ and yanked status so a simple static host can serve lockfile-friendly package me
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.
 =======
 =======
@@ -141,6 +143,7 @@ resolution exist, manifests must not contain `[registry]`, `[publish]`,
 `package.checksum`, `package.registry`, `package.source`, or dependency
 `version`/`checksum`/`registry`/`source` fields. The parser rejects them instead
 of silently treating a registry package as a local package.
+=======
 =======
 =======
 =======
