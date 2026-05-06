@@ -20,10 +20,18 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/st
 
 <<<<<<< HEAD
 ## Advisory Go/Rust/Axiom comparison gate
+This closes the local benchmark-suite foundation. Extended validation also runs
+`make stage1-bench-gate`, which measures three representative stage1 build
+workloads (`hello`, `capabilities`, and `stdlib_async`) against checked-in
+Go/Rust reference programs.
 
-The stage1 comparison report is intentionally non-blocking at first. It builds
-and runs equivalent Axiom, Go, and Rust workloads, then emits machine-readable
-JSON covering:
+The existing benchmark gate still owns hard failures for obvious cold-build and
+warm-cache regressions against the checked-in native reference builds. The newer
+committed calibration-baseline comparison is deliberately non-blocking: it
+compares current `axiomc build` medians to
+`stage1/benchmarks/stage1-build-baseline.json` with a 35% tolerance and prints
+`PASS`/`WARN` diagnostics, but WARN results exit successfully so CI can collect
+calibration data without blocking unrelated PRs.
 
 - cold and warm Axiom build time versus Go/Rust reference build medians
 - run time medians for each produced executable
@@ -69,7 +77,6 @@ By default the report is written to
 baseline. Use `scripts/ci/check-stage1-benchmarks.py` for the separate
 non-blocking comparison gate against Go/Rust reference workloads.
 >>>>>>> origin/codex/worker-c-issue-361
-=======
 This closes the local benchmark-suite foundation. Go and Rust reference
 comparisons should be layered on top of this harness in CI once representative
 workloads are stable enough to treat as performance policy.
@@ -77,3 +84,7 @@ workloads are stable enough to treat as performance policy.
 =======
 =======
 =======
+=======
+Refresh the committed calibration baseline only after maintainers agree the
+runner, workload set, and observed medians are stable enough to ratchet. Keep
+baseline changes in review so tolerance movement is visible.
