@@ -24,6 +24,7 @@ use crate::manifest::{
 >>>>>>> origin/codex/issue-424-survivor-report
 >>>>>>> origin/codex/issue-409-proof-cli
 >>>>>>> origin/codex/issue-410-proof-worker
+>>>>>>> origin/codex/worker-f-issue-341
 };
 use crate::mir;
 use crate::stdlib;
@@ -89,11 +90,11 @@ pub struct BuiltPackage {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
     pub cache_key: BuildCacheMetadata,
->>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
 =======
 >>>>>>> origin/codex/issue-369-check-fixtures
@@ -105,6 +106,8 @@ pub struct BuiltPackage {
 >>>>>>> origin/codex/issue-409-proof-cli
 =======
 >>>>>>> origin/codex/issue-410-proof-worker
+=======
+>>>>>>> origin/codex/worker-f-issue-341
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -135,6 +138,7 @@ pub struct BuildOutput {
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-409-proof-cli
 >>>>>>> origin/codex/issue-410-proof-worker
+>>>>>>> origin/codex/worker-f-issue-341
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
     pub cache_misses: usize,
@@ -359,13 +363,15 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
->>>>>>> origin/codex/issue-424-survivor-report
+<<<<<<< HEAD
             cache_key: report.cache_key,
 =======
 =======
 >>>>>>> origin/codex/issue-409-proof-cli
 =======
 >>>>>>> origin/codex/issue-410-proof-worker
+=======
+>>>>>>> origin/codex/worker-f-issue-341
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -413,6 +419,7 @@ pub fn build_project_with_options(
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-409-proof-cli
 >>>>>>> origin/codex/issue-410-proof-worker
+>>>>>>> origin/codex/worker-f-issue-341
         metadata: root.metadata,
         cache_hits,
         cache_misses,
@@ -747,12 +754,14 @@ fn collect_discovered_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             kind,
             stderr,
             kind,
             expected_error: None,
             capabilities: Vec::new(),
             package: None,
+=======
 =======
 =======
 =======
@@ -1745,9 +1754,7 @@ fn run_test_case(
             stdout: String::new(),
             stderr: String::new(),
             expected_stdout: test.stdout.clone(),
-<<<<<<< HEAD
             expected_stderr: test.stderr.clone(),
-=======
             required_capabilities: test.capabilities.clone(),
             selected_package: test.package.clone(),
             expected_error: None,
@@ -2326,13 +2333,35 @@ fn load_module_recursive(
     visiting: &mut Vec<PathBuf>,
 ) -> Result<(), Diagnostic> {
     let module_path = normalize_path(module_path);
+<<<<<<< HEAD
     if visiting.contains(&module_path) {
         let relative = relative_diagnostic_path(package_root, &module_path.display().to_string());
         return Err(Diagnostic::new(
             "import",
             format!("circular import detected at {relative}"),
+=======
+    if let Some(cycle_start) = visiting.iter().position(|path| path == &module_path) {
+        let mut cycle = visiting[cycle_start..].to_vec();
+        cycle.push(module_path.clone());
+        let cycle_path = cycle
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        let related = visiting[cycle_start..]
+            .iter()
+            .map(|path| {
+                Diagnostic::new("import", "module participates in import cycle")
+                    .with_code("import_cycle_member")
+                    .with_path(path.display().to_string())
+            })
+            .collect();
+        return Err(Diagnostic::new(
+            "import",
+            format!("circular import detected: {}", cycle_path.join(" -> ")),
         )
-        .with_path(module_path.display().to_string()));
+        .with_code("import_cycle")
+        .with_path(module_path.display().to_string())
+        .with_related(related));
     }
     if loaded.contains_key(&module_path) {
         return Ok(());

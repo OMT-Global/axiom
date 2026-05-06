@@ -30,6 +30,7 @@
 >>>>>>> origin/codex/issue-424-survivor-report
 >>>>>>> origin/codex/issue-409-proof-cli
 >>>>>>> origin/codex/issue-410-proof-worker
+>>>>>>> origin/codex/worker-f-issue-341
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -125,11 +126,13 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 //! * `std/cli.ax` — access to process arguments forwarded by `axiomc run`.
 //! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
 //!   fallback unwrap helpers implemented in Axiom.
 //! * `std/encoding.ax` — URL component and path segment percent-encoding
 //!   helpers.
+=======
 =======
 =======
 =======
@@ -329,6 +332,7 @@ pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_sel
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
 >>>>>>> origin/codex/issue-424-survivor-report
+>>>>>>> origin/codex/worker-f-issue-341
         "async_time.ax",
         "pub async fn sleep_ms(milliseconds: int): int {\nreturn clock_sleep_ms(milliseconds)\n}\n\
 pub async fn sleep_duration_ms(milliseconds: int): int {\nreturn clock_sleep_ms(milliseconds)\n}\n",
@@ -365,6 +369,7 @@ pub fn find(pattern: string, text: string): Option<string> {\nreturn regex_find(
 pub fn replace_all(pattern: string, text: string, replacement: string): string {\nreturn regex_replace_all(pattern, text, replacement)\n}\n",
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     ),
     (
         "cli.ax",
@@ -386,6 +391,7 @@ pub fn result_unwrap_or<T, E>(value: Result<T, E>, fallback: T): T {\nmatch valu
         "pub fn url_component_encode(value: string): string {\nreturn encoding_url_component_encode(value)\n}\n\
 pub fn url_component_decode(value: string): Option<string> {\nreturn encoding_url_component_decode(value)\n}\n\
 pub fn path_segment_encode(value: string): string {\nreturn encoding_path_segment_encode(value)\n}\n",
+=======
 =======
 =======
     ),

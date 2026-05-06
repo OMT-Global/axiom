@@ -454,6 +454,7 @@ const OWNERSHIP_CLOSURE_BORROWED_SLICE_RETURN: &str = "closure_borrowed_slice_re
 =======
 >>>>>>> origin/codex/issue-423-mutation-smoke
 >>>>>>> origin/codex/issue-424-survivor-report
+>>>>>>> origin/codex/worker-f-issue-341
 const OWNERSHIP_LOOP_MOVE_OUTER_NON_COPY: &str = "loop_move_outer_non_copy";
 const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str = "borrow_return_requires_param_origin";
 const OWNERSHIP_MOVE_WHILE_BORROWED: &str = "move_while_borrowed";
@@ -559,7 +560,6 @@ fn lower_with_capabilities_impl(
         &enum_names,
         &aliases,
         &consts,
->>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
@@ -1008,6 +1008,7 @@ fn type_has_unboxed_recursive_path(
 >>>>>>> origin/codex/issue-422-comparison-gate
 >>>>>>> origin/codex/issue-423-mutation-smoke
 >>>>>>> origin/codex/issue-424-survivor-report
+>>>>>>> origin/codex/worker-f-issue-341
         Type::Option(inner)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -2830,6 +2831,8 @@ fn rewrite_aggregate_type_name(
                 column,
             )?),
         ),
+<<<<<<< HEAD
+=======
 =======
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
@@ -4379,6 +4382,9 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect()
 }
+=======
+
+>>>>>>> origin/codex/worker-f-issue-341
 fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new("ownership", message).with_code(code)
 }
@@ -5579,6 +5585,7 @@ fn lower_match_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
@@ -5596,7 +5603,7 @@ fn lower_match_stmt(
 >>>>>>> origin/codex/issue-422-comparison-gate
 =======
 =======
->>>>>>> origin/codex/issue-410-proof-worker
+>>>>>>> origin/codex/worker-f-issue-341
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5647,7 +5654,6 @@ fn lower_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5668,6 +5674,18 @@ fn lower_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+            if actual != expected && !actual.is_error() && !expected.is_error() {
+=======
+=======
+=======
+=======
+=======
+=======
+=======
+=======
+            if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
@@ -5675,19 +5693,8 @@ fn lower_stmt(
 =======
 =======
 =======
-=======
-=======
-=======
-=======
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
-=======
-            if actual != expected && !actual.is_error() && !expected.is_error() {
-=======
-=======
-=======
-=======
-            if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -10429,6 +10436,7 @@ fn contains_borrowed_slice_type_inner(
             )
         }
         Type::Array(inner)
+>>>>>>> origin/codex/worker-f-issue-341
         Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -10440,6 +10448,25 @@ fn contains_borrowed_slice_type_inner(
             visiting_structs,
             visiting_enums,
         ),
+<<<<<<< HEAD
+=======
+        Type::Fn(params, return_ty) => {
+            params.iter().any(|param| {
+                contains_borrowed_slice_type_inner(
+                    param,
+                    structs,
+                    enums,
+                    visiting_structs,
+                    visiting_enums,
+                )
+            }) || contains_borrowed_slice_type_inner(
+                return_ty,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }
         Type::Struct(name) => {
             if !visiting_structs.insert(name.clone()) {
                 return false;
@@ -10547,6 +10574,7 @@ fn contains_mut_borrowed_slice_type_inner(
             )
         }
         Type::Array(inner)
+>>>>>>> origin/codex/worker-f-issue-341
         Type::Array(inner, _)
         | Type::Task(inner)
         | Type::JoinHandle(inner)
@@ -10558,6 +10586,25 @@ fn contains_mut_borrowed_slice_type_inner(
             visiting_structs,
             visiting_enums,
         ),
+<<<<<<< HEAD
+=======
+        Type::Fn(params, return_ty) => {
+            params.iter().any(|param| {
+                contains_mut_borrowed_slice_type_inner(
+                    param,
+                    structs,
+                    enums,
+                    visiting_structs,
+                    visiting_enums,
+                )
+            }) || contains_mut_borrowed_slice_type_inner(
+                return_ty,
+                structs,
+                enums,
+                visiting_structs,
+                visiting_enums,
+            )
+        }
         Type::Struct(name) => {
             if !visiting_structs.insert(name.clone()) {
                 return false;
@@ -10653,7 +10700,6 @@ fn increment_active_borrows(
                 format!("internal error: missing borrow owner {owner_name:?}"),
             )
         })?;
-<<<<<<< HEAD
         binding.borrow_state.begin_borrow(
             owner_name,
             borrow_kind,
@@ -10995,6 +11041,7 @@ fn lower_type_inner<T, U>(
                 return_ty, structs, enums, aliases, consts, resolving, line, column,
             )?),
         )),
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD

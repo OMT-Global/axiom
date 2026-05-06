@@ -104,7 +104,6 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
     pub stderr: Option<String>,
-=======
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -131,6 +130,7 @@ pub struct ExpectedDiagnostic {
     pub path: String,
     pub line: usize,
     pub column: usize,
+=======
 =======
 =======
 =======
@@ -208,6 +208,7 @@ pub struct CapabilityDescriptor {
     pub rationale: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
+>>>>>>> origin/codex/worker-f-issue-341
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +272,7 @@ struct RawTestTarget {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     kind: Option<String>,
     stderr: Option<String>,
     kind: Option<String>,
@@ -285,6 +287,7 @@ struct RawPublishSection {
     expected_error: Option<ExpectedDiagnostic>,
     capabilities: Option<Vec<CapabilityKind>>,
     package: Option<String>,
+=======
 =======
 =======
 =======
@@ -418,6 +421,7 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
+>>>>>>> origin/codex/worker-f-issue-341
         })
         .collect()
 }
@@ -430,6 +434,7 @@ pub fn render_manifest(name: &str) -> String {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
 =======
@@ -442,6 +447,8 @@ pub fn render_manifest(name: &str) -> String {
 =======
 =======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
+=======
+        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
     )
 }
 

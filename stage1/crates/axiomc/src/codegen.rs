@@ -959,6 +959,7 @@ fn axiom_percent_decode(value: String) -> Option<String> {
 >>>>>>> origin/codex/issue-424-survivor-report
 >>>>>>> origin/codex/issue-409-proof-cli
 >>>>>>> origin/codex/issue-410-proof-worker
+>>>>>>> origin/codex/worker-f-issue-341
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
@@ -3346,6 +3347,7 @@ fn render_expr(expr: &Expr) -> String {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         Expr::Call { name, args, .. } if name == "map_get" => {
             format!(
                 "axiom_map_lookup({}, {})",
@@ -3360,6 +3362,7 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(&args[1])
             )
         }
+=======
 =======
 =======
 =======

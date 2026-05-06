@@ -64,9 +64,9 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-409-proof-cli
-=======
 >>>>>>> origin/codex/issue-410-proof-worker
+=======
+>>>>>>> origin/codex/worker-f-issue-341
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,
