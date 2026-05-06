@@ -29,6 +29,7 @@ use axiomc::manifest::{load_manifest, manifest_path};
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
 use axiomc::new_project::create_project;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -58,6 +59,7 @@ use axiomc::registry::{
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
@@ -68,6 +70,7 @@ use axiomc::project::{
     BuildOutput, CheckOptions, RunOptions, TestOptions,
 };
 use axiomc::registry::{load_registry_index, render_registry_index};
+=======
 =======
 =======
 =======
@@ -140,6 +143,10 @@ enum Command {
         timings: bool,
         #[arg(long)]
         target: Option<String>,
+        #[arg(long)]
+        locked: bool,
+        #[arg(long)]
+        offline: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
         /// Require axiom.lock to exactly match the local manifest/workspace/dependency graph.
@@ -258,11 +265,11 @@ enum Command {
 >>>>>>> origin/codex/issue-425-crap-thresholds
 =======
 =======
->>>>>>> origin/codex/issue-410-proof-worker
-=======
 >>>>>>> origin/codex/worker-f-issue-341
 =======
 >>>>>>> origin/codex/worker-f-issue-343
+=======
+>>>>>>> origin/codex/worker-c-issue-361
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -336,9 +343,9 @@ enum InspectCommand {
 =======
 =======
 =======
->>>>>>> origin/codex/worker-f-issue-341
-=======
 >>>>>>> origin/codex/worker-f-issue-343
+=======
+>>>>>>> origin/codex/worker-c-issue-361
 }
 
 fn main() {
@@ -392,6 +399,8 @@ fn main() {
             debug,
             timings,
             target,
+            locked,
+            offline,
             package,
             locked,
             offline,
@@ -2683,7 +2692,7 @@ mod tests {
 =======
 =======
 =======
->>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2714,6 +2723,7 @@ mod tests {
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2831,6 +2841,8 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======

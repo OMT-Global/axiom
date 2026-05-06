@@ -23,6 +23,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -44,6 +45,7 @@ mod tests {
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{
         CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
+<<<<<<< HEAD
         render_manifest,
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -69,6 +71,8 @@ mod tests {
 =======
 =======
 =======
+=======
+        lockfile_path, render_manifest,
     };
     use crate::mir;
     use crate::new_project::{WorkloadTemplate, create_project, create_project_with_template};
@@ -111,13 +115,13 @@ mod tests {
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
 =======
-=======
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
 =======
 =======
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
 =======
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
+=======
 =======
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
@@ -470,6 +474,7 @@ print borrowed
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -3030,6 +3035,7 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
@@ -3048,13 +3054,14 @@ crypto = false
 =======
 =======
 =======
+=======
         assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 8);
 =======
-=======
 >>>>>>> origin/codex/worker-f-issue-343
+=======
     }
 
     #[test]
@@ -5966,6 +5973,7 @@ print serve_once("127.0.0.1:18080", "hello")
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
     fn manifest_parses_richer_test_kinds() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("typed-tests");
@@ -6072,6 +6080,7 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     fn run_project_tests_reports_manifest_metadata_in_json() {
         let dir = tempdir().expect("tempdir");
@@ -6120,7 +6129,8 @@ print serve_once("127.0.0.1:18080", "hello")
 =======
 =======
 =======
->>>>>>> origin/codex/worker-f-issue-343
+=======
+>>>>>>> origin/codex/worker-c-issue-361
     fn run_project_tests_executes_manifest_cases() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner");
@@ -6604,7 +6614,6 @@ print serve_once("127.0.0.1:18080", "hello")
         assert_eq!(output.passed, 36);
         assert_eq!(output.cases.len(), 29);
         assert_eq!(output.passed, 29);
-<<<<<<< HEAD
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
         assert_eq!(output.cases.len(), 26);
@@ -6635,11 +6644,9 @@ print serve_once("127.0.0.1:18080", "hello")
                 == 21
                 == 20
 =======
-=======
                 == 20
 =======
                 == 20
->>>>>>> origin/codex/issue-410-proof-worker
 =======
                 == 24
 >>>>>>> origin/codex/worker-f-issue-341
@@ -6655,7 +6662,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 .count(),
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             12
             9
             10
@@ -6663,7 +6669,6 @@ print serve_once("127.0.0.1:18080", "hello")
             8
             9
             12
-=======
             9
 =======
             11
@@ -9368,6 +9373,94 @@ print 0
     }
 
     #[test]
+    fn build_project_locked_offline_succeeds_for_local_graph() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("locked-offline-build");
+        create_project(&project, Some("locked-offline-app")).expect("create project");
+
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("build local project in locked offline mode");
+
+        assert!(Path::new(&output.binary).exists());
+    }
+
+    #[test]
+    fn build_project_offline_requires_locked() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("offline-without-locked");
+        create_project(&project, Some("offline-without-locked-app")).expect("create project");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("offline without locked should fail");
+
+        assert_eq!(error.kind, "build");
+        assert!(error.message.contains("offline builds require --locked"));
+    }
+
+    #[test]
+    fn build_project_locked_offline_rejects_missing_lockfile_without_writing_it() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-lockfile");
+        create_project(&project, Some("missing-lockfile-app")).expect("create project");
+        let lockfile = lockfile_path(&project);
+        fs::remove_file(&lockfile).expect("remove lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("missing lockfile should fail");
+
+        assert_eq!(error.kind, "lockfile");
+        assert!(!lockfile.exists());
+    }
+
+    #[test]
+    fn build_project_locked_offline_rejects_stale_lockfile_without_rewriting_it() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stale-lockfile");
+        create_project(&project, Some("stale-lockfile-app")).expect("create project");
+        let lockfile = lockfile_path(&project);
+        let stale_lockfile = fs::read_to_string(&lockfile)
+            .expect("read lockfile")
+            .replace("stale-lockfile-app", "other-app");
+        fs::write(&lockfile, &stale_lockfile).expect("write stale lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("stale lockfile should fail");
+
+        assert_eq!(error.kind, "lockfile");
+        assert_eq!(
+            fs::read_to_string(&lockfile).expect("read stale lockfile"),
+            stale_lockfile
+        );
+    }
+
+    #[test]
     fn build_project_wasm_alias_emits_wasm_artifact() {
         if !rust_target_installed("wasm32-wasip1") {
             eprintln!("skipping wasm build test; wasm32-wasip1 target is not installed");
@@ -9775,8 +9868,10 @@ print 0
                 target: Some(rust_host_target()),
                 package: None,
                 debug: true,
+<<<<<<< HEAD
                 locked: true,
                 offline: true,
+=======
                 ..BuildOptions::default()
             },
         )

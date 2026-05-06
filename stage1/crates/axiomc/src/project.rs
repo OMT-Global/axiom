@@ -26,6 +26,7 @@ use crate::manifest::{
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
 };
 use crate::mir;
 use crate::stdlib;
@@ -111,7 +112,6 @@ pub struct BuiltPackage {
 =======
     pub cache_key: BuildCacheMetadata,
 =======
->>>>>>> origin/codex/issue-369-check-fixtures
 =======
 >>>>>>> origin/codex/issue-370-command-fixtures
 =======
@@ -266,6 +266,7 @@ pub struct BuildOptions {
     /// Require the checked-in axiom.lock graph to match the local manifest graph.
     pub locked: bool,
     /// Resolve the build graph without network access. Stage1 currently supports local path graphs only.
+    pub locked: bool,
     pub offline: bool,
 }
 
@@ -348,6 +349,7 @@ pub fn build_project_with_options(
     project_root: &Path,
     options: &BuildOptions,
 ) -> Result<BuildOutput, Diagnostic> {
+    validate_build_resolution_mode(options)?;
     let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
@@ -389,12 +391,9 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             cache_key: report.cache_key,
 =======
 =======
-=======
->>>>>>> origin/codex/issue-410-proof-worker
 =======
 >>>>>>> origin/codex/worker-f-issue-341
 =======
@@ -456,6 +455,16 @@ pub fn build_project_with_options(
     })
 }
 
+fn validate_build_resolution_mode(options: &BuildOptions) -> Result<(), Diagnostic> {
+    if options.offline && !options.locked {
+        return Err(Diagnostic::new(
+            "build",
+            "offline builds require --locked so axiom.lock is the only dependency resolution source",
+        ));
+    }
+    Ok(())
+}
+
 pub fn run_project(project_root: &Path) -> Result<i32, Diagnostic> {
     run_project_with_options(project_root, &RunOptions::default())
 }
@@ -486,6 +495,7 @@ pub fn run_project_with_options(
             debug: false,
             locked: true,
             offline: true,
+            ..BuildOptions::default()
         },
     )?;
     let build_output_dir = Path::new(&built.generated_rust).parent().ok_or_else(|| {

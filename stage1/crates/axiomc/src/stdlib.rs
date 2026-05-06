@@ -32,6 +32,7 @@
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-341
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -106,6 +107,8 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======

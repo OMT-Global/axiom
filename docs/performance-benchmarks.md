@@ -18,6 +18,7 @@ collecting timing data:
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/stdlib_testing --include-benchmarks --json
 ```
 
+<<<<<<< HEAD
 ## Advisory Go/Rust/Axiom comparison gate
 
 The stage1 comparison report is intentionally non-blocking at first. It builds
@@ -67,6 +68,8 @@ By default the report is written to
 `axiom.stage1.bench-harness.v1`. It is a local artifact, not a committed
 baseline. Use `scripts/ci/check-stage1-benchmarks.py` for the separate
 non-blocking comparison gate against Go/Rust reference workloads.
+=======
+>>>>>>> origin/codex/worker-c-issue-361
 This closes the local benchmark-suite foundation. Go and Rust reference
 comparisons should be layered on top of this harness in CI once representative
 workloads are stable enough to treat as performance policy.

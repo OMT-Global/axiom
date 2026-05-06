@@ -579,6 +579,7 @@ fn lower_with_capabilities_impl(
 >>>>>>> origin/codex/issue-409-proof-cli
 >>>>>>> origin/codex/issue-410-proof-worker
 >>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
     )
     .map_err(single_diagnostic)?;
     let functions =
@@ -930,6 +931,7 @@ fn type_has_unboxed_recursive_path(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -938,6 +940,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
+=======
 =======
 =======
 =======
@@ -5602,7 +5605,7 @@ fn lower_match_stmt(
 >>>>>>> origin/codex/issue-422-comparison-gate
 =======
 =======
->>>>>>> origin/codex/worker-f-issue-343
+>>>>>>> origin/codex/worker-c-issue-361
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5682,7 +5685,6 @@ fn lower_stmt(
 =======
 =======
 =======
-=======
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
 =======
@@ -5692,6 +5694,7 @@ fn lower_stmt(
 =======
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
+=======
 =======
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
