@@ -39,6 +39,11 @@
       "description": "foreign function interface access",
       "enabled": false,
       "name": "ffi"
+    },
+    {
+      "description": "host async runtime access",
+      "enabled": false,
+      "name": "async"
     }
   ],
   "command": "check",
@@ -87,6 +92,11 @@
           "description": "foreign function interface access",
           "enabled": false,
           "name": "ffi"
+        },
+        {
+          "description": "host async runtime access",
+          "enabled": false,
+          "name": "async"
         }
       ],
       "entry": "<project>/src/main.ax",

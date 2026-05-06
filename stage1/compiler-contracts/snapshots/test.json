@@ -8,6 +8,7 @@
       "exit_code": 0,
       "expected_stdout": "hello from stage1\n",
       "generated_rust": "<project>/dist/tests/contract-app-src-main-test.generated.rs",
+      "kind": "unit",
       "name": "src/main_test",
       "ok": true,
       "package_root": "<project>",
@@ -19,6 +20,9 @@
   "duration_ms": 0,
   "failed": 0,
   "filter": null,
+  "kinds": {
+    "unit": 1
+  },
   "manifest": "<project>/axiom.toml",
   "ok": true,
   "packages": [

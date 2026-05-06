@@ -90,7 +90,13 @@ fn normalize_payload(mut payload: Value, project: &Path) -> Value {
 fn normalize_value(value: &mut Value, project_aliases: &[String], key: Option<&str>) {
     match value {
         Value::String(text) => {
-            if let Some(project) = project_aliases.iter().find(|project| text.starts_with(*project))
+            if matches!(
+                key,
+                Some("source_hash" | "generated_rust_hash" | "lockfile_hash" | "manifest_hash")
+            ) {
+                *text = String::from("<hash>");
+            } else if let Some(project) =
+                project_aliases.iter().find(|project| text.starts_with(*project))
             {
                 *text = text.replacen(project, "<project>", 1);
             }
