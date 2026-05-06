@@ -1,4 +1,5 @@
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
+>>>>>>> origin/codex/issue-380-doc-json
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal stage1-run
 
 test: docs-python-exit stage1-test
@@ -34,11 +35,13 @@ stage1-crap-proposal:
 	python3 scripts/ci/propose-stage1-crap-thresholds.py --output stage1/quality/crap-threshold-proposal.json
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 mutation-rust-smoke:
 	bash scripts/ci/run-mutation-rust-smoke.sh
 
 =======
->>>>>>> origin/codex/worker-a-issue-379-fmt-json
+=======
+>>>>>>> origin/codex/issue-380-doc-json
 stage1-smoke:
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check stage1/examples/hello --json
 	cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/hello --json

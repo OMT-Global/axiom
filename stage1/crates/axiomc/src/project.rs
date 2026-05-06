@@ -67,6 +67,7 @@ pub struct BuiltPackage {
     pub debug: bool,
     pub cache_key: BuildCacheMetadata,
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+>>>>>>> origin/codex/issue-380-doc-json
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -86,7 +87,9 @@ pub struct BuildOutput {
     pub target: Option<String>,
     pub debug: bool,
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub cache_key: BuildCacheMetadata,
+=======
 =======
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
@@ -290,6 +293,7 @@ pub fn build_project_with_options(
             debug: options.debug,
             cache_key: report.cache_key,
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+>>>>>>> origin/codex/issue-380-doc-json
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -322,7 +326,9 @@ pub fn build_project_with_options(
         target: root.target,
         debug: root.debug,
 <<<<<<< HEAD
+<<<<<<< HEAD
         cache_key: root.cache_key,
+=======
 =======
         metadata: root.metadata,
         cache_hits,
@@ -1122,9 +1128,8 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
-
-=======
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+=======
 fn build_metadata(package_root: &Path, cache: &BuildCacheFile) -> BuildMetadata {
     BuildMetadata {
         target: cache.target.clone(),

@@ -546,6 +546,7 @@ fn lower_with_capabilities_impl(
         &aliases,
         &consts,
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+>>>>>>> origin/codex/issue-380-doc-json
     )
     .map_err(single_diagnostic)?;
     let functions =
@@ -869,6 +870,7 @@ fn type_has_unboxed_recursive_path(
 ) -> bool {
     match ty {
 <<<<<<< HEAD
+<<<<<<< HEAD
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -877,6 +879,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
+=======
 =======
         Type::Error | Type::Int | Type::Bool | Type::String | Type::Ptr(_) | Type::MutPtr(_) => {
             false
@@ -5435,6 +5438,7 @@ fn lower_match_stmt(
     })
 }
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+>>>>>>> origin/codex/issue-380-doc-json
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5475,6 +5479,7 @@ fn lower_stmt(
             let lowered_expr = lower_expr_with_expected(expr, Some(&expected), env, ctx)?;
             let actual = lowered_expr.ty().clone();
 <<<<<<< HEAD
+<<<<<<< HEAD
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5491,6 +5496,7 @@ fn lower_stmt(
             }
             if !type_assignable_to(&actual, &expected) && !actual.is_error() && !expected.is_error()
             {
+=======
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
@@ -6492,6 +6498,7 @@ fn lower_expr_with_expected_inner(
                 };
                 let lhs = lower_expr(&args[value_start], env, ctx)?;
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String | Type::Str) {
+>>>>>>> origin/codex/issue-380-doc-json
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
                         "type",
@@ -10277,8 +10284,6 @@ fn borrow_kind_for_type(
         None
     }
 }
-
->>>>>>> origin/codex/worker-a-issue-379-fmt-json
 fn increment_active_borrows(
     owner_names: &HashSet<String>,
     env: &mut HashMap<String, Binding>,

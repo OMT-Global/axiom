@@ -46,9 +46,15 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/pr
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- bench stage1/examples/benchmarks --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 ```
+
+`axiomc doc --json` emits the same API extraction pass as a versioned machine
+contract, including generated Markdown/HTML paths, documented symbols, comments,
+signatures, simple example notes, declaration kind/visibility, and package
+capability descriptors when the input path is a package root.
 
 `axiomc test` discovers `src/**/*_test.ax` entrypoints by default, builds each test
 as a native artifact, executes it, and compares stdout against a sibling
@@ -83,6 +89,7 @@ Successful payloads always include `ok`, `command`, and `project`, while
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
 requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
+<<<<<<< HEAD
 with generated source-position markers. Build JSON carries both `cache_key`
 metadata with the cache schema version, compiler key, target, debug mode,
 manifest hash, lockfile hash, generated Rust hash, and per-source hashes used
@@ -93,6 +100,8 @@ sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
+=======
+>>>>>>> origin/codex/issue-380-doc-json
 with generated source-position markers. Build JSON also carries `metadata` for
 cache-key inspection: requested/resolved `target`, `debug`, package `lockfile`,
 `lockfile_hash`, and aggregate `source_hash`. Debug builds also report `debug_map`,

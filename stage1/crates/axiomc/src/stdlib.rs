@@ -270,8 +270,8 @@ pub async fn udp_bind_loopback_once(response: string, timeout_ms: int): Option<i
 pub async fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
     ),
     (
-=======
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+=======
         "testing.ax",
         "pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
 pub fn table_bool(name: string, actual: bool, expected: bool): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\

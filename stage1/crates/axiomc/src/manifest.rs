@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
+>>>>>>> origin/codex/issue-380-doc-json
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -287,7 +288,9 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
 
 pub fn render_manifest(name: &str) -> String {
     format!(
+<<<<<<< HEAD
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
+=======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
     )
 }

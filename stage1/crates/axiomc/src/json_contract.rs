@@ -3,6 +3,7 @@ use crate::manifest::CapabilityDescriptor;
 use crate::project::{BuildOutput, CheckOutput, TestOutput};
 use serde::Serialize;
 use serde_json::{Value, json};
+>>>>>>> origin/codex/issue-380-doc-json
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -41,9 +42,11 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "target": output.target,
         "debug": output.debug,
 <<<<<<< HEAD
+<<<<<<< HEAD
         "cache_key": output.cache_key,
 =======
->>>>>>> origin/codex/worker-a-issue-379-fmt-json
+=======
+>>>>>>> origin/codex/issue-380-doc-json
         "metadata": output.metadata,
         "cache_hits": output.cache_hits,
         "cache_misses": output.cache_misses,

@@ -37,8 +37,8 @@ version = "0.1.0"
 source = "path:fail/for_loop_requires_iteration_protocol"
 
 [[package]]
-=======
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
+=======
 name = "conformance-match-guard-not-supported"
 version = "0.1.0"
 source = "path:fail/match_guard_not_supported"
