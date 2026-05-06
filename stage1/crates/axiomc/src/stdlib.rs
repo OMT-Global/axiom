@@ -70,7 +70,6 @@
 //!   cancellation, and select wrappers over the stage1 async runtime values.
 <<<<<<< HEAD
 <<<<<<< HEAD
-=======
 //! * `std/regex.ax` — linear-time regular-expression helpers (`is_match`,
 //!   `find`, `replace_all`) over a stage1-safe NFA engine.
 //! * `std/testing.ax` — table-case, property, and snapshot assertion helpers
@@ -79,6 +78,9 @@
 //! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
 //!   fallback unwrap helpers implemented in Axiom.
 =======
+=======
+//! * `std/encoding.ax` — URL component and path segment percent-encoding
+//!   helpers.
 
 use std::path::{Path, PathBuf};
 
@@ -269,7 +271,6 @@ pub fn selected<T>(result: SelectResult<T>): int {\nreturn async_selected<T>(res
 pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_selected_value<T>(result)\n}\n",
     ),
     (
-<<<<<<< HEAD
         "async_time.ax",
         "pub async fn sleep_ms(milliseconds: int): int {\nreturn clock_sleep_ms(milliseconds)\n}\n\
 pub async fn sleep_duration_ms(milliseconds: int): int {\nreturn clock_sleep_ms(milliseconds)\n}\n",
@@ -283,7 +284,6 @@ pub async fn udp_send_recv(host: string, port: int, message: string, timeout_ms:
     ),
     (
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
-=======
         "testing.ax",
         "pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
 pub fn table_bool(name: string, actual: bool, expected: bool): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
@@ -322,7 +322,12 @@ pub fn result_is_ok<T, E>(value: Result<T, E>): bool {\nmatch value {\nOk(_inner
 pub fn result_is_err<T, E>(value: Result<T, E>): bool {\nmatch value {\nOk(_inner) {\nreturn false\n}\nErr(_error) {\nreturn true\n}\n}\n}\n\
 pub fn result_unwrap_or<T, E>(value: Result<T, E>, fallback: T): T {\nmatch value {\nOk(inner) {\nreturn inner\n}\nErr(_error) {\nreturn fallback\n}\n}\n}\n",
 =======
->>>>>>> origin/codex/issue-406-collection-lookup
+    ),
+    (
+        "encoding.ax",
+        "pub fn url_component_encode(value: string): string {\nreturn encoding_url_component_encode(value)\n}\n\
+pub fn url_component_decode(value: string): Option<string> {\nreturn encoding_url_component_decode(value)\n}\n\
+pub fn path_segment_encode(value: string): string {\nreturn encoding_path_segment_encode(value)\n}\n",
     ),
 ];
 

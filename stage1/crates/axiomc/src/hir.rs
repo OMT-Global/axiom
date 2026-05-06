@@ -877,7 +877,6 @@ fn type_has_unboxed_recursive_path(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -886,7 +885,6 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
-=======
 =======
 =======
 =======
@@ -5451,7 +5449,6 @@ fn lower_match_stmt(
         span: SourceSpan { line, column },
     })
 }
->>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
@@ -5499,7 +5496,6 @@ fn lower_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5516,7 +5512,6 @@ fn lower_stmt(
             }
             if !type_assignable_to(&actual, &expected) && !actual.is_error() && !expected.is_error()
             {
-=======
 =======
 =======
 =======
@@ -6525,7 +6520,6 @@ fn lower_expr_with_expected_inner(
                 let lhs = lower_expr(&args[value_start], env, ctx)?;
 <<<<<<< HEAD
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String | Type::Str) {
->>>>>>> origin/codex/issue-376-doctor-json
 =======
                 if !matches!(lhs.ty(), Type::Int | Type::Bool | Type::String) {
                     return Err(Diagnostic::new(
@@ -6887,6 +6881,36 @@ fn lower_expr_with_expected_inner(
                     name: name.clone(),
                     args: vec![lowered],
                     ty: Type::Option(Box::new(Type::String)),
+            if matches!(
+                name.as_str(),
+                "encoding_url_component_encode"
+                    | "encoding_url_component_decode"
+                    | "encoding_path_segment_encode"
+            ) {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if lowered.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects a string argument, got {}", lowered.ty()),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: if name == "encoding_url_component_decode" {
+                        Type::Option(Box::new(Type::String))
+                    } else {
+                        Type::String
+                    },
                 });
             }
             if name == "fs_read" {
