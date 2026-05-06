@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
+>>>>>>> origin/codex/issue-409-proof-cli
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -51,6 +52,7 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
@@ -58,9 +60,10 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-423-mutation-smoke
 =======
 >>>>>>> origin/codex/issue-424-survivor-report
+=======
+>>>>>>> origin/codex/issue-409-proof-cli
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,
@@ -76,8 +79,8 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 <<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> origin/codex/issue-422-comparison-gate
-=======
         "cache_key": output.cache_key,
+=======
 =======
 =======
 =======

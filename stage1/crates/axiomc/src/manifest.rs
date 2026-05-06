@@ -24,6 +24,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-425-crap-thresholds
+>>>>>>> origin/codex/issue-409-proof-cli
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -99,6 +100,7 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub stderr: Option<String>,
 =======
 }
@@ -127,6 +129,7 @@ pub struct ExpectedDiagnostic {
     pub path: String,
     pub line: usize,
     pub column: usize,
+=======
 =======
 =======
 =======
@@ -201,10 +204,8 @@ pub struct CapabilityDescriptor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
 <<<<<<< HEAD
-<<<<<<< HEAD
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
-=======
 =======
 }
 
@@ -267,6 +268,7 @@ struct RawTestTarget {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     kind: Option<String>,
     stderr: Option<String>,
     kind: Option<String>,
@@ -281,6 +283,7 @@ struct RawPublishSection {
     expected_error: Option<ExpectedDiagnostic>,
     capabilities: Option<Vec<CapabilityKind>>,
     package: Option<String>,
+=======
 =======
 =======
 =======
@@ -410,11 +413,9 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             owner: config.owners.get(kind.name()).cloned(),
             rationale: config.rationale.get(kind.name()).cloned(),
 <<<<<<< HEAD
-<<<<<<< HEAD
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
-=======
 =======
         })
         .collect()
@@ -426,6 +427,7 @@ pub fn render_manifest(name: &str) -> String {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
 =======
@@ -435,6 +437,8 @@ pub fn render_manifest(name: &str) -> String {
 =======
 =======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
+=======
+        "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
     )
 }
 
