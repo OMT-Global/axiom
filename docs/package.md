@@ -11,7 +11,6 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/h
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
-<<<<<<< HEAD
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
@@ -21,7 +20,6 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 >>>>>>> origin/codex/issue-395-effective-fs-roots
 >>>>>>> origin/codex/worker-h-issue-413
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
-=======
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
 ```
@@ -39,6 +37,7 @@ The current stage1 examples document the supported manifest surface:
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 `axiomc caps <package> --json` reports the declared capability surface. When
 filesystem access is enabled, the `fs` capability includes the manifest-relative
 `configured_root` and canonical `effective_root` so operators can inspect the
@@ -55,6 +54,25 @@ Stage1 currently accepts `*`, exact `MAJOR.MINOR.PATCH`, and caret
 `^MAJOR.MINOR.PATCH` constraints. The compiler validates the constraint against
 the dependency package's `[package].version` while loading the local package
 graph and fails deterministically when the versions are incompatible.
+=======
+## Publish Contract
+
+Remote publishing is not implemented in stage1, but manifests can now declare
+the package metadata that future registry tooling will inspect:
+
+```toml
+[publish]
+registry = "https://registry.example.test/index"
+checksum = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+include = ["src", "axiom.toml", "axiom.lock"]
+```
+
+Package identity still comes from `[package].name` and `[package].version`.
+`[publish].registry` is validated as an `https://` or `file:` registry source,
+`[publish].checksum` must use `sha256:<64 hex characters>`, and include entries
+must be relative paths without parent traversal. These fields define the
+manifest contract only; `axiomc` does not publish, upload, or contact a remote
+registry.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.

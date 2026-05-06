@@ -38,6 +38,7 @@ pub struct Manifest {
     pub build: BuildSection,
     pub tests: Vec<TestTarget>,
     pub capabilities: CapabilityConfig,
+    pub publish: PublishSection,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -87,7 +88,6 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
     pub stderr: Option<String>,
 =======
 =======
@@ -95,7 +95,16 @@ pub enum TestKind {
 =======
 =======
 =======
-=======
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+pub struct PublishSection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -116,7 +125,6 @@ pub struct CapabilityConfig {
     pub crypto: bool,
     pub ffi: bool,
     pub async_runtime: bool,
->>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
@@ -161,10 +169,8 @@ pub struct CapabilityDescriptor {
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
-<<<<<<< HEAD
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
-=======
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +181,7 @@ struct RawManifest {
     build: Option<RawBuildSection>,
     tests: Option<Vec<RawTestTarget>>,
     capabilities: Option<RawCapabilityConfig>,
+    publish: Option<RawPublishSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,6 +233,13 @@ struct RawTestTarget {
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RawPublishSection {
+    registry: Option<String>,
+    checksum: Option<String>,
+    include: Option<Vec<String>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RawCapabilityConfig {
     fs: Option<bool>,
     #[serde(rename = "fs:write")]
@@ -241,7 +255,6 @@ struct RawCapabilityConfig {
     ffi: Option<bool>,
     #[serde(rename = "async")]
     async_runtime: Option<bool>,
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/agent-f-fs
@@ -345,11 +358,9 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             unsafe_opt_in: config.unsafe_opt_ins.iter().any(|name| name == kind.name()),
             owner: config.owners.get(kind.name()).cloned(),
             rationale: config.rationale.get(kind.name()).cloned(),
-<<<<<<< HEAD
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
-=======
         })
         .collect()
 }
@@ -464,6 +475,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     validate_relative_path(path, "build.out_dir", &out_dir)?;
     let dependencies = normalize_dependencies(raw.dependencies.unwrap_or_default(), path)?;
     let tests = normalize_tests(raw.tests.unwrap_or_default(), path)?;
+    let publish = normalize_publish(raw.publish.unwrap_or_default(), path)?;
     let capabilities = raw.capabilities.unwrap_or_default();
     let fs_root =
         normalize_optional_relative_path(path, "capabilities.fs_root", capabilities.fs_root)?;
@@ -514,13 +526,13 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             crypto: capabilities.crypto.unwrap_or(false),
             ffi: capabilities.ffi.unwrap_or(false),
             async_runtime: capabilities.async_runtime.unwrap_or(false),
->>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
             rationale,
         },
+        publish,
     })
 }
 
@@ -825,9 +837,7 @@ fn normalize_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             stderr: raw_test.stderr,
-=======
 =======
 =======
 =======
@@ -836,6 +846,7 @@ fn normalize_tests(
     Ok(tests)
 }
 
+<<<<<<< HEAD
 fn normalize_test_kind(
     value: Option<String>,
     path: &Path,
@@ -855,6 +866,84 @@ fn normalize_test_kind(
         )
         .with_path(path.display().to_string())),
     }
+=======
+fn normalize_publish(raw: RawPublishSection, path: &Path) -> Result<PublishSection, Diagnostic> {
+    let registry = match raw.registry {
+        Some(registry) => {
+            let registry = required_field(Some(registry), path, "publish.registry")?;
+            validate_registry_source(path, &registry)?;
+            Some(registry)
+        }
+        None => None,
+    };
+    let checksum = match raw.checksum {
+        Some(checksum) => {
+            let checksum = required_field(Some(checksum), path, "publish.checksum")?;
+            validate_sha256_checksum(path, &checksum)?;
+            Some(checksum)
+        }
+        None => None,
+    };
+    let mut include = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, value) in raw.include.unwrap_or_default().into_iter().enumerate() {
+        let field_name = format!("publish.include[{index}]");
+        let value = required_field(Some(value), path, &field_name)?;
+        validate_relative_path(path, &field_name, &value)?;
+        if !seen.insert(value.clone()) {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!("duplicate publish include path {value:?}"),
+            )
+            .with_path(path.display().to_string()));
+        }
+        include.push(value);
+    }
+    Ok(PublishSection {
+        registry,
+        checksum,
+        include,
+    })
+}
+
+fn validate_registry_source(path: &Path, registry: &str) -> Result<(), Diagnostic> {
+    if let Some(rest) = registry.strip_prefix("https://") {
+        let host = rest.split('/').next().unwrap_or_default();
+        if !host.is_empty() && !host.chars().any(char::is_whitespace) {
+            return Ok(());
+        }
+    } else if let Some(rest) = registry.strip_prefix("file:") {
+        if !rest.is_empty() && !rest.chars().any(char::is_whitespace) {
+            return Ok(());
+        }
+    }
+    Err(Diagnostic::new(
+        "manifest",
+        "publish.registry must be a valid https:// or file: registry source",
+    )
+    .with_path(path.display().to_string()))
+}
+
+fn validate_sha256_checksum(path: &Path, checksum: &str) -> Result<(), Diagnostic> {
+    let Some(hex) = checksum.strip_prefix("sha256:") else {
+        return Err(Diagnostic::new(
+            "manifest",
+            "publish.checksum must use sha256:<64 lowercase hex characters>",
+        )
+        .with_path(path.display().to_string()));
+    };
+    if hex.len() == 64
+        && hex
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ('a'..='f').contains(&ch))
+    {
+        return Ok(());
+    }
+    Err(Diagnostic::new(
+        "manifest",
+        "publish.checksum must use sha256:<64 lowercase hex characters>",
+    )
+    .with_path(path.display().to_string()))
 }
 
 fn normalize_optional_relative_path(

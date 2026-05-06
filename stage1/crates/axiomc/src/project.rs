@@ -8,6 +8,8 @@ use crate::manifest::{
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
     TestKind, binary_path_for_target, capability_descriptors, entry_path, generated_rust_path,
     load_manifest, manifest_path, out_dir_path,
+    PublishSection, binary_path_for_target, capability_descriptors, entry_path,
+    generated_rust_path, load_manifest, manifest_path, out_dir_path,
 };
 use crate::mir;
 use crate::stdlib;
@@ -90,12 +92,9 @@ pub struct BuildOutput {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
 =======
 =======
 =======
-=======
->>>>>>> origin/codex/issue-395-effective-fs-roots
 =======
 >>>>>>> origin/codex/worker-h-issue-413
     pub manifest: String,
@@ -106,9 +105,7 @@ pub struct BuildOutput {
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
-<<<<<<< HEAD
     pub cache_key: BuildCacheMetadata,
-=======
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
     pub cache_misses: usize,
@@ -330,7 +327,6 @@ pub fn build_project_with_options(
             target: resolved_target.clone(),
             debug: options.debug,
             cache_key: report.cache_key,
->>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
 >>>>>>> origin/codex/worker-h-issue-413
@@ -361,12 +357,9 @@ pub fn build_project_with_options(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
 =======
 =======
 =======
-=======
->>>>>>> origin/codex/issue-395-effective-fs-roots
 =======
 >>>>>>> origin/codex/worker-h-issue-413
         manifest: root.manifest,
@@ -377,9 +370,7 @@ pub fn build_project_with_options(
         statement_count: root.statement_count,
         target: root.target,
         debug: root.debug,
-<<<<<<< HEAD
         cache_key: root.cache_key,
-=======
         metadata: root.metadata,
         cache_hits,
         cache_misses,
@@ -979,7 +970,6 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             crypto: true,
             ffi: false,
             async_runtime: true,
->>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
@@ -989,6 +979,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             owners: BTreeMap::new(),
             rationale: BTreeMap::new(),
         },
+        publish: PublishSection::default(),
     };
     graph.packages.insert(
         root.clone(),
@@ -5060,6 +5051,7 @@ mod tests {
             },
             tests: Vec::new(),
             capabilities: CapabilityConfig::default(),
+            publish: PublishSection::default(),
         }
     }
 
@@ -5077,6 +5069,7 @@ mod tests {
             },
             tests: Vec::new(),
             capabilities: CapabilityConfig::default(),
+            publish: PublishSection::default(),
         }
     }
 

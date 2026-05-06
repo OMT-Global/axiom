@@ -69,14 +69,11 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
 =======
 =======
 =======
 =======
-=======
->>>>>>> origin/codex/issue-387-capability-validation
 =======
 >>>>>>> origin/codex/issue-395-effective-fs-roots
 =======
@@ -2788,6 +2785,25 @@ crypto = false
                 .message
                 .contains("version constraint \"^0.2.0\" is incompatible")
         );
+    fn publish_manifest_contract_validates_registry_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("publish-contract");
+        create_project(&project, Some("publish-contract-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            format!(
+                "{}\n[publish]\nregistry = \"https://registry.example.test/index\"\nchecksum = \"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\ninclude = [\"src\", \"axiom.toml\"]\n",
+                render_manifest("publish-contract-app")
+            ),
+        )
+        .expect("write publish manifest");
+
+        let manifest = load_manifest(&project).expect("load publish manifest");
+        assert_eq!(
+            manifest.publish.registry.as_deref(),
+            Some("https://registry.example.test/index")
+        );
+        assert_eq!(manifest.publish.include, vec!["src", "axiom.toml"]);
 
         fs::write(
             project.join("axiom.toml"),
@@ -2839,6 +2855,36 @@ crypto = false
                 .message
                 .contains("version constraint \"^0.0.3\" is incompatible")
         );
+                "{}\n[publish]\nregistry = \"http://registry.example.test/index\"\nchecksum = \"sha256:not-a-real-checksum\"\n",
+                render_manifest("publish-contract-app")
+            ),
+        )
+        .expect("write invalid publish manifest");
+        let error = load_manifest(&project).expect_err("invalid registry should fail");
+        assert_eq!(error.kind, "manifest");
+        assert!(error.message.contains("publish.registry"));
+    }
+
+    #[test]
+    fn publish_manifest_rejects_malformed_registry_sources() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("publish-registry-invalid");
+        create_project(&project, Some("publish-registry-invalid-app")).expect("create project");
+
+        for registry in ["https://", "https://not a host", "file:"] {
+            fs::write(
+                project.join("axiom.toml"),
+                format!(
+                    "{}\n[publish]\nregistry = \"{registry}\"\n",
+                    render_manifest("publish-registry-invalid-app")
+                ),
+            )
+            .expect("write invalid publish manifest");
+
+            let error = load_manifest(&project).expect_err("malformed registry should fail");
+            assert_eq!(error.kind, "manifest");
+            assert!(error.message.contains("publish.registry"));
+        }
     }
 
     #[test]
@@ -2918,13 +2964,11 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
-=======
 =======
 =======
 =======
@@ -3039,7 +3083,6 @@ crypto = false
                 .message
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
->>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
@@ -5803,9 +5846,7 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
                 stderr: None,
-=======
 =======
 =======
 =======
@@ -6319,7 +6360,6 @@ print serve_once("127.0.0.1:18080", "hello")
         assert_eq!(output.passed, 29);
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
->>>>>>> origin/codex/worker-h-issue-413
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -6327,11 +6367,9 @@ print serve_once("127.0.0.1:18080", "hello")
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-<<<<<<< HEAD
                 == 24
                 == 20
                 == 21
-=======
                 == 20
         );
         assert_eq!(
@@ -6342,7 +6380,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 .count(),
             12
             9
->>>>>>> origin/codex/issue-387-capability-validation
             10
             9
         );
@@ -9337,8 +9374,6 @@ print 0
         assert_eq!(payload["offline"], true);
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
-=======
 =======
 =======
         assert!(payload["target"].is_string());
@@ -9631,7 +9666,6 @@ print next.value
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
->>>>>>> origin/codex/agent-f-fs
 
     // AG2: deterministic monomorphized symbol naming (#337)
     // These snapshot tests lock the exact symbol names produced for nested generics,
