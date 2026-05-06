@@ -7249,6 +7249,23 @@ print takes_two(three)
     }
 
     #[test]
+    fn check_project_rejects_str_return_from_local_string() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("str-return-local-string");
+        create_project(&project, Some("str-return-local-string-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn pick(input: &str): &str {\nlet owned: string = \"local\"\nreturn owned\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("local string borrow return should fail");
+        assert!(error.message.contains(
+            "returning borrowed values requires data derived from one of the borrowed parameters"
+        ));
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
     fn check_project_rejects_wrapped_borrow_return_from_local_value() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("wrapped-borrow-return-local");
