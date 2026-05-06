@@ -5053,7 +5053,8 @@ fn lower_match_stmt(
 ) -> Result<Stmt, Diagnostic> {
     let lowered_expr = lower_expr(expr, env, ctx)?;
     let match_borrowed_owners = expr_borrowed_owners(&lowered_expr, env, ctx);
-    let match_borrow_kind = borrow_kind_for_type(lowered_expr.ty(), ctx.structs, ctx.enums);
+    let match_borrow_kind =
+        borrowck::borrow_kind_for_type(lowered_expr.ty(), ctx.structs, ctx.enums);
     let reuse_existing_match_binding =
         matches!(lowered_expr, Expr::VarRef { .. }) && !match_borrowed_owners.is_empty();
     if let Some(borrow_kind) = match_borrow_kind
@@ -5219,7 +5220,7 @@ fn lower_match_stmt(
                     ty: payload_ty.clone(),
                     moved: false,
                     moved_projections: HashSet::new(),
-                    borrow_kind: borrow_kind_for_type(payload_ty, ctx.structs, ctx.enums),
+                    borrow_kind: borrowck::borrow_kind_for_type(payload_ty, ctx.structs, ctx.enums),
                     borrow_origin: match_binding_borrow_origin(
                         &lowered_expr,
                         &arm.variant,

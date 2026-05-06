@@ -2900,6 +2900,10 @@ fn explicit_return_lifetime(ty: &TypeName) -> Option<&str> {
         }
         TypeName::Tuple(elements) => elements.iter().find_map(explicit_return_lifetime),
         TypeName::Named(_, args) => args.iter().find_map(explicit_return_lifetime),
+        TypeName::Fn(params, return_ty) => params
+            .iter()
+            .find_map(explicit_return_lifetime)
+            .or_else(|| explicit_return_lifetime(return_ty)),
         TypeName::Ptr(_)
         | TypeName::MutPtr(_)
         | TypeName::Slice(_)
@@ -2917,6 +2921,10 @@ fn type_uses_lifetime(ty: &TypeName, lifetime: &str) -> bool {
         }
         TypeName::Named(_, args) | TypeName::Tuple(args) => {
             args.iter().any(|arg| type_uses_lifetime(arg, lifetime))
+        }
+        TypeName::Fn(params, return_ty) => {
+            params.iter().any(|arg| type_uses_lifetime(arg, lifetime))
+                || type_uses_lifetime(return_ty, lifetime)
         }
         TypeName::Ptr(inner)
         | TypeName::MutPtr(inner)
@@ -2939,6 +2947,10 @@ fn type_contains_borrowed_slice(ty: &TypeName) -> bool {
         | TypeName::LifetimeMutSlice(_, _) => true,
         TypeName::Named(_, args) | TypeName::Tuple(args) => {
             args.iter().any(type_contains_borrowed_slice)
+        }
+        TypeName::Fn(params, return_ty) => {
+            params.iter().any(type_contains_borrowed_slice)
+                || type_contains_borrowed_slice(return_ty)
         }
         TypeName::Ptr(inner)
         | TypeName::MutPtr(inner)
