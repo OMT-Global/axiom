@@ -28,6 +28,7 @@ DIAGNOSTIC_FIXTURE = REPO_ROOT / "stage1/conformance/fail/ownership_use_after_mo
 CAPABILITY_NAMES = ["fs", "fs:write", "net", "process", "env", "clock", "crypto", "ffi"]
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
 >>>>>>> origin/codex/issue-380-doc-json
+>>>>>>> origin/codex/issue-376-doctor-json
 
 
 @dataclass(frozen=True)
@@ -174,8 +175,10 @@ def compare_regression_baseline(report: dict, baseline: dict | None) -> list[str
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 def file_size(path: Path) -> int | None:
     return path.stat().st_size if path.exists() else None
+=======
 =======
 =======
 def benchmark_workload(workload: Workload, temp_dir: Path) -> dict:

@@ -68,6 +68,7 @@ pub struct BuiltPackage {
     pub cache_key: BuildCacheMetadata,
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
 >>>>>>> origin/codex/issue-380-doc-json
+>>>>>>> origin/codex/issue-376-doctor-json
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -88,7 +89,9 @@ pub struct BuildOutput {
     pub debug: bool,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub cache_key: BuildCacheMetadata,
+=======
 =======
 =======
     pub metadata: BuildMetadata,
@@ -294,6 +297,7 @@ pub fn build_project_with_options(
             cache_key: report.cache_key,
 >>>>>>> origin/codex/worker-a-issue-379-fmt-json
 >>>>>>> origin/codex/issue-380-doc-json
+>>>>>>> origin/codex/issue-376-doctor-json
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -327,7 +331,9 @@ pub fn build_project_with_options(
         debug: root.debug,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         cache_key: root.cache_key,
+=======
 =======
 =======
         metadata: root.metadata,
@@ -817,6 +823,7 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             crypto: true,
             ffi: false,
             async_runtime: true,
+>>>>>>> origin/codex/issue-376-doctor-json
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),
             owners: BTreeMap::new(),
@@ -1108,6 +1115,7 @@ fn build_artifacts(
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1128,8 +1136,9 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
->>>>>>> origin/codex/worker-a-issue-379-fmt-json
 =======
+=======
+>>>>>>> origin/codex/issue-376-doctor-json
 fn build_metadata(package_root: &Path, cache: &BuildCacheFile) -> BuildMetadata {
     BuildMetadata {
         target: cache.target.clone(),

@@ -4,6 +4,7 @@ use crate::project::{BuildOutput, CheckOutput, TestOutput};
 use serde::Serialize;
 use serde_json::{Value, json};
 >>>>>>> origin/codex/issue-380-doc-json
+>>>>>>> origin/codex/issue-376-doctor-json
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -43,10 +44,12 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "debug": output.debug,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         "cache_key": output.cache_key,
 =======
 =======
->>>>>>> origin/codex/issue-380-doc-json
+=======
+>>>>>>> origin/codex/issue-376-doctor-json
         "metadata": output.metadata,
         "cache_hits": output.cache_hits,
         "cache_misses": output.cache_misses,

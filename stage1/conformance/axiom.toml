@@ -8,8 +8,8 @@ members = [
   "fail/comparison_predictable_diagnostic",
   "fail/comparison_strict_type_mismatch",
   "fail/for_loop_requires_iteration_protocol",
-=======
 >>>>>>> origin/codex/issue-380-doc-json
+=======
   "fail/for_loop_requires_iteration_protocol",
   "fail/comparison_owned_resource_move",
   "fail/comparison_predictable_diagnostic",

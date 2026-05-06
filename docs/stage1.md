@@ -44,6 +44,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/ca
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_cli --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/proof_worker --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doctor stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --json
@@ -100,8 +101,8 @@ sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
-=======
 >>>>>>> origin/codex/issue-380-doc-json
+=======
 with generated source-position markers. Build JSON also carries `metadata` for
 cache-key inspection: requested/resolved `target`, `debug`, package `lockfile`,
 `lockfile_hash`, and aggregate `source_hash`. Debug builds also report `debug_map`,
@@ -112,6 +113,9 @@ incremental generated-Rust cache.
 Parser diagnostics now preserve additional recovered top-level parse errors in
 the error payload's `related` array when possible, so editor tooling can show
 more than the first syntax error without waiting for full checker recovery.
+`axiomc doctor --json` reports local `rustc` and `cargo` availability, the host
+target triple, lockfile status, package/workspace graph summary, manifest
+capabilities, and known unsupported feature buckets for agent preflight checks.
 
 ## Current gaps
 

@@ -7,6 +7,7 @@ pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/issue-380-doc-json
+>>>>>>> origin/codex/issue-376-doctor-json
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -85,7 +86,9 @@ pub struct CapabilityConfig {
     pub clock: bool,
     pub crypto: bool,
     pub ffi: bool,
+<<<<<<< HEAD
     pub async_runtime: bool,
+=======
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
@@ -187,6 +190,7 @@ struct RawCapabilityConfig {
     ffi: Option<bool>,
     #[serde(rename = "async")]
     async_runtime: Option<bool>,
+>>>>>>> origin/codex/issue-376-doctor-json
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -289,7 +293,9 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
 pub fn render_manifest(name: &str) -> String {
     format!(
 <<<<<<< HEAD
+<<<<<<< HEAD
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\nasync = false\n"
+=======
 =======
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n"
     )
@@ -430,7 +436,10 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             clock: capabilities.clock.unwrap_or(false),
             crypto: capabilities.crypto.unwrap_or(false),
             ffi: capabilities.ffi.unwrap_or(false),
+<<<<<<< HEAD
             async_runtime: capabilities.async_runtime.unwrap_or(false),
+=======
+>>>>>>> origin/codex/issue-376-doctor-json
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
