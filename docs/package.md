@@ -18,6 +18,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/issue-395-effective-fs-roots
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 =======
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
@@ -35,6 +36,11 @@ The current stage1 examples document the supported manifest surface:
 - `stage1/examples/workspace_only`: workspace-only roots with
   `--package` selection.
 - `stage1/examples/capabilities`: manifest-gated runtime capabilities.
+
+`axiomc caps <package> --json` reports the declared capability surface. When
+filesystem access is enabled, the `fs` capability includes the manifest-relative
+`configured_root` and canonical `effective_root` so operators can inspect the
+actual package-local filesystem boundary before build or run.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
@@ -56,7 +62,9 @@ and yanked status so a simple static host can serve lockfile-friendly package me
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.
+=======
 =======
 =======
 =======

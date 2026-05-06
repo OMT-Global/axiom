@@ -92,9 +92,9 @@ pub struct BuildOutput {
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
-=======
 >>>>>>> origin/codex/issue-387-capability-validation
+=======
+>>>>>>> origin/codex/issue-395-effective-fs-roots
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -104,9 +104,7 @@ pub struct BuildOutput {
     pub target: Option<String>,
     pub debug: bool,
 <<<<<<< HEAD
-<<<<<<< HEAD
     pub cache_key: BuildCacheMetadata,
-=======
 =======
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
@@ -329,7 +327,6 @@ pub fn build_project_with_options(
             target: resolved_target.clone(),
             debug: options.debug,
             cache_key: report.cache_key,
->>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
@@ -363,9 +360,9 @@ pub fn build_project_with_options(
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
-=======
 >>>>>>> origin/codex/issue-387-capability-validation
+=======
+>>>>>>> origin/codex/issue-395-effective-fs-roots
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -375,9 +372,7 @@ pub fn build_project_with_options(
         target: root.target,
         debug: root.debug,
 <<<<<<< HEAD
-<<<<<<< HEAD
         cache_key: root.cache_key,
-=======
 =======
         metadata: root.metadata,
         cache_hits,
@@ -707,8 +702,10 @@ fn collect_discovered_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             kind,
             stderr,
+=======
 =======
 =======
 =======
@@ -750,7 +747,32 @@ fn load_package_expected_output(project_root: &Path) -> Result<Option<String>, D
 
 pub fn project_capabilities(project_root: &Path) -> Result<Vec<CapabilityDescriptor>, Diagnostic> {
     let manifest = load_manifest(project_root)?;
-    Ok(capability_descriptors(&manifest.capabilities))
+    let mut capabilities = capability_descriptors(&manifest.capabilities);
+    if manifest.capabilities.fs || manifest.capabilities.fs_write {
+        let configured_root = manifest
+            .capabilities
+            .fs_root
+            .clone()
+            .unwrap_or_else(|| String::from("."));
+        let package_root = fs::canonicalize(project_root).map_err(|err| {
+            Diagnostic::new(
+                "manifest",
+                format!("failed to canonicalize package root: {err}"),
+            )
+            .with_path(project_root.display().to_string())
+        })?;
+        let effective_root = fs_root_path_for_package(project_root, &manifest)?;
+        for capability in capabilities.iter_mut().filter(|capability| {
+            capability.enabled
+                && (capability.name == CapabilityKind::Fs.name()
+                    || capability.name == CapabilityKind::FsWrite.name())
+        }) {
+            capability.configured_root = Some(configured_root.clone());
+            capability.effective_root = Some(effective_root.display().to_string());
+            capability.package_root = Some(package_root.display().to_string());
+        }
+    }
+    Ok(capabilities)
 }
 
 #[derive(Debug, Clone)]
@@ -1249,7 +1271,6 @@ fn build_artifacts(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
 fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
     BuildCacheMetadata {
         version: cache.version,
@@ -1270,7 +1291,6 @@ fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
             .collect(),
     }
 }
-=======
 =======
 =======
 =======
@@ -4372,7 +4392,6 @@ fn rewrite_type_name(
             )?),
         )),
 =======
->>>>>>> origin/codex/issue-387-capability-validation
     }
 }
 

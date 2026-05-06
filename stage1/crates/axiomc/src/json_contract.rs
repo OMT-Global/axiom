@@ -46,9 +46,9 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/agent-i-language-slice
-=======
 >>>>>>> origin/codex/issue-387-capability-validation
+=======
+>>>>>>> origin/codex/issue-395-effective-fs-roots
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

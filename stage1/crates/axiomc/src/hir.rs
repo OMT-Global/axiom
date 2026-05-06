@@ -563,6 +563,7 @@ fn lower_with_capabilities_impl(
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
+>>>>>>> origin/codex/issue-395-effective-fs-roots
     )
     .map_err(single_diagnostic)?;
     let functions =
@@ -902,6 +903,7 @@ fn type_has_unboxed_recursive_path(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -910,6 +912,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
+=======
 =======
 =======
 =======
@@ -4214,7 +4217,6 @@ fn substitute_type_name(
             Box::new(substitute_type_name(inner, type_bindings)),
             len.clone(),
         ),
-<<<<<<< HEAD
         syntax::TypeName::Fn(params, return_ty) => syntax::TypeName::Fn(
             params
                 .iter()
@@ -4222,7 +4224,6 @@ fn substitute_type_name(
                 .collect(),
             Box::new(substitute_type_name(return_ty, type_bindings)),
         ),
-=======
         syntax::TypeName::Int => syntax::TypeName::Int,
         syntax::TypeName::Numeric(numeric) => syntax::TypeName::Numeric(*numeric),
         syntax::TypeName::Bool => syntax::TypeName::Bool,
@@ -4347,8 +4348,6 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
 fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new("ownership", message).with_code(code)
 }
-
->>>>>>> origin/codex/issue-387-capability-validation
 impl Type {
     fn is_error(&self) -> bool {
         matches!(self, Type::Error)
@@ -5553,6 +5552,7 @@ fn lower_match_stmt(
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/issue-395-effective-fs-roots
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5600,6 +5600,7 @@ fn lower_stmt(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             if let Some(expected_len) = expected_array_len {
                 if let syntax::Expr::ArrayLiteral { elements, .. } = expr {
                     if elements.len() != expected_len {
@@ -5627,6 +5628,8 @@ fn lower_stmt(
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
+=======
+            if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),

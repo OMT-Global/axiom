@@ -8,6 +8,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/issue-395-effective-fs-roots
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -66,15 +67,17 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
 =======
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
 =======
 >>>>>>> origin/codex/agent-i-language-slice
 =======
 >>>>>>> origin/codex/issue-387-capability-validation
+=======
+>>>>>>> origin/codex/issue-395-effective-fs-roots
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
 =======
@@ -411,6 +414,7 @@ print borrowed
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
+>>>>>>> origin/codex/issue-395-effective-fs-roots
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2808,11 +2812,13 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
 =======
 =======
 =======
@@ -2859,6 +2865,14 @@ crypto = false
         fs::write(
             project.join("axiom.toml"),
             "[package]\nname = \"caps-policy-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\ndeny_by_default = true\nunsafe_opt_ins = [\"ffi\"]\nowners = { fs = \"platform\", ffi = \"runtime\" }\nrationale = { fs = \"read package fixtures\", ffi = \"native host bridge migration\" }\n",
+    fn capability_view_includes_effective_fs_root_scope() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("caps-fs");
+        create_project(&project, Some("caps-fs-app")).expect("create project");
+        fs::create_dir_all(project.join("data")).expect("create fs root");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"caps-fs-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n",
         )
         .expect("write manifest");
 
@@ -2994,6 +3008,84 @@ crypto = false
             env.unsafe_rationale.as_deref(),
             Some("migration reads audited CI variables")
         );
+        let fs_capability = caps
+            .iter()
+            .find(|cap| cap.name == "fs")
+            .expect("fs capability");
+        assert!(fs_capability.enabled);
+        assert_eq!(fs_capability.configured_root.as_deref(), Some("data"));
+        let canonical_data = fs::canonicalize(project.join("data"))
+            .expect("canonical fs root")
+            .to_string_lossy()
+            .into_owned();
+        let canonical_project = fs::canonicalize(&project)
+            .expect("canonical package root")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            fs_capability.effective_root.as_deref(),
+            Some(canonical_data.as_str())
+        );
+        assert_eq!(
+            fs_capability.package_root.as_deref(),
+            Some(canonical_project.as_str())
+        );
+
+        let payload = json_contract::caps_success(&project, &caps);
+        assert_eq!(payload["capabilities"][0]["name"], "fs");
+        assert_eq!(payload["capabilities"][0]["configured_root"], "data");
+        assert_eq!(payload["capabilities"][0]["effective_root"], canonical_data);
+        assert_eq!(payload["capabilities"][0]["package_root"], canonical_project);
+    }
+
+    #[test]
+    fn capability_view_includes_fs_write_root_scope() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("caps-fs-write");
+        create_project(&project, Some("caps-fs-write-app")).expect("create project");
+        fs::create_dir_all(project.join("data")).expect("create fs root");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"caps-fs-write-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = true\nfs_root = \"data\"\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\nffi = false\n",
+        )
+        .expect("write manifest");
+
+        let caps = project_capabilities(&project).expect("project capabilities");
+        let fs_capability = caps
+            .iter()
+            .find(|cap| cap.name == "fs")
+            .expect("fs capability");
+        assert!(!fs_capability.enabled);
+        assert!(fs_capability.configured_root.is_none());
+
+        let fs_write_capability = caps
+            .iter()
+            .find(|cap| cap.name == "fs:write")
+            .expect("fs:write capability");
+        assert!(fs_write_capability.enabled);
+        assert_eq!(fs_write_capability.configured_root.as_deref(), Some("data"));
+        let canonical_data = fs::canonicalize(project.join("data"))
+            .expect("canonical fs root")
+            .to_string_lossy()
+            .into_owned();
+        let canonical_project = fs::canonicalize(&project)
+            .expect("canonical package root")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            fs_write_capability.effective_root.as_deref(),
+            Some(canonical_data.as_str())
+        );
+        assert_eq!(
+            fs_write_capability.package_root.as_deref(),
+            Some(canonical_project.as_str())
+        );
+
+        let payload = json_contract::caps_success(&project, &caps);
+        assert_eq!(payload["capabilities"][1]["name"], "fs:write");
+        assert_eq!(payload["capabilities"][1]["configured_root"], "data");
+        assert_eq!(payload["capabilities"][1]["effective_root"], canonical_data);
+        assert_eq!(payload["capabilities"][1]["package_root"], canonical_project);
     }
 
     #[test]
@@ -3360,6 +3452,32 @@ print strlen("hello")
             "inside ok\nabsolute denied\ntraversal denied\nsymlink denied\nlarge denied\n",
         )
         .expect("write golden");
+        let caps = project_capabilities(&project).expect("project capabilities");
+        let fs_capability = caps
+            .iter()
+            .find(|cap| cap.name == "fs")
+            .expect("fs capability");
+        let canonical_data = fs::canonicalize(&data)
+            .expect("canonical fs root")
+            .to_string_lossy()
+            .into_owned();
+        let canonical_project = fs::canonicalize(&project)
+            .expect("canonical package root")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(fs_capability.configured_root.as_deref(), Some("data"));
+        assert_eq!(
+            fs_capability.effective_root.as_deref(),
+            Some(canonical_data.as_str())
+        );
+        assert_eq!(
+            fs_capability.package_root.as_deref(),
+            Some(canonical_project.as_str())
+        );
+        assert!(
+            canonical_data.starts_with(&canonical_project),
+            "reported fs root must stay within reported package root"
+        );
 
         let built = build_project(&project).expect("build project");
         let output = compiled_binary_command(&built.binary)
