@@ -16,6 +16,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -42,8 +43,10 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         CapabilityConfig, CapabilityKind, ExpectedDiagnostic, TestTarget, capability_descriptors,
         load_manifest, render_manifest,
+=======
 =======
 =======
 =======
@@ -90,10 +93,11 @@ mod tests {
 =======
 =======
 =======
-=======
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
 =======
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
+=======
+            "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
 =======
         let mut manifest = format!(
@@ -437,6 +441,7 @@ print borrowed
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2989,6 +2994,7 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
@@ -3003,11 +3009,13 @@ crypto = false
 =======
 =======
 =======
+=======
         assert_eq!(caps.len(), 8);
         assert!(caps.iter().all(|cap| !cap.enabled));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 8);
 =======
+>>>>>>> origin/codex/issue-425-crap-thresholds
     }
 
     #[test]
@@ -3035,6 +3043,7 @@ crypto = false
         assert_eq!(payload["capabilities"][4]["allowed"][0], "FOO");
         assert_eq!(payload["capabilities"][4]["allowed"][1], "LOG_LEVEL");
         assert!(payload["capabilities"][4]["unsafe_unrestricted"].is_null());
+<<<<<<< HEAD
     }
 
     #[test]
@@ -3112,7 +3121,6 @@ crypto = false
                 .message
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
->>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
 >>>>>>> origin/codex/issue-387-capability-validation
     }
@@ -3298,6 +3306,8 @@ crypto = false
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
     }
 
     #[test]
@@ -5890,10 +5900,10 @@ print serve_once("127.0.0.1:18080", "hello")
 =======
 =======
 =======
-=======
                 expected_error: None,
                 capabilities: Vec::new(),
                 package: None,
+=======
 =======
 =======
 =======
@@ -5910,6 +5920,7 @@ print serve_once("127.0.0.1:18080", "hello")
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
     fn manifest_parses_richer_test_kinds() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("typed-tests");
@@ -6009,6 +6020,7 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     fn run_project_tests_reports_manifest_metadata_in_json() {
         let dir = tempdir().expect("tempdir");
@@ -6050,7 +6062,8 @@ print serve_once("127.0.0.1:18080", "hello")
 =======
 =======
 =======
->>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
     fn run_project_tests_executes_manifest_cases() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner");
@@ -6535,14 +6548,12 @@ print serve_once("127.0.0.1:18080", "hello")
         assert_eq!(output.cases.len(), 29);
         assert_eq!(output.passed, 29);
 <<<<<<< HEAD
-<<<<<<< HEAD
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
         assert_eq!(output.cases.len(), 26);
         assert_eq!(output.passed, 26);
         assert_eq!(output.cases.len(), 31);
         assert_eq!(output.passed, 31);
-=======
         assert_eq!(output.failed, 0);
         assert!(
             output
@@ -6553,7 +6564,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 == 24
                 == 20
                 == 21
->>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
                 == 20
@@ -6568,13 +6578,11 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
             12
             9
             10
             9
             8
-=======
 =======
 =======
             9
@@ -9568,10 +9576,12 @@ print 0
         );
         assert_eq!(payload["command"], "build");
         assert_eq!(payload["backend"], "generated-rust");
+<<<<<<< HEAD
         assert_eq!(payload["locked"], true);
         assert_eq!(payload["offline"], true);
 <<<<<<< HEAD
 <<<<<<< HEAD
+=======
 =======
 =======
         assert!(payload["target"].is_string());

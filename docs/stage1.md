@@ -19,6 +19,7 @@ The Rust compiler is intentionally small in this bootstrap slice:
 >>>>>>> origin/codex/issue-395-effective-fs-roots
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with sixteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, `std/async.ax`, and `std/regex.ax`. `std/regex.ax` exposes `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`, and `replace_all(pattern, text, replacement): string` over a deterministic NFA-state engine supporting anchors, `.`, `?`, `*`, `+`, escaped literals, and character classes/ranges without backtracking.
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with fifteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. Env denial diagnostics only name the missing allowlist entry and do not read or print environment values. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, and `std/async.ax`.
+>>>>>>> origin/codex/issue-425-crap-thresholds
 - Stage1 now ships a synthetic standard library surface under the `std/` import prefix with sixteen landed modules. Capability-gated surfaces cover the six capability classes: `std/time.ax` exposes `Duration`, `Instant`, `duration_ms(ms): Duration`, `now_ms(): int`, `now(): Instant`, `elapsed_ms(start): int`, and `sleep(duration): int` on top of `clock_now_ms`, `clock_elapsed_ms`, and `clock_sleep_ms`; `std/env.ax` exposes `get_env(key: string): Option<string>` on top of `env_get`, `std/fs.ax` exposes `read_file(path: string): Option<string>` on top of `fs_read`, `std/net.ax` exposes `resolve(host: string): Option<string>` on top of `net_resolve` plus a bounded loopback-only socket floor (`tcp_listen_loopback_once`, `tcp_dial`, `udp_bind_loopback_once`, and `udp_send_recv`), `std/process.ax` exposes `run_status(command: string): int` on top of `process_status`, and `std/crypto_hash.ax` (the stage1 spelling of `std.crypto.hash`) exposes `sha256(input: string): string` on top of `crypto_sha256`. The crypto surface also includes `std/crypto_mac.ax` for `hmac_sha256(key, message): string` plus `constant_time_eq(left, right): bool`; both require `[capabilities].crypto = true`. Each gated module requires the importing package to declare the matching capability (`clock`, `env`, `fs`, `net`, `process`, or `crypto`); environment access is scoped with `env = ["PORT", "LOG_LEVEL"]`, and `env_get` returns `None` for names outside that manifest allowlist. The legacy `env = true` form remains temporarily available but emits a check warning because it grants unrestricted process environment access; `env_unrestricted = true` is the explicit migration escape hatch and is reported as unsafe in capability output. The seventh module, `std/http.ax`, shares the `net` capability surface with `std/net.ax` and exposes `get(url: string): Option<string>` on top of a new `http_get` intrinsic that implements a blocking HTTP/1.0 client for `http://` and `https://` URLs. Ungated modules now cover `std/io.ax`, `std/json.ax`, `std/collections.ax`, `std/string_builder.ax`, `std/log.ax`, `std/sync.ax`, `std/async.ax`, and `std/regex.ax`. `std/regex.ax` exposes `is_match(pattern, text): bool`, `find(pattern, text): Option<string>`, and `replace_all(pattern, text, replacement): string` over a deterministic NFA-state engine supporting anchors, `.`, `?`, `*`, `+`, escaped literals, and character classes/ranges without backtracking.
 - The pipeline is already split into syntax -> HIR -> MIR -> native build.
 - `axiomc build` emits a native binary by default, or a `.wasm` artifact for `--target wasm32` / `--target wasm32-wasi`, by generating Rust and invoking `rustc`.
@@ -96,6 +97,7 @@ The command also accepts `--filter <pattern>` to run a subset of discovered
 tests by test name or entry path, and the default CLI summary prints `passed` /
 `failed` / `skipped` counts. Workspace-only roots are supported as long as
 build/run commands select a concrete member package with `-p/--package`.
+<<<<<<< HEAD
 `*.stdout` golden file when present. A sibling `*.stderr` file can also pin the
 expected stderr stream, and manifest-declared `[[tests]]` entries support inline
 `stdout` and `stderr` expectations. JSON output includes actual and expected
@@ -121,7 +123,6 @@ package, test name, and entry path columns, while `--json` adds stable package
 membership plus golden-output and compile-fail markers for automation. Workspace
 only roots are now supported as long as build/run commands select a concrete
 member package with `-p/--package`.
->>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/agent-i-language-slice
@@ -134,6 +135,8 @@ member package with `-p/--package`.
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
 
 ## JSON contract
 
@@ -153,8 +156,6 @@ requested Rust target triple when `--target <triple>` is used and report
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
-=======
 with generated source-position markers. Build JSON carries both `cache_key`
 metadata with the cache schema version, compiler key, target, debug mode,
 manifest hash, lockfile hash, generated Rust hash, and per-source hashes used
@@ -228,6 +229,8 @@ still far from the stated 1.0 target for service and agent workloads.
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 - `axiomc publish` now validates the lockfile and stages a deterministic signed archive into a local static-registry tree for `axiomc registry-index`; there is still no hosted registry service, version resolution, trust-root management, or offline package verification beyond this bootstrap shape.
@@ -270,6 +273,7 @@ still far from the stated 1.0 target for service and agent workloads.
 >>>>>>> origin/codex/issue-395-effective-fs-roots
 >>>>>>> origin/codex/worker-j-issue-362
 >>>>>>> origin/codex/worker-j-issue-363
+>>>>>>> origin/codex/issue-425-crap-thresholds
 - `axiomc fmt`, `axiomc bench`, `axiomc doc`, the stage1 scratch `repl`, and a
   bounded `axiomc lsp` analyzer now exist as bootstrap-grade toolchain
   commands. The LSP endpoint currently serves compiler-backed diagnostics over
@@ -323,6 +327,8 @@ Current proof points:
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======

@@ -19,6 +19,7 @@ use crate::manifest::{
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
 };
 use crate::mir;
 use crate::stdlib;
@@ -82,7 +83,6 @@ pub struct BuiltPackage {
 <<<<<<< HEAD
 =======
     pub cache_key: BuildCacheMetadata,
->>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-f-fs
 >>>>>>> origin/codex/issue-387-capability-validation
@@ -343,13 +343,10 @@ pub fn build_project_with_options(
             target: resolved_target.clone(),
             debug: options.debug,
 <<<<<<< HEAD
-<<<<<<< HEAD
 >>>>>>> origin/codex/issue-422-comparison-gate
             cache_key: report.cache_key,
-=======
 >>>>>>> origin/codex/issue-370-command-fixtures
 =======
->>>>>>> origin/codex/issue-418-schema-metadata
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -728,12 +725,12 @@ fn collect_discovered_tests(
             kind,
             stderr,
 =======
-=======
             kind,
 =======
             expected_error: None,
             capabilities: Vec::new(),
             package: None,
+=======
 =======
 =======
 =======

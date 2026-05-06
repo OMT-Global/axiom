@@ -58,9 +58,9 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-418-schema-metadata
-=======
 >>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

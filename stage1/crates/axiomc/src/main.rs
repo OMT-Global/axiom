@@ -22,6 +22,7 @@ use axiomc::manifest::{load_manifest, manifest_path};
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
 use axiomc::new_project::create_project;
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
@@ -35,6 +36,7 @@ use axiomc::project::{
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
 };
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -70,7 +72,8 @@ use axiomc::registry::{load_registry_index, render_registry_index};
 =======
 =======
 =======
->>>>>>> origin/codex/issue-418-schema-metadata
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -161,7 +164,6 @@ enum Command {
         json: bool,
         #[command(subcommand)]
         command: Option<CapsCommand>,
-<<<<<<< HEAD
     },
     /// Report local stage1 project and toolchain health.
     Doctor {
@@ -184,7 +186,6 @@ enum Command {
         code: String,
         #[arg(long)]
         json: bool,
-=======
     },
     /// Format .ax source files with the canonical stage1 style.
     Fmt {
@@ -226,7 +227,7 @@ enum Command {
         json: bool,
     },
 <<<<<<< HEAD
->>>>>>> origin/codex/issue-406-collection-lookup
+<<<<<<< HEAD
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
@@ -240,6 +241,8 @@ enum Command {
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -313,9 +316,9 @@ enum InspectCommand {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-418-schema-metadata
-=======
 >>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
 }
 
 fn main() {
@@ -2652,7 +2655,7 @@ mod tests {
 =======
 =======
 =======
->>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2676,6 +2679,7 @@ mod tests {
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
 >>>>>>> origin/codex/issue-422-comparison-gate
+>>>>>>> origin/codex/issue-425-crap-thresholds
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2780,6 +2784,8 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
 =======

@@ -575,6 +575,7 @@ fn lower_with_capabilities_impl(
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
 >>>>>>> origin/codex/issue-418-schema-metadata
+>>>>>>> origin/codex/issue-425-crap-thresholds
     )
     .map_err(single_diagnostic)?;
     let functions =
@@ -922,6 +923,7 @@ fn type_has_unboxed_recursive_path(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         Type::Error
         | Type::Int
         | Type::Numeric(_)
@@ -930,6 +932,7 @@ fn type_has_unboxed_recursive_path(
         | Type::Str
         | Type::Ptr(_)
         | Type::MutPtr(_) => false,
+=======
 =======
 =======
 =======
@@ -2819,7 +2822,6 @@ fn rewrite_aggregate_type_name(
                 column,
             )?),
         ),
-<<<<<<< HEAD
 =======
 >>>>>>> origin/codex/issue-422-comparison-gate
         syntax::TypeName::Int => syntax::TypeName::Int,
@@ -4370,8 +4372,6 @@ fn sanitize_symbol_suffix(raw: &str) -> String {
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect()
 }
-
-=======
 >>>>>>> origin/codex/issue-422-comparison-gate
 fn ownership_error(code: &'static str, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new("ownership", message).with_code(code)
@@ -5175,6 +5175,7 @@ fn insert_type_error_binding_for_failed_stmt(
     }
 }
 
+<<<<<<< HEAD
 fn declared_array_len(
     ty: &syntax::TypeName,
     ctx: &LowerContext<'_>,
@@ -5572,7 +5573,6 @@ fn lower_match_stmt(
     })
 }
 <<<<<<< HEAD
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
 >>>>>>> origin/codex/issue-406-collection-lookup
 >>>>>>> origin/codex/issue-383-new-templates
@@ -5589,6 +5589,8 @@ fn lower_match_stmt(
 >>>>>>> origin/codex/issue-418-schema-metadata
 =======
 >>>>>>> origin/codex/issue-422-comparison-gate
+=======
+>>>>>>> origin/codex/issue-425-crap-thresholds
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -5666,7 +5668,6 @@ fn lower_stmt(
 =======
 =======
 =======
-=======
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
 =======
@@ -5678,6 +5679,8 @@ fn lower_stmt(
 =======
             if actual != expected && !actual.is_error() && !expected.is_error() {
 =======
+=======
+            if actual != expected && !actual.is_error() && !expected.is_error() {
                 return Err(Diagnostic::new(
                     "type",
                     format!("let binding {name:?} expects {expected}, got {actual}"),
@@ -10642,8 +10645,6 @@ fn increment_active_borrows(
             )
         })?;
 <<<<<<< HEAD
-<<<<<<< HEAD
-=======
         binding.borrow_state.begin_borrow(
             owner_name,
             borrow_kind,
@@ -10684,7 +10685,6 @@ fn increment_active_borrows(
         if matches!(borrow_kind, BorrowKind::Mutable) {
             binding.active_mut_borrow_count += 1;
         }
->>>>>>> origin/codex/issue-422-comparison-gate
     }
     Ok(())
 }
@@ -10973,7 +10973,6 @@ fn lower_type_inner<T, U>(
                 len,
             ))
         }
-<<<<<<< HEAD
         syntax::TypeName::Fn(params, return_ty) => Ok(Type::Fn(
             params
                 .iter()
@@ -10989,8 +10988,6 @@ fn lower_type_inner<T, U>(
         )),
 <<<<<<< HEAD
 =======
-=======
->>>>>>> origin/codex/issue-422-comparison-gate
     }
 }
 
