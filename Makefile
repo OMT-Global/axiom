@@ -1,5 +1,4 @@
-
-.PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
+.PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench stage1-bench-update-baseline stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
 
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal stage1-run
 
