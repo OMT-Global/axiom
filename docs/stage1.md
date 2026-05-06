@@ -47,6 +47,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doctor stage1/examples/hello --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- inspect symbols stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- inspect graph stage1/examples/modules --json
+cargo run --manifest-path stage1/Cargo.toml -p axiomc -- explain use_after_move --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- fmt stage1/examples/hello --check
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- doc stage1/examples/hello --json
@@ -92,7 +93,6 @@ Successful payloads always include `ok`, `command`, and `project`, while
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
 requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
-<<<<<<< HEAD
 with generated source-position markers. Build JSON carries both `cache_key`
 metadata with the cache schema version, compiler key, target, debug mode,
 manifest hash, lockfile hash, generated Rust hash, and per-source hashes used
@@ -104,7 +104,6 @@ positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
 >>>>>>> origin/codex/issue-380-doc-json
-=======
 with generated source-position markers. Build JSON also carries `metadata` for
 cache-key inspection: requested/resolved `target`, `debug`, package `lockfile`,
 `lockfile_hash`, and aggregate `source_hash`. Debug builds also report `debug_map`,
@@ -115,6 +114,7 @@ incremental generated-Rust cache.
 Parser diagnostics now preserve additional recovered top-level parse errors in
 the error payload's `related` array when possible, so editor tooling can show
 more than the first syntax error without waiting for full checker recovery.
+<<<<<<< HEAD
 `axiomc doctor --json` reports local `rustc` and `cargo` availability, the host
 target triple, lockfile status, package/workspace graph summary, manifest
 capabilities, and known unsupported feature buckets for agent preflight checks.
@@ -124,6 +124,10 @@ capability use for agent indexing.
 `axiomc inspect graph --json` emits package metadata, lockfile resolution,
 package-local module imports, stdlib module names, detected local import cycles,
 and import errors for agent dependency-graph checks.
+=======
+Stable diagnostic codes can be queried with `axiomc explain <code>` in text or
+JSON form; the current catalog covers the stable ownership codes emitted by the
+stage1 checker.
 
 ## Current gaps
 

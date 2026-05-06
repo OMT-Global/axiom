@@ -1,5 +1,6 @@
 use axiomc::codegen::NativeBackendKind;
 use axiomc::dap;
+use axiomc::diagnostic_catalog::{DiagnosticCodeInfo, diagnostic_code_info};
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
@@ -119,6 +120,12 @@ enum Command {
         #[command(subcommand)]
         command: InspectCommand,
     },
+    /// Explain a stable diagnostic code.
+    Explain {
+        code: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Format .ax source files with the canonical stage1 style.
     Fmt {
         path: PathBuf,
@@ -184,7 +191,6 @@ enum Command {
     Dap,
 <<<<<<< HEAD
 <<<<<<< HEAD
-<<<<<<< HEAD
 }
 
 #[derive(Debug, Subcommand)]
@@ -192,7 +198,6 @@ enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
 >>>>>>> origin/codex/issue-376-doctor-json
-=======
 =======
 }
 
@@ -206,7 +211,6 @@ enum InspectCommand {
         #[arg(long)]
         json: bool,
     },
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
 }
 
@@ -393,7 +397,6 @@ fn main() {
         Command::Inspect { command } => match command {
 <<<<<<< HEAD
             InspectCommand::Symbols { path, json } => match inspect_symbols(&path) {
-=======
             InspectCommand::Graph { path, json } => match inspect_graph(&path) {
                 Ok(report) => {
                     if json {
@@ -424,6 +427,25 @@ fn main() {
                 }
                 Err(error) => print_error("inspect graph", error, json),
             },
+=======
+        Command::Explain { code, json } => match diagnostic_code_info(&code) {
+            Some(info) => {
+                if json {
+                    println!(
+                        "{}",
+                        json_contract::to_pretty_string(&explain_payload(info))
+                            .unwrap_or_else(|_| String::from("{}"))
+                    );
+                } else {
+                    println!("{}", explain_text(info));
+                }
+                0
+            }
+            None => print_error(
+                "explain",
+                Diagnostic::new("diagnostic", format!("unknown diagnostic code {code:?}")),
+                json,
+            ),
         },
         Command::Fmt { path, check } => match format_axiom_sources(&path, check) {
         }
@@ -822,7 +844,6 @@ struct FormatEdit {
 #[derive(Debug, Clone, Serialize)]
 struct DoctorReport {
 struct InspectSymbolsReport {
-=======
 struct InspectGraphReport {
     schema_version: &'static str,
     ok: bool,
@@ -1570,6 +1591,27 @@ fn normalize_for_graph(path: &Path) -> String {
         .to_string()
 }
 
+=======
+fn explain_payload(info: &DiagnosticCodeInfo) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": json_contract::JSON_SCHEMA_VERSION,
+        "ok": true,
+        "command": "explain",
+        "diagnostic": info,
+    })
+}
+
+fn explain_text(info: &DiagnosticCodeInfo) -> String {
+    format!(
+        "{code} ({kind})\n{title}\n\n{explanation}\n\nExample:\n{example}\n\nSuggested fix:\n{suggested_fix}",
+        code = info.code,
+        kind = info.kind,
+        title = info.title,
+        explanation = info.explanation,
+        example = info.example,
+        suggested_fix = info.suggested_fix,
+    )
+}
 #[derive(Debug, Clone)]
 struct FormatFileReport {
     path: String,
@@ -2339,6 +2381,7 @@ mod tests {
         assert!(help.contains("Report local stage1 project and toolchain health"));
 >>>>>>> origin/codex/issue-378-inspect-graph
         assert!(help.contains("Inspect project metadata for agent tooling"));
+        assert!(help.contains("Explain a stable diagnostic code"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
@@ -2375,7 +2418,6 @@ mod tests {
                 "only generated-rust is implemented in this preparatory backend plumbing"
             )
         );
-<<<<<<< HEAD
 <<<<<<< HEAD
     }
 
@@ -2422,8 +2464,6 @@ mod tests {
         }
 >>>>>>> origin/codex/issue-376-doctor-json
 =======
-=======
->>>>>>> origin/codex/issue-378-inspect-graph
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2440,7 +2480,6 @@ mod tests {
             target: None,
             debug: true,
 <<<<<<< HEAD
-<<<<<<< HEAD
             cache_key: axiomc::project::BuildCacheMetadata {
                 version: 1,
                 compiler: String::from("stage1"),
@@ -2451,7 +2490,6 @@ mod tests {
                 generated_rust_hash: String::from("rust-hash"),
                 sources: Vec::new(),
             },
-=======
 =======
             metadata: axiomc::project::BuildMetadata {
                 target: None,
@@ -2517,6 +2555,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn inspect_symbols_reports_public_symbols_and_capabilities() {
         let dir = tempfile::tempdir().expect("tempdir");
         let source_dir = dir.path().join("src");
@@ -2669,7 +2708,6 @@ mod tests {
         assert_eq!(
             parse_rustc_host_target(version).as_deref(),
             Some("aarch64-apple-darwin")
->>>>>>> origin/codex/issue-376-doctor-json
         );
     }
 
@@ -2789,6 +2827,28 @@ mod tests {
         let report = inspect_graph(&project).expect("inspect graph");
 
         assert!(!report.cycles.is_empty());
+=======
+    fn explain_text_includes_example_and_fix() {
+        let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
+        let text = explain_text(info);
+
+        assert!(text.contains("use_after_move (ownership)"));
+        assert!(text.contains("Example:"));
+        assert!(text.contains("Suggested fix:"));
+    }
+
+    #[test]
+    fn explain_json_payload_is_versioned() {
+        let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
+        let payload = explain_payload(info);
+
+        assert_eq!(
+            payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(payload["command"], "explain");
+        assert_eq!(payload["diagnostic"]["code"], "use_after_move");
+>>>>>>> origin/codex/issue-375-explain-diagnostics
     }
 
     #[test]
