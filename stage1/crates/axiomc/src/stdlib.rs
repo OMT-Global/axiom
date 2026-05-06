@@ -44,7 +44,7 @@
 //!   sockets and serve blocking HTTP/1.0 responses.
 
 //!
-//! The eighth through fourteenth modules are stdlib surfaces not tied to a
+//! The eighth through fifteenth modules are stdlib surfaces not tied to a
 //! capability flag, matching the ambient status of the `print` statement:
 //!
 //! * `std/io.ax` — `eprintln(text)` on top of the new ungated `io_eprintln`
@@ -70,6 +70,7 @@
 //!   `find`, `replace_all`) over a stage1-safe NFA engine.
 //! * `std/testing.ax` — table-case, property, and snapshot assertion helpers
 //!   layered over the bootstrap test intrinsics.
+//! * `std/cli.ax` — access to process arguments forwarded by `axiomc run`.
 
 use std::path::{Path, PathBuf};
 
@@ -294,6 +295,12 @@ pub fn serve_once(bind: string, body: string): bool {\nreturn http_serve_once(bi
         "pub fn is_match(pattern: string, text: string): bool {\nreturn regex_is_match(pattern, text)\n}\n\
 pub fn find(pattern: string, text: string): Option<string> {\nreturn regex_find(pattern, text)\n}\n\
 pub fn replace_all(pattern: string, text: string, replacement: string): string {\nreturn regex_replace_all(pattern, text, replacement)\n}\n",
+    ),
+    (
+        "cli.ax",
+        "pub fn args(): [string] {\nreturn cli_args()\n}\n\
+pub fn arg_count(): int {\nreturn cli_arg_count()\n}\n\
+pub fn arg(index: int): Option<string> {\nreturn cli_arg(index)\n}\n",
     ),
 ];
 

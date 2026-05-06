@@ -30,6 +30,7 @@ use axiomc::project::{
 };
 use axiomc::registry::{load_registry_index, render_registry_index};
 >>>>>>> origin/codex/issue-381-test-list
+>>>>>>> origin/codex/issue-408-cli-args
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,8 @@ enum Command {
         path: PathBuf,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Discover, build, and run package test entrypoints.
     Test {
@@ -177,6 +180,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+<<<<<<< HEAD
     /// Pack, sign, and publish a stage1 package into a local registry tree.
     Publish {
         path: PathBuf,
@@ -187,7 +191,8 @@ enum Command {
         #[arg(long)]
         allow_overwrite: bool,
     },
->>>>>>> origin/codex/issue-381-test-list
+=======
+>>>>>>> origin/codex/issue-408-cli-args
     /// Build a static package-registry index from package release folders.
     RegistryIndex {
         packages_dir: PathBuf,
@@ -203,15 +208,14 @@ enum Command {
     /// Start the bounded axiom-debug Debug Adapter Protocol endpoint.
     Dap,
 <<<<<<< HEAD
-<<<<<<< HEAD
 }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 #[derive(Debug, Subcommand)]
 enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
-=======
 }
 
 #[derive(Debug, Subcommand)]
@@ -224,9 +228,10 @@ enum InspectCommand {
         #[arg(long)]
         json: bool,
     },
->>>>>>> origin/codex/issue-378-inspect-graph
 =======
 >>>>>>> origin/codex/issue-381-test-list
+=======
+>>>>>>> origin/codex/issue-408-cli-args
 }
 
 fn main() {
@@ -297,10 +302,15 @@ fn main() {
                 Err(error) => print_error("build", error, json),
             }
         }
-        Command::Run { path, package } => match run_project_with_options(
+        Command::Run {
+            path,
+            package,
+            args,
+        } => match run_project_with_options(
             &path,
             &RunOptions {
                 package: package.clone(),
+                args: args.clone(),
             },
         ) {
             Ok(code) => code,
@@ -355,6 +365,11 @@ fn main() {
                     Err(error) => print_error("test", error, json),
                 }
                 if ok { 0 } else { 1 }
+                if ok {
+                    0
+                } else {
+                    1
+                }
             }
             Err(error) => print_error("test", error, json),
         },
@@ -649,6 +664,7 @@ fn main() {
             Err(error) => print_error("publish", error, false),
         },
 >>>>>>> origin/codex/issue-381-test-list
+>>>>>>> origin/codex/issue-408-cli-args
         Command::RegistryIndex {
             packages_dir,
             base_url,
@@ -690,10 +706,12 @@ fn main() {
             Err(error) => print_error("lsp", error, false),
         },
 <<<<<<< HEAD
+<<<<<<< HEAD
         Command::Dap => match dap::run_stdio(io::stdin().lock(), io::stdout()) {
             Ok(()) => 0,
             Err(error) => print_error("dap", error, false),
         },
+=======
 =======
     };
     std::process::exit(code);
@@ -2459,6 +2477,7 @@ mod tests {
         assert!(help.contains("Start a small stage1 scratch REPL"));
         assert!(help.contains("Pack, sign, and publish a stage1 package"));
 >>>>>>> origin/codex/issue-381-test-list
+>>>>>>> origin/codex/issue-408-cli-args
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
     }
@@ -2538,7 +2557,9 @@ mod tests {
 =======
 =======
         assert!(rendered.contains("only generated-rust is implemented in this preparatory backend plumbing"));
->>>>>>> origin/codex/issue-381-test-list
+<<<<<<< HEAD
+=======
+>>>>>>> origin/codex/issue-408-cli-args
     }
 
     fn build_output(debug_map: Option<String>) -> BuildOutput {
@@ -2547,6 +2568,7 @@ mod tests {
             locked: false,
             offline: false,
 >>>>>>> origin/codex/issue-381-test-list
+>>>>>>> origin/codex/issue-408-cli-args
             manifest: String::from("axiom.toml"),
             entry: String::from("src/main.ax"),
             binary: String::from("dist/app"),
@@ -2627,6 +2649,8 @@ mod tests {
             vec![String::from("wrote dist/app (backend=generated-rust)")]
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
 =======
 =======
         );

@@ -235,7 +235,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn parser_distinguishes_owned_string_from_borrowed_str() {
         let source = r#"fn read(label: &str): int {
 print label
@@ -363,7 +362,6 @@ print borrowed
     }
 
     #[test]
-=======
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2440,9 +2438,57 @@ let bad: u8 = byte.wrapping_add(1u16)
             &project,
             &RunOptions {
                 package: Some(String::from("workspace-app")),
+                args: Vec::new(),
             },
         )
         .expect("run selected workspace package");
+        assert_eq!(exit, 0);
+    }
+
+    #[test]
+    fn run_project_forwards_cli_args_to_stdlib_cli() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("cli-args");
+        create_project(&project, Some("cli-args-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/cli.ax\"\n\
+print arg_count()\n\
+match arg(0) {\n\
+Some(value) {\n\
+print value\n\
+}\n\
+None {\n\
+print \"missing\"\n\
+}\n\
+}\n\
+let values: [string] = args()\n\
+print first(values)\n",
+        )
+        .expect("write cli args program");
+
+        let built = build_project(&project).expect("build cli args project");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated Rust");
+        assert!(generated.contains("usize::try_from(index)"));
+        let build_output_dir = Path::new(&built.generated_rust)
+            .parent()
+            .expect("build output directory");
+        let output = command_for_build_output(&built.binary, build_output_dir)
+            .expect("binary command")
+            .args(["alpha", "beta"])
+            .output()
+            .expect("run binary with args");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\nalpha\nalpha\n");
+
+        let exit = run_project_with_options(
+            &project,
+            &RunOptions {
+                package: None,
+                args: vec![String::from("alpha"), String::from("beta")],
+            },
+        )
+        .expect("run project with forwarded args");
         assert_eq!(exit, 0);
     }
 
@@ -2813,7 +2859,6 @@ crypto = false
                 .message
                 .contains("capabilities.unsafe_opt_ins[0] references unknown capability")
         );
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
     }
 
@@ -5855,9 +5900,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 .filter(|case| case.expected_error.is_some())
                 .count()
 <<<<<<< HEAD
-<<<<<<< HEAD
                 == 24
-=======
 =======
                 == 20
         );
@@ -5868,7 +5911,6 @@ print serve_once("127.0.0.1:18080", "hello")
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
             12
->>>>>>> origin/codex/issue-378-inspect-graph
             9
         );
     }
@@ -8742,8 +8784,8 @@ print 0
 <<<<<<< HEAD
         assert_eq!(payload["locked"], true);
         assert_eq!(payload["offline"], true);
-=======
 >>>>>>> origin/codex/issue-381-test-list
+=======
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());

@@ -34,9 +34,12 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "command": "build",
         "project": project.display().to_string(),
         "backend": output.backend,
+<<<<<<< HEAD
         "locked": output.locked,
         "offline": output.offline,
 >>>>>>> origin/codex/issue-381-test-list
+=======
+>>>>>>> origin/codex/issue-408-cli-args
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

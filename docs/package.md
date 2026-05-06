@@ -11,8 +11,11 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- build stage1/examples/h
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run stage1/examples/hello
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test stage1/examples/modules --json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/hello --json
+<<<<<<< HEAD
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 >>>>>>> origin/codex/issue-381-test-list
+=======
+>>>>>>> origin/codex/issue-408-cli-args
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
 ```

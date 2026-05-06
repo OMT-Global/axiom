@@ -82,6 +82,7 @@ pub struct BuildOutput {
     pub locked: bool,
     pub offline: bool,
 >>>>>>> origin/codex/issue-381-test-list
+>>>>>>> origin/codex/issue-408-cli-args
     pub manifest: String,
     pub entry: String,
     pub binary: String,
@@ -213,6 +214,7 @@ pub struct BuildOptions {
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub package: Option<String>,
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -319,7 +321,6 @@ pub fn build_project_with_options(
             target: resolved_target.clone(),
             debug: options.debug,
             cache_key: report.cache_key,
->>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
             metadata: report.metadata,
@@ -346,6 +347,7 @@ pub fn build_project_with_options(
         locked: options.locked,
         offline: options.offline,
 >>>>>>> origin/codex/issue-381-test-list
+>>>>>>> origin/codex/issue-408-cli-args
         manifest: root.manifest,
         entry: root.entry,
         binary: root.binary,
@@ -413,7 +415,7 @@ pub fn run_project_with_options(
         )
     })?;
     let status = command_for_build_output(&built.binary, build_output_dir)
-        .and_then(|mut command| command.status())
+        .and_then(|mut command| command.args(&options.args).status())
         .map_err(|err| {
             Diagnostic::new("run", format!("failed to execute {}: {err}", built.binary))
         })?;
@@ -929,7 +931,6 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             crypto: true,
             ffi: false,
             async_runtime: true,
->>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
             deny_by_default: false,
             unsafe_opt_ins: Vec::new(),

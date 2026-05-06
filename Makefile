@@ -1,9 +1,12 @@
+<<<<<<< HEAD
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal mutation-rust-smoke stage1-run
 >>>>>>> origin/codex/issue-380-doc-json
 >>>>>>> origin/codex/issue-376-doctor-json
 >>>>>>> origin/codex/issue-377-inspect-symbols
 >>>>>>> origin/codex/issue-378-inspect-graph
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-crap-proposal stage1-run
+=======
+>>>>>>> origin/codex/issue-408-cli-args
 .PHONY: test smoke supply-chain docs-python-exit docs-python-exit-test stage1-test stage1-proof-test stage1-conformance stage1-smoke stage1-bench-gate stage1-run
 
 test: docs-python-exit stage1-test
