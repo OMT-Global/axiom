@@ -46,9 +46,9 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 =======
 =======
 =======
->>>>>>> origin/codex/agent-g-regex
-=======
 >>>>>>> origin/codex/agent-f-fs
+=======
+>>>>>>> origin/codex/agent-i-language-slice
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

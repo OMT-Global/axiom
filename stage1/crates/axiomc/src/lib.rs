@@ -6,6 +6,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/agent-i-language-slice
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -62,15 +63,17 @@ mod tests {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\nasync = false\n"
 =======
->>>>>>> origin/codex/issue-406-collection-lookup
 =======
 >>>>>>> origin/codex/issue-383-new-templates
 =======
 >>>>>>> origin/codex/agent-g-regex
 =======
 >>>>>>> origin/codex/agent-f-fs
+=======
+>>>>>>> origin/codex/agent-i-language-slice
             "[package]\nname = {name:?}\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = {fs}\n\"fs:write\" = {fs}\nnet = {net}\nprocess = {process}\nenv = {env}\nclock = {clock}\ncrypto = {crypto}\n"
         )
     }
@@ -396,6 +399,7 @@ print borrowed
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/agent-i-language-slice
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2792,11 +2796,13 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
 =======
 =======
 =======
@@ -2906,6 +2912,7 @@ crypto = false
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/agent-i-language-slice
     }
 
     #[test]
@@ -5435,7 +5442,9 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 stderr: None,
+=======
 =======
 =======
 =======
@@ -6759,6 +6768,106 @@ print takes_two(three)
     }
 
     #[test]
+    fn build_project_emits_native_binary_with_static_globals() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-globals");
+        create_project(&project, Some("static-globals-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static LIMIT: int = 40 + 2\nstatic READY: bool = LIMIT == 42\nstatic LABEL: string = \"stage1\"\nprint LIMIT\nprint READY\nprint LABEL\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project with static globals");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("static static_globals_app_main_LIMIT: i64 = 40 + 2;"));
+        assert!(generated.contains("static static_globals_app_main_READY: bool = 40 + 2 == 42;"));
+        assert!(
+            generated.contains("static static_globals_app_main_LABEL: &'static str = \"stage1\";")
+        );
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "42\ntrue\nstage1\n"
+        );
+    }
+
+    #[test]
+    fn build_project_folds_static_string_comparisons() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-string-comparison");
+        create_project(&project, Some("static-string-comparison-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static SAME: bool = \"a\" == \"a\"\nstatic DIFFERENT: bool = \"a\" != \"b\"\nprint SAME\nprint DIFFERENT\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project with static string comparisons");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains(
+            "static static_string_comparison_app_main_SAME: bool = true;"
+        ));
+        assert!(generated.contains(
+            "static static_string_comparison_app_main_DIFFERENT: bool = true;"
+        ));
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\ntrue\n");
+    }
+
+    #[test]
+    fn build_project_preserves_static_source_names_for_recursion_tracking() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-source-names");
+        create_project(&project, Some("p")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static A: int = 1\nstatic p_main_A: int = A\nprint A\nprint p_main_A\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("static names should not false-recurse");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("static p_main_A: i64 = 1;"));
+        assert!(generated.contains("static p_main_p_main_A: i64 = 1;"));
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n1\n");
+    }
+
+    #[test]
+    fn build_project_emits_native_binary_with_imported_public_static_globals() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-static-globals");
+        create_project(&project, Some("public-static-globals-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"values.ax\"\nprint LIMIT\nprint READY\n",
+        )
+        .expect("write main");
+        fs::write(
+            project.join("src/values.ax"),
+            "pub static LIMIT: int = 40 + 2\npub static READY: bool = LIMIT == 42\n",
+        )
+        .expect("write values");
+        let built = build_project(&project).expect("build project with imported static globals");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("static public_static_globals_app_values_LIMIT: i64 = 40 + 2;"));
+        assert!(
+            generated
+                .contains("static public_static_globals_app_values_READY: bool = 40 + 2 == 42;")
+        );
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "42\ntrue\n");
+    }
+
+    #[test]
     fn check_project_rejects_missing_import() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("missing-import");
@@ -7061,6 +7170,25 @@ print takes_two(three)
     }
 
     #[test]
+    fn check_project_rejects_static_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-type-mismatch");
+        create_project(&project, Some("static-type-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static READY: bool = 42\nprint READY\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("static type mismatch should fail");
+        assert!(
+            error
+                .message
+                .contains("static \"READY\" expects bool, got int")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn check_project_rejects_type_alias_inside_function_block() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("block-type-alias");
@@ -7093,7 +7221,7 @@ print takes_two(three)
         assert!(
             error
                 .message
-                .contains("only supports top-level const declarations")
+                .contains("only supports top-level const/static declarations")
         );
         assert_eq!(error.kind, "parse");
     }
@@ -8846,7 +8974,7 @@ print 0
 =======
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/agent-i-language-slice
         assert!(payload["target"].is_string());
         assert_eq!(payload["debug"], true);
         assert!(payload["debug_map"].is_string());

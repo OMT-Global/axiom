@@ -14,6 +14,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/issue-383-new-templates
 >>>>>>> origin/codex/agent-g-regex
 >>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/agent-i-language-slice
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -79,7 +80,9 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub stderr: Option<String>,
+=======
 =======
 =======
 =======
@@ -704,7 +707,7 @@ fn normalize_tests(
 =======
 =======
 =======
->>>>>>> origin/codex/agent-f-fs
+>>>>>>> origin/codex/agent-i-language-slice
         });
     }
     Ok(tests)

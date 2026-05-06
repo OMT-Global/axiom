@@ -140,6 +140,9 @@ Deliberate exclusions:
 - no higher-kinded abstractions
 - no macros
 - no requirement for user-defined closures at this milestone
+- no broad const-evaluation expansion beyond the current scalar `const` floor and
+  scalar module-scope `static` declarations; `const fn`, array-size constants,
+  address-taking, and non-scalar statics remain follow-on language work
 
 Acceptance:
 
