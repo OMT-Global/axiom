@@ -132,16 +132,21 @@ member package with `-p/--package`.
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
 
 ## JSON contract
 
 `axiomc check --json`, `build --json`, `test --json`, and `caps --json` all now
 emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
+The checked-in compiler JSON schema is
+`stage1/schemas/axiom.stage1.v1.schema.json`; the manifest editor schema is
+`stage1/schemas/axiom.toml.schema.json`.
 Successful payloads always include `ok`, `command`, and `project`, while
 `axiomc test --json` additionally reports `filter` and per-run/per-case
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
 requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -157,6 +162,7 @@ sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions. `axiomc build --timings` prints total build time, cache hit/miss
 counts, and per-package compile timing/cache status for the incremental
 generated-Rust cache.
+=======
 =======
 =======
 =======

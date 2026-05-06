@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 >>>>>>> origin/codex/worker-h-issue-413
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -49,15 +50,17 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 =======
 =======
 =======
 =======
 =======
->>>>>>> origin/codex/issue-369-check-fixtures
 =======
 >>>>>>> origin/codex/issue-370-command-fixtures
+=======
+>>>>>>> origin/codex/issue-418-schema-metadata
         "manifest": output.manifest,
         "entry": output.entry,
         "binary": output.binary,

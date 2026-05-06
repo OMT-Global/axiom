@@ -38,6 +38,7 @@ CAPABILITY_NAMES = ["fs", "fs:write", "net", "process", "env", "clock", "crypto"
 >>>>>>> origin/codex/worker-h-issue-413
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
 
 
 @dataclass(frozen=True)
@@ -194,8 +195,10 @@ def compare_regression_baseline(report: dict, baseline: dict | None) -> list[str
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 def file_size(path: Path) -> int | None:
     return path.stat().st_size if path.exists() else None
+=======
 =======
 =======
 =======

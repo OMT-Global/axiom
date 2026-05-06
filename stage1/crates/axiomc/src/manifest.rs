@@ -22,6 +22,7 @@ pub const KNOWN_CAPABILITIES: [CapabilityKind; 9] = [
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
 pub const KNOWN_CAPABILITIES: [CapabilityKind; 8] = [
     CapabilityKind::Fs,
     CapabilityKind::FsWrite,
@@ -95,6 +96,7 @@ pub enum TestKind {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     pub stderr: Option<String>,
 =======
 =======
@@ -128,6 +130,7 @@ pub struct ExpectedDiagnostic {
     pub column: usize,
 =======
 =======
+=======
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
@@ -150,6 +153,7 @@ pub struct CapabilityConfig {
     pub async_runtime: bool,
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
     pub deny_by_default: bool,
     pub unsafe_opt_ins: Vec<String>,
     pub owners: BTreeMap<String, String>,
@@ -195,8 +199,10 @@ pub struct CapabilityDescriptor {
     pub rationale: Option<String>,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unsafe_rationale: Option<String>,
+=======
 =======
 =======
 }
@@ -270,10 +276,10 @@ struct RawPublishSection {
     checksum: Option<String>,
     include: Option<Vec<String>>,
     kind: Option<String>,
-=======
     expected_error: Option<ExpectedDiagnostic>,
     capabilities: Option<Vec<CapabilityKind>>,
     package: Option<String>,
+=======
 =======
 =======
     kind: Option<String>,
@@ -301,6 +307,7 @@ struct RawCapabilityConfig {
 >>>>>>> origin/codex/worker-h-issue-413
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
     deny_by_default: Option<bool>,
     unsafe_opt_ins: Option<Vec<String>>,
     owners: Option<BTreeMap<String, String>>,
@@ -401,9 +408,11 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             rationale: config.rationale.get(kind.name()).cloned(),
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             unsafe_rationale: (*kind == CapabilityKind::Env && config.env_unrestricted)
                 .then(|| config.unsafe_rationale.clone())
                 .flatten(),
+=======
 =======
 =======
         })
@@ -570,6 +579,7 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             async_runtime: capabilities.async_runtime.unwrap_or(false),
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
             deny_by_default: capabilities.deny_by_default.unwrap_or(false),
             unsafe_opt_ins,
             owners,
@@ -936,6 +946,7 @@ fn normalize_tests(
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -948,6 +959,7 @@ fn normalize_tests(
             expected_error: raw_test.expected_error,
             capabilities,
             package,
+=======
 =======
 =======
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,

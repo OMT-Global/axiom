@@ -14,6 +14,7 @@ pub mod diagnostic_catalog;
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -38,8 +39,10 @@ mod tests {
         render_manifest,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         CapabilityConfig, CapabilityKind, ExpectedDiagnostic, TestTarget, capability_descriptors,
         load_manifest, render_manifest,
+=======
 =======
 =======
     };
@@ -428,6 +431,7 @@ print borrowed
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
     fn parser_expands_declarative_statement_macros_before_lowering() {
         let source = r#"macro_rules! answer {
 ($value:expr) => {
@@ -2978,11 +2982,13 @@ crypto = false
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         assert_eq!(caps.len(), 9);
         assert!(caps.iter().all(|cap| !cap.enabled));
         assert!(caps.iter().any(|cap| cap.name == "async"));
         let project_caps = project_capabilities(&project).expect("project capabilities");
         assert_eq!(project_caps.len(), 9);
+=======
 =======
 =======
 =======
@@ -3283,6 +3289,7 @@ crypto = false
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
     }
 
     #[test]
@@ -5867,6 +5874,7 @@ print serve_once("127.0.0.1:18080", "hello")
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 stderr: None,
 =======
 =======
@@ -5879,6 +5887,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 package: None,
 =======
 =======
+=======
             }]
         );
     }
@@ -5889,6 +5898,7 @@ print serve_once("127.0.0.1:18080", "hello")
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
     fn manifest_parses_richer_test_kinds() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("typed-tests");
@@ -5986,6 +5996,7 @@ print serve_once("127.0.0.1:18080", "hello")
     #[test]
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     fn run_project_tests_reports_manifest_metadata_in_json() {
         let dir = tempdir().expect("tempdir");
@@ -6025,7 +6036,8 @@ print serve_once("127.0.0.1:18080", "hello")
     #[test]
 =======
 =======
->>>>>>> origin/codex/issue-370-command-fixtures
+=======
+>>>>>>> origin/codex/issue-418-schema-metadata
     fn run_project_tests_executes_manifest_cases() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner");
@@ -6530,6 +6542,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 == 21
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
                 == 20
         );
         assert_eq!(
@@ -6540,11 +6553,13 @@ print serve_once("127.0.0.1:18080", "hello")
                 .count(),
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             12
             9
             10
             9
             8
+=======
 =======
 =======
             9

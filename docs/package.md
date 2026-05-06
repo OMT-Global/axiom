@@ -23,6 +23,7 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- caps stage1/examples/he
 >>>>>>> origin/codex/worker-j-issue-363
 >>>>>>> origin/codex/issue-369-check-fixtures
 >>>>>>> origin/codex/issue-370-command-fixtures
+>>>>>>> origin/codex/issue-418-schema-metadata
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- publish stage1/examples/hello --registry-dir ./registry/packages --signing-key dev-key
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-index ./registry/packages --base-url https://packages.example.test --out ./registry/index.json
 cargo run --manifest-path stage1/Cargo.toml -p axiomc -- registry-validate ./registry/index.json
@@ -78,8 +79,24 @@ registry.
 
 See [stage1.md](stage1.md) for the current compiler, package, and capability
 contract.
-
 <<<<<<< HEAD
+=======
+
+## Editor Schemas
+
+Checked-in editor and agent metadata lives under `stage1/schemas/`:
+
+- `stage1/schemas/axiom.toml.schema.json` describes the decoded `axiom.toml`
+  manifest shape for TOML-aware editors.
+- `stage1/schemas/axiom.stage1.v1.schema.json` describes the shared JSON
+  envelope emitted by `axiomc check`, `build`, `test`, and `caps` with
+  `--json`.
+
+These schemas are intentionally metadata for editor completion, validation, and
+agent contract discovery. The compiler remains the source of truth for semantic
+checks such as dependency graph validity, capability enforcement, and source
+analysis.
+
 ## Publish and Static Registry Groundwork
 
 `axiomc publish` packs a checked stage1 package into a deterministic `package.axp`, writes an `axiom-signature-v1` sidecar, and copies `axiom.toml` plus `axiom.lock` into a local registry tree at `<packages>/<name>/<version>/`. The command validates the lockfile first and refuses to replace an existing release unless `--allow-overwrite` is passed.
@@ -102,8 +119,8 @@ and yanked status so a simple static host can serve lockfile-friendly package me
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.
-=======
 =======
 =======
 =======
@@ -143,6 +160,7 @@ resolution exist, manifests must not contain `[registry]`, `[publish]`,
 `package.checksum`, `package.registry`, `package.source`, or dependency
 `version`/`checksum`/`registry`/`source` fields. The parser rejects them instead
 of silently treating a registry package as a local package.
+=======
 =======
 =======
 =======
