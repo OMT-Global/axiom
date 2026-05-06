@@ -65,6 +65,7 @@ pub struct BuiltPackage {
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
+    pub cache_key: BuildCacheMetadata,
     pub metadata: BuildMetadata,
     pub cache_status: BuildCacheStatus,
     pub compile_ms: u64,
@@ -83,11 +84,31 @@ pub struct BuildOutput {
     pub statement_count: usize,
     pub target: Option<String>,
     pub debug: bool,
+    pub cache_key: BuildCacheMetadata,
     pub metadata: BuildMetadata,
     pub cache_hits: usize,
     pub cache_misses: usize,
     pub duration_ms: u64,
     pub packages: Vec<BuiltPackage>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BuildCacheMetadata {
+    pub version: u32,
+    pub compiler: String,
+    pub target: Option<String>,
+    pub debug: bool,
+    pub manifest_hash: String,
+    pub lockfile_hash: String,
+    pub generated_rust_hash: String,
+    pub sources: Vec<BuildSourceMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BuildSourceMetadata {
+    pub path: String,
+    pub source_hash: String,
+    pub imports: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -264,6 +285,7 @@ pub fn build_project_with_options(
             statement_count: analyzed.mir.statement_count(),
             target: resolved_target.clone(),
             debug: options.debug,
+            cache_key: report.cache_key,
             metadata: report.metadata,
             cache_status: report.cache_status,
             compile_ms: report.compile_ms,
@@ -295,6 +317,7 @@ pub fn build_project_with_options(
         statement_count: root.statement_count,
         target: root.target,
         debug: root.debug,
+        cache_key: root.cache_key,
         metadata: root.metadata,
         cache_hits,
         cache_misses,
@@ -959,6 +982,7 @@ fn resolve_workspace_members(
 struct BuildArtifactReport {
     metadata: BuildMetadata,
     cache_status: BuildCacheStatus,
+    cache_key: BuildCacheMetadata,
     compile_ms: u64,
 }
 
@@ -1038,6 +1062,7 @@ fn build_artifacts(
         return Ok(BuildArtifactReport {
             metadata: build_metadata(package_root, &cache),
             cache_status: BuildCacheStatus::Hit,
+            cache_key: build_cache_metadata(&cache),
             compile_ms: 0,
         });
     }
@@ -1065,8 +1090,30 @@ fn build_artifacts(
     Ok(BuildArtifactReport {
         metadata: build_metadata(package_root, &cache),
         cache_status: BuildCacheStatus::Miss,
+        cache_key: build_cache_metadata(&cache),
         compile_ms,
     })
+}
+
+fn build_cache_metadata(cache: &BuildCacheFile) -> BuildCacheMetadata {
+    BuildCacheMetadata {
+        version: cache.version,
+        compiler: cache.compiler.clone(),
+        target: cache.target.clone(),
+        debug: cache.debug,
+        manifest_hash: cache.manifest_hash.clone(),
+        lockfile_hash: cache.lockfile_hash.clone(),
+        generated_rust_hash: cache.rust_hash.clone(),
+        sources: cache
+            .modules
+            .iter()
+            .map(|module| BuildSourceMetadata {
+                path: module.path.clone(),
+                source_hash: module.source_hash.clone(),
+                imports: module.imports.clone(),
+            })
+            .collect(),
+    }
 }
 
 fn build_metadata(package_root: &Path, cache: &BuildCacheFile) -> BuildMetadata {

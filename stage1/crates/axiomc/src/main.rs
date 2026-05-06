@@ -1443,6 +1443,16 @@ mod tests {
             statement_count: 1,
             target: None,
             debug: true,
+            cache_key: axiomc::project::BuildCacheMetadata {
+                version: 1,
+                compiler: String::from("stage1"),
+                target: None,
+                debug: true,
+                manifest_hash: String::from("manifest-hash"),
+                lockfile_hash: String::from("lockfile-hash"),
+                generated_rust_hash: String::from("rust-hash"),
+                sources: Vec::new(),
+            },
             metadata: axiomc::project::BuildMetadata {
                 target: None,
                 debug: true,
