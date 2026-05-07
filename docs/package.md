@@ -138,4 +138,3 @@ resolution exist, manifests must not contain `[registry]`, `[publish]`,
 `package.checksum`, `package.registry`, `package.source`, or dependency
 `version`/`checksum`/`registry`/`source` fields. The parser rejects them instead
 of silently treating a registry package as a local package.
-
