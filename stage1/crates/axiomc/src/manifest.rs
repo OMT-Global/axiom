@@ -55,6 +55,19 @@ pub struct TestTarget {
     pub entry: String,
     pub stdout: Option<String>,
     pub kind: TestKind,
+    pub expected_error: Option<ExpectedDiagnostic>,
+    pub capabilities: Vec<CapabilityKind>,
+    pub package: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExpectedDiagnostic {
+    pub kind: String,
+    pub code: Option<String>,
+    pub message: String,
+    pub path: String,
+    pub line: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -90,7 +103,7 @@ pub struct CapabilityConfig {
     pub rationale: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityKind {
     Fs,
@@ -131,12 +144,17 @@ struct RawManifest {
     build: Option<RawBuildSection>,
     tests: Option<Vec<RawTestTarget>>,
     capabilities: Option<RawCapabilityConfig>,
+    registry: Option<toml::Value>,
+    publish: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawPackageSection {
     name: Option<String>,
     version: Option<String>,
+    checksum: Option<toml::Value>,
+    registry: Option<toml::Value>,
+    source: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,6 +178,10 @@ enum RawDependencySpec {
 #[derive(Debug, Deserialize)]
 struct RawDependencyDetail {
     path: Option<String>,
+    version: Option<toml::Value>,
+    checksum: Option<toml::Value>,
+    registry: Option<toml::Value>,
+    source: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +190,9 @@ struct RawTestTarget {
     entry: Option<String>,
     stdout: Option<String>,
     kind: Option<String>,
+    expected_error: Option<ExpectedDiagnostic>,
+    capabilities: Option<Vec<CapabilityKind>>,
+    package: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -364,6 +389,7 @@ impl CapabilityKind {
 }
 
 fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnostic> {
+    validate_reserved_root_publish_fields(&raw, path)?;
     let workspace = normalize_workspace(raw.workspace, path)?;
     let package = normalize_package(raw.package, workspace.is_some(), path)?;
     let raw_build = raw.build;
@@ -432,6 +458,25 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
             rationale,
         },
     })
+}
+
+
+fn validate_reserved_root_publish_fields(raw: &RawManifest, path: &Path) -> Result<(), Diagnostic> {
+    if raw.registry.is_some() {
+        return Err(reserved_manifest_field(path, "[registry]"));
+    }
+    if raw.publish.is_some() {
+        return Err(reserved_manifest_field(path, "[publish]"));
+    }
+    Ok(())
+}
+
+fn reserved_manifest_field(path: &Path, field_name: &str) -> Diagnostic {
+    Diagnostic::new(
+        "manifest",
+        format!("{field_name} is reserved for future registry publishing"),
+    )
+    .with_path(path.display().to_string())
 }
 
 fn normalize_capability_name_list(
@@ -553,6 +598,15 @@ fn normalize_package(
         return Err(Diagnostic::new("manifest", "missing [package] section")
             .with_path(path.display().to_string()));
     };
+    if package.checksum.is_some() {
+        return Err(reserved_manifest_field(path, "package.checksum"));
+    }
+    if package.registry.is_some() {
+        return Err(reserved_manifest_field(path, "package.registry"));
+    }
+    if package.source.is_some() {
+        return Err(reserved_manifest_field(path, "package.source"));
+    }
     let package_name = required_field(package.name, path, "package.name")?;
     let package_version = required_field(package.version, path, "package.version")?;
     Ok(Some(PackageSection {
@@ -620,6 +674,30 @@ fn normalize_dependencies(
         let raw_path = match raw_spec {
             RawDependencySpec::Path(value) => value,
             RawDependencySpec::Detailed(detail) => {
+                if detail.version.is_some() {
+                    return Err(reserved_manifest_field(
+                        path,
+                        &format!("dependencies.{name}.version"),
+                    ));
+                }
+                if detail.checksum.is_some() {
+                    return Err(reserved_manifest_field(
+                        path,
+                        &format!("dependencies.{name}.checksum"),
+                    ));
+                }
+                if detail.registry.is_some() {
+                    return Err(reserved_manifest_field(
+                        path,
+                        &format!("dependencies.{name}.registry"),
+                    ));
+                }
+                if detail.source.is_some() {
+                    return Err(reserved_manifest_field(
+                        path,
+                        &format!("dependencies.{name}.source"),
+                    ));
+                }
                 required_field(detail.path, path, &format!("dependencies.{name}.path"))?
             }
         };
@@ -646,14 +724,58 @@ fn normalize_tests(
         }
         let entry = required_field(raw_test.entry, path, &format!("{field_prefix}.entry"))?;
         validate_relative_path(path, &format!("{field_prefix}.entry"), &entry)?;
+        let package =
+            normalize_optional_name(path, &format!("{field_prefix}.package"), raw_test.package)?;
+        let capabilities = normalize_test_capabilities(
+            path,
+            &format!("{field_prefix}.capabilities"),
+            raw_test.capabilities.unwrap_or_default(),
+        )?;
         tests.push(TestTarget {
             name,
             entry,
             stdout: raw_test.stdout,
             kind: normalize_test_kind(raw_test.kind, path, &format!("{field_prefix}.kind"))?,
+            expected_error: raw_test.expected_error,
+            capabilities,
+            package,
         });
     }
     Ok(tests)
+}
+
+fn normalize_optional_name(
+    path: &Path,
+    field_name: &str,
+    value: Option<String>,
+) -> Result<Option<String>, Diagnostic> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    required_field(Some(value), path, field_name).map(Some)
+}
+
+fn normalize_test_capabilities(
+    path: &Path,
+    field_name: &str,
+    values: Vec<CapabilityKind>,
+) -> Result<Vec<CapabilityKind>, Diagnostic> {
+    let mut capabilities = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for capability in values {
+        if !seen.insert(capability) {
+            return Err(Diagnostic::new(
+                "manifest",
+                format!(
+                    "duplicate capability {:?} in {field_name}",
+                    capability.name()
+                ),
+            )
+            .with_path(path.display().to_string()));
+        }
+        capabilities.push(capability);
+    }
+    Ok(capabilities)
 }
 
 fn normalize_test_kind(
