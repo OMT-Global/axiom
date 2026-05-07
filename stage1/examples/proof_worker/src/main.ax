@@ -5,8 +5,8 @@ import "std/time.ax"
 import "jobs.ax"
 import "state.ax"
 
-async fn process(queue: string, job: string, worker: string, processed: int): string {
-return "{" + field_string("workload", "proof-worker") + "," + field_string("worker", worker) + "," + field_string("queue", queue) + "," + field_string("job", job) + "," + field_string("result", handle(job)) + "," + field_int("processed", processed) + "}"
+async fn process(queue: string, worker: string, processed: int): string {
+return "{" + field_string("workload", "proof-worker") + "," + field_string("worker", worker) + "," + field_string("queue", queue) + "," + field_string("job", "reconcile") + "," + field_string("result", handle("reconcile")) + "," + field_int("processed", processed) + "}"
 }
 
 let worker: string = worker_name(get_env("AXIOM_STAGE1_WORKER"))
@@ -19,7 +19,7 @@ Some(queue_name) {
 match job {
 Some(payload) {
 let processed: int = processed_count()
-let handle: JoinHandle<string> = spawn<string>(process(queue_name, payload, worker, processed))
+let handle: JoinHandle<string> = spawn<string>(process(queue_name, worker, processed))
 print await join<string>(handle)
 print sleep(duration_ms(0)) == 0
 }
