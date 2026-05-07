@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import statistics
 import subprocess
@@ -18,6 +17,7 @@ ROUNDS = 5
 BASELINE_FLOOR_MS = 50.0
 COLD_BUILD_LIMIT_MULTIPLIER = 4.0
 WARM_BUILD_LIMIT_MULTIPLIER = 2.0
+REGRESSION_TOLERANCE = 0.35
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AXIOMC_MANIFEST = REPO_ROOT / "stage1/Cargo.toml"
@@ -25,7 +25,7 @@ AXIOMC_BIN = REPO_ROOT / "stage1/target/debug/axiomc"
 REF_ROOT = REPO_ROOT / "stage1/benchmarks/reference"
 BASELINE_PATH = REPO_ROOT / "stage1/benchmarks/baselines/stage1-build-median.json"
 DIAGNOSTIC_FIXTURE = REPO_ROOT / "stage1/conformance/fail/ownership_use_after_move"
-CAPABILITY_NAMES = ["fs", "fs:write", "net", "process", "env", "clock", "crypto", "ffi"]
+CAPABILITY_NAMES = ["fs", "fs:write", "net", "process", "env", "clock", "crypto", "ffi", "async"]
 
 
 @dataclass(frozen=True)
@@ -86,11 +86,7 @@ def ensure_tools() -> list[str]:
 
 
 def build_axiomc() -> None:
-    subprocess.run(
-        ["cargo", "build", "--manifest-path", str(AXIOMC_MANIFEST), "-p", "axiomc"],
-        cwd=REPO_ROOT,
-        check=True,
-    )
+    timed_run(["cargo", "build", "--manifest-path", str(AXIOMC_MANIFEST), "-p", "axiomc"], cwd=REPO_ROOT)
 
 
 def axiom_build(workload: Workload, *, cold: bool) -> CommandResult:
@@ -101,7 +97,8 @@ def axiom_build(workload: Workload, *, cold: bool) -> CommandResult:
 
 def axiom_binary_from_build(result: CommandResult) -> Path:
     payload = json.loads(result.stdout)
-    return REPO_ROOT / payload["binary"] if not Path(payload["binary"]).is_absolute() else Path(payload["binary"])
+    binary = Path(payload["binary"])
+    return binary if binary.is_absolute() else REPO_ROOT / binary
 
 
 def go_build(workload: Workload, temp_dir: Path) -> tuple[CommandResult, Path]:
@@ -122,68 +119,24 @@ def run_binary(binary: Path) -> CommandResult:
     return timed_run([str(binary)], cwd=REPO_ROOT)
 
 
-def load_regression_baseline() -> dict | None:
-    if not BASELINE_PATH.exists():
-        print(f"WARN benchmark regression baseline is missing: {BASELINE_PATH}", file=sys.stderr)
-        return None
-    with BASELINE_PATH.open(encoding="utf-8") as handle:
-        return json.load(handle)
-
-
-def baseline_comparison_medians(workload_report: dict) -> dict[str, float]:
-    build_medians = workload_report.get("medians_ms", {}).get("build", {})
-    return {
-        "axiom_cold_build": float(build_medians["axiom_cold"]),
-        "axiom_warm_build": float(build_medians["axiom_warm"]),
-        "go_build": float(build_medians["go"]),
-        "rust_build": float(build_medians["rust"]),
-    }
-
-
-def compare_regression_baseline(report: dict, baseline: dict | None) -> list[str]:
-    if baseline is None:
-        return ["missing committed benchmark baseline"]
-
-    tolerance_pct = float(baseline.get("tolerance_pct", 0.35))
-    warnings: list[str] = []
-    baseline_workloads = baseline.get("workloads", {})
-    report_workloads = report.get("workloads", {})
-
-    for workload_name, workload_report in report_workloads.items():
-        workload_baseline = baseline_workloads.get(workload_name)
-        if workload_baseline is None:
-            warnings.append(f"{workload_name}: missing baseline workload")
-            continue
-        baseline_medians = workload_baseline.get("medians_ms", {})
-        actual_medians = baseline_comparison_medians(workload_report)
-        for metric_name, actual_value in actual_medians.items():
-            baseline_value = baseline_medians.get(metric_name)
-            if baseline_value is None:
-                warnings.append(f"{workload_name}.{metric_name}: missing baseline metric")
-                continue
-            limit = float(baseline_value) * (1.0 + tolerance_pct)
-            if actual_value > limit:
-                warnings.append(
-                    f"{workload_name}.{metric_name}: {actual_value:.1f} ms exceeds "
-                    f"baseline {float(baseline_value):.1f} ms + {tolerance_pct:.0%}"
-                )
-    return warnings
-
-
 def file_size(path: Path) -> int | None:
     return path.stat().st_size if path.exists() else None
+
+
+def compare_limit(actual_ms: float, limit_ms: float) -> str:
+    return "pass" if actual_ms <= limit_ms else "advisory-fail"
 
 
 def capability_manifest_coverage(workload: Workload) -> dict[str, Any]:
     result = timed_run([str(AXIOMC_BIN), "caps", str(workload.project), "--json"], cwd=REPO_ROOT)
     payload = json.loads(result.stdout)
     descriptors = payload.get("capabilities", [])
-    covered = sorted({item.get("name") for item in descriptors if item.get("enabled")})
     declared = sorted({item.get("name") for item in descriptors})
+    enabled = sorted({item.get("name") for item in descriptors if item.get("enabled")})
     return {
         "schema_version": payload.get("schema_version"),
         "declared": declared,
-        "enabled": covered,
+        "enabled": enabled,
         "declared_count": len(declared),
         "known_capability_count": len(CAPABILITY_NAMES),
         "coverage_ratio": round(len(declared) / len(CAPABILITY_NAMES), 3),
@@ -206,8 +159,55 @@ def diagnostic_quality() -> dict[str, Any]:
     }
 
 
-def compare_limit(actual_ms: float, limit_ms: float) -> str:
-    return "pass" if actual_ms <= limit_ms else "advisory-fail"
+def load_baseline(path: Path) -> dict:
+    if not path.exists():
+        print(f"WARN no committed benchmark baseline found at {path}", file=sys.stderr)
+        return {}
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def baseline_build_medians(workload_report: dict[str, Any]) -> dict[str, float]:
+    build = workload_report.get("medians_ms", {}).get("build", {})
+    return {
+        "axiom_cold_build": float(build["axiom_cold"]),
+        "axiom_warm_build": float(build["axiom_warm"]),
+        "go_build": float(build["go"]),
+        "rust_build": float(build["rust"]),
+    }
+
+
+def compare_to_baseline(report: dict[str, Any], baseline: dict[str, Any], tolerance: float) -> list[dict[str, Any]]:
+    comparisons: list[dict[str, Any]] = []
+    baseline_workloads = baseline.get("workloads", {})
+    for workload_name, workload_report in report["workloads"].items():
+        baseline_medians = baseline_workloads.get(workload_name, {}).get("medians_ms", {})
+        for metric, current_ms in baseline_build_medians(workload_report).items():
+            baseline_ms = baseline_medians.get(metric)
+            if baseline_ms is None:
+                print(f"WARN missing baseline metric {workload_name}.{metric}", file=sys.stderr)
+                continue
+            limit_ms = float(baseline_ms) * (1.0 + tolerance)
+            delta_pct = ((float(current_ms) - float(baseline_ms)) / float(baseline_ms)) * 100.0 if float(baseline_ms) else 0.0
+            status = "pass" if float(current_ms) <= limit_ms else "warn"
+            print(
+                f"{status.upper()} {workload_name} {metric} vs committed baseline: "
+                f"{float(current_ms):.1f} ms <= {limit_ms:.1f} ms "
+                f"(baseline {float(baseline_ms):.1f} ms, delta {delta_pct:+.1f}%)",
+                file=sys.stderr,
+            )
+            comparisons.append(
+                {
+                    "workload": workload_name,
+                    "metric": metric,
+                    "status": status,
+                    "current_ms": float(current_ms),
+                    "baseline_ms": float(baseline_ms),
+                    "limit_ms": limit_ms,
+                    "delta_pct": delta_pct,
+                }
+            )
+    return comparisons
 
 
 def benchmark_workload(workload: Workload, temp_dir: Path) -> dict[str, Any]:
@@ -290,10 +290,11 @@ def benchmark_workload(workload: Workload, temp_dir: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Report advisory Go/Rust/Axiom stage1 workload comparisons.")
     parser.add_argument("--json-out", type=Path, help="write the machine-readable report to this path")
+    parser.add_argument("--baseline", type=Path, default=BASELINE_PATH, help="committed JSON baseline to compare against")
+    parser.add_argument("--tolerance", type=float, default=REGRESSION_TOLERANCE, help="allowed fractional regression before WARN output")
     parser.add_argument("--enforce", action="store_true", help="fail when advisory limits are exceeded")
     args = parser.parse_args()
 
-    os.chdir(REPO_ROOT)
     missing = ensure_tools()
     if missing:
         raise SystemExit(f"missing required benchmark tools: {', '.join(missing)}")
@@ -303,44 +304,36 @@ def main() -> int:
         temp_dir = Path(temp_name)
         workloads = {workload.name: benchmark_workload(workload, temp_dir) for workload in WORKLOADS}
 
-    report = {
+    report: dict[str, Any] = {
         "schema_version": "axiom.stage1.comparison.v1",
         "policy": "advisory-nonblocking",
         "rounds": ROUNDS,
         "baseline_floor_ms": BASELINE_FLOOR_MS,
         "cold_build_limit_multiplier": COLD_BUILD_LIMIT_MULTIPLIER,
         "warm_build_limit_multiplier": WARM_BUILD_LIMIT_MULTIPLIER,
+        "regression_tolerance": args.tolerance,
+        "baseline_path": str(args.baseline.relative_to(REPO_ROOT) if args.baseline.is_relative_to(REPO_ROOT) else args.baseline),
         "workloads": workloads,
         "diagnostics_quality": diagnostic_quality(),
     }
-    baseline_warnings = compare_regression_baseline(report, load_regression_baseline())
-    report["regression_baseline"] = {
-        "path": str(BASELINE_PATH.relative_to(REPO_ROOT)),
-        "blocking": False,
-        "warnings": baseline_warnings,
-    }
-
-    if baseline_warnings:
-        print("WARN benchmark regression baseline comparison is non-blocking:")
-        for warning in baseline_warnings:
-            print(f"WARN {warning}")
-    else:
-        print("PASS benchmark regression baseline comparison")
-
-    rendered = json.dumps(report, indent=2)
-    print(rendered)
-    if args.json_out:
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(rendered + "\n", encoding="utf-8")
+    report["baseline_comparisons"] = compare_to_baseline(report, load_baseline(args.baseline), args.tolerance)
 
     advisory_failures = [
-        f"{name}:{metric}"
-        for name, data in workloads.items()
-        for metric, status in data["policy"]["status"].items()
-        if status != "pass"
+        f"{name}.{metric}"
+        for name, workload in workloads.items()
+        for metric, status in workload["policy"]["status"].items()
+        if status == "advisory-fail"
     ]
     if advisory_failures:
         print("ADVISORY comparison limit findings: " + ", ".join(advisory_failures), file=sys.stderr)
+
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(payload, encoding="utf-8")
+    else:
+        print(payload, end="")
+
     return 1 if args.enforce and advisory_failures else 0
 
 

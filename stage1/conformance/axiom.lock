@@ -16,6 +16,7 @@ version = "0.1.0"
 source = "path:fail/closure_move_captured_non_copy"
 
 [[package]]
+
 name = "conformance-comparison-owned-resource-move"
 version = "0.1.0"
 source = "path:fail/comparison_owned_resource_move"
@@ -26,6 +27,7 @@ version = "0.1.0"
 source = "path:fail/comparison_predictable_diagnostic"
 
 [[package]]
+
 name = "conformance-comparison-strict-type-mismatch"
 version = "0.1.0"
 source = "path:fail/comparison_strict_type_mismatch"
@@ -36,6 +38,38 @@ version = "0.1.0"
 source = "path:fail/for_loop_requires_iteration_protocol"
 
 [[package]]
+
+name = "conformance-import-cycle"
+version = "0.1.0"
+source = "path:fail/import_cycle"
+
+[[package]]
+name = "conformance-import-duplicate-export"
+version = "0.1.0"
+source = "path:fail/import_duplicate_export"
+
+[[package]]
+name = "conformance-import-missing-module"
+version = "0.1.0"
+source = "path:fail/import_missing_module"
+
+[[package]]
+name = "conformance-import-path-escape"
+version = "0.1.0"
+source = "path:fail/import_path_escape"
+
+[[package]]
+name = "conformance-import-reserved-namespace"
+version = "0.1.0"
+source = "path:fail/import_reserved_namespace"
+
+[[package]]
+name = "conformance-import-unsupported-alias"
+version = "0.1.0"
+source = "path:fail/import_unsupported_alias"
+
+[[package]]
+
 name = "conformance-match-guard-not-supported"
 version = "0.1.0"
 source = "path:fail/match_guard_not_supported"
@@ -189,3 +223,8 @@ source = "path:pass/package_visibility"
 name = "conformance-struct-field-access"
 version = "0.1.0"
 source = "path:pass/struct_field_access"
+
+[[package]]
+name = "conformance-type-system-aggregates"
+version = "0.1.0"
+source = "path:pass/type_system_aggregates"
