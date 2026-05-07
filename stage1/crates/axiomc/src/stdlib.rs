@@ -59,8 +59,10 @@
 //! * `std/sync.ax` — ownership-shaped synchronization primitives implemented
 //!   in Axiom: move-only mutex guards, one-shot cells, and single-slot
 //!   nonblocking channels.
-//! * `std/async.ax` — deterministic task, join, channel, timeout,
-//!   cancellation, and select wrappers over the stage1 async runtime values.
+//! * `std/async.ax` — task, join, channel, timeout, cancellation, and select
+//!   wrappers over the stage1 async runtime values.
+//! * `std/async_time.ax` and `std/async_net.ax` — async task wrappers around
+//!   `std/time` timer and `std/net` loopback socket primitives.
 //! * `std/regex.ax` — linear-time regular-expression helpers (`is_match`,
 //!   `find`, `replace_all`) over a stage1-safe NFA engine.
 //! * `std/testing.ax` — table-case, property, and snapshot assertion helpers
@@ -191,6 +193,7 @@ pub fn object3(first_field: string, second_field: string, third_field: string): 
         "pub fn count<T>(values: &[T]): int {\nreturn len(values)\n}\n\
 pub fn is_empty<T>(values: &[T]): bool {\nreturn len(values) == 0\n}\n\
 pub fn has_items<T>(values: &[T]): bool {\nreturn len(values) > 0\n}\n\
+pub fn count_mut<T>(values: &mut [T]): int {\nreturn len(values)\n}\n\
 pub fn skip<T>(values: &[T], count: int): &[T] {\nreturn values[count:]\n}\n\
 pub fn take<T>(values: &[T], count: int): &[T] {\nreturn values[:count]\n}\n\
 pub fn window<T>(values: &[T], start: int, end: int): &[T] {\nreturn values[start:end]\n}\n",
@@ -250,6 +253,18 @@ pub fn recv<T>(channel: AsyncChannel<T>): Task<Option<T>> {\nreturn async_recv<T
 pub fn select<T>(left: Task<Option<T>>, right: Task<Option<T>>): Task<SelectResult<T>> {\nreturn async_select<T>(left, right)\n}\n\
 pub fn selected<T>(result: SelectResult<T>): int {\nreturn async_selected<T>(result)\n}\n\
 pub fn selected_value<T>(result: SelectResult<T>): Option<T> {\nreturn async_selected_value<T>(result)\n}\n",
+    ),
+    (
+        "async_time.ax",
+        "pub async fn sleep_ms(milliseconds: int): int {\nreturn clock_sleep_ms(milliseconds)\n}\n\
+pub async fn sleep_duration_ms(milliseconds: int): int {\nreturn clock_sleep_ms(milliseconds)\n}\n",
+    ),
+    (
+        "async_net.ax",
+        "pub async fn tcp_listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
+pub async fn tcp_dial(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_tcp_dial(host, port, message, timeout_ms)\n}\n\
+pub async fn udp_bind_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_udp_bind_loopback_once(response, timeout_ms)\n}\n\
+pub async fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
     ),
     (
         "testing.ax",
