@@ -2,6 +2,7 @@ use crate::diagnostics::Diagnostic;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use url::Url;
 
 pub const MANIFEST_FILENAME: &str = "axiom.toml";
 pub const LOCK_FILENAME: &str = "axiom.lock";
@@ -987,6 +988,7 @@ fn normalize_test_kind(
         )
         .with_path(path.display().to_string())),
     }
+}
 
 fn normalize_publish(raw: RawPublishSection, path: &Path) -> Result<PublishSection, Diagnostic> {
     let registry = match raw.registry {
@@ -1028,15 +1030,16 @@ fn normalize_publish(raw: RawPublishSection, path: &Path) -> Result<PublishSecti
 }
 
 fn validate_registry_source(path: &Path, registry: &str) -> Result<(), Diagnostic> {
-    if let Some(rest) = registry.strip_prefix("https://") {
-        let host = rest.split('/').next().unwrap_or_default();
-        if !host.is_empty() && !host.chars().any(char::is_whitespace) {
-            return Ok(());
-        }
-    } else if let Some(rest) = registry.strip_prefix("file:") {
-        if !rest.is_empty() && !rest.chars().any(char::is_whitespace) {
-            return Ok(());
-        }
+    let valid = Url::parse(registry).is_ok_and(|url| match url.scheme() {
+        "https" => url.host_str().is_some(),
+        "file" if registry.starts_with("file:///") => url
+            .to_file_path()
+            .is_ok_and(|path| path.is_absolute() && path.components().count() > 1),
+        "file" => false,
+        _ => false,
+    });
+    if valid {
+        return Ok(());
     }
     Err(Diagnostic::new(
         "manifest",
@@ -1065,7 +1068,6 @@ fn validate_sha256_checksum(path: &Path, checksum: &str) -> Result<(), Diagnosti
         "publish.checksum must use sha256:<64 lowercase hex characters>",
     )
     .with_path(path.display().to_string()))
-
 }
 
 fn normalize_optional_relative_path(

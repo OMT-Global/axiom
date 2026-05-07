@@ -2843,7 +2843,15 @@ crypto = false
         let project = dir.path().join("publish-registry-invalid");
         create_project(&project, Some("publish-registry-invalid-app")).expect("create project");
 
-        for registry in ["https://", "https://not a host", "file:"] {
+        for registry in [
+            "https://",
+            "https://not a host",
+            "https://registry.example.test:bad-port/index",
+            "https://exa[mple.test/index",
+            "file:",
+            "file://hosted/path",
+            "file:relative/path",
+        ] {
             fs::write(
                 project.join("axiom.toml"),
                 format!(
