@@ -1,4 +1,4 @@
-type Names = &[Names]
+type Names = Names
 
-let values: [int] = [1]
-print values[0]
+let value: Names = 42
+print value

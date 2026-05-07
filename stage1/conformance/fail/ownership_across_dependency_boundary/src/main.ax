@@ -1,4 +1,4 @@
-import "core"
+import "core/main.ax"
 
 let buf: InternalBuffer = allocate(16)
 print buf.capacity
