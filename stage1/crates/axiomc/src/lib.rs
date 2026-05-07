@@ -218,6 +218,9 @@ mod tests {
             create_project_with_template(&project, None, template).expect("create project");
 
             check_project(&project).expect("check generated project");
+            let built = build_project(&project).expect("build generated project");
+            assert_eq!(built.packages.len(), 1);
+            assert!(Path::new(&built.binary).exists());
             let tests = run_project_tests(&project).expect("test generated project");
             assert_eq!(tests.failed, 0);
             assert_eq!(tests.passed, 1);
