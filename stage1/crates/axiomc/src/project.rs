@@ -2762,8 +2762,10 @@ fn format_function_params(function: &syntax::Function) -> String {
 fn format_type_name(ty: &syntax::TypeName) -> String {
     match ty {
         syntax::TypeName::Int => String::from("int"),
+        syntax::TypeName::Numeric(numeric) => numeric.as_str().to_string(),
         syntax::TypeName::Bool => String::from("bool"),
         syntax::TypeName::String => String::from("string"),
+        syntax::TypeName::Str => String::from("str"),
         syntax::TypeName::Named(name, args) if args.is_empty() => name.clone(),
         syntax::TypeName::Named(name, args) => format!(
             "{name}<{}>",
@@ -2776,6 +2778,12 @@ fn format_type_name(ty: &syntax::TypeName) -> String {
         syntax::TypeName::MutPtr(inner) => format!("&mut {}", format_type_name(inner)),
         syntax::TypeName::Slice(inner) => format!("&[{}]", format_type_name(inner)),
         syntax::TypeName::MutSlice(inner) => format!("&mut [{}]", format_type_name(inner)),
+        syntax::TypeName::LifetimeSlice(lifetime, inner) => {
+            format!("&'{lifetime} [{}]", format_type_name(inner))
+        }
+        syntax::TypeName::LifetimeMutSlice(lifetime, inner) => {
+            format!("&'{lifetime} mut [{}]", format_type_name(inner))
+        }
         syntax::TypeName::Option(inner) => format!("Option<{}>", format_type_name(inner)),
         syntax::TypeName::Result(ok, err) => {
             format!(
@@ -2795,7 +2803,19 @@ fn format_type_name(ty: &syntax::TypeName) -> String {
         syntax::TypeName::Map(key, value) => {
             format!("{{{}: {}}}", format_type_name(key), format_type_name(value))
         }
-        syntax::TypeName::Array(inner) => format!("[{}]", format_type_name(inner)),
+        syntax::TypeName::Array(inner, len) => match len {
+            Some(len) => format!("[{}; {len}]", format_type_name(inner)),
+            None => format!("[{}]", format_type_name(inner)),
+        },
+        syntax::TypeName::Fn(params, return_ty) => format!(
+            "fn({}) -> {}",
+            params
+                .iter()
+                .map(format_type_name)
+                .collect::<Vec<_>>()
+                .join(", "),
+            format_type_name(return_ty)
+        ),
     }
 }
 
