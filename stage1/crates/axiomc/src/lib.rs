@@ -21,7 +21,7 @@ mod tests {
     use crate::lockfile::{render_lockfile, render_lockfile_for_project};
     use crate::manifest::{
         CapabilityConfig, TestKind, TestTarget, capability_descriptors, load_manifest,
-        render_manifest,
+        lockfile_path, render_manifest,
     };
     use crate::mir;
     use crate::new_project::create_project;
@@ -224,6 +224,133 @@ mod tests {
         assert!(rendered.contains("if ready {"));
         assert!(rendered.contains("println!(\"{}\", banner(String::from(\"from stage1\")));"));
         assert!(rendered.contains("println!(\"{}\", ready);"));
+    }
+
+    #[test]
+    fn parser_distinguishes_owned_string_from_borrowed_str() {
+        let source = r#"fn read(label: &str): int {
+print label
+return 1
+}
+
+let literal: &str = "borrowed"
+let owned: String = "owned"
+print read(literal)
+print read(owned)
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn read<'a>(label: &'a str) -> i64 {"));
+        assert!(rendered.contains(r#"let literal: &str = "borrowed";"#));
+        assert!(rendered.contains(r#"let owned: String = String::from("owned");"#));
+        assert!(rendered.contains(r#"println!("{}", read(literal));"#));
+        assert!(rendered.contains(r#"println!("{}", read(owned.as_str()));"#));
+    }
+
+    #[test]
+    fn parser_rejects_borrowed_str_from_temporary_string() {
+        let source = r#"fn make(): String {
+return "owned"
+}
+
+let borrowed: &str = make()
+print borrowed
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let err = hir::lower(&parsed).expect_err("lower should reject borrowed temporary String");
+        assert!(
+            err.message
+                .contains("cannot borrow a temporary String as &str")
+        );
+    }
+
+    #[test]
+    fn parser_rejects_borrowed_str_from_temporary_concat() {
+        let source = r#"let borrowed: &str = "own" + "ed"
+print borrowed
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let err = hir::lower(&parsed).expect_err("lower should reject borrowed temporary concat");
+        assert!(
+            err.message
+                .contains("cannot borrow a temporary String as &str")
+        );
+    }
+
+    #[test]
+    fn parser_rejects_borrowed_str_from_indexed_string() {
+        let source = r#"let values: [string] = ["hello"]
+let borrowed: &str = values[0]
+print borrowed
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let err = hir::lower(&parsed).expect_err("lower should reject indexed String borrow");
+        assert!(
+            err.message
+                .contains("cannot borrow a temporary String as &str")
+        );
+    }
+
+    #[test]
+    fn parser_allows_borrowed_str_call_arg_from_temporary_string() {
+        let source = r#"fn read(label: &str): int {
+print label
+return 1
+}
+
+fn make(): String {
+return "owned"
+}
+
+print read(make())
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains(r#"println!("{}", read(make().as_str()));"#));
+    }
+
+    #[test]
+    fn parser_rejects_borrow_return_from_temporary_string_call_arg() {
+        let source = r#"fn echo(value: &str): &str {
+return value
+}
+
+fn make(): String {
+return "owned"
+}
+
+let borrowed: &str = echo(make())
+print borrowed
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let err = hir::lower(&parsed)
+            .expect_err("lower should reject escaping borrow from temporary String call arg");
+        assert!(
+            err.message
+                .contains("cannot borrow a temporary String as &str")
+        );
+    }
+
+    #[test]
+    fn parser_rejects_borrow_return_from_temporary_concat_call_arg() {
+        let source = r#"fn echo(value: &str): &str {
+return value
+}
+
+let borrowed: &str = echo("own" + "ed")
+print borrowed
+"#;
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let err = hir::lower(&parsed)
+            .expect_err("lower should reject escaping borrow from temporary concat call arg");
+        assert!(
+            err.message
+                .contains("cannot borrow a temporary String as &str")
+        );
     }
 
     #[test]
@@ -1081,6 +1208,89 @@ print fail()
             "let info: BuildInfo = BuildInfo { name: String::from(\"stage1\"), count: 42 };"
         ));
         assert!(rendered.contains("return (info).count;"));
+    }
+
+    #[test]
+    fn parser_lowers_numeric_tower_literals_and_casts() {
+        let source = "fn widen(value: u8): u32 {\nreturn value as u32\n}\n\nlet byte: u8 = 255u8\nlet word: u32 = widen(byte) + 1u32\nlet signed: i16 = -1i16\nlet big: i64 = signed as i64\nlet ratio: f64 = 3.5f64\nlet half: f32 = 0.5f32\nprint word as int\nprint big\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("fn widen(value: u8) -> u32 {"));
+        assert!(rendered.contains("return (value) as u32;"));
+        assert!(rendered.contains("let byte: u8 = 255u8;"));
+        assert!(rendered.contains("let word: u32 = widen(byte) + 1u32;"));
+        assert!(rendered.contains("let signed: i16 = -1i16;"));
+        assert!(rendered.contains("let big: i64 = (signed) as i64;"));
+        assert!(rendered.contains("let ratio: f64 = 3.5f64;"));
+        assert!(rendered.contains("let half: f32 = 0.5f32;"));
+        assert!(rendered.contains("println!(\"{}\", (word) as i64);"));
+    }
+
+    #[test]
+    fn checker_rejects_mixed_numeric_width_arithmetic_without_cast() {
+        let source = "let byte: u8 = 1u8\nlet word: u32 = 2u32\nlet bad: u32 = byte + word\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("mixed-width arithmetic should fail");
+        assert!(
+            error
+                .message
+                .contains("matching numeric or string operands")
+        );
+    }
+
+    #[test]
+    fn parser_rejects_unsigned_negative_numeric_literal() {
+        let source = "let bad: u8 = -1u8\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("unsigned negative numeric literal should fail during parsing");
+        assert!(error.message.contains("invalid numeric literal"));
+    }
+
+    #[test]
+    fn parser_rejects_out_of_range_numeric_literal() {
+        let source = "let bad: u8 = 300u8\n";
+        let error = parse_program(source, Path::new("main.ax"))
+            .expect_err("out-of-range numeric literal should fail during parsing");
+        assert!(error.message.contains("invalid numeric literal"));
+    }
+
+    #[test]
+    fn parser_rejects_non_rust_suffixed_float_literals() {
+        for source in [
+            "let bad: f64 = NaNf64\n",
+            "let bad: f32 = inff32\n",
+            "let bad: f32 = 1e39f32\n",
+        ] {
+            let error = parse_program(source, Path::new("main.ax"))
+                .expect_err("non-rust float literal should fail during parsing");
+            assert!(error.message.contains("invalid numeric literal"));
+        }
+    }
+
+    #[test]
+    fn parser_lowers_numeric_checked_and_wrapping_methods() {
+        let source = "let byte: u8 = 255u8
+let wrapped: u8 = byte.wrapping_add(1u8)
+let checked: Option<u8> = byte.checked_add(1u8)
+";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let wrapped: u8 = (byte).wrapping_add(1u8);"));
+        assert!(rendered.contains("let checked: Option<u8> = (byte).checked_add(1u8);"));
+    }
+
+    #[test]
+    fn checker_rejects_numeric_method_argument_type_mismatch() {
+        let source = "let byte: u8 = 1u8
+let bad: u8 = byte.wrapping_add(1u16)
+";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let error = hir::lower(&parsed).expect_err("numeric method argument width should fail");
+        assert!(error.message.contains("expects argument type u8"));
     }
 
     #[test]
@@ -2162,6 +2372,7 @@ print fail()
             &project,
             &CheckOptions {
                 package: Some(String::from("workspace-app")),
+                include_exports: false,
             },
         )
         .expect("check selected workspace package");
@@ -3973,12 +4184,12 @@ true
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/collections.ax\"\nlet numbers: [int] = [4, 5, 6, 7]\nprint count<int>(numbers[:])\nprint is_empty<int>(numbers[:])\nprint has_items<int>(numbers[:])\nlet middle: &[int] = window<int>(numbers[:], 1, 3)\nprint count<int>(middle)\nprint first(middle)\nprint last(middle)\nlet prefix: &[int] = take<int>(numbers[:], 2)\nprint last(prefix)\nlet suffix: &[int] = skip<int>(numbers[:], 2)\nprint first(suffix)\nlet words: [string] = [\"build\", \"test\", \"ship\"]\nprint count<string>(words[:])\nlet empty_words: &[string] = take<string>(words[:], 0)\nprint is_empty<string>(empty_words)\n";
+        let source = "import \"std/collections.ax\"\nlet numbers: [int] = [4, 5, 6, 7]\nprint count_mut<int>(numbers[:])\nprint count<int>(numbers[:])\nprint is_empty<int>(numbers[:])\nprint has_items<int>(numbers[:])\nlet middle: &[int] = window<int>(numbers[:], 1, 3)\nprint count<int>(middle)\nprint first(middle)\nprint last(middle)\nlet prefix: &[int] = take<int>(numbers[:], 2)\nprint last(prefix)\nlet suffix: &[int] = skip<int>(numbers[:], 2)\nprint first(suffix)\nlet words: [string] = [\"build\", \"test\", \"ship\"]\nprint count<string>(words[:])\nlet empty_words: &[string] = take<string>(words[:], 0)\nprint is_empty<string>(empty_words)\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
         fs::write(project.join("src/main_test.ax"), source).expect("write test");
         fs::write(
             project.join("src/main_test.stdout"),
-            "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n",
+            "4\n4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n",
         )
         .expect("write golden");
 
@@ -3988,7 +4199,7 @@ true
             .expect("run compiled binary");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            "4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
+            "4\n4\nfalse\ntrue\n2\n5\n6\n5\n6\n3\ntrue\n"
         );
 
         let tests = run_project_tests(&project).expect("run tests");
@@ -4096,6 +4307,129 @@ true
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn closure_rejects_borrowed_slice_return_fn_value() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("closure-borrowed-slice-return");
+        create_project(&project, Some("closure-borrowed-slice-return")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "closure-borrowed-slice-return",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "let xs: [int] = [1, 2, 3]\nlet head: fn(&[int]): &[int] = |ys: &[int]| ys\nprint len(head(xs[:]))\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project)
+            .expect_err("fn closures must reject borrowed slice return values");
+        assert_eq!(err.kind, "ownership");
+        assert_eq!(err.code.as_deref(), Some("closure_borrowed_slice_return"));
+        assert!(
+            err.message
+                .contains("closure fn values cannot return borrowed slice types"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn closure_rejects_moving_captured_non_copy_fn_value() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("closure-captured-non-copy");
+        create_project(&project, Some("closure-captured-non-copy")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "closure-captured-non-copy",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "let s: string = \"hello\"\nlet take: fn(): string = || s\nprint take()\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project)
+            .expect_err("fn closures must reject moving captured non-copy values");
+        assert_eq!(err.kind, "ownership");
+        assert_eq!(err.code.as_deref(), Some("closure_move_captured_non_copy"));
+        assert!(
+            err.message
+                .contains("closure cannot move captured non-copy value `s`"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
+    fn closure_captures_function_value_callee_name() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("closure-captures-function-callee");
+        create_project(&project, Some("closure-captures-function-callee")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "closure-captures-function-callee",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "let inner: fn(int): int = |x: int| x + 1\nlet outer: fn(int): int = |n: int| inner(n)\nprint inner(2)\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project)
+            .expect_err("closure bodies must capture function-valued callees by name");
+        assert_eq!(err.kind, "ownership");
+        assert!(
+            err.message.contains("use of moved value `inner`")
+                || err.message.contains("use of moved value \"inner\"")
+                || err.message.contains("cannot use moved value `inner`"),
+            "unexpected diagnostic: {err:?}",
+        );
     }
 
     #[test]
@@ -4972,6 +5306,9 @@ print serve_once("127.0.0.1:18080", "hello")
                 entry: String::from("src/math_test.ax"),
                 stdout: Some(String::from("42\n")),
                 kind: TestKind::Unit,
+                expected_error: None,
+                capabilities: Vec::new(),
+                package: None,
             }]
         );
     }
@@ -4992,6 +5329,51 @@ print serve_once("127.0.0.1:18080", "hello")
 
         let manifest = load_manifest(&project).expect("load manifest");
         assert_eq!(manifest.tests[0].kind, TestKind::Table);
+    }
+
+    #[test]
+    fn manifest_rejects_reserved_registry_publish_fields() {
+        let dir = tempdir().expect("tempdir");
+
+        let root_registry = dir.path().join("root-registry");
+        create_project(&root_registry, Some("root-registry-app")).expect("create project");
+        fs::write(
+            root_registry.join("axiom.toml"),
+            format!(
+                "{}\n[registry]\nsource = \"https://registry.example\"\n",
+                render_manifest("root-registry-app")
+            ),
+        )
+        .expect("write manifest");
+        let err = load_manifest(&root_registry).expect_err("reserved registry should fail");
+        assert!(err.message.contains("[registry] is reserved"));
+
+        let package_checksum = dir.path().join("package-checksum");
+        create_project(&package_checksum, Some("package-checksum-app")).expect("create project");
+        fs::write(
+            package_checksum.join("axiom.toml"),
+            "[package]\nname = \"package-checksum-app\"\nversion = \"0.1.0\"\nchecksum = \"sha256:abc\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        )
+        .expect("write manifest");
+        let err = load_manifest(&package_checksum).expect_err("reserved checksum should fail");
+        assert!(err.message.contains("package.checksum is reserved"));
+
+        let dependency_version = dir.path().join("dependency-version");
+        create_project(&dependency_version, Some("dependency-version-app"))
+            .expect("create project");
+        fs::write(
+            dependency_version.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ version = \"1.0.0\", registry = \"default\" }}\n",
+                render_manifest("dependency-version-app")
+            ),
+        )
+        .expect("write manifest");
+        let err = load_manifest(&dependency_version).expect_err("reserved dependency should fail");
+        assert!(
+            err.message
+                .contains("dependencies.core.version is reserved")
+        );
     }
 
     #[test]
@@ -5312,6 +5694,21 @@ print serve_once("127.0.0.1:18080", "hello")
                 "cannot create mutable borrow of value",
             ),
             (
+                "shared_borrow_while_mutable_live",
+                "shared_borrow_while_mutable_live",
+                "cannot create shared borrow of value",
+            ),
+            (
+                "double_mutable_borrow",
+                "mutable_borrow_while_mutable_live",
+                "cannot create mutable borrow of value",
+            ),
+            (
+                "move_string_while_str_borrow_live",
+                "move_while_borrowed",
+                "cannot move value",
+            ),
+            (
                 "loop_move_outer_non_copy",
                 "loop_move_outer_non_copy",
                 "cannot move non-copy value",
@@ -5374,16 +5771,22 @@ print serve_once("127.0.0.1:18080", "hello")
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 31);
-        assert_eq!(output.passed, 31);
-        assert_eq!(output.failed, 0);
+        assert_eq!(output.cases.len(), 60);
+        assert_eq!(output.passed, 60);
+        let failures: Vec<_> = output
+            .cases
+            .iter()
+            .filter(|case| !case.ok)
+            .map(|case| format!("{}: {:?}", case.name, case.error))
+            .collect();
+        assert_eq!(output.failed, 0, "conformance failures: {failures:#?}");
         assert!(
             output
                 .cases
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 21
+                == 43
         );
         assert_eq!(
             output
@@ -5391,7 +5794,7 @@ print serve_once("127.0.0.1:18080", "hello")
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            10
+            17
         );
     }
 
@@ -7097,6 +7500,64 @@ print takes_two(three)
     }
 
     #[test]
+    fn build_project_accepts_mutable_slice_borrow_from_function_parameter() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-param-slice-borrow");
+        create_project(&project, Some("mut-param-slice-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn use_mut(values: [int]): int {\nlet slice: &mut [int] = values[:]\nprint len(slice)\nreturn 0\n}\nlet ignored: int = use_mut([1, 2, 3])\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
+    fn build_project_accepts_mutable_slice_borrow_from_field_root() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-field-slice-borrow");
+        create_project(&project, Some("mut-field-slice-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Box {\nvalues: [int]\n}\nlet holder: Box = Box { values: [1, 2, 3] }\nlet slice: &mut [int] = (holder.values)[:]\nprint len(slice)\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
+    fn build_project_accepts_mutable_slice_borrow_from_match_payload() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-match-payload-slice-borrow");
+        create_project(&project, Some("mut-match-payload-slice-borrow-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "enum Payload {\nItems([int])\n}\nlet payload: Payload = Items([1, 2, 3])\nmatch payload {\nItems(values) {\nlet slice: &mut [int] = values[:]\nprint len(slice)\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owned_array_while_mutable_slice_borrow_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("live-mut-borrow-move");
@@ -7650,8 +8111,8 @@ print takes_two(three)
         assert_eq!(error.kind, "import");
         assert_eq!(error.code.as_deref(), Some("import_cycle"));
         assert!(error.message.contains("circular import detected:"));
-        assert!(error.message.contains(&alpha.display().to_string()));
-        assert!(error.message.contains(&beta.display().to_string()));
+        assert!(error.message.contains("src/alpha.ax"));
+        assert!(error.message.contains("src/beta.ax"));
         assert!(error.path.as_deref().unwrap().ends_with("src/alpha.ax"));
         assert_eq!(error.related.len(), 2);
         let related_paths = error
@@ -7821,6 +8282,94 @@ print takes_two(three)
 
         assert_eq!(output.target.as_deref(), Some(target.as_str()));
         assert!(project.join("dist/targeted-build-app").exists());
+    }
+
+    #[test]
+    fn build_project_locked_offline_succeeds_for_local_graph() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("locked-offline-build");
+        create_project(&project, Some("locked-offline-app")).expect("create project");
+
+        let output = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("build local project in locked offline mode");
+
+        assert!(Path::new(&output.binary).exists());
+    }
+
+    #[test]
+    fn build_project_offline_requires_locked() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("offline-without-locked");
+        create_project(&project, Some("offline-without-locked-app")).expect("create project");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("offline without locked should fail");
+
+        assert_eq!(error.kind, "build");
+        assert!(error.message.contains("offline builds require --locked"));
+    }
+
+    #[test]
+    fn build_project_locked_offline_rejects_missing_lockfile_without_writing_it() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("missing-lockfile");
+        create_project(&project, Some("missing-lockfile-app")).expect("create project");
+        let lockfile = lockfile_path(&project);
+        fs::remove_file(&lockfile).expect("remove lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("missing lockfile should fail");
+
+        assert_eq!(error.kind, "lockfile");
+        assert!(!lockfile.exists());
+    }
+
+    #[test]
+    fn build_project_locked_offline_rejects_stale_lockfile_without_rewriting_it() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stale-lockfile");
+        create_project(&project, Some("stale-lockfile-app")).expect("create project");
+        let lockfile = lockfile_path(&project);
+        let stale_lockfile = fs::read_to_string(&lockfile)
+            .expect("read lockfile")
+            .replace("stale-lockfile-app", "other-app");
+        fs::write(&lockfile, &stale_lockfile).expect("write stale lockfile");
+
+        let error = build_project_with_options(
+            &project,
+            &BuildOptions {
+                locked: true,
+                offline: true,
+                ..BuildOptions::default()
+            },
+        )
+        .expect_err("stale lockfile should fail");
+
+        assert_eq!(error.kind, "lockfile");
+        assert_eq!(
+            fs::read_to_string(&lockfile).expect("read stale lockfile"),
+            stale_lockfile
+        );
     }
 
     #[test]
@@ -8128,6 +8677,95 @@ print takes_two(three)
         assert_eq!(payload["command"], "check");
         assert_eq!(payload["ok"], true);
         assert!(payload["packages"].is_array());
+    }
+
+    #[test]
+    fn check_json_can_include_package_public_api_exports() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("public-api-workspace");
+        let core = project.join("deps/core");
+        create_project(&project, Some("public-api-app")).expect("create root project");
+        create_project(&core, Some("public-api-core")).expect("create core project");
+
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"public-api-app\"\nversion = \"0.1.0\"\n\n[workspace]\nmembers = [\"deps/core\"]\n\n[dependencies]\ncore = { path = \"deps/core\" }\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write root manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"core/main.ax\"\n\npub fn root_answer(): int {\nreturn answer()\n}\n\nprint root_answer()\n",
+        )
+        .expect("write root source");
+        fs::write(
+            core.join("src/main.ax"),
+            "pub const LIMIT: int = 7\npub type Id = int\n\npub struct Widget {\nlabel: string\n}\n\npub enum Status {\nReady\n}\n\npub fn answer(): int {\nreturn LIMIT\n}\n\npub fn use_map(values: {string: int}): {string: int} {\nreturn values\n}\n\nimpl Widget {\npub fn label(self): string {\nreturn self.label\n}\n}\n",
+        )
+        .expect("write core source");
+
+        let core_manifest = load_manifest(&core).expect("load core manifest");
+        fs::write(
+            core.join("axiom.lock"),
+            render_lockfile_for_project(&core, &core_manifest).expect("core lockfile"),
+        )
+        .expect("write core lockfile");
+        let root_manifest = load_manifest(&project).expect("load root manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &root_manifest).expect("root lockfile"),
+        )
+        .expect("write root lockfile");
+
+        let output = check_project_with_options(
+            &project,
+            &CheckOptions {
+                package: None,
+                include_exports: true,
+            },
+        )
+        .expect("check public api workspace");
+        let core_package = output
+            .packages
+            .iter()
+            .find(|package| package.package_root.ends_with("deps/core"))
+            .expect("core package exports");
+        let exported = core_package
+            .exports
+            .iter()
+            .map(|export| (export.kind.as_str(), export.name.as_str()))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(exported.contains(&("const", "LIMIT")));
+        assert!(exported.contains(&("type_alias", "Id")));
+        assert!(exported.contains(&("struct", "Widget")));
+        assert!(exported.contains(&("enum", "Status")));
+        assert!(exported.contains(&("function", "answer")));
+        assert!(exported.contains(&("function", "label")));
+        assert!(exported.contains(&("function", "use_map")));
+        let signatures = core_package
+            .exports
+            .iter()
+            .map(|export| (export.name.as_str(), export.signature.as_deref()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            signatures.get("label").copied().flatten(),
+            Some("fn Widget.label(self): string")
+        );
+        assert_eq!(
+            signatures.get("use_map").copied().flatten(),
+            Some("fn use_map(values: {string: int}): {string: int}")
+        );
+
+        let payload = json_contract::check_success(&project, &output);
+        assert!(payload["exports"].is_array());
+        let root_exports = payload["exports"]
+            .as_array()
+            .expect("top-level root exports array");
+        assert!(root_exports.iter().any(|export| {
+            export["kind"] == "function"
+                && export["name"] == "root_answer"
+                && export["signature"] == "fn root_answer(): int"
+        }));
+        assert!(payload["packages"][1]["exports"].is_array());
     }
 
     #[test]
