@@ -184,9 +184,67 @@ pub struct MatchArm {
     pub column: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
+pub enum NumericType {
+    I8,
+    I16,
+    I32,
+    I64,
+    Isize,
+    U8,
+    U16,
+    U32,
+    U64,
+    Usize,
+    F32,
+    F64,
+}
+
+impl NumericType {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "i8" => Some(Self::I8),
+            "i16" => Some(Self::I16),
+            "i32" => Some(Self::I32),
+            "i64" => Some(Self::I64),
+            "isize" => Some(Self::Isize),
+            "u8" => Some(Self::U8),
+            "u16" => Some(Self::U16),
+            "u32" => Some(Self::U32),
+            "u64" => Some(Self::U64),
+            "usize" => Some(Self::Usize),
+            "f32" => Some(Self::F32),
+            "f64" => Some(Self::F64),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::I8 => "i8",
+            Self::I16 => "i16",
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::Isize => "isize",
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+            Self::Usize => "usize",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+        }
+    }
+
+    pub fn is_float(self) -> bool {
+        matches!(self, Self::F32 | Self::F64)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum TypeName {
     Int,
+    Numeric(NumericType),
     Bool,
     String,
     Str,
@@ -195,11 +253,14 @@ pub enum TypeName {
     MutPtr(Box<TypeName>),
     Slice(Box<TypeName>),
     MutSlice(Box<TypeName>),
+    LifetimeSlice(String, Box<TypeName>),
+    LifetimeMutSlice(String, Box<TypeName>),
     Option(Box<TypeName>),
     Result(Box<TypeName>, Box<TypeName>),
     Tuple(Vec<TypeName>),
     Map(Box<TypeName>, Box<TypeName>),
-    Array(Box<TypeName>),
+    Array(Box<TypeName>, Option<String>),
+    Fn(Vec<TypeName>, Box<TypeName>),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
