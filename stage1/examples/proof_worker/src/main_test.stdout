@@ -1,1 +1,4 @@
-processed invoice
+{"workload":"proof-worker","worker":"worker","queue":"default","job":"reconcile","result":"handled reconcile","processed":1}
+true
+default
+1
