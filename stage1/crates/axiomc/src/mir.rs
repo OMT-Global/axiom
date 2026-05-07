@@ -111,6 +111,7 @@ pub struct MatchArm {
     pub variant: String,
     pub bindings: Vec<String>,
     pub is_named: bool,
+    pub ignore_payloads: bool,
     pub body: Vec<Stmt>,
 }
 
@@ -141,6 +142,10 @@ pub enum Expr {
         op: CompareOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+        ty: Type,
+    },
+    Cast {
+        expr: Box<Expr>,
         ty: Type,
     },
     Try {
@@ -185,6 +190,11 @@ pub enum Expr {
         elements: Vec<Expr>,
         ty: Type,
     },
+    Closure {
+        params: Vec<Param>,
+        body: Box<Expr>,
+        ty: Type,
+    },
     Slice {
         base: Box<Expr>,
         start: Option<Box<Expr>>,
@@ -205,6 +215,10 @@ pub enum Expr {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum LiteralValue {
     Int(i64),
+    Numeric {
+        raw: String,
+        ty: crate::syntax::NumericType,
+    },
     Bool(bool),
     String(String),
     Str(String),
@@ -223,6 +237,7 @@ pub enum CompareOp {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Type {
     Int,
+    Numeric(crate::syntax::NumericType),
     Bool,
     String,
     Str,
@@ -236,17 +251,19 @@ pub enum Type {
     Result(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Map(Box<Type>, Box<Type>),
-    Array(Box<Type>),
+    Array(Box<Type>, Option<usize>),
     Task(Box<Type>),
     JoinHandle(Box<Type>),
     AsyncChannel(Box<Type>),
     SelectResult(Box<Type>),
+    Fn(Vec<Type>, Box<Type>),
 }
 
 impl Type {
     pub fn is_copy(&self) -> bool {
         match self {
             Type::Int
+            | Type::Numeric(_)
             | Type::Bool
             | Type::Str
             | Type::Ptr(_)
@@ -260,11 +277,12 @@ impl Type {
             | Type::Struct(_)
             | Type::Enum(_)
             | Type::Map(_, _)
-            | Type::Array(_)
+            | Type::Array(_, _)
             | Type::Task(_)
             | Type::JoinHandle(_)
             | Type::AsyncChannel(_)
-            | Type::SelectResult(_) => false,
+            | Type::SelectResult(_)
+            | Type::Fn(_, _) => false,
         }
     }
 }
@@ -299,6 +317,7 @@ impl Expr {
     pub fn ty(&self) -> Type {
         match self {
             Expr::Literal(LiteralValue::Int(_)) => Type::Int,
+            Expr::Literal(LiteralValue::Numeric { ty, .. }) => Type::Numeric(*ty),
             Expr::Literal(LiteralValue::Bool(_)) => Type::Bool,
             Expr::Literal(LiteralValue::String(_)) => Type::String,
             Expr::Literal(LiteralValue::Str(_)) => Type::Str,
@@ -306,6 +325,7 @@ impl Expr {
             Expr::Call { ty, .. } => ty.clone(),
             Expr::BinaryAdd { ty, .. } => ty.clone(),
             Expr::BinaryCompare { ty, .. } => ty.clone(),
+            Expr::Cast { ty, .. } => ty.clone(),
             Expr::Try { ty, .. } => ty.clone(),
             Expr::Await { ty, .. } => ty.clone(),
             Expr::StructLiteral { ty, .. } => ty.clone(),
@@ -315,6 +335,7 @@ impl Expr {
             Expr::MapLiteral { ty, .. } => ty.clone(),
             Expr::EnumVariant { ty, .. } => ty.clone(),
             Expr::ArrayLiteral { ty, .. } => ty.clone(),
+            Expr::Closure { ty, .. } => ty.clone(),
             Expr::Slice { ty, .. } => ty.clone(),
             Expr::Index { ty, .. } => ty.clone(),
             Expr::StringBorrow { ty, .. } => ty.clone(),
@@ -455,6 +476,7 @@ fn lower_stmt(stmt: &hir::Stmt) -> Stmt {
                     variant: arm.variant.clone(),
                     bindings: arm.bindings.clone(),
                     is_named: arm.is_named,
+                    ignore_payloads: arm.ignore_payloads,
                     body: arm.body.iter().map(lower_stmt).collect(),
                 })
                 .collect(),
@@ -478,6 +500,10 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
     match expr {
         hir::Expr::Literal { ty, value } => Expr::Literal(match value {
             hir::LiteralValue::Int(value) => LiteralValue::Int(*value),
+            hir::LiteralValue::Numeric { raw, ty } => LiteralValue::Numeric {
+                raw: raw.clone(),
+                ty: *ty,
+            },
             hir::LiteralValue::Bool(value) => LiteralValue::Bool(*value),
             hir::LiteralValue::String(value) => {
                 if matches!(ty, hir::Type::Str) {
@@ -505,6 +531,10 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             op: lower_compare_op(*op),
             lhs: Box::new(lower_expr(lhs)),
             rhs: Box::new(lower_expr(rhs)),
+            ty: lower_type(ty),
+        },
+        hir::Expr::Cast { expr, ty } => Expr::Cast {
+            expr: Box::new(lower_expr(expr)),
             ty: lower_type(ty),
         },
         hir::Expr::Try { expr, ty } => Expr::Try {
@@ -567,6 +597,11 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             elements: elements.iter().map(lower_expr).collect(),
             ty: lower_type(ty),
         },
+        hir::Expr::Closure { params, body, ty } => Expr::Closure {
+            params: params.iter().map(lower_param).collect(),
+            body: Box::new(lower_expr(body)),
+            ty: lower_type(ty),
+        },
         hir::Expr::Slice {
             base,
             start,
@@ -594,6 +629,7 @@ fn lower_type(ty: &hir::Type) -> Type {
     match ty {
         hir::Type::Error => unreachable!("type-error sentinel must not reach MIR lowering"),
         hir::Type::Int => Type::Int,
+        hir::Type::Numeric(numeric) => Type::Numeric(*numeric),
         hir::Type::Bool => Type::Bool,
         hir::Type::String => Type::String,
         hir::Type::Str => Type::Str,
@@ -611,11 +647,15 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::Map(key, value) => {
             Type::Map(Box::new(lower_type(key)), Box::new(lower_type(value)))
         }
-        hir::Type::Array(inner, _) => Type::Array(Box::new(lower_type(inner))),
+        hir::Type::Array(inner, len) => Type::Array(Box::new(lower_type(inner)), *len),
         hir::Type::Task(inner) => Type::Task(Box::new(lower_type(inner))),
         hir::Type::JoinHandle(inner) => Type::JoinHandle(Box::new(lower_type(inner))),
         hir::Type::AsyncChannel(inner) => Type::AsyncChannel(Box::new(lower_type(inner))),
         hir::Type::SelectResult(inner) => Type::SelectResult(Box::new(lower_type(inner))),
+        hir::Type::Fn(params, return_ty) => Type::Fn(
+            params.iter().map(lower_type).collect(),
+            Box::new(lower_type(return_ty)),
+        ),
     }
 }
 

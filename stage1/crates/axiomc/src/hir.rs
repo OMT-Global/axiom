@@ -1706,6 +1706,8 @@ fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<Stri
         | syntax::TypeName::MutPtr(inner)
         | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
+        | syntax::TypeName::LifetimeSlice(_, inner)
+        | syntax::TypeName::LifetimeMutSlice(_, inner)
         | syntax::TypeName::Option(inner)
         | syntax::TypeName::Array(inner, _) => contains_generic_type_param(inner, type_params),
         syntax::TypeName::Result(ok, err) | syntax::TypeName::Map(ok, err) => {
@@ -1794,6 +1796,24 @@ fn unify_generic_type_name(
         }
         syntax::TypeName::MutSlice(lhs) => {
             if let syntax::TypeName::MutSlice(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::LifetimeSlice(_, lhs) => {
+            if let syntax::TypeName::LifetimeSlice(_, rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::LifetimeMutSlice(_, lhs) => {
+            if let syntax::TypeName::LifetimeMutSlice(_, rhs) = actual {
                 unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
             } else if contains_generic_type_param(pattern, type_params) {
                 Err(generic_constraint_mismatch(pattern, actual, line, column))
@@ -2274,6 +2294,8 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
         | syntax::TypeName::MutPtr(inner)
         | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
+        | syntax::TypeName::LifetimeSlice(_, inner)
+        | syntax::TypeName::LifetimeMutSlice(_, inner)
         | syntax::TypeName::Option(inner)
         | syntax::TypeName::Array(inner, _) => collect_type_params(inner, type_params, found),
         syntax::TypeName::Result(ok, err) | syntax::TypeName::Map(ok, err) => {
@@ -2603,6 +2625,30 @@ fn rewrite_aggregate_type_name(
                 column,
             )?))
         }
+        syntax::TypeName::LifetimeSlice(lifetime, inner) => syntax::TypeName::LifetimeSlice(
+            lifetime.clone(),
+            Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?),
+        ),
+        syntax::TypeName::LifetimeMutSlice(lifetime, inner) => syntax::TypeName::LifetimeMutSlice(
+            lifetime.clone(),
+            Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?),
+        ),
         syntax::TypeName::Option(inner) => {
             syntax::TypeName::Option(Box::new(rewrite_aggregate_type_name(
                 inner,
@@ -4100,6 +4146,14 @@ fn substitute_type_name(
         syntax::TypeName::MutSlice(inner) => {
             syntax::TypeName::MutSlice(Box::new(substitute_type_name(inner, type_bindings)))
         }
+        syntax::TypeName::LifetimeSlice(lifetime, inner) => syntax::TypeName::LifetimeSlice(
+            lifetime.clone(),
+            Box::new(substitute_type_name(inner, type_bindings)),
+        ),
+        syntax::TypeName::LifetimeMutSlice(lifetime, inner) => syntax::TypeName::LifetimeMutSlice(
+            lifetime.clone(),
+            Box::new(substitute_type_name(inner, type_bindings)),
+        ),
         syntax::TypeName::Option(inner) => {
             syntax::TypeName::Option(Box::new(substitute_type_name(inner, type_bindings)))
         }
@@ -4199,6 +4253,16 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
         syntax::TypeName::MutSlice(inner) => {
             format!("mutslice_{}", type_name_monomorph_suffix(inner))
         }
+        syntax::TypeName::LifetimeSlice(lifetime, inner) => format!(
+            "lslice_{}_{}",
+            sanitize_symbol_suffix(lifetime),
+            type_name_monomorph_suffix(inner)
+        ),
+        syntax::TypeName::LifetimeMutSlice(lifetime, inner) => format!(
+            "lmutslice_{}_{}",
+            sanitize_symbol_suffix(lifetime),
+            type_name_monomorph_suffix(inner)
+        ),
         syntax::TypeName::Option(inner) => {
             format!("option_{}", type_name_monomorph_suffix(inner))
         }
@@ -10593,12 +10657,16 @@ fn lower_type_inner<T, U>(
         syntax::TypeName::MutPtr(inner) => Ok(Type::MutPtr(Box::new(lower_type_inner(
             inner, structs, enums, aliases, consts, resolving, line, column,
         )?))),
-        syntax::TypeName::Slice(inner) => Ok(Type::Slice(Box::new(lower_type_inner(
-            inner, structs, enums, aliases, consts, resolving, line, column,
-        )?))),
-        syntax::TypeName::MutSlice(inner) => Ok(Type::MutSlice(Box::new(lower_type_inner(
-            inner, structs, enums, aliases, consts, resolving, line, column,
-        )?))),
+        syntax::TypeName::Slice(inner) | syntax::TypeName::LifetimeSlice(_, inner) => {
+            Ok(Type::Slice(Box::new(lower_type_inner(
+                inner, structs, enums, aliases, consts, resolving, line, column,
+            )?)))
+        }
+        syntax::TypeName::MutSlice(inner) | syntax::TypeName::LifetimeMutSlice(_, inner) => {
+            Ok(Type::MutSlice(Box::new(lower_type_inner(
+                inner, structs, enums, aliases, consts, resolving, line, column,
+            )?)))
+        }
         syntax::TypeName::Option(inner) => Ok(Type::Option(Box::new(lower_type_inner(
             inner, structs, enums, aliases, consts, resolving, line, column,
         )?))),

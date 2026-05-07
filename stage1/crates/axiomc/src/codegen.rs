@@ -2978,7 +2978,14 @@ fn render_match_arm(
 ) {
     let pad = "    ".repeat(indent);
     if arm.bindings.is_empty() {
-        out.push_str(&format!("{pad}{}::{} => {{\n", arm.enum_name, arm.variant));
+        if arm.ignore_payloads {
+            out.push_str(&format!(
+                "{pad}{}::{} {{ .. }} => {{\n",
+                arm.enum_name, arm.variant
+            ));
+        } else {
+            out.push_str(&format!("{pad}{}::{} => {{\n", arm.enum_name, arm.variant));
+        }
     } else if arm.is_named {
         out.push_str(&format!(
             "{pad}{}::{} {{ {} }} => {{\n",
