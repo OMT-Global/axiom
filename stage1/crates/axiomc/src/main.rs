@@ -233,9 +233,9 @@ fn main() {
             debug,
             timings,
             target,
-            package,
             locked,
             offline,
+            package,
         } => {
             match build_project_with_options(
                 &path,

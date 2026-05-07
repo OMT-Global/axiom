@@ -269,6 +269,7 @@ pub fn build_project_with_options(
     project_root: &Path,
     options: &BuildOptions,
 ) -> Result<BuildOutput, Diagnostic> {
+    validate_build_resolution_mode(options)?;
     let project_root = canonicalize_existing_path(&normalize_path(project_root), "project root")?;
     let graph = load_package_graph(&project_root)?;
     validate_workspace_root_lockfile(&graph, &project_root)?;
@@ -345,6 +346,16 @@ pub fn build_project_with_options(
         duration_ms: started.elapsed().as_millis() as u64,
         packages,
     })
+}
+
+fn validate_build_resolution_mode(options: &BuildOptions) -> Result<(), Diagnostic> {
+    if options.offline && !options.locked {
+        return Err(Diagnostic::new(
+            "build",
+            "offline builds require --locked so axiom.lock is the only dependency resolution source",
+        ));
+    }
+    Ok(())
 }
 
 pub fn run_project(project_root: &Path) -> Result<i32, Diagnostic> {
