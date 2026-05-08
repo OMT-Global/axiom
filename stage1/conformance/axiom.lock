@@ -140,16 +140,6 @@ version = "0.1.0"
 source = "path:fail/ownership_use_after_move"
 
 [[package]]
-name = "conformance-ownership-across-dependency-boundary"
-version = "0.1.0"
-source = "path:fail/ownership_across_dependency_boundary"
-
-[[package]]
-name = "core"
-version = "0.1.0"
-source = "path:fail/ownership_across_dependency_boundary/deps/core"
-
-[[package]]
 name = "conformance-package-visibility-dependency-boundary"
 version = "0.1.0"
 source = "path:fail/package_visibility_dependency_boundary"
