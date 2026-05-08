@@ -2119,9 +2119,11 @@ fn expected_error_mismatch(
         .unwrap_or_default();
     let actual_line = actual.line.unwrap_or_default();
     let actual_column = actual.column.unwrap_or_default();
+    let message_matches = actual.message == expected.message
+        || (expected.message.ends_with(':') && actual.message.starts_with(&expected.message));
     if actual.kind == expected.kind
         && actual.code == expected.code
-        && actual.message == expected.message
+        && message_matches
         && actual_path == expected.path
         && actual_line == expected.line
         && actual_column == expected.column
