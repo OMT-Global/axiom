@@ -292,7 +292,7 @@ pub fn check_project_with_options(
             entry: analyzed.entry_path.display().to_string(),
             statement_count: analyzed.mir.statement_count(),
             capabilities: capability_descriptors(&analyzed.manifest.capabilities),
-            exports: Vec::new(),
+            exports,
             warnings: analyzed.manifest.capabilities.warnings(),
             exports,
         });
@@ -311,7 +311,7 @@ pub fn check_project_with_options(
         entry: root.entry,
         statement_count: root.statement_count,
         capabilities: root.capabilities,
-        exports: Vec::new(),
+        exports: root.exports,
         warnings: root.warnings,
         exports: root.exports,
         packages,
