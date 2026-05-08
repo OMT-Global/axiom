@@ -31,8 +31,6 @@ pub struct CheckedPackage {
     pub entry: String,
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub exports: Vec<ApiExport>,
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exports: Vec<ApiExport>,
@@ -44,7 +42,6 @@ pub struct CheckOutput {
     pub entry: String,
     pub statement_count: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
-    pub exports: Vec<ApiExport>,
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exports: Vec<ApiExport>,
@@ -78,6 +75,7 @@ pub struct BuiltPackage {
     pub binary: String,
     pub generated_rust: String,
     pub debug_map: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_manifest: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
@@ -98,6 +96,7 @@ pub struct BuildOutput {
     pub binary: String,
     pub generated_rust: String,
     pub debug_map: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_manifest: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
@@ -292,7 +291,6 @@ pub fn check_project_with_options(
             entry: analyzed.entry_path.display().to_string(),
             statement_count: analyzed.mir.statement_count(),
             capabilities: capability_descriptors(&analyzed.manifest.capabilities),
-            exports,
             warnings: analyzed.manifest.capabilities.warnings(),
             exports,
         });
@@ -311,7 +309,6 @@ pub fn check_project_with_options(
         entry: root.entry,
         statement_count: root.statement_count,
         capabilities: root.capabilities,
-        exports: root.exports,
         warnings: root.warnings,
         exports: root.exports,
         packages,

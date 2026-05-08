@@ -3099,9 +3099,14 @@ crypto = false
         assert!(env.unsafe_unrestricted);
 
         let payload = json_contract::caps_success(&project, &caps);
-        assert_eq!(payload["capabilities"][3]["name"], "env");
-        assert!(payload["capabilities"][3]["allowed"].is_null());
-        assert_eq!(payload["capabilities"][3]["unsafe_unrestricted"], true);
+        let env_payload = payload["capabilities"]
+            .as_array()
+            .expect("capabilities array")
+            .iter()
+            .find(|cap| cap["name"] == "env")
+            .expect("env capability payload");
+        assert!(env_payload["allowed"].is_null());
+        assert_eq!(env_payload["unsafe_unrestricted"], true);
     }
 
     #[test]
