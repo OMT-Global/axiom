@@ -58,12 +58,22 @@ fn build_fixtures_cover_target_triple_and_failure_diagnostic() {
     assert!(success["metadata"]["lockfile"].is_string());
     assert!(success["metadata"]["lockfile_hash"].is_string());
     assert!(success["metadata"]["source_hash"].is_string());
+    assert_eq!(success["cache_key"]["compiler"], "axiomc-stage1-0.1.0-generated-rust");
+    assert_eq!(success["cache_key"]["debug"], false);
+    assert!(success["cache_key"]["generated_rust_hash"].is_string());
+    assert!(success["cache_key"]["lockfile_hash"].is_string());
+    assert!(success["cache_key"]["manifest_hash"].is_string());
+    assert_eq!(success["cache_key"]["sources"][0]["path"], success["entry"]);
+    assert!(success["cache_key"]["sources"][0]["source_hash"].is_string());
+    assert_eq!(success["cache_key"]["target"], "aarch64-apple-darwin");
+    assert_eq!(success["cache_key"]["version"], 1);
     assert!(success["duration_ms"].is_u64());
     assert!(success["cache_hits"].is_u64());
     assert!(success["cache_misses"].is_u64());
     assert_eq!(success["packages"][0]["backend"], "generated-rust");
     assert!(success["packages"][0]["target"].is_string());
     assert_eq!(success["packages"][0]["metadata"], success["metadata"]);
+    assert_eq!(success["packages"][0]["cache_key"], success["cache_key"]);
 
     let failure = fixture("build", "failure.json");
     assert_matches_stage1_schema(&validator, &failure);
