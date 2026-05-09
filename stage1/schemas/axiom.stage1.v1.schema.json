@@ -124,7 +124,8 @@
             "env",
             "clock",
             "crypto",
-            "ffi"
+            "ffi",
+            "async"
           ]
         },
         "enabled": {
