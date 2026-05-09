@@ -2847,12 +2847,16 @@ crypto = false
         for registry in [
             "https://",
             "https://not a host",
+            "https://user@registry.example.test/index",
+            "https://registry.example.test?mirror=1",
+            "https://registry.example.test#fragment",
             "https://registry.example.test:bad-port/index",
             "https://registry.example.test:65536/index",
             "https://registry.example.test:99999/index",
             "https://[::1]:99999/index",
             "https://exa[mple.test/index",
             "file:",
+            "file://",
             "file://hosted/path",
             "file:relative/path",
         ] {
