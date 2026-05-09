@@ -3,6 +3,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn fixture(name: &str) -> Value {
     let path = fixture_dir().join(name);
@@ -62,7 +63,12 @@ fn check_fixtures_validate_against_stage1_v1_schema() {
 #[test]
 fn check_success_fixture_matches_stage1_v1_envelope() {
     let payload = fixture("success.json");
+    let generated = normalized_check_success_for_hello();
 
+    assert_eq!(
+        payload, generated,
+        "success fixture drifted from axiomc check --json stage1/examples/hello"
+    );
     assert_check_envelope(&payload, true);
     assert!(payload["project"].is_string());
     assert!(payload["manifest"].is_string());
@@ -80,6 +86,57 @@ fn check_success_fixture_matches_stage1_v1_envelope() {
         capability_contract(&package["capabilities"]),
         expected_capability_contract()
     );
+}
+
+fn normalized_check_success_for_hello() -> Value {
+    let stage1_root = stage1_root();
+    let project = Path::new("stage1").join("examples").join("hello");
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "check",
+            project.to_str().expect("hello project path"),
+            "--json",
+        ])
+        .current_dir(stage1_root.parent().expect("repo root"))
+        .output()
+        .expect("run axiomc check --json");
+    assert!(
+        output.status.success(),
+        "axiomc check --json failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut payload: Value = serde_json::from_slice(&output.stdout).expect("parse check JSON");
+    normalize_repo_paths(&mut payload, stage1_root.parent().expect("repo root"));
+    payload
+}
+
+fn stage1_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("stage1 root")
+}
+
+fn normalize_repo_paths(value: &mut Value, repo_root: &Path) {
+    match value {
+        Value::String(text) => {
+            let repo_root = repo_root.display().to_string();
+            if text.starts_with(&repo_root) {
+                *text = text.replacen(&repo_root, "/workspace/axiom", 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_repo_paths(item, repo_root);
+            }
+        }
+        Value::Object(map) => {
+            for value in map.values_mut() {
+                normalize_repo_paths(value, repo_root);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn capability_contract(capabilities: &Value) -> Vec<(String, bool, String)> {
