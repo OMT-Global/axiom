@@ -30,8 +30,8 @@ mod tests {
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
         command_for_build_output, command_for_executable, list_project_tests_with_options,
-        package_graph_metadata, project_capabilities, run_project_tests, run_project_tests_with_options,
-        run_project_with_options,
+        package_graph_metadata, project_capabilities, run_project_tests,
+        run_project_tests_with_options, run_project_with_options,
     };
     use crate::syntax::{Stmt, TypeName, Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
@@ -5750,8 +5750,26 @@ print serve_once("127.0.0.1:18080", "hello")
         let err = load_manifest(&dependency_version).expect_err("reserved dependency should fail");
         assert!(
             err.message
-                .contains("dependencies.core.version is reserved")
+                .contains("dependencies.core.registry is reserved")
         );
+
+        let invalid_dependency_version = dir.path().join("invalid-dependency-version");
+        create_project(
+            &invalid_dependency_version,
+            Some("invalid-dependency-version-app"),
+        )
+        .expect("create project");
+        fs::write(
+            invalid_dependency_version.join("axiom.toml"),
+            format!(
+                "{}\n[dependencies]\ncore = {{ path = \"deps/core\", version = \"latest\" }}\n",
+                render_manifest("invalid-dependency-version-app")
+            ),
+        )
+        .expect("write manifest");
+        let err = load_manifest(&invalid_dependency_version)
+            .expect_err("invalid dependency version should fail");
+        assert!(err.message.contains("dependencies.core.version must be"));
     }
 
     #[test]

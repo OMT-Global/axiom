@@ -800,12 +800,6 @@ fn normalize_dependencies(
                 continue;
             }
             RawDependencySpec::Detailed(detail) => {
-                if detail.path.is_none() && detail.version.is_some() {
-                    return Err(reserved_manifest_field(
-                        path,
-                        &format!("dependencies.{name}.version"),
-                    ));
-                }
                 if detail.checksum.is_some() {
                     return Err(reserved_manifest_field(
                         path,
@@ -822,6 +816,12 @@ fn normalize_dependencies(
                     return Err(reserved_manifest_field(
                         path,
                         &format!("dependencies.{name}.source"),
+                    ));
+                }
+                if detail.path.is_none() && detail.version.is_some() {
+                    return Err(reserved_manifest_field(
+                        path,
+                        &format!("dependencies.{name}.version"),
                     ));
                 }
                 let raw_path =

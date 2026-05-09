@@ -8,8 +8,8 @@ use axiomc::manifest::{entry_path, load_manifest};
 use axiomc::new_project::{WorkloadTemplate, create_project_with_template};
 use axiomc::project::{
     BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
-    check_project_with_options, list_project_tests_with_options, project_capabilities,
-    run_project_tests_with_options, run_project_with_options,
+    check_project_with_options, list_project_tests_with_options, package_graph_metadata,
+    project_capabilities, run_project_tests_with_options, run_project_with_options,
 };
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
@@ -112,6 +112,11 @@ enum Command {
         #[command(subcommand)]
         command: InspectCommand,
     },
+    /// Inspect local package graph metadata.
+    Pkg {
+        #[command(subcommand)]
+        command: PkgCommand,
+    },
     /// Explain a stable diagnostic code.
     Explain {
         code: String,
@@ -185,6 +190,16 @@ enum Command {
 enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
+enum PkgCommand {
+    /// Emit the resolved local package graph.
+    Graph {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -460,6 +475,26 @@ fn main() {
                     0
                 }
                 Err(error) => print_error("inspect symbols", error, json),
+            },
+        },
+        Command::Pkg { command } => match command {
+            PkgCommand::Graph { path, json } => match package_graph_metadata(&path) {
+                Ok(output) => {
+                    if json {
+                        println!(
+                            "{}",
+                            json_contract::to_pretty_string(&output)
+                                .unwrap_or_else(|_| String::from("{}"))
+                        );
+                    } else {
+                        for package in &output.packages {
+                            let name = package.name.as_deref().unwrap_or("<workspace>");
+                            println!("{} {}", name, package.root);
+                        }
+                    }
+                    0
+                }
+                Err(error) => print_error("pkg graph", error, json),
             },
         },
         Command::Fmt { path, check, json } => match format_axiom_sources(&path, check) {
@@ -1977,6 +2012,7 @@ mod tests {
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
         assert!(help.contains("Inspect project metadata for agent tooling"));
+        assert!(help.contains("Inspect local package graph metadata"));
         assert!(help.contains("Explain a stable diagnostic code"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
@@ -1985,6 +2021,20 @@ mod tests {
         assert!(help.contains("Pack, sign, and publish a stage1 package"));
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
+    }
+
+    #[test]
+    fn pkg_graph_cli_parses_path_and_json_flag() {
+        let cli = Cli::parse_from(["axiomc", "pkg", "graph", ".", "--json"]);
+        match cli.command {
+            Command::Pkg {
+                command: PkgCommand::Graph { path, json },
+            } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert!(json);
+            }
+            other => panic!("expected pkg graph command, got {other:?}"),
+        }
     }
 
     #[test]
