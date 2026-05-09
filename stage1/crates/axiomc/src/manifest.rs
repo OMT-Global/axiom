@@ -994,8 +994,8 @@ fn is_valid_https_registry_url(rest: &str) -> bool {
 
     if authority.is_empty()
         || authority.contains('@')
-        || suffix.starts_with('?')
-        || suffix.starts_with('#')
+        || suffix.contains('?')
+        || suffix.contains('#')
     {
         return false;
     }

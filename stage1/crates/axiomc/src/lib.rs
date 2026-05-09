@@ -2850,6 +2850,8 @@ crypto = false
             "https://user@registry.example.test/index",
             "https://registry.example.test?mirror=1",
             "https://registry.example.test#fragment",
+            "https://registry.example.test/index?mirror=1",
+            "https://registry.example.test/index#fragment",
             "https://registry.example.test:bad-port/index",
             "https://registry.example.test:65536/index",
             "https://registry.example.test:99999/index",
