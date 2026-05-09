@@ -45,4 +45,23 @@ fn editor_metadata_schemas_are_parseable_and_current() {
         "https://axiom.omt.global/schemas/axiom.toml.schema.json"
     );
     assert!(manifest_schema["properties"]["capabilities"]["properties"]["env"]["oneOf"].is_array());
+
+    let test_target = &manifest_schema["properties"]["tests"]["items"]["properties"];
+    assert!(test_target["kind"].is_object());
+
+    let manifest_capabilities = &manifest_schema["properties"]["capabilities"]["properties"];
+    for field in ["deny_by_default", "unsafe_opt_ins", "owners", "rationale"] {
+        assert!(
+            manifest_capabilities[field].is_object(),
+            "manifest schema includes capabilities.{field}"
+        );
+    }
+
+    let descriptor = &compiler_schema["$defs"]["capability"]["properties"];
+    for field in ["deny_by_default", "unsafe_opt_in", "owner", "rationale"] {
+        assert!(
+            descriptor[field].is_object(),
+            "compiler schema includes capability descriptor {field}"
+        );
+    }
 }

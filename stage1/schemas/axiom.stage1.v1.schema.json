@@ -141,6 +141,20 @@
         },
         "unsafe_unrestricted": {
           "type": "boolean"
+        },
+        "deny_by_default": {
+          "type": "boolean"
+        },
+        "unsafe_opt_in": {
+          "type": "boolean"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
