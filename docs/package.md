@@ -47,8 +47,17 @@ Stage1 currently accepts `*`, exact `MAJOR.MINOR.PATCH`, and caret
 the dependency package's `[package].version` while loading the local package
 graph and fails deterministically when the versions are incompatible.
 
-See [stage1.md](stage1.md) for the current compiler, package, and capability
-contract.
+Local path dependencies may declare a bounded version constraint:
+
+```toml
+[dependencies]
+core = { path = "deps/core", version = "^0.1.0" }
+```
+
+Stage1 currently accepts `*`, exact `MAJOR.MINOR.PATCH`, and caret
+`^MAJOR.MINOR.PATCH` constraints. The compiler validates the constraint against
+the dependency package's `[package].version` while loading the local package
+graph and fails deterministically when the versions are incompatible.
 
 `axiomc pkg graph <path> --json` prints the resolved local package graph without
 mutating manifests or lockfiles. The JSON lists each package root, package

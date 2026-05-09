@@ -8,8 +8,8 @@ use axiomc::manifest::{entry_path, load_manifest};
 use axiomc::new_project::{WorkloadTemplate, create_project_with_template};
 use axiomc::project::{
     BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
-    check_project_with_options, list_project_tests_with_options, project_capabilities,
-    run_project_tests_with_options, run_project_with_options,
+    check_project_with_options, list_project_tests_with_options, package_graph_metadata,
+    project_capabilities, run_project_tests_with_options, run_project_with_options,
 };
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
@@ -112,6 +112,11 @@ enum Command {
         #[command(subcommand)]
         command: InspectCommand,
     },
+    /// Inspect local package graph metadata.
+    Pkg {
+        #[command(subcommand)]
+        command: PkgCommand,
+    },
     /// Explain a stable diagnostic code.
     Explain {
         code: String,
@@ -185,6 +190,16 @@ enum Command {
 enum CapsCommand {
     /// Diff two caps JSON payloads and fail on capability escalation.
     Diff { old: PathBuf, new: PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
+enum PkgCommand {
+    /// Emit the resolved local package graph.
+    Graph {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -462,6 +477,26 @@ fn main() {
                 Err(error) => print_error("inspect symbols", error, json),
             },
         },
+        Command::Pkg { command } => match command {
+            PkgCommand::Graph { path, json } => match package_graph_metadata(&path) {
+                Ok(output) => {
+                    if json {
+                        println!(
+                            "{}",
+                            json_contract::to_pretty_string(&output)
+                                .unwrap_or_else(|_| String::from("{}"))
+                        );
+                    } else {
+                        for package in &output.packages {
+                            let name = package.name.as_deref().unwrap_or("<workspace>");
+                            println!("{} {}", name, package.root);
+                        }
+                    }
+                    0
+                }
+                Err(error) => print_error("pkg graph", error, json),
+            },
+        },
         Command::Fmt { path, check, json } => match format_axiom_sources(&path, check) {
             Ok(report) => {
                 let serialization_error = if json {
@@ -650,6 +685,9 @@ fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
     )];
     if let Some(debug_map) = &output.debug_map {
         lines.push(format!("wrote debug map {debug_map}"));
+    }
+    if let Some(debug_manifest) = &output.debug_manifest {
+        lines.push(format!("wrote debug manifest {debug_manifest}"));
     }
     if timings {
         lines.push(
@@ -1974,6 +2012,7 @@ mod tests {
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
         assert!(help.contains("Inspect project metadata for agent tooling"));
+        assert!(help.contains("Inspect local package graph metadata"));
         assert!(help.contains("Explain a stable diagnostic code"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
@@ -1982,6 +2021,20 @@ mod tests {
         assert!(help.contains("Pack, sign, and publish a stage1 package"));
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
+    }
+
+    #[test]
+    fn pkg_graph_cli_parses_path_and_json_flag() {
+        let cli = Cli::parse_from(["axiomc", "pkg", "graph", ".", "--json"]);
+        match cli.command {
+            Command::Pkg {
+                command: PkgCommand::Graph { path, json },
+            } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert!(json);
+            }
+            other => panic!("expected pkg graph command, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2068,7 +2121,7 @@ mod tests {
         }
     }
 
-    fn build_output(debug_map: Option<String>) -> BuildOutput {
+    fn build_output(debug_map: Option<String>, debug_manifest: Option<String>) -> BuildOutput {
         BuildOutput {
             backend: NativeBackendKind::GeneratedRust,
             locked: false,
@@ -2078,6 +2131,7 @@ mod tests {
             binary: String::from("dist/app"),
             generated_rust: String::from("target/main.rs"),
             debug_map,
+            debug_manifest,
             statement_count: 1,
             target: None,
             debug: true,
@@ -2109,7 +2163,7 @@ mod tests {
     fn build_json_includes_target_debug_and_cache_key_metadata() {
         let payload = json_contract::build_success(
             Path::new("stage1/examples/hello"),
-            &build_output(Some(String::from("target/main.debug-map.json"))),
+            &build_output(Some(String::from("target/main.debug-map.json")), None),
         );
 
         assert_eq!(payload["target"], serde_json::json!(null));
@@ -2131,15 +2185,19 @@ mod tests {
     }
 
     #[test]
-    fn build_summary_mentions_debug_map_when_available() {
+    fn build_summary_mentions_debug_artifacts_when_available() {
         assert_eq!(
             build_summary_lines(
-                &build_output(Some(String::from("target/main.debug-map.json"))),
+                &build_output(
+                    Some(String::from("target/main.debug-map.json")),
+                    Some(String::from("target/main.debug-manifest.json")),
+                ),
                 false,
             ),
             vec![
                 String::from("wrote dist/app (backend=generated-rust)"),
                 String::from("wrote debug map target/main.debug-map.json"),
+                String::from("wrote debug manifest target/main.debug-manifest.json"),
             ]
         );
     }
@@ -2147,7 +2205,7 @@ mod tests {
     #[test]
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
-            build_summary_lines(&build_output(None), false),
+            build_summary_lines(&build_output(None, None), false),
             vec![String::from("wrote dist/app (backend=generated-rust)")]
         );
     }

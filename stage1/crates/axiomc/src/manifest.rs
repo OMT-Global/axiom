@@ -138,6 +138,12 @@ pub struct CapabilityDescriptor {
     pub deny_by_default: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allowed: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_root: Option<String>,
     #[serde(skip_serializing_if = "is_false")]
     pub unsafe_unrestricted: bool,
     #[serde(skip_serializing_if = "is_false")]
@@ -322,6 +328,9 @@ pub fn capability_descriptors(config: &CapabilityConfig) -> Vec<CapabilityDescri
             } else {
                 Vec::new()
             },
+            configured_root: None,
+            effective_root: None,
+            package_root: None,
             unsafe_unrestricted: *kind == CapabilityKind::Env && config.env_unrestricted,
             unsafe_opt_in: config.unsafe_opt_ins.iter().any(|name| name == kind.name()),
             owner: config.owners.get(kind.name()).cloned(),
@@ -807,6 +816,12 @@ fn normalize_dependencies(
                     return Err(reserved_manifest_field(
                         path,
                         &format!("dependencies.{name}.source"),
+                    ));
+                }
+                if detail.path.is_none() && detail.version.is_some() {
+                    return Err(reserved_manifest_field(
+                        path,
+                        &format!("dependencies.{name}.version"),
                     ));
                 }
                 let raw_path =
