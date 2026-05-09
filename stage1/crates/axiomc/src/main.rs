@@ -21,6 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::time::Instant;
 
 #[derive(Debug, Parser)]
@@ -120,6 +121,12 @@ enum Command {
     /// Explain a stable diagnostic code.
     Explain {
         code: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Report local stage1 project and toolchain health.
+    Doctor {
+        path: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -496,6 +503,22 @@ fn main() {
                 }
                 Err(error) => print_error("pkg graph", error, json),
             },
+        },
+        Command::Doctor { path, json } => {
+            let project = path.unwrap_or_else(|| PathBuf::from("."));
+            let report = doctor_report(&project);
+            if json {
+                match json_contract::to_pretty_string(&report) {
+                    Ok(output) => {
+                        println!("{output}");
+                        if report.ok { 0 } else { 1 }
+                    }
+                    Err(error) => print_error("doctor", error, false),
+                }
+            } else {
+                println!("{}", doctor_text(&report));
+                if report.ok { 0 } else { 1 }
+            }
         },
         Command::Fmt { path, check, json } => match format_axiom_sources(&path, check) {
             Ok(report) => {
@@ -1289,6 +1312,152 @@ fn capability_for_call(name: &str) -> Option<&'static str> {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DoctorReport {
+    schema_version: &'static str,
+    ok: bool,
+    command: &'static str,
+    project: String,
+    rustc: ToolProbe,
+    cargo: ToolProbe,
+    target_triple: Option<String>,
+    lockfile_status: &'static str,
+    capabilities: Vec<axiomc::manifest::CapabilityDescriptor>,
+    workspace_graph: Vec<DoctorPackage>,
+    known_unsupported_features: Vec<&'static str>,
+    error: Option<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ToolProbe {
+    available: bool,
+    version: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorPackage {
+    package_root: String,
+    manifest: String,
+    entry: String,
+    statement_count: usize,
+}
+
+fn doctor_report(project: &Path) -> DoctorReport {
+    let rustc = probe_tool("rustc", &["-vV"]);
+    let cargo = probe_tool("cargo", &["--version"]);
+    let target_triple = rustc.version.as_deref().and_then(parse_rustc_host_target);
+    let check = check_project_with_options(project, &CheckOptions::default());
+    let (ok, lockfile_status, capabilities, workspace_graph, error) = match check {
+        Ok(output) => {
+            let packages = output
+                .packages
+                .iter()
+                .map(|package| DoctorPackage {
+                    package_root: package.package_root.clone(),
+                    manifest: package.manifest.clone(),
+                    entry: package.entry.clone(),
+                    statement_count: package.statement_count,
+                })
+                .collect();
+            (
+                rustc.available && cargo.available,
+                "valid",
+                output.capabilities,
+                packages,
+                None,
+            )
+        }
+        Err(error) => {
+            let lockfile_status =
+                if error.message.contains("axiom.lock") || error.message.contains("lockfile") {
+                    "invalid"
+                } else {
+                    "unknown"
+                };
+            (false, lockfile_status, Vec::new(), Vec::new(), Some(error))
+        }
+    };
+    DoctorReport {
+        schema_version: json_contract::JSON_SCHEMA_VERSION,
+        ok,
+        command: "doctor",
+        project: project.display().to_string(),
+        rustc,
+        cargo,
+        target_triple,
+        lockfile_status,
+        capabilities,
+        workspace_graph,
+        known_unsupported_features: vec![
+            "package registry resolution",
+            "native Axiom DWARF line tables",
+            "general borrow checker",
+            "trait-style interfaces",
+            "closures",
+        ],
+        error,
+    }
+}
+
+fn probe_tool(program: &str, args: &[&str]) -> ToolProbe {
+    match ProcessCommand::new(program).args(args).output() {
+        Ok(output) if output.status.success() => ToolProbe {
+            available: true,
+            version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
+            error: None,
+        },
+        Ok(output) => ToolProbe {
+            available: false,
+            version: None,
+            error: Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        },
+        Err(error) => ToolProbe {
+            available: false,
+            version: None,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn parse_rustc_host_target(version: &str) -> Option<String> {
+    version
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .map(str::to_string)
+}
+
+fn doctor_text(report: &DoctorReport) -> String {
+    let mut lines = vec![
+        format!("project: {}", report.project),
+        format!("ok: {}", report.ok),
+        format!("rustc: {}", tool_text(&report.rustc)),
+        format!("cargo: {}", tool_text(&report.cargo)),
+        format!(
+            "target_triple: {}",
+            report.target_triple.as_deref().unwrap_or("unknown")
+        ),
+        format!("lockfile_status: {}", report.lockfile_status),
+        format!("packages: {}", report.workspace_graph.len()),
+    ];
+    if let Some(error) = &report.error {
+        lines.push(format!("error: {error}"));
+    }
+    lines.push(format!(
+        "known_unsupported_features: {}",
+        report.known_unsupported_features.join(", ")
+    ));
+    lines.join("\n")
+}
+
+fn tool_text(tool: &ToolProbe) -> String {
+    if tool.available {
+        tool.version.as_deref().unwrap_or("available").to_string()
+    } else {
+        format!("missing ({})", tool.error.as_deref().unwrap_or("unknown"))
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct FormatFileReport {
     path: String,
     changed: bool,
@@ -2014,6 +2183,7 @@ mod tests {
         assert!(help.contains("Inspect project metadata for agent tooling"));
         assert!(help.contains("Inspect local package graph metadata"));
         assert!(help.contains("Explain a stable diagnostic code"));
+        assert!(help.contains("Report local stage1 project and toolchain health"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
@@ -2417,6 +2587,37 @@ mod tests {
         );
         assert_eq!(payload["command"], "explain");
         assert_eq!(payload["diagnostic"]["code"], "use_after_move");
+    }
+
+    #[test]
+    fn doctor_reports_project_health_json_fields() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("doctor");
+        create_project_with_template(&project, Some("doctor-app"), WorkloadTemplate::Cli)
+            .expect("create project");
+
+        let report = doctor_report(&project);
+
+        assert_eq!(report.schema_version, json_contract::JSON_SCHEMA_VERSION);
+        assert_eq!(report.command, "doctor");
+        assert_eq!(report.lockfile_status, "valid");
+        assert_eq!(report.workspace_graph.len(), 1);
+        assert!(report.target_triple.is_some());
+        assert!(
+            report
+                .known_unsupported_features
+                .contains(&"package registry resolution")
+        );
+    }
+
+    #[test]
+    fn rustc_host_target_parser_reads_verbose_version_output() {
+        let version = "rustc 1.90.0\nhost: aarch64-apple-darwin\nrelease: 1.90.0\n";
+
+        assert_eq!(
+            parse_rustc_host_target(version).as_deref(),
+            Some("aarch64-apple-darwin")
+        );
     }
 
     #[test]
