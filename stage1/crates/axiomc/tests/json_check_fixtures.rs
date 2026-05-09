@@ -69,8 +69,55 @@ fn check_success_fixture_matches_stage1_v1_envelope() {
     assert!(payload["entry"].is_string());
     assert!(payload["statement_count"].is_u64());
     assert!(payload["capabilities"].is_array());
+    assert_eq!(
+        capability_contract(&payload["capabilities"]),
+        expected_capability_contract()
+    );
     assert!(payload["warnings"].is_array());
     assert!(payload["packages"].is_array());
+    let package = &payload["packages"][0];
+    assert_eq!(
+        capability_contract(&package["capabilities"]),
+        expected_capability_contract()
+    );
+}
+
+fn capability_contract(capabilities: &Value) -> Vec<(String, bool, String)> {
+    capabilities
+        .as_array()
+        .expect("capabilities array")
+        .iter()
+        .map(|capability| {
+            (
+                capability["name"]
+                    .as_str()
+                    .expect("capability name")
+                    .to_owned(),
+                capability["enabled"].as_bool().expect("capability enabled"),
+                capability["description"]
+                    .as_str()
+                    .expect("capability description")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn expected_capability_contract() -> Vec<(String, bool, String)> {
+    [
+        ("fs", false, "filesystem read access"),
+        ("fs:write", false, "filesystem write access"),
+        ("net", false, "network access"),
+        ("process", false, "child process execution"),
+        ("env", false, "environment variable access"),
+        ("clock", false, "wall-clock time access"),
+        ("crypto", false, "hashing and cryptography primitives"),
+        ("ffi", false, "foreign function interface access"),
+        ("async", false, "host async runtime access"),
+    ]
+    .into_iter()
+    .map(|(name, enabled, description)| (name.to_owned(), enabled, description.to_owned()))
+    .collect()
 }
 
 #[test]
