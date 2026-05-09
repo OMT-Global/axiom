@@ -2847,6 +2847,7 @@ crypto = false
             "https://",
             "https://not a host",
             "https://registry.example.test:bad-port/index",
+            "https://registry.example.test:99999/index",
             "https://exa[mple.test/index",
             "file:",
             "file://hosted/path",
