@@ -101,8 +101,6 @@ analysis.
 The generated index records per-release capability manifests, archive/signature URLs,
 and yanked status so a simple static host can serve lockfile-friendly package metadata. This is publish and registry-index groundwork for a future hosted registry service, not the hosted service itself.
 
-and yanked status so a simple static host can serve lockfile-friendly package metadata. This is registry-index groundwork for a future hosted registry service, not the hosted service itself.
-
 ## Registry And Publish Contract
 
 The local manifest contract reserves the package-registry surface without
