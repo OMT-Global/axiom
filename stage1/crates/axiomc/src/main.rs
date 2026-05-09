@@ -1,13 +1,15 @@
 use axiomc::codegen::NativeBackendKind;
 use axiomc::dap;
+use axiomc::diagnostic_catalog::{DiagnosticCodeInfo, diagnostic_code_info};
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lsp;
-use axiomc::new_project::create_project;
+use axiomc::manifest::{entry_path, load_manifest};
+use axiomc::new_project::{WorkloadTemplate, create_project_with_template};
 use axiomc::project::{
     BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, build_project_with_options,
-    check_project_with_options, project_capabilities, run_project_tests_with_options,
-    run_project_with_options,
+    check_project_with_options, list_project_tests_with_options, package_graph_metadata,
+    project_capabilities, run_project_tests_with_options, run_project_with_options,
 };
 use axiomc::registry::{
     PublishOptions, load_registry_index, publish_package, render_registry_index,
@@ -35,12 +37,22 @@ enum Command {
         path: PathBuf,
         #[arg(long)]
         name: Option<String>,
+        #[arg(long, default_value = "cli")]
+        template: String,
+    },
+    /// Parse the primary stage1 package entrypoint without typechecking.
+    Parse {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     /// Check a stage1 package or workspace member without building an artifact.
     Check {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        exports: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
@@ -82,6 +94,8 @@ enum Command {
         filter: Option<String>,
         #[arg(long)]
         include_benchmarks: bool,
+        #[arg(long)]
+        list: bool,
         #[arg(short = 'p', long = "package")]
         package: Option<String>,
     },
@@ -93,11 +107,29 @@ enum Command {
         #[command(subcommand)]
         command: Option<CapsCommand>,
     },
+    /// Inspect project metadata for agent tooling.
+    Inspect {
+        #[command(subcommand)]
+        command: InspectCommand,
+    },
+    /// Inspect local package graph metadata.
+    Pkg {
+        #[command(subcommand)]
+        command: PkgCommand,
+    },
+    /// Explain a stable diagnostic code.
+    Explain {
+        code: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Format .ax source files with the canonical stage1 style.
     Fmt {
         path: PathBuf,
         #[arg(long)]
         check: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Generate Markdown and HTML API docs from source doc comments.
     Doc {
@@ -160,24 +192,77 @@ enum CapsCommand {
     Diff { old: PathBuf, new: PathBuf },
 }
 
+#[derive(Debug, Subcommand)]
+enum PkgCommand {
+    /// Emit the resolved local package graph.
+    Graph {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum InspectCommand {
+    /// Emit exported functions, types, consts, imports, and capability use.
+    Symbols {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 fn main() {
     let cli = Cli::parse();
     let code = match cli.command {
-        Command::New { path, name } => match create_project(&path, name.as_deref()) {
+        Command::New {
+            path,
+            name,
+            template,
+        } => match WorkloadTemplate::parse(&template)
+            .and_then(|template| create_project_with_template(&path, name.as_deref(), template))
+        {
             Ok(()) => {
-                println!("initialized stage1 project in {}", path.display());
+                println!(
+                    "initialized stage1 {template} project in {}",
+                    path.display()
+                );
                 0
             }
             Err(error) => print_error("new", error, false),
         },
+        Command::Parse { path, json } => match parse_project_entry(&path) {
+            Ok(output) => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "schema_version": json_contract::JSON_SCHEMA_VERSION,
+                            "ok": true,
+                            "command": "parse",
+                            "project": path.display().to_string(),
+                            "manifest": output.manifest,
+                            "entry": output.entry,
+                            "statement_count": output.statement_count,
+                        })
+                    );
+                } else {
+                    eprintln!("OK statements={}", output.statement_count);
+                }
+                0
+            }
+            Err(error) => print_error("parse", error, json),
+        },
         Command::Check {
             path,
             json,
+            exports,
             package,
         } => match check_project_with_options(
             &path,
             &CheckOptions {
                 package: package.clone(),
+                include_exports: exports,
             },
         ) {
             Ok(output) => {
@@ -200,9 +285,9 @@ fn main() {
             debug,
             timings,
             target,
-            package,
             locked,
             offline,
+            package,
         } => {
             match build_project_with_options(
                 &path,
@@ -242,40 +327,68 @@ fn main() {
             json,
             filter,
             include_benchmarks,
+            list,
             package,
-        } => match run_project_tests_with_options(
-            &path,
-            &TestOptions {
+        } => {
+            let options = TestOptions {
                 filter: filter.clone(),
                 package: package.clone(),
                 include_benchmarks,
-            },
-        ) {
-            Ok(output) => {
-                let ok = output.failed == 0;
-                if json {
-                    println!(
-                        "{}",
-                        json_contract::test_success(&path, filter.as_deref(), &output)
-                    );
-                } else {
-                    for case in &output.cases {
-                        let status = if case.ok { "PASS" } else { "FAIL" };
-                        eprintln!("{status} {:?} {} ({})", case.kind, case.name, case.entry);
-                        if let Some(error) = &case.error {
-                            eprintln!("  {}", error);
+            };
+            if list {
+                match list_project_tests_with_options(&path, &options) {
+                    Ok(output) => {
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::test_list_success(&path, filter.as_deref(), &output)
+                            );
+                        } else {
+                            for test in &output.tests {
+                                let package = test.package.as_deref().unwrap_or("<unnamed>");
+                                eprintln!(
+                                    "{:?} {} {} ({})",
+                                    test.kind, package, test.name, test.entry
+                                );
+                            }
+                            eprintln!("discovered: {}", output.tests.len());
                         }
-                        eprintln!("  duration: {} ms", case.duration_ms);
+                        0
                     }
-                    eprintln!(
-                        "passed: {} failed: {} skipped: {} duration: {} ms",
-                        output.passed, output.failed, output.skipped, output.duration_ms
-                    );
+                    Err(error) => print_error("test", error, json),
                 }
-                if ok { 0 } else { 1 }
+            } else {
+                match run_project_tests_with_options(&path, &options) {
+                    Ok(output) => {
+                        let ok = output.failed == 0;
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::test_success(&path, filter.as_deref(), &output)
+                            );
+                        } else {
+                            for case in &output.cases {
+                                let status = if case.ok { "PASS" } else { "FAIL" };
+                                eprintln!(
+                                    "{status} {:?} {} ({})",
+                                    case.kind, case.name, case.entry
+                                );
+                                if let Some(error) = &case.error {
+                                    eprintln!("  {}", error);
+                                }
+                                eprintln!("  duration: {} ms", case.duration_ms);
+                            }
+                            eprintln!(
+                                "passed: {} failed: {} skipped: {} duration: {} ms",
+                                output.passed, output.failed, output.skipped, output.duration_ms
+                            );
+                        }
+                        if ok { 0 } else { 1 }
+                    }
+                    Err(error) => print_error("test", error, json),
+                }
             }
-            Err(error) => print_error("test", error, json),
-        },
+        }
         Command::Caps {
             path,
             json,
@@ -323,22 +436,99 @@ fn main() {
                 }
             }
         },
-        Command::Fmt { path, check } => match format_axiom_sources(&path, check) {
-            Ok(report) => {
-                for file in &report.files {
-                    if file.changed {
-                        eprintln!("formatted {}", file.path);
-                    }
-                }
-                if check && report.changed > 0 {
-                    eprintln!("{} file(s) need formatting", report.changed);
-                    1
+        Command::Explain { code, json } => match diagnostic_code_info(&code) {
+            Some(info) => {
+                if json {
+                    println!(
+                        "{}",
+                        json_contract::to_pretty_string(&explain_payload(info))
+                            .unwrap_or_else(|_| String::from("{}"))
+                    );
                 } else {
-                    eprintln!("checked {} file(s)", report.files.len());
+                    println!("{}", explain_text(info));
+                }
+                0
+            }
+            None => print_error(
+                "explain",
+                Diagnostic::new("diagnostic", format!("unknown diagnostic code {code:?}")),
+                json,
+            ),
+        },
+        Command::Inspect { command } => match command {
+            InspectCommand::Symbols { path, json } => match inspect_symbols(&path) {
+                Ok(report) => {
+                    if json {
+                        println!(
+                            "{}",
+                            json_contract::to_pretty_string(&report)
+                                .unwrap_or_else(|_| String::from("{}"))
+                        );
+                    } else {
+                        for symbol in &report.symbols {
+                            println!(
+                                "{} {} {}:{}",
+                                symbol.kind, symbol.name, symbol.span.path, symbol.span.line
+                            );
+                        }
+                    }
                     0
                 }
+                Err(error) => print_error("inspect symbols", error, json),
+            },
+        },
+        Command::Pkg { command } => match command {
+            PkgCommand::Graph { path, json } => match package_graph_metadata(&path) {
+                Ok(output) => {
+                    if json {
+                        println!(
+                            "{}",
+                            json_contract::to_pretty_string(&output)
+                                .unwrap_or_else(|_| String::from("{}"))
+                        );
+                    } else {
+                        for package in &output.packages {
+                            let name = package.name.as_deref().unwrap_or("<workspace>");
+                            println!("{} {}", name, package.root);
+                        }
+                    }
+                    0
+                }
+                Err(error) => print_error("pkg graph", error, json),
+            },
+        },
+        Command::Fmt { path, check, json } => match format_axiom_sources(&path, check) {
+            Ok(report) => {
+                let serialization_error = if json {
+                    match json_contract::to_pretty_string(&report) {
+                        Ok(output) => {
+                            println!("{output}");
+                            None
+                        }
+                        Err(error) => Some(error),
+                    }
+                } else {
+                    None
+                };
+                if let Some(error) = serialization_error {
+                    print_error("fmt", error, true)
+                } else {
+                    if !json {
+                        for file in &report.files {
+                            if file.changed {
+                                eprintln!("formatted {}", file.path);
+                            }
+                        }
+                        if check && report.changed > 0 {
+                            eprintln!("{} file(s) need formatting", report.changed);
+                        } else {
+                            eprintln!("checked {} file(s)", report.files.len());
+                        }
+                    }
+                    if check && report.changed > 0 { 1 } else { 0 }
+                }
             }
-            Err(error) => print_error("fmt", error, false),
+            Err(error) => print_error("fmt", error, json),
         },
         Command::Doc { path, out_dir } => match generate_docs(&path, &out_dir) {
             Ok(output) => {
@@ -464,6 +654,30 @@ fn main() {
     std::process::exit(code);
 }
 
+#[derive(Debug)]
+struct ParseOutput {
+    manifest: String,
+    entry: String,
+    statement_count: usize,
+}
+
+fn parse_project_entry(path: &Path) -> Result<ParseOutput, Diagnostic> {
+    let manifest = load_manifest(path)?;
+    let entry = entry_path(path, &manifest);
+    let source = fs::read_to_string(&entry).map_err(|err| {
+        Diagnostic::new(
+            "parse",
+            format!("failed to read {}: {err}", entry.display()),
+        )
+    })?;
+    let program = parse_program(&source, &entry)?;
+    Ok(ParseOutput {
+        manifest: path.join("axiom.toml").display().to_string(),
+        entry: entry.display().to_string(),
+        statement_count: program.stmts.len(),
+    })
+}
+
 fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
     let mut lines = vec![format!(
         "wrote {} (backend={})",
@@ -471,6 +685,9 @@ fn build_summary_lines(output: &BuildOutput, timings: bool) -> Vec<String> {
     )];
     if let Some(debug_map) = &output.debug_map {
         lines.push(format!("wrote debug map {debug_map}"));
+    }
+    if let Some(debug_manifest) = &output.debug_manifest {
+        lines.push(format!("wrote debug manifest {debug_manifest}"));
     }
     if timings {
         lines.push(
@@ -660,6 +877,36 @@ fn scope_diff(
     })
 }
 
+fn explain_payload(info: &DiagnosticCodeInfo) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": json_contract::JSON_SCHEMA_VERSION,
+        "ok": true,
+        "command": "explain",
+        "diagnostic": info,
+    })
+}
+
+fn explain_text(info: &DiagnosticCodeInfo) -> String {
+    format!(
+        "{code} ({kind})
+{title}
+
+{explanation}
+
+Example:
+{example}
+
+Suggested fix:
+{suggested_fix}",
+        code = info.code,
+        kind = info.kind,
+        title = info.title,
+        explanation = info.explanation,
+        example = info.example,
+        suggested_fix = info.suggested_fix,
+    )
+}
+
 fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
     if json {
         println!("{}", json_contract::error(command, &error));
@@ -672,14 +919,387 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
     1
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+struct FormatEdit {
+    action: String,
+    line: usize,
+    before: Option<String>,
+    after: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InspectSymbolsReport {
+    schema_version: &'static str,
+    ok: bool,
+    command: &'static str,
+    project: String,
+    symbols: Vec<InspectedSymbol>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InspectedSymbol {
+    name: String,
+    kind: &'static str,
+    signature: String,
+    span: SymbolSpan,
+    imports: Vec<String>,
+    capabilities: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SymbolSpan {
+    path: String,
+    line: usize,
+    column: usize,
+}
+
+fn inspect_symbols(path: &Path) -> Result<InspectSymbolsReport, Diagnostic> {
+    let files = axiom_files(path)?;
+    let mut symbols = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(&file).map_err(|err| {
+            Diagnostic::new(
+                "inspect",
+                format!("failed to read {}: {err}", file.display()),
+            )
+            .with_path(file.display().to_string())
+        })?;
+        let program = parse_program(&source, &file)?;
+        let imports = program
+            .imports
+            .iter()
+            .map(|import| import.path.clone())
+            .collect::<Vec<_>>();
+        for decl in &program.consts {
+            if decl.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "const",
+                    signature: format!("pub const {}: {}", decl.name, render_type(&decl.ty)),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: capabilities_in_expr(&decl.expr),
+                });
+            }
+        }
+        for decl in &program.type_aliases {
+            if decl.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "type",
+                    signature: format!("pub type {} = {}", decl.name, render_type(&decl.ty)),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        for decl in &program.structs {
+            if decl.visibility.is_public() {
+                let fields = decl
+                    .fields
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name, render_type(&field.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "struct",
+                    signature: format!("pub struct {} {{ {} }}", decl.name, fields),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        for decl in &program.enums {
+            if decl.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: decl.name.clone(),
+                    kind: "enum",
+                    signature: format!("pub enum {}", decl.name),
+                    span: symbol_span(&file, decl.line, decl.column),
+                    imports: imports.clone(),
+                    capabilities: Vec::new(),
+                });
+            }
+        }
+        for function in &program.functions {
+            if function.visibility.is_public() {
+                symbols.push(InspectedSymbol {
+                    name: function.source_name.clone(),
+                    kind: "function",
+                    signature: function_signature(function),
+                    span: symbol_span(&file, function.line, function.column),
+                    imports: imports.clone(),
+                    capabilities: capabilities_in_stmts(&function.body),
+                });
+            }
+        }
+    }
+    symbols.sort_by(|left, right| {
+        left.span
+            .path
+            .cmp(&right.span.path)
+            .then_with(|| left.span.line.cmp(&right.span.line))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(InspectSymbolsReport {
+        schema_version: json_contract::JSON_SCHEMA_VERSION,
+        ok: true,
+        command: "inspect symbols",
+        project: path.display().to_string(),
+        symbols,
+    })
+}
+
+fn symbol_span(path: &Path, line: usize, column: usize) -> SymbolSpan {
+    SymbolSpan {
+        path: path.display().to_string(),
+        line,
+        column,
+    }
+}
+
+fn function_signature(function: &axiomc::syntax::Function) -> String {
+    let async_prefix = if function.is_async { "async " } else { "" };
+    let params = function
+        .params
+        .iter()
+        .map(|param| format!("{}: {}", param.name, render_type(&param.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "pub {async_prefix}fn {}({params}): {}",
+        function.source_name,
+        render_type(&function.return_ty)
+    )
+}
+
+fn render_type(ty: &axiomc::syntax::TypeName) -> String {
+    use axiomc::syntax::TypeName;
+    match ty {
+        TypeName::Int => "int".to_string(),
+        TypeName::Numeric(numeric) => numeric.as_str().to_string(),
+        TypeName::Bool => "bool".to_string(),
+        TypeName::String => "string".to_string(),
+        TypeName::Str => "str".to_string(),
+        TypeName::Named(name, args) if args.is_empty() => name.clone(),
+        TypeName::Named(name, args) => format!(
+            "{}<{}>",
+            name,
+            args.iter().map(render_type).collect::<Vec<_>>().join(", ")
+        ),
+        TypeName::Ptr(inner) => format!("ptr<{}>", render_type(inner)),
+        TypeName::MutPtr(inner) => format!("mut ptr<{}>", render_type(inner)),
+        TypeName::Slice(inner) => format!("&[{}]", render_type(inner)),
+        TypeName::MutSlice(inner) => format!("&mut [{}]", render_type(inner)),
+        TypeName::LifetimeSlice(lifetime, inner) => {
+            format!("&'{lifetime} [{}]", render_type(inner))
+        }
+        TypeName::LifetimeMutSlice(lifetime, inner) => {
+            format!("&'{lifetime} mut [{}]", render_type(inner))
+        }
+        TypeName::Option(inner) => format!("Option<{}>", render_type(inner)),
+        TypeName::Result(ok, err) => format!("Result<{}, {}>", render_type(ok), render_type(err)),
+        TypeName::Tuple(elements) => format!(
+            "({})",
+            elements
+                .iter()
+                .map(render_type)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        TypeName::Map(key, value) => format!("{{{}: {}}}", render_type(key), render_type(value)),
+        TypeName::Array(inner, Some(size)) => format!("[{}; {}]", render_type(inner), size),
+        TypeName::Array(inner, None) => format!("[{}]", render_type(inner)),
+        TypeName::Fn(params, ret) => format!(
+            "fn({}) -> {}",
+            params
+                .iter()
+                .map(render_type)
+                .collect::<Vec<_>>()
+                .join(", "),
+            render_type(ret)
+        ),
+    }
+}
+
+fn capabilities_in_stmts(stmts: &[axiomc::syntax::Stmt]) -> Vec<&'static str> {
+    let mut capabilities = Vec::new();
+    for stmt in stmts {
+        collect_stmt_capabilities(stmt, &mut capabilities);
+    }
+    capabilities.sort_unstable();
+    capabilities.dedup();
+    capabilities
+}
+
+fn capabilities_in_expr(expr: &axiomc::syntax::Expr) -> Vec<&'static str> {
+    let mut capabilities = Vec::new();
+    collect_expr_capabilities(expr, &mut capabilities);
+    capabilities.sort_unstable();
+    capabilities.dedup();
+    capabilities
+}
+
+fn collect_stmt_capabilities(stmt: &axiomc::syntax::Stmt, capabilities: &mut Vec<&'static str>) {
+    use axiomc::syntax::Stmt;
+    match stmt {
+        Stmt::Let { expr, .. }
+        | Stmt::Print { expr, .. }
+        | Stmt::Panic { expr, .. }
+        | Stmt::Defer { expr, .. }
+        | Stmt::Return { expr, .. } => collect_expr_capabilities(expr, capabilities),
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_expr_capabilities(cond, capabilities);
+            for stmt in then_block {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+            for stmt in else_block.iter().flatten() {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+        }
+        Stmt::IfLet {
+            expr,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_expr_capabilities(expr, capabilities);
+            for stmt in then_block {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+            for stmt in else_block.iter().flatten() {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            collect_expr_capabilities(cond, capabilities);
+            for stmt in body {
+                collect_stmt_capabilities(stmt, capabilities);
+            }
+        }
+        Stmt::Match { expr, arms, .. } => {
+            collect_expr_capabilities(expr, capabilities);
+            for arm in arms {
+                for stmt in &arm.body {
+                    collect_stmt_capabilities(stmt, capabilities);
+                }
+            }
+        }
+    }
+}
+
+fn collect_expr_capabilities(expr: &axiomc::syntax::Expr, capabilities: &mut Vec<&'static str>) {
+    use axiomc::syntax::Expr;
+    match expr {
+        Expr::Call { name, args, .. } => {
+            if let Some(capability) = capability_for_call(name) {
+                capabilities.push(capability);
+            }
+            for arg in args {
+                collect_expr_capabilities(arg, capabilities);
+            }
+        }
+        Expr::MethodCall { base, args, .. } => {
+            collect_expr_capabilities(base, capabilities);
+            for arg in args {
+                collect_expr_capabilities(arg, capabilities);
+            }
+        }
+        Expr::BinaryAdd { lhs, rhs, .. } | Expr::BinaryCompare { lhs, rhs, .. } => {
+            collect_expr_capabilities(lhs, capabilities);
+            collect_expr_capabilities(rhs, capabilities);
+        }
+        Expr::Cast { expr, .. } | Expr::Try { expr, .. } | Expr::Await { expr, .. } => {
+            collect_expr_capabilities(expr, capabilities);
+        }
+        Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_expr_capabilities(&field.expr, capabilities);
+            }
+        }
+        Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
+            collect_expr_capabilities(base, capabilities);
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            collect_expr_capabilities(base, capabilities);
+            if let Some(start) = start {
+                collect_expr_capabilities(start, capabilities);
+            }
+            if let Some(end) = end {
+                collect_expr_capabilities(end, capabilities);
+            }
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_expr_capabilities(element, capabilities);
+            }
+        }
+        Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                collect_expr_capabilities(&entry.key, capabilities);
+                collect_expr_capabilities(&entry.value, capabilities);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_expr_capabilities(base, capabilities);
+            collect_expr_capabilities(index, capabilities);
+        }
+        Expr::Closure { body, .. } => collect_expr_capabilities(body, capabilities),
+        Expr::Literal(_) | Expr::VarRef { .. } => {}
+    }
+}
+
+fn capability_for_call(name: &str) -> Option<&'static str> {
+    match name {
+        "clock_now_ms" | "clock_elapsed_ms" | "clock_sleep_ms" => Some("clock"),
+        "env_get" => Some("env"),
+        "fs_read" => Some("fs"),
+        "fs_write" | "fs_create" | "fs_append" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file"
+        | "fs_remove_dir" | "fs_replace" => Some("fs:write"),
+        "net_resolve"
+        | "http_get"
+        | "http_serve_once"
+        | "http_serve_route"
+        | "net_tcp_listen_loopback_once"
+        | "tcp_listen_loopback_once"
+        | "net_tcp_dial"
+        | "tcp_dial"
+        | "net_udp_bind_loopback_once"
+        | "udp_bind_loopback_once"
+        | "net_udp_send_recv"
+        | "udp_send_recv" => Some("net"),
+        "process_status" => Some("process"),
+        "crypto_sha256"
+        | "crypto_hmac_sha256"
+        | "crypto_constant_time_eq"
+        | "hmac_sha256"
+        | "constant_time_eq" => Some("crypto"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct FormatFileReport {
     path: String,
     changed: bool,
+    edits: Vec<FormatEdit>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 struct FormatReport {
+    schema_version: &'static str,
+    command: &'static str,
+    check: bool,
     files: Vec<FormatFileReport>,
     changed: usize,
 }
@@ -701,6 +1321,7 @@ fn format_axiom_sources(path: &Path, check: bool) -> Result<FormatReport, Diagno
         })?;
         let formatted = format_axiom_source(&original);
         let is_changed = formatted != original;
+        let edits = format_edits(&original, &formatted);
         if is_changed {
             changed += 1;
             if !check {
@@ -713,9 +1334,13 @@ fn format_axiom_sources(path: &Path, check: bool) -> Result<FormatReport, Diagno
         reports.push(FormatFileReport {
             path: file.display().to_string(),
             changed: is_changed,
+            edits,
         });
     }
     Ok(FormatReport {
+        schema_version: json_contract::JSON_SCHEMA_VERSION,
+        command: "fmt",
+        check,
         files: reports,
         changed,
     })
@@ -737,6 +1362,43 @@ fn format_axiom_source(source: &str) -> String {
         lines.pop();
     }
     format!("{}\n", lines.join("\n"))
+}
+
+fn format_edits(original: &str, formatted: &str) -> Vec<FormatEdit> {
+    let original_lines: Vec<&str> = original.split_inclusive('\n').collect();
+    let formatted_lines: Vec<&str> = formatted.split_inclusive('\n').collect();
+    let max_len = original_lines.len().max(formatted_lines.len());
+    let mut edits = Vec::new();
+    for index in 0..max_len {
+        match (original_lines.get(index), formatted_lines.get(index)) {
+            (Some(before), Some(after)) if before != after => edits.push(FormatEdit {
+                action: String::from("replace_line"),
+                line: index + 1,
+                before: Some(trim_line_ending(before).to_string()),
+                after: Some(trim_line_ending(after).to_string()),
+            }),
+            (Some(before), None) => edits.push(FormatEdit {
+                action: String::from("delete_line"),
+                line: index + 1,
+                before: Some(trim_line_ending(before).to_string()),
+                after: None,
+            }),
+            (None, Some(after)) => edits.push(FormatEdit {
+                action: String::from("insert_line"),
+                line: index + 1,
+                before: None,
+                after: Some(trim_line_ending(after).to_string()),
+            }),
+            _ => {}
+        }
+    }
+    edits
+}
+
+fn trim_line_ending(line: &str) -> &str {
+    line.strip_suffix('\n')
+        .and_then(|line| line.strip_suffix('\r').or(Some(line)))
+        .unwrap_or(line)
 }
 
 #[derive(Debug, Clone)]
@@ -1349,6 +2011,9 @@ mod tests {
         assert!(!build_help.contains("direct-native"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
+        assert!(help.contains("Inspect project metadata for agent tooling"));
+        assert!(help.contains("Inspect local package graph metadata"));
+        assert!(help.contains("Explain a stable diagnostic code"));
         assert!(help.contains("Format .ax source files"));
         assert!(help.contains("Generate Markdown and HTML API docs"));
         assert!(help.contains("Run discovered *_bench.ax entrypoints"));
@@ -1356,6 +2021,32 @@ mod tests {
         assert!(help.contains("Pack, sign, and publish a stage1 package"));
         assert!(help.contains("Build a static package-registry index"));
         assert!(help.contains("Validate a static package-registry index JSON file"));
+    }
+
+    #[test]
+    fn pkg_graph_cli_parses_path_and_json_flag() {
+        let cli = Cli::parse_from(["axiomc", "pkg", "graph", ".", "--json"]);
+        match cli.command {
+            Command::Pkg {
+                command: PkgCommand::Graph { path, json },
+            } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert!(json);
+            }
+            other => panic!("expected pkg graph command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_accepts_list_flag() {
+        let cli = Cli::parse_from(["axiomc", "test", ".", "--list", "--json"]);
+        match cli.command {
+            Command::Test { list, json, .. } => {
+                assert!(list);
+                assert!(json);
+            }
+            other => panic!("expected test command, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1430,7 +2121,7 @@ mod tests {
         }
     }
 
-    fn build_output(debug_map: Option<String>) -> BuildOutput {
+    fn build_output(debug_map: Option<String>, debug_manifest: Option<String>) -> BuildOutput {
         BuildOutput {
             backend: NativeBackendKind::GeneratedRust,
             locked: false,
@@ -1440,6 +2131,7 @@ mod tests {
             binary: String::from("dist/app"),
             generated_rust: String::from("target/main.rs"),
             debug_map,
+            debug_manifest,
             statement_count: 1,
             target: None,
             debug: true,
@@ -1471,7 +2163,7 @@ mod tests {
     fn build_json_includes_target_debug_and_cache_key_metadata() {
         let payload = json_contract::build_success(
             Path::new("stage1/examples/hello"),
-            &build_output(Some(String::from("target/main.debug-map.json"))),
+            &build_output(Some(String::from("target/main.debug-map.json")), None),
         );
 
         assert_eq!(payload["target"], serde_json::json!(null));
@@ -1493,15 +2185,19 @@ mod tests {
     }
 
     #[test]
-    fn build_summary_mentions_debug_map_when_available() {
+    fn build_summary_mentions_debug_artifacts_when_available() {
         assert_eq!(
             build_summary_lines(
-                &build_output(Some(String::from("target/main.debug-map.json"))),
+                &build_output(
+                    Some(String::from("target/main.debug-map.json")),
+                    Some(String::from("target/main.debug-manifest.json")),
+                ),
                 false,
             ),
             vec![
                 String::from("wrote dist/app (backend=generated-rust)"),
                 String::from("wrote debug map target/main.debug-map.json"),
+                String::from("wrote debug manifest target/main.debug-manifest.json"),
             ]
         );
     }
@@ -1509,7 +2205,7 @@ mod tests {
     #[test]
     fn build_summary_omits_debug_map_for_release_builds() {
         assert_eq!(
-            build_summary_lines(&build_output(None), false),
+            build_summary_lines(&build_output(None, None), false),
             vec![String::from("wrote dist/app (backend=generated-rust)")]
         );
     }
@@ -1622,10 +2318,163 @@ mod tests {
     }
 
     #[test]
+    fn inspect_symbols_reports_public_symbols_and_capabilities() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_dir = dir.path().join("src");
+        fs::create_dir_all(&source_dir).expect("create source dir");
+        fs::write(
+            source_dir.join("main.ax"),
+            "import \"time.ax\"\n\npub const LIMIT: int = 3\n\npub struct Job {\nname: string\n}\n\npub fn now(): int {\nreturn clock_now_ms()\n}\n\npub fn dial(): int {\nreturn net_tcp_dial(\"127.0.0.1\", 80)\n}\n\npub fn write_file_cap(): int {\nreturn fs_write(\"tmp.txt\", \"ok\")\n}\n\npub fn create_file_cap(): int {\nreturn fs_create(\"tmp.txt\")\n}\n\npub fn serve_once_cap(): bool {\nreturn http_serve_once(\"127.0.0.1:0\", \"ok\")\n}\n\npub fn serve_route_cap(): bool {\nreturn http_serve_route(\"127.0.0.1:0\", \"/\", \"ok\", 1)\n}\n\npub fn mac(): string {\nreturn hmac_sha256(\"key\", \"message\")\n}\n\npub fn safe_eq(): bool {\nreturn constant_time_eq(\"left\", \"right\")\n}\n\npub fn slice_time(values: [int]): [int] {\nreturn values[0:clock_now_ms()]\n}\n\nfn private_helper(): int {\nreturn 1\n}\n",
+        )
+        .expect("write main source");
+        fs::write(
+            source_dir.join("time.ax"),
+            "pub fn exported(): int {\nreturn 7\n}\n",
+        )
+        .expect("write imported source");
+
+        let report = inspect_symbols(dir.path()).expect("inspect symbols");
+
+        assert_eq!(report.command, "inspect symbols");
+        assert_eq!(report.symbols.len(), 12);
+        let now = report
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "now")
+            .expect("now symbol");
+        assert_eq!(now.kind, "function");
+        assert!(now.signature.contains("pub fn now(): int"));
+        assert_eq!(now.imports, vec![String::from("time.ax")]);
+        assert_eq!(now.capabilities, vec!["clock"]);
+        let dial = report
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "dial")
+            .expect("dial symbol");
+        assert_eq!(dial.capabilities, vec!["net"]);
+        for symbol_name in ["write_file_cap", "create_file_cap"] {
+            let symbol = report
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == symbol_name)
+                .expect("fs write symbol");
+            assert_eq!(symbol.capabilities, vec!["fs:write"]);
+        }
+        for symbol_name in ["serve_once_cap", "serve_route_cap"] {
+            let symbol = report
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == symbol_name)
+                .expect("net symbol");
+            assert_eq!(symbol.capabilities, vec!["net"]);
+        }
+        for symbol_name in ["mac", "safe_eq"] {
+            let symbol = report
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == symbol_name)
+                .expect("crypto symbol");
+            assert_eq!(symbol.capabilities, vec!["crypto"]);
+        }
+        let slice_time = report
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "slice_time")
+            .expect("slice_time symbol");
+        assert_eq!(slice_time.capabilities, vec!["clock"]);
+        assert!(
+            report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "exported")
+        );
+        assert!(
+            !report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "private_helper")
+        );
+    }
+
+    #[test]
+    fn explain_text_includes_example_and_fix() {
+        let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
+        let text = explain_text(info);
+
+        assert!(text.contains("use_after_move (ownership)"));
+        assert!(text.contains("Example:"));
+        assert!(text.contains("Suggested fix:"));
+    }
+
+    #[test]
+    fn explain_json_payload_is_versioned() {
+        let info = diagnostic_code_info("use_after_move").expect("diagnostic info");
+        let payload = explain_payload(info);
+
+        assert_eq!(
+            payload["schema_version"],
+            json_contract::JSON_SCHEMA_VERSION
+        );
+        assert_eq!(payload["command"], "explain");
+        assert_eq!(payload["diagnostic"]["code"], "use_after_move");
+    }
+
+    #[test]
     fn formatter_trims_whitespace_and_collapses_blank_runs() {
         assert_eq!(
             format_axiom_source("fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n"),
             "fn main() {\n    print \"hi\"\n\n}\n"
+        );
+    }
+
+    #[test]
+    fn formatter_check_reports_json_planning_edits_without_writing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src/main.ax");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("mkdir");
+        fs::write(&source, "fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n").expect("write source");
+
+        let report = format_axiom_sources(dir.path(), true).expect("format report");
+
+        assert_eq!(report.schema_version, json_contract::JSON_SCHEMA_VERSION);
+        assert_eq!(report.command, "fmt");
+        assert!(report.check);
+        assert_eq!(report.changed, 1);
+        assert_eq!(report.files.len(), 1);
+        assert!(report.files[0].changed);
+        assert!(
+            report.files[0]
+                .edits
+                .iter()
+                .any(|edit| edit.action == "replace_line" && edit.line == 1)
+        );
+        assert_eq!(
+            fs::read_to_string(&source).expect("read source"),
+            "fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n"
+        );
+    }
+
+    #[test]
+    fn formatter_check_reports_missing_final_newline_edit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("src/main.ax");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("mkdir");
+        fs::write(&source, "fn main() {}").expect("write source");
+
+        let report = format_axiom_sources(dir.path(), true).expect("format report");
+
+        assert_eq!(report.changed, 1);
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].edits.len(), 1);
+        assert_eq!(report.files[0].edits[0].action, "replace_line");
+        assert_eq!(report.files[0].edits[0].line, 1);
+        assert_eq!(
+            report.files[0].edits[0].before.as_deref(),
+            Some("fn main() {}")
+        );
+        assert_eq!(
+            report.files[0].edits[0].after.as_deref(),
+            Some("fn main() {}")
         );
     }
 
