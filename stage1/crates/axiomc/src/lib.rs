@@ -1,5 +1,6 @@
 pub mod codegen;
 pub mod dap;
+pub mod diagnostic_catalog;
 pub mod diagnostics;
 pub mod hir;
 pub mod json_contract;
@@ -28,8 +29,9 @@ mod tests {
     use crate::project::{
         BuildCacheStatus, BuildOptions, CheckOptions, RunOptions, TestOptions, build_project,
         build_project_with_options, check_project, check_project_with_options,
-        command_for_build_output, command_for_executable, project_capabilities, run_project_tests,
-        run_project_tests_with_options, run_project_with_options,
+        command_for_build_output, command_for_executable, list_project_tests_with_options,
+        project_capabilities, run_project_tests, run_project_tests_with_options,
+        run_project_with_options,
     };
     use crate::syntax::{Stmt, TypeName, Visibility, parse_program, parse_program_with_recovery};
     use serde::Serialize;
@@ -5712,6 +5714,54 @@ print serve_once("127.0.0.1:18080", "hello")
     }
 
     #[test]
+    fn list_project_tests_reports_stable_names_paths_and_package_membership() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("list-tests-discovery");
+        create_project(&project, Some("list-tests-app")).expect("create project");
+        fs::write(project.join("src/main_test.ax"), "print \"unit\"\n").expect("write unit test");
+        fs::create_dir_all(project.join("src/nested")).expect("create nested dir");
+        fs::write(
+            project.join("src/nested/cases_table_test.ax"),
+            "print \"table\"\n",
+        )
+        .expect("write table test");
+
+        let output = list_project_tests_with_options(&project, &TestOptions::default())
+            .expect("list discovered tests");
+
+        assert_eq!(output.packages, vec![project.display().to_string()]);
+        let listed = output
+            .tests
+            .iter()
+            .map(|test| {
+                (
+                    test.package.as_deref(),
+                    test.name.as_str(),
+                    test.entry.as_str(),
+                    test.kind,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            listed,
+            vec![
+                (
+                    Some("list-tests-app"),
+                    "src/main_test",
+                    "src/main_test.ax",
+                    TestKind::Unit,
+                ),
+                (
+                    Some("list-tests-app"),
+                    "src/nested/cases_table_test",
+                    "src/nested/cases_table_test.ax",
+                    TestKind::Table,
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn run_project_tests_can_include_benchmark_smoke_fixtures() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("runner-benchmark-discovery");
@@ -5803,6 +5853,114 @@ print serve_once("127.0.0.1:18080", "hello")
                 error.message
             );
         }
+    }
+
+    fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) {
+        fs::create_dir_all(to).expect("create destination directory");
+        for entry in fs::read_dir(from).expect("read source directory") {
+            let entry = entry.expect("read directory entry");
+            let source = entry.path();
+            let dest = to.join(entry.file_name());
+            if source.is_dir() {
+                copy_dir_recursive(&source, &dest);
+            } else {
+                fs::copy(&source, &dest).expect("copy fixture file");
+            }
+        }
+    }
+
+    #[test]
+    fn checked_in_proof_http_service_serves_local_request_response() {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("proof-http-service");
+        copy_dir_recursive(&checked_in_example_fixture("proof_http_service"), &project);
+
+        let port = find_free_loopback_port();
+        fs::write(
+            project.join("src/main.ax"),
+            format!(
+                r#"import "std/time.ax"
+import "server.ax"
+
+let started: bool = now_ms() > 0
+print serve_health("127.0.0.1:{port}", 1, started)
+"#
+            ),
+        )
+        .expect("write service proof entrypoint");
+
+        check_project(&project).expect("check service proof workload");
+        let built = build_project(&project).expect("build service proof workload");
+        let child = compiled_binary_command(&built.binary)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn service proof workload");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stream = loop {
+            match TcpStream::connect(("127.0.0.1", port)) {
+                Ok(stream) => break stream,
+                Err(err) if Instant::now() < deadline => {
+                    let _ = err;
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(err) => panic!("service proof workload never became ready: {err}"),
+            }
+        };
+        stream
+            .write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+            .expect("write health request");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("read response");
+        assert!(
+            response.starts_with("HTTP/1.0 200 OK\r\n"),
+            "unexpected response: {response:?}"
+        );
+        assert!(
+            response.ends_with(r#"{"path":"/health","ok":true}"#),
+            "unexpected response body: {response:?}"
+        );
+
+        let output = child
+            .wait_with_output()
+            .expect("wait for service proof exit");
+        assert!(output.status.success(), "service proof failed: {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "true\n");
+        assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+    }
+
+    #[test]
+    fn checked_in_proof_http_service_requires_net_capability_for_server() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("proof-http-service-net-denied");
+        copy_dir_recursive(&checked_in_example_fixture("proof_http_service"), &project);
+        let manifest = fs::read_to_string(project.join("axiom.toml"))
+            .expect("read proof service manifest")
+            .replace("net = true", "net = false");
+        fs::write(project.join("axiom.toml"), manifest).expect("write denied manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/time.ax"
+import "server.ax"
+
+let started: bool = now_ms() > 0
+print serve_health("127.0.0.1:18080", 1, started)
+"#,
+        )
+        .expect("write denied service entrypoint");
+
+        let err = check_project(&project).expect_err("expected net capability denial");
+        assert_eq!(err.kind, "capability");
+        assert!(
+            err.message.contains("requires [capabilities].net = true"),
+            "unexpected diagnostic: {err:?}"
+        );
     }
 
     #[test]
