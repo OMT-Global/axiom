@@ -2818,11 +2818,12 @@ crypto = false
         .expect("write publish manifest");
 
         let manifest = load_manifest(&project).expect("load publish manifest");
+        let publish = manifest.publish.expect("publish section");
         assert_eq!(
-            manifest.publish.registry.as_deref(),
-            Some("https://registry.example.test/index")
+            publish.registry.as_str(),
+            "https://registry.example.test/index"
         );
-        assert_eq!(manifest.publish.include, vec!["src", "axiom.toml"]);
+        assert_eq!(publish.include, vec!["src", "axiom.toml"]);
 
         fs::write(
             project.join("axiom.toml"),

@@ -6,8 +6,8 @@ use crate::hir;
 use crate::lockfile::validate_lockfile;
 use crate::manifest::{
     BuildSection, CapabilityConfig, CapabilityDescriptor, CapabilityKind, Manifest, PackageSection,
-    PublishSection, TestKind, binary_path_for_target, capability_descriptors, entry_path,
-    generated_rust_path, load_manifest, manifest_path, out_dir_path,
+    TestKind, binary_path_for_target, capability_descriptors, entry_path, generated_rust_path,
+    load_manifest, manifest_path, out_dir_path,
 };
 use crate::mir;
 use crate::stdlib;
@@ -1096,7 +1096,6 @@ fn register_stdlib_package(graph: &mut PackageGraph) {
             owners: BTreeMap::new(),
             rationale: BTreeMap::new(),
         },
-        publish: PublishSection::default(),
     };
     graph.packages.insert(
         root.clone(),
@@ -5460,7 +5459,6 @@ mod tests {
             },
             tests: Vec::new(),
             capabilities: CapabilityConfig::default(),
-            publish: PublishSection::default(),
         }
     }
 
@@ -5479,7 +5477,6 @@ mod tests {
             },
             tests: Vec::new(),
             capabilities: CapabilityConfig::default(),
-            publish: PublishSection::default(),
         }
     }
 
