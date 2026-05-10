@@ -76,7 +76,6 @@ pub struct BuiltPackage {
     pub binary: String,
     pub generated_rust: String,
     pub debug_map: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_manifest: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
@@ -97,7 +96,6 @@ pub struct BuildOutput {
     pub binary: String,
     pub generated_rust: String,
     pub debug_map: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_manifest: Option<String>,
     pub statement_count: usize,
     pub target: Option<String>,
