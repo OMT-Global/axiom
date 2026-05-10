@@ -24,7 +24,7 @@ pub fn check_success(project: &Path, output: &CheckOutput) -> Value {
 }
 
 pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
-    let mut payload = json!({
+    let payload = json!({
         "schema_version": JSON_SCHEMA_VERSION,
         "ok": true,
         "command": "build",
@@ -37,6 +37,7 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "binary": output.binary,
         "generated_rust": output.generated_rust,
         "debug_map": output.debug_map,
+        "debug_manifest": output.debug_manifest,
         "statement_count": output.statement_count,
         "target": output.target,
         "debug": output.debug,
@@ -47,9 +48,6 @@ pub fn build_success(project: &Path, output: &BuildOutput) -> Value {
         "duration_ms": output.duration_ms,
         "packages": output.packages,
     });
-    if let Some(debug_manifest) = &output.debug_manifest {
-        payload["debug_manifest"] = json!(debug_manifest);
-    }
     payload
 }
 

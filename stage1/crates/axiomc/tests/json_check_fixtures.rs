@@ -3,6 +3,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn fixture(name: &str) -> Value {
     let path = fixture_dir().join(name);
@@ -62,15 +63,118 @@ fn check_fixtures_validate_against_stage1_v1_schema() {
 #[test]
 fn check_success_fixture_matches_stage1_v1_envelope() {
     let payload = fixture("success.json");
+    let generated = normalized_check_success_for_hello();
 
+    assert_eq!(
+        payload, generated,
+        "success fixture drifted from axiomc check --json stage1/examples/hello"
+    );
     assert_check_envelope(&payload, true);
     assert!(payload["project"].is_string());
     assert!(payload["manifest"].is_string());
     assert!(payload["entry"].is_string());
     assert!(payload["statement_count"].is_u64());
     assert!(payload["capabilities"].is_array());
+    assert_eq!(
+        capability_contract(&payload["capabilities"]),
+        expected_capability_contract()
+    );
     assert!(payload["warnings"].is_array());
     assert!(payload["packages"].is_array());
+    let package = &payload["packages"][0];
+    assert_eq!(
+        capability_contract(&package["capabilities"]),
+        expected_capability_contract()
+    );
+}
+
+fn normalized_check_success_for_hello() -> Value {
+    let stage1_root = stage1_root();
+    let project = Path::new("stage1").join("examples").join("hello");
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "check",
+            project.to_str().expect("hello project path"),
+            "--json",
+        ])
+        .current_dir(stage1_root.parent().expect("repo root"))
+        .output()
+        .expect("run axiomc check --json");
+    assert!(
+        output.status.success(),
+        "axiomc check --json failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut payload: Value = serde_json::from_slice(&output.stdout).expect("parse check JSON");
+    normalize_repo_paths(&mut payload, stage1_root.parent().expect("repo root"));
+    payload
+}
+
+fn stage1_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("stage1 root")
+}
+
+fn normalize_repo_paths(value: &mut Value, repo_root: &Path) {
+    match value {
+        Value::String(text) => {
+            let repo_root = repo_root.display().to_string();
+            if text.starts_with(&repo_root) {
+                *text = text.replacen(&repo_root, "/workspace/axiom", 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_repo_paths(item, repo_root);
+            }
+        }
+        Value::Object(map) => {
+            for value in map.values_mut() {
+                normalize_repo_paths(value, repo_root);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn capability_contract(capabilities: &Value) -> Vec<(String, bool, String)> {
+    capabilities
+        .as_array()
+        .expect("capabilities array")
+        .iter()
+        .map(|capability| {
+            (
+                capability["name"]
+                    .as_str()
+                    .expect("capability name")
+                    .to_owned(),
+                capability["enabled"].as_bool().expect("capability enabled"),
+                capability["description"]
+                    .as_str()
+                    .expect("capability description")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn expected_capability_contract() -> Vec<(String, bool, String)> {
+    [
+        ("fs", false, "filesystem read access"),
+        ("fs:write", false, "filesystem write access"),
+        ("net", false, "network access"),
+        ("process", false, "child process execution"),
+        ("env", false, "environment variable access"),
+        ("clock", false, "wall-clock time access"),
+        ("crypto", false, "hashing and cryptography primitives"),
+        ("ffi", false, "foreign function interface access"),
+        ("async", false, "host async runtime access"),
+    ]
+    .into_iter()
+    .map(|(name, enabled, description)| (name.to_owned(), enabled, description.to_owned()))
+    .collect()
 }
 
 #[test]

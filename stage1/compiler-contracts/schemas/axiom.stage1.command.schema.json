@@ -57,6 +57,18 @@
           "items": {
             "type": "string"
           }
+        },
+        "configured_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effective_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "package_root": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -110,6 +122,7 @@
         "binary",
         "generated_rust",
         "debug_map",
+        "debug_manifest",
         "target",
         "debug",
         "cache_status",
@@ -141,6 +154,12 @@
           "$ref": "#/$defs/path"
         },
         "debug_map": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debug_manifest": {
           "type": [
             "string",
             "null"
@@ -325,6 +344,7 @@
         "binary",
         "generated_rust",
         "debug_map",
+        "debug_manifest",
         "statement_count",
         "target",
         "debug",
@@ -371,6 +391,12 @@
           "$ref": "#/$defs/path"
         },
         "debug_map": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "debug_manifest": {
           "type": [
             "string",
             "null"
