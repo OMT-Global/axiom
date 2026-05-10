@@ -69,8 +69,7 @@
 //!   layered over the bootstrap test intrinsics.
 //! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
 //!   fallback unwrap helpers implemented in Axiom.
-//! * `std/encoding.ax` — URL component and path segment percent-encoding
-//!   helpers.
+//! * `std/encoding.ax` — URL query and path percent-encoding helpers.
 
 use std::path::{Path, PathBuf};
 
@@ -200,7 +199,11 @@ pub fn has_items<T>(values: &[T]): bool {\nreturn len(values) > 0\n}\n\
 pub fn count_mut<T>(values: &mut [T]): int {\nreturn len(values)\n}\n\
 pub fn skip<T>(values: &[T], count: int): &[T] {\nreturn values[count:]\n}\n\
 pub fn take<T>(values: &[T], count: int): &[T] {\nreturn values[:count]\n}\n\
-pub fn window<T>(values: &[T], start: int, end: int): &[T] {\nreturn values[start:end]\n}\n",
+pub fn window<T>(values: &[T], start: int, end: int): &[T] {\nreturn values[start:end]\n}\n\
+pub fn contains<K, V>(values: {K: V}, key: K): bool {\nreturn map_contains_key<K, V>(values, key)\n}\n\
+pub fn get<K, V>(values: {K: V}, key: K): Option<V> {\nreturn map_get<K, V>(values, key)\n}\n\
+pub fn get_or_default<K, V>(values: {K: V}, key: K, default: V): V {\nmatch map_get<K, V>(values, key) {\nSome(value) {\nreturn value\n}\nNone {\nreturn default\n}\n}\n}\n\
+pub fn keys<K, V>(values: {K: V}): [K] {\nreturn map_keys<K, V>(values)\n}\n",
     ),
     (
         "string_builder.ax",
@@ -303,6 +306,12 @@ return encoding_url_component_decode(value)
 }
 pub fn path_segment_encode(value: string): string {
 return encoding_path_segment_encode(value)
+}
+pub fn query_pair_encode(name: string, value: string): string {
+return encoding_url_query_pair_encode(name, value)
+}
+pub fn path_join_segment(base: string, segment: string): string {
+return encoding_path_join_segment(base, segment)
 }
 ",
     ),

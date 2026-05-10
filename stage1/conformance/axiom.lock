@@ -235,6 +235,11 @@ version = "0.1.0"
 source = "path:pass/closures"
 
 [[package]]
+name = "conformance-collection-lookup-helpers"
+version = "0.1.0"
+source = "path:pass/collection_lookup_helpers"
+
+[[package]]
 name = "conformance-collection-operations"
 version = "0.1.0"
 source = "path:pass/collection_operations"
@@ -288,6 +293,11 @@ source = "path:pass/package_local_modules"
 name = "conformance-package-visibility"
 version = "0.1.0"
 source = "path:pass/package_visibility"
+
+[[package]]
+name = "conformance-runtime-negative-diagnostics"
+version = "0.1.0"
+source = "path:pass/runtime_negative_diagnostics"
 
 [[package]]
 name = "conformance-slice-type-alias-in-option"

@@ -895,6 +895,23 @@ fn axiom_percent_encode(value: String) -> String {
 }
 
 #[allow(dead_code)]
+fn axiom_query_pair_encode(name: String, value: String) -> String {
+    format!("{}={}", axiom_percent_encode(name), axiom_percent_encode(value))
+}
+
+#[allow(dead_code)]
+fn axiom_path_join_segment(base: String, segment: String) -> String {
+    let encoded = axiom_percent_encode(segment);
+    if base.is_empty() {
+        encoded
+    } else if base.ends_with('/') {
+        format!("{base}{encoded}")
+    } else {
+        format!("{base}/{encoded}")
+    }
+}
+
+#[allow(dead_code)]
 fn axiom_percent_decode(value: String) -> Option<String> {
     fn hex(byte: u8) -> Option<u8> {
         match byte {
@@ -2202,6 +2219,12 @@ fn axiom_crypto_constant_time_eq(left: String, right: String) -> bool {
     out.push_str("fn axiom_map_contains_key<K: Eq + std::hash::Hash, V>(values: HashMap<K, V>, key: K) -> bool {\n");
     out.push_str("    values.contains_key(&key)\n");
     out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str(
+        "fn axiom_map_keys<K: Eq + std::hash::Hash, V>(values: HashMap<K, V>) -> Vec<K> {\n",
+    );
+    out.push_str("    values.into_keys().collect()\n");
+    out.push_str("}\n\n");
     for enum_def in &program.enums {
         render_enum(enum_def, &type_context, &mut out);
         out.push('\n');
@@ -3259,19 +3282,33 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Call { name, args, .. } if name == "json_stringify_string" => {
             format!("axiom_json_stringify_string({})", render_expr(&args[0]))
         }
-        Expr::Call { name, args, .. } if name == "map_get" => {
+        Expr::Call { name, args, .. } if matches!(name.as_str(), "map_get" | "get") => {
             format!(
                 "axiom_map_lookup({}, {})",
                 render_expr(&args[0]),
                 render_expr(&args[1])
             )
         }
-        Expr::Call { name, args, .. } if name == "map_contains_key" => {
+
+        Expr::Call { name, args, .. } if name == "get_or_default" => {
+            format!(
+                "match axiom_map_lookup({}, {}) {{ Some(value) => value, None => {} }}",
+                render_expr(&args[0]),
+                render_expr(&args[1]),
+                render_expr(&args[2])
+            )
+        }
+        Expr::Call { name, args, .. }
+            if matches!(name.as_str(), "map_contains_key" | "contains") =>
+        {
             format!(
                 "axiom_map_contains_key({}, {})",
                 render_expr(&args[0]),
                 render_expr(&args[1])
             )
+        }
+        Expr::Call { name, args, .. } if matches!(name.as_str(), "map_keys" | "keys") => {
+            format!("axiom_map_keys({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "regex_is_match" => {
             format!(
@@ -3303,6 +3340,20 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "encoding_path_segment_encode" => {
             format!("axiom_percent_encode({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "encoding_url_query_pair_encode" => {
+            format!(
+                "axiom_query_pair_encode({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "encoding_path_join_segment" => {
+            format!(
+                "axiom_path_join_segment({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
         }
         Expr::Call { name, args, .. } if name == "fs_read" => {
             format!("axiom_fs_read({})", render_expr(&args[0]))
