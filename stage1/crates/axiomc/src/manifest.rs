@@ -452,11 +452,8 @@ fn normalize_manifest(raw: RawManifest, path: &Path) -> Result<Manifest, Diagnos
     let fs_root =
         normalize_optional_relative_path(path, "capabilities.fs_root", capabilities.fs_root)?;
     let explicit_env_unrestricted = capabilities.env_unrestricted.unwrap_or(false);
-    let (env, env_vars, env_unrestricted, env_legacy_unrestricted) = normalize_env_capability(
-        path,
-        capabilities.env,
-        explicit_env_unrestricted,
-    )?;
+    let (env, env_vars, env_unrestricted, env_legacy_unrestricted) =
+        normalize_env_capability(path, capabilities.env, explicit_env_unrestricted)?;
     let unsafe_rationale = normalize_unsafe_rationale(
         path,
         capabilities.unsafe_rationale,
