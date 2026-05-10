@@ -1171,6 +1171,37 @@ checksum = "sha256:not-a-digest"
     }
 
     #[test]
+    fn rejects_malformed_publish_registry_sources() {
+        for registry in [
+            "https://registry.example.test?mirror=1",
+            "https://registry.example.test#fragment",
+            "https://registry.example.test/index?mirror=1",
+            "https://registry.example.test/index#fragment",
+        ] {
+            let manifest_text = format!(
+                r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[publish]
+registry = "{registry}"
+checksum = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+"#
+            );
+            let dir = write_manifest(&manifest_text);
+            let error = load_manifest(dir.path()).unwrap_err();
+            assert!(
+                error.message.contains(
+                    "publish.registry must be a valid https:// or file:// registry source"
+                ),
+                "unexpected error for {registry}: {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
     fn still_reserves_dependency_registry_resolution_fields() {
         let dir = write_manifest(
             r#"
