@@ -57,6 +57,18 @@
           "items": {
             "type": "string"
           }
+        },
+        "configured_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effective_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "package_root": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
