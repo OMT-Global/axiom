@@ -194,9 +194,9 @@ enum CapsCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum PkgCommand {
-    /// Emit the resolved local package graph.
-    Graph {
+enum InspectCommand {
+    /// Emit exported functions, types, consts, imports, and capability use.
+    Symbols {
         path: PathBuf,
         #[arg(long)]
         json: bool,
@@ -204,9 +204,9 @@ enum PkgCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum InspectCommand {
-    /// Emit exported functions, types, consts, imports, and capability use.
-    Symbols {
+enum PkgCommand {
+    /// Print resolved packages, members, dependencies, entrypoints, capabilities, and lockfile status.
+    Graph {
         path: PathBuf,
         #[arg(long)]
         json: bool,
