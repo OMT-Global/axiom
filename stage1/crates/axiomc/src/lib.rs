@@ -7750,6 +7750,25 @@ print takes_two(three)
     }
 
     #[test]
+    fn check_project_rejects_static_type_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("static-type-mismatch");
+        create_project(&project, Some("static-type-mismatch-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "static READY: bool = 42\nprint READY\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("static type mismatch should fail");
+        assert!(
+            error
+                .message
+                .contains("static \"READY\" expects bool, got int")
+        );
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
     fn check_project_rejects_type_alias_inside_function_block() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("block-type-alias");
