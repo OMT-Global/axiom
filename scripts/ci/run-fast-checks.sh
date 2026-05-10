@@ -8,6 +8,8 @@ bash scripts/ci/check-python-exit-docs.sh
 bash scripts/ci/validate-capability-manifests.sh
 bash scripts/ci/test-validate-capability-manifests.sh
 bash scripts/ci/test-pr-fast-ci-workflow.sh
+bash scripts/ci/test-validate-capability-manifests.sh
+bash scripts/ci/validate-capability-manifests.sh
 
 if [[ "${AXIOM_FAST_CI_PROOF_WORKLOADS:-1}" != "1" ]]; then
   echo "error: proof workload execution is required for PR fast checks." >&2
