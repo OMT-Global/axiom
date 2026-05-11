@@ -267,6 +267,7 @@ pub struct BuildOptions {
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub package: Option<String>,
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -477,7 +478,7 @@ pub fn run_project_with_options(
         )
     })?;
     let status = command_for_build_output(&built.binary, build_output_dir)
-        .and_then(|mut command| command.status())
+        .and_then(|mut command| command.args(&options.args).status())
         .map_err(|err| {
             Diagnostic::new("run", format!("failed to execute {}: {err}", built.binary))
         })?;

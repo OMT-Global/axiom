@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides twenty-one stdlib modules. Six are thin wrappers over
+//! Today this provides twenty-two stdlib modules. Six are thin wrappers over
 //! single-intrinsic capability-gated surfaces, one per capability class:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -70,6 +70,7 @@
 //! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
 //!   fallback unwrap helpers implemented in Axiom.
 //! * `std/encoding.ax` — URL query and path percent-encoding helpers.
+//! * `std/cli.ax` — access to process arguments forwarded by `axiomc run`.
 
 use std::path::{Path, PathBuf};
 
@@ -323,6 +324,12 @@ pub fn option_unwrap_or<T>(value: Option<T>, fallback: T): T {\nmatch value {\nS
 pub fn result_is_ok<T, E>(value: Result<T, E>): bool {\nmatch value {\nOk(_inner) {\nreturn true\n}\nErr(_error) {\nreturn false\n}\n}\n}\n\
 pub fn result_is_err<T, E>(value: Result<T, E>): bool {\nmatch value {\nOk(_inner) {\nreturn false\n}\nErr(_error) {\nreturn true\n}\n}\n}\n\
 pub fn result_unwrap_or<T, E>(value: Result<T, E>, fallback: T): T {\nmatch value {\nOk(inner) {\nreturn inner\n}\nErr(_error) {\nreturn fallback\n}\n}\n}\n",
+    ),
+    (
+        "cli.ax",
+        "pub fn args(): [string] {\nreturn cli_args()\n}\n\
+pub fn arg_count(): int {\nreturn cli_arg_count()\n}\n\
+pub fn arg(index: int): Option<string> {\nreturn cli_arg(index)\n}\n",
     ),
 ];
 
