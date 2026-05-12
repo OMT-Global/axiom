@@ -3838,6 +3838,42 @@ process = ["/bin/true"]
     }
 
     #[test]
+    fn load_manifest_rejects_empty_process_allowlist() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("process-empty-allowlist");
+        create_project(&project, Some("process-empty-allowlist-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "process-empty-allowlist-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+process = []
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "print process_status(\"/bin/true\")\n",
+        )
+        .expect("write source");
+
+        let error = load_manifest(&project).expect_err("empty process allowlist should fail closed");
+        assert_eq!(error.kind, "manifest");
+        assert!(
+            error
+                .message
+                .contains("capabilities.process must list at least one allowed command"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn check_project_rejects_process_command_missing_from_manifest_allowlist() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("process-not-allowlisted");

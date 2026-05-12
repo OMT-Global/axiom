@@ -701,6 +701,12 @@ fn normalize_process_allowlist(
     path: &Path,
     values: Vec<String>,
 ) -> Result<Vec<String>, Diagnostic> {
+    if values.is_empty() {
+        return Err(
+            Diagnostic::new("manifest", "capabilities.process must list at least one allowed command or use false to disable process execution")
+                .with_path(path.display().to_string()),
+        );
+    }
     let mut commands = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for (index, value) in values.into_iter().enumerate() {
