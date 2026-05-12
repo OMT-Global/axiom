@@ -6660,6 +6660,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6686,6 +6687,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6712,6 +6714,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6738,6 +6741,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6805,6 +6809,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6831,6 +6836,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6860,6 +6866,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6886,6 +6893,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -6915,6 +6923,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -7111,6 +7120,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -7213,6 +7223,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -7314,6 +7325,8 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[3].line(), args[3].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &host, *line, *column)?;
+                validate_net_port_allowlist_hir(ctx.capabilities, name, &port, *line, *column)?;
                 move_lowered_value(&host, env)?;
                 move_lowered_value(&message, env)?;
                 return Ok(Expr::Call {
@@ -7416,6 +7429,8 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[3].line(), args[3].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &host, *line, *column)?;
+                validate_net_port_allowlist_hir(ctx.capabilities, name, &port, *line, *column)?;
                 move_lowered_value(&host, env)?;
                 move_lowered_value(&message, env)?;
                 return Ok(Expr::Call {
@@ -7445,6 +7460,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -7585,6 +7601,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -7694,6 +7711,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -7727,6 +7745,7 @@ fn lower_expr_with_expected_inner(
                     )
                     .with_span(args[0].line(), args[0].column()));
                 }
+                validate_net_host_allowlist_hir(ctx.capabilities, name, &lowered, *line, *column)?;
                 move_lowered_value(&lowered, env)?;
                 return Ok(Expr::Call {
                     name: name.clone(),
@@ -9740,6 +9759,80 @@ fn validate_ffi_type(ty: &Type, line: usize, column: usize) -> Result<(), Diagno
     }
 }
 
+fn validate_net_host_allowlist_hir(
+    capabilities: &CapabilityConfig,
+    intrinsic_name: &str,
+    host: &Expr,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
+    if capabilities.net_hosts.is_empty() {
+        return Ok(());
+    }
+    match host {
+        Expr::Literal {
+            value: LiteralValue::String(value),
+            ..
+        } if capabilities
+            .net_hosts
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(value)) => Ok(()),
+        Expr::Literal {
+            value: LiteralValue::String(value),
+            ..
+        } => Err(Diagnostic::new(
+            "capability",
+            format!(
+                "call to {intrinsic_name:?} requires [capabilities].net.hosts to include {value:?}"
+            ),
+        )
+        .with_span(line, column)),
+        _ => Err(Diagnostic::new(
+            "capability",
+            format!(
+                "call to {intrinsic_name:?} requires a string literal listed in [capabilities].net.hosts"
+            ),
+        )
+        .with_span(line, column)),
+    }
+}
+
+fn validate_net_port_allowlist_hir(
+    capabilities: &CapabilityConfig,
+    intrinsic_name: &str,
+    port: &Expr,
+    line: usize,
+    column: usize,
+) -> Result<(), Diagnostic> {
+    if capabilities.net_ports.is_empty() {
+        return Ok(());
+    }
+    match port {
+        Expr::Literal {
+            value: LiteralValue::Int(value),
+            ..
+        } if u16::try_from(*value)
+            .ok()
+            .is_some_and(|value| capabilities.net_ports.contains(&value)) => Ok(()),
+        Expr::Literal {
+            value: LiteralValue::Int(value),
+            ..
+        } => Err(Diagnostic::new(
+            "capability",
+            format!(
+                "call to {intrinsic_name:?} requires [capabilities].net.ports to include {value}"
+            ),
+        )
+        .with_span(line, column)),
+        _ => Err(Diagnostic::new(
+            "capability",
+            format!(
+                "call to {intrinsic_name:?} requires an integer literal listed in [capabilities].net.ports"
+            ),
+        )
+        .with_span(line, column)),
+    }
+}
 
 fn validate_process_command_allowlist_hir(
     capabilities: &CapabilityConfig,
@@ -9754,13 +9847,21 @@ fn validate_process_command_allowlist_hir(
         Expr::Literal {
             value: LiteralValue::String(value),
             ..
-        } if capabilities.process_commands.iter().any(|allowed| allowed == value) => Ok(()),
+        } if capabilities
+            .process_commands
+            .iter()
+            .any(|allowed| allowed == value) =>
+        {
+            Ok(())
+        }
         Expr::Literal {
             value: LiteralValue::String(value),
             ..
         } => Err(Diagnostic::new(
             "capability",
-            format!("call to \"process_status\" requires [capabilities].process to include {value:?}"),
+            format!(
+                "call to \"process_status\" requires [capabilities].process to include {value:?}"
+            ),
         )
         .with_span(line, column)),
         _ => Err(Diagnostic::new(
