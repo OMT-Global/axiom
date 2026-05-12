@@ -2749,8 +2749,8 @@ fn validate_expr_capabilities(
                 .with_path(module_path.display().to_string())
                 .with_span(*line, *column));
             }
-            if name == "process_status" {
-                validate_process_command_allowlist(module_path, args, capabilities, *line, *column)?;
+            if name == "process_status" || name == "run_status" {
+                validate_process_command_allowlist(module_path, name, args, capabilities, *line, *column)?;
             }
             for arg in args {
                 validate_expr_capabilities(module_path, arg, capabilities)?;
@@ -2822,6 +2822,7 @@ fn validate_expr_capabilities(
 
 fn validate_process_command_allowlist(
     module_path: &Path,
+    call_name: &str,
     args: &[syntax::Expr],
     capabilities: &CapabilityConfig,
     line: usize,
@@ -2835,13 +2836,13 @@ fn validate_process_command_allowlist(
             if capabilities.process_commands.iter().any(|allowed| allowed == command) => Ok(()),
         Some(syntax::Expr::Literal(syntax::Literal::String(command))) => Err(Diagnostic::new(
             "capability",
-            format!("call to \"process_status\" requires [capabilities].process to include {command:?}"),
+            format!("call to {call_name:?} requires [capabilities].process to include {command:?}"),
         )
         .with_path(module_path.display().to_string())
         .with_span(line, column)),
         _ => Err(Diagnostic::new(
             "capability",
-            "call to \"process_status\" requires a string literal listed in [capabilities].process",
+            format!("call to {call_name:?} requires a string literal listed in [capabilities].process"),
         )
         .with_path(module_path.display().to_string())
         .with_span(line, column)),

@@ -3709,6 +3709,43 @@ process = ["/bin/true"]
     }
 
     #[test]
+    fn check_project_rejects_stdlib_process_command_missing_from_manifest_allowlist() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-process-not-allowlisted");
+        create_project(&project, Some("stdlib-process-not-allowlisted-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-process-not-allowlisted-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+process = ["/bin/true"]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/process.ax"
+print run_status("/bin/false")
+"#,
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("unlisted stdlib process command should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains(r#"requires [capabilities].process to include "/bin/false""#)
+        );
+    }
+
+    #[test]
     fn check_project_rejects_dynamic_process_command_with_manifest_allowlist() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("process-dynamic-denied");
