@@ -3550,6 +3550,49 @@ print strlen("hello")
     }
 
     #[test]
+    fn generated_runtime_emits_optional_host_audit_jsonl_without_secret_values() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("host-audit");
+        create_project(&project, Some("host-audit-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"host-audit-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv = [\"FOO_SECRET\"]\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match env_get(\"FOO_SECRET\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let audit_log = project.join("host-audit.jsonl");
+        let output = compiled_binary_command(&built.binary)
+            .env("FOO_SECRET", "super-secret-value")
+            .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
+            .output()
+            .expect("run compiled binary");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "super-secret-value\n"
+        );
+        let audit = fs::read_to_string(audit_log).expect("read audit log");
+        assert!(audit.contains("\"intrinsic\":\"env_get\""));
+        assert!(audit.contains("\"package\":"));
+        assert!(audit.contains("\"args\":{\"name\":\"string:10\"}"));
+        assert!(audit.contains("\"outcome\":\"ok\""));
+        assert!(!audit.contains("FOO_SECRET"));
+        assert!(!audit.contains("super-secret-value"));
+    }
+
+    #[test]
     fn legacy_env_bool_still_checks_with_deprecation_warning() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("legacy-env");

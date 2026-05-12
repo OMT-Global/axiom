@@ -179,6 +179,7 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("];\n");
     out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n");
     out.push_str("const AXIOM_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;\n\n");
+    out.push_str("const AXIOM_HOST_AUDIT_LOG_ENV: &str = \"AXIOM_HOST_AUDIT_LOG\";\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("struct AxiomTask<T> {\n");
@@ -1028,14 +1029,71 @@ fn axiom_percent_decode(value: String) -> Option<String> {
     out.push_str("    }\n");
     out.push_str("    std::env::args().skip(1).nth(index as usize)\n");
     out.push_str("}\n\n");
+    out.push_str(
+        r#"#[allow(dead_code)]
+fn axiom_json_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+#[allow(dead_code)]
+fn axiom_host_arg_summary(parts: &[(&str, String)]) -> String {
+    let mut items = Vec::new();
+    for (name, summary) in parts {
+        items.push(format!(
+            "\"{}\":\"{}\"",
+            axiom_json_escape(name),
+            axiom_json_escape(summary)
+        ));
+    }
+    format!("{{{}}}", items.join(","))
+}
+
+#[allow(dead_code)]
+fn axiom_host_audit(intrinsic: &str, args: String, outcome: &str) {
+    let Ok(path) = std::env::var(AXIOM_HOST_AUDIT_LOG_ENV) else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    use std::io::Write;
+    let _ = writeln!(
+        file,
+        "{{\"package\":\"{}\",\"intrinsic\":\"{}\",\"args\":{},\"outcome\":\"{}\"}}",
+        axiom_json_escape(AXIOM_PACKAGE_ROOT),
+        axiom_json_escape(intrinsic),
+        args,
+        axiom_json_escape(outcome)
+    );
+}
+
+"#,
+    );
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"path\", format!(\"string:{}\", path.len()))]);\n");
     out.push_str(
         "    let canonical_package_root = std::fs::canonicalize(AXIOM_PACKAGE_ROOT).ok()?;\n",
     );
     out.push_str("    let canonical_fs_root = std::fs::canonicalize(AXIOM_FS_ROOT).ok()?;\n");
     out.push_str("    if !canonical_fs_root.starts_with(&canonical_package_root) {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
     out.push_str("    let requested = std::path::Path::new(&path);\n");
@@ -1044,21 +1102,37 @@ fn axiom_percent_decode(value: String) -> Option<String> {
     out.push_str("    } else {\n");
     out.push_str("        canonical_package_root.join(requested)\n");
     out.push_str("    };\n");
-    out.push_str("    let canonical_candidate = std::fs::canonicalize(candidate).ok()?;\n");
+    out.push_str("    let Some(canonical_candidate) = std::fs::canonicalize(candidate).ok() else {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"missing\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
     out.push_str("    if !canonical_candidate.starts_with(&canonical_fs_root) {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    let metadata = std::fs::metadata(&canonical_candidate).ok()?;\n");
+    out.push_str("    let Some(metadata) = std::fs::metadata(&canonical_candidate).ok() else {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"missing\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
     out.push_str("    if !metadata.is_file() || metadata.len() > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    let file = std::fs::File::open(&canonical_candidate).ok()?;\n");
+    out.push_str("    let Some(file) = std::fs::File::open(&canonical_candidate).ok() else {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
     out.push_str("    let mut reader = file.take(AXIOM_MAX_FS_READ_BYTES + 1);\n");
     out.push_str("    let mut content = String::new();\n");
-    out.push_str("    reader.read_to_string(&mut content).ok()?;\n");
-    out.push_str("    if content.len() as u64 > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("    if reader.read_to_string(&mut content).is_err() {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
+    out.push_str("    if content.len() as u64 > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    axiom_host_audit(\"fs_read\", args, \"ok\");\n");
     out.push_str("    Some(content)\n");
     out.push_str("}\n\n");
     out.push_str(
@@ -1298,10 +1372,12 @@ fn axiom_fs_replace(path: String, content: String) -> i64 {
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_net_resolve(host: String) -> Option<String> {\n");
-    out.push_str("    axiom_resolve_public_socket_addrs(host.as_str(), 0)?\n");
-    out.push_str("        .into_iter()\n");
-    out.push_str("        .next()\n");
-    out.push_str("        .map(|addr| addr.ip().to_string())\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"host\", format!(\"string:{}\", host.len()))]);\n");
+    out.push_str("    let resolved = axiom_resolve_public_socket_addrs(host.as_str(), 0)\n");
+    out.push_str("        .and_then(|addrs| addrs.into_iter().next())\n");
+    out.push_str("        .map(|addr| addr.ip().to_string());\n");
+    out.push_str("    axiom_host_audit(\"net_resolve\", args, if resolved.is_some() { \"ok\" } else { \"denied\" });\n");
+    out.push_str("    resolved\n");
     out.push_str("}\n\n");
     out.push_str(
         r#"#[allow(dead_code)]
@@ -1990,12 +2066,15 @@ fn axiom_http_serve_once(bind: String, body: String) -> bool {
     }
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_process_status(program: String) -> i64 {\n");
-    out.push_str("    std::process::Command::new(program)\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"program\", format!(\"string:{}\", program.len()))]);\n");
+    out.push_str("    let status = std::process::Command::new(program)\n");
     out.push_str("        .status()\n");
     out.push_str("        .ok()\n");
     out.push_str("        .and_then(|status| status.code())\n");
     out.push_str("        .map(i64::from)\n");
-    out.push_str("        .unwrap_or(-1)\n");
+    out.push_str("        .unwrap_or(-1);\n");
+    out.push_str("    axiom_host_audit(\"process_status\", args, if status >= 0 { \"ok\" } else { \"denied\" });\n");
+    out.push_str("    status\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_clock_now_ms() -> i64 {\n");
@@ -2031,7 +2110,10 @@ fn axiom_http_serve_once(bind: String, body: String) -> bool {
     );
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    std::env::var(name).ok()\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"name\", format!(\"string:{}\", name.len()))]);\n");
+    out.push_str("    let value = std::env::var(name).ok();\n");
+    out.push_str("    axiom_host_audit(\"env_get\", args, if value.is_some() { \"ok\" } else { \"missing\" });\n");
+    out.push_str("    value\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_crypto_sha256(input: String) -> String {\n");
