@@ -170,21 +170,36 @@ pub fn caps_manifest_success(
             })
         })
         .collect();
-    let mut stdlib_modules_by_capability: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut stdlib_modules_by_capability: BTreeMap<String, BTreeMap<String, BTreeSet<String>>> =
+        BTreeMap::new();
     for package in &sbom.packages {
         for use_site in &package.intrinsic_use {
             stdlib_modules_by_capability
                 .entry(use_site.capability.clone())
                 .or_default()
-                .insert(use_site.module.clone());
+                .entry(use_site.module.clone())
+                .or_default()
+                .insert(format!(
+                    "{}:{}:{}",
+                    use_site.line, use_site.column, use_site.intrinsic
+                ));
         }
     }
     let stdlib_modules: Vec<Value> = stdlib_modules_by_capability
         .into_iter()
         .map(|(capability, modules)| {
+            let modules = modules
+                .into_iter()
+                .map(|(module, triggers)| {
+                    json!({
+                        "module": module,
+                        "triggers": triggers.into_iter().collect::<Vec<_>>(),
+                    })
+                })
+                .collect::<Vec<_>>();
             json!({
                 "capability": capability,
-                "modules": modules.into_iter().collect::<Vec<_>>(),
+                "modules": modules,
             })
         })
         .collect();
