@@ -187,8 +187,20 @@
           "default": false
         },
         "process": {
-          "type": "boolean",
-          "default": false
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^\\S+$"
+              },
+              "uniqueItems": true
+            }
+          ]
         },
         "env": {
           "oneOf": [
