@@ -1070,23 +1070,6 @@ fn axiom_percent_decode(value: String) -> Option<String> {
     out.push_str("}\n\n");
     out.push_str(
         r#"#[allow(dead_code)]
-fn axiom_json_escape(value: &str) -> String {
-    let mut escaped = String::new();
-    for ch in value.chars() {
-        match ch {
-            '\\' => escaped.push_str("\\\\"),
-            '"' => escaped.push_str("\\\""),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
-#[allow(dead_code)]
 fn axiom_host_arg_summary(parts: &[(&str, String)]) -> String {
     let mut items = Vec::new();
     for (name, summary) in parts {
