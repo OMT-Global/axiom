@@ -44,7 +44,17 @@
       "properties": {
         "name": {
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "fs",
+            "fs:write",
+            "net",
+            "process",
+            "env",
+            "clock",
+            "crypto",
+            "ffi",
+            "async"
+          ]
         },
         "description": {
           "type": "string"
