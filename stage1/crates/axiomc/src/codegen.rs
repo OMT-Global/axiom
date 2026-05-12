@@ -179,6 +179,7 @@ pub fn render_rust_for_package_with_capabilities(
     out.push_str("];\n");
     out.push_str("const AXIOM_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;\n");
     out.push_str("const AXIOM_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;\n\n");
+    out.push_str("const AXIOM_HOST_AUDIT_LOG_ENV: &str = \"AXIOM_HOST_AUDIT_LOG\";\n\n");
     out.push_str("struct AxiomRuntimeAbort;\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("struct AxiomTask<T> {\n");
@@ -1028,14 +1029,71 @@ fn axiom_percent_decode(value: String) -> Option<String> {
     out.push_str("    }\n");
     out.push_str("    std::env::args().skip(1).nth(index as usize)\n");
     out.push_str("}\n\n");
+    out.push_str(
+        r#"#[allow(dead_code)]
+fn axiom_json_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+#[allow(dead_code)]
+fn axiom_host_arg_summary(parts: &[(&str, String)]) -> String {
+    let mut items = Vec::new();
+    for (name, summary) in parts {
+        items.push(format!(
+            "\"{}\":\"{}\"",
+            axiom_json_escape(name),
+            axiom_json_escape(summary)
+        ));
+    }
+    format!("{{{}}}", items.join(","))
+}
+
+#[allow(dead_code)]
+fn axiom_host_audit(intrinsic: &str, args: String, outcome: &str) {
+    let Ok(path) = std::env::var(AXIOM_HOST_AUDIT_LOG_ENV) else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    use std::io::Write;
+    let _ = writeln!(
+        file,
+        "{{\"package\":\"{}\",\"intrinsic\":\"{}\",\"args\":{},\"outcome\":\"{}\"}}",
+        axiom_json_escape(AXIOM_PACKAGE_ROOT),
+        axiom_json_escape(intrinsic),
+        args,
+        axiom_json_escape(outcome)
+    );
+}
+
+"#,
+    );
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_fs_read(path: String) -> Option<String> {\n");
     out.push_str("    use std::io::Read;\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"path\", format!(\"string:{}\", path.len()))]);\n");
     out.push_str(
         "    let canonical_package_root = std::fs::canonicalize(AXIOM_PACKAGE_ROOT).ok()?;\n",
     );
     out.push_str("    let canonical_fs_root = std::fs::canonicalize(AXIOM_FS_ROOT).ok()?;\n");
     out.push_str("    if !canonical_fs_root.starts_with(&canonical_package_root) {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
     out.push_str("    let requested = std::path::Path::new(&path);\n");
@@ -1044,21 +1102,39 @@ fn axiom_percent_decode(value: String) -> Option<String> {
     out.push_str("    } else {\n");
     out.push_str("        canonical_package_root.join(requested)\n");
     out.push_str("    };\n");
-    out.push_str("    let canonical_candidate = std::fs::canonicalize(candidate).ok()?;\n");
+    out.push_str(
+        "    let Some(canonical_candidate) = std::fs::canonicalize(candidate).ok() else {\n",
+    );
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"missing\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
     out.push_str("    if !canonical_candidate.starts_with(&canonical_fs_root) {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    let metadata = std::fs::metadata(&canonical_candidate).ok()?;\n");
+    out.push_str("    let Some(metadata) = std::fs::metadata(&canonical_candidate).ok() else {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"missing\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
     out.push_str("    if !metadata.is_file() || metadata.len() > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    let file = std::fs::File::open(&canonical_candidate).ok()?;\n");
+    out.push_str("    let Some(file) = std::fs::File::open(&canonical_candidate).ok() else {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    };\n");
     out.push_str("    let mut reader = file.take(AXIOM_MAX_FS_READ_BYTES + 1);\n");
     out.push_str("    let mut content = String::new();\n");
-    out.push_str("    reader.read_to_string(&mut content).ok()?;\n");
-    out.push_str("    if content.len() as u64 > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("    if reader.read_to_string(&mut content).is_err() {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
     out.push_str("        return None;\n");
     out.push_str("    }\n");
+    out.push_str("    if content.len() as u64 > AXIOM_MAX_FS_READ_BYTES {\n");
+    out.push_str("        axiom_host_audit(\"fs_read\", args, \"denied\");\n");
+    out.push_str("        return None;\n");
+    out.push_str("    }\n");
+    out.push_str("    axiom_host_audit(\"fs_read\", args, \"ok\");\n");
     out.push_str("    Some(content)\n");
     out.push_str("}\n\n");
     out.push_str(
@@ -1111,22 +1187,35 @@ fn axiom_fs_candidate(path: &str, allow_missing_ancestors: bool) -> Option<std::
 }
 
 #[allow(dead_code)]
-fn axiom_fs_write(path: String, content: String) -> i64 {
-    if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
-        return -1;
-    }
-    match axiom_fs_candidate(&path, false) {
-        Some(candidate) => match std::fs::write(candidate, content) {
-            Ok(()) => 0,
-            Err(_) => -1,
-        },
-        None => -1,
+fn axiom_fs_audit_args(path_len: usize, content_len: Option<usize>) -> String {
+    match content_len {
+        Some(content_len) => axiom_host_arg_summary(&[("path", format!("string:{path_len}")), ("content", format!("string:{content_len}"))]),
+        None => axiom_host_arg_summary(&[("path", format!("string:{path_len}"))]),
     }
 }
 
 #[allow(dead_code)]
+fn axiom_fs_write(path: String, content: String) -> i64 {
+    let path_len = path.len();
+    let content_len = content.len();
+    let result = if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
+        -1
+    } else {
+        match axiom_fs_candidate(&path, false) {
+            Some(candidate) => match std::fs::write(candidate, content) {
+                Ok(()) => 0,
+                Err(_) => -1,
+            },
+            None => -1,
+        }
+    };
+    { let args = axiom_fs_audit_args(path_len, Some(content_len)); axiom_host_audit("fs_write", args, if result == 0 { "ok" } else { "denied" }); result }
+}
+
+#[allow(dead_code)]
 fn axiom_fs_create(path: String) -> i64 {
-    match axiom_fs_candidate(&path, false) {
+    let path_len = path.len();
+    let result = match axiom_fs_candidate(&path, false) {
         Some(candidate) => match std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -1136,58 +1225,68 @@ fn axiom_fs_create(path: String) -> i64 {
             Err(_) => -1,
         },
         None => -1,
-    }
+    };
+    { let args = axiom_fs_audit_args(path_len, None); axiom_host_audit("fs_create", args, if result == 0 { "ok" } else { "denied" }); result }
 }
 
 #[allow(dead_code)]
 fn axiom_fs_append(path: String, content: String) -> i64 {
-    if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
-        return -1;
-    }
-    match axiom_fs_candidate(&path, false) {
-        Some(candidate) => match std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(candidate)
-        {
-            Ok(mut file) => {
-                use std::io::Write;
-                match file.write_all(content.as_bytes()) {
-                    Ok(()) => 0,
-                    Err(_) => -1,
+    let path_len = path.len();
+    let content_len = content.len();
+    let result = if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
+        -1
+    } else {
+        match axiom_fs_candidate(&path, false) {
+            Some(candidate) => match std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(candidate)
+            {
+                Ok(mut file) => {
+                    use std::io::Write;
+                    match file.write_all(content.as_bytes()) {
+                        Ok(()) => 0,
+                        Err(_) => -1,
+                    }
                 }
-            }
-            Err(_) => -1,
-        },
-        None => -1,
-    }
+                Err(_) => -1,
+            },
+            None => -1,
+        }
+    };
+    { let args = axiom_fs_audit_args(path_len, Some(content_len)); axiom_host_audit("fs_append", args, if result == 0 { "ok" } else { "denied" }); result }
 }
 
 #[allow(dead_code)]
 fn axiom_fs_mkdir(path: String) -> i64 {
-    match axiom_fs_candidate(&path, false) {
+    let path_len = path.len();
+    let result = match axiom_fs_candidate(&path, false) {
         Some(candidate) => match std::fs::create_dir(candidate) {
             Ok(()) => 0,
             Err(_) => -1,
         },
         None => -1,
-    }
+    };
+    { let args = axiom_fs_audit_args(path_len, None); axiom_host_audit("fs_mkdir", args, if result == 0 { "ok" } else { "denied" }); result }
 }
 
 #[allow(dead_code)]
 fn axiom_fs_mkdir_all(path: String) -> i64 {
-    match axiom_fs_candidate(&path, true) {
+    let path_len = path.len();
+    let result = match axiom_fs_candidate(&path, true) {
         Some(candidate) => match std::fs::create_dir_all(candidate) {
             Ok(()) => 0,
             Err(_) => -1,
         },
         None => -1,
-    }
+    };
+    { let args = axiom_fs_audit_args(path_len, None); axiom_host_audit("fs_mkdir_all", args, if result == 0 { "ok" } else { "denied" }); result }
 }
 
 #[allow(dead_code)]
 fn axiom_fs_remove_file(path: String) -> i64 {
-    match axiom_fs_candidate(&path, false) {
+    let path_len = path.len();
+    let result = match axiom_fs_candidate(&path, false) {
         Some(candidate) => match std::fs::metadata(&candidate) {
             Ok(metadata) if metadata.is_file() => match std::fs::remove_file(candidate) {
                 Ok(()) => 0,
@@ -1196,12 +1295,14 @@ fn axiom_fs_remove_file(path: String) -> i64 {
             _ => -1,
         },
         None => -1,
-    }
+    };
+    { let args = axiom_fs_audit_args(path_len, None); axiom_host_audit("fs_remove_file", args, if result == 0 { "ok" } else { "denied" }); result }
 }
 
 #[allow(dead_code)]
 fn axiom_fs_remove_dir(path: String) -> i64 {
-    match axiom_fs_candidate(&path, false) {
+    let path_len = path.len();
+    let result = match axiom_fs_candidate(&path, false) {
         Some(candidate) => match std::fs::metadata(&candidate) {
             Ok(metadata) if metadata.is_dir() => match std::fs::remove_dir(candidate) {
                 Ok(()) => 0,
@@ -1210,38 +1311,45 @@ fn axiom_fs_remove_dir(path: String) -> i64 {
             _ => -1,
         },
         None => -1,
-    }
+    };
+    { let args = axiom_fs_audit_args(path_len, None); axiom_host_audit("fs_remove_dir", args, if result == 0 { "ok" } else { "denied" }); result }
 }
 
 #[allow(dead_code)]
 fn axiom_fs_replace(path: String, content: String) -> i64 {
-    if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
-        return -1;
-    }
-    match axiom_fs_candidate(&path, false) {
-        Some(candidate) => {
-            let Some(parent) = candidate.parent() else {
-                return -1;
-            };
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0);
-            let temp = parent.join(format!(".axiom-replace-{}-{stamp}.tmp", std::process::id()));
-            match std::fs::write(&temp, content) {
-                Ok(()) => match std::fs::rename(&temp, &candidate) {
-                    Ok(()) => 0,
-                    Err(_) => {
-                        let _ = std::fs::remove_file(&temp);
-                        -1
-                    }
-                },
-                Err(_) => -1,
-            }
+    let args = axiom_host_arg_summary(&[("path", format!("string:{}", path.len())), ("content", format!("string:{}", content.len()))]);
+    let result = (|| {
+        if content.len() > AXIOM_MAX_FS_WRITE_BYTES {
+            return -1;
         }
-        None => -1,
-    }
+        match axiom_fs_candidate(&path, false) {
+            Some(candidate) => {
+                let Some(parent) = candidate.parent() else {
+                    return -1;
+                };
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or(0);
+                let temp = parent.join(format!(".axiom-replace-{}-{stamp}.tmp", std::process::id()));
+                match std::fs::write(&temp, content) {
+                    Ok(()) => match std::fs::rename(&temp, &candidate) {
+                        Ok(()) => 0,
+                        Err(_) => {
+                            let _ = std::fs::remove_file(&temp);
+                            -1
+                        }
+                    },
+                    Err(_) => -1,
+                }
+            }
+            None => -1,
+        }
+    })();
+    axiom_host_audit("fs_replace", args, if result == 0 { "ok" } else { "denied" });
+    result
 }
+
 
 "#,
     );
@@ -1298,10 +1406,12 @@ fn axiom_fs_replace(path: String, content: String) -> i64 {
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_net_resolve(host: String) -> Option<String> {\n");
-    out.push_str("    axiom_resolve_public_socket_addrs(host.as_str(), 0)?\n");
-    out.push_str("        .into_iter()\n");
-    out.push_str("        .next()\n");
-    out.push_str("        .map(|addr| addr.ip().to_string())\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"host\", format!(\"string:{}\", host.len()))]);\n");
+    out.push_str("    let resolved = axiom_resolve_public_socket_addrs(host.as_str(), 0)\n");
+    out.push_str("        .and_then(|addrs| addrs.into_iter().next())\n");
+    out.push_str("        .map(|addr| addr.ip().to_string());\n");
+    out.push_str("    axiom_host_audit(\"net_resolve\", args, if resolved.is_some() { \"ok\" } else { \"denied\" });\n");
+    out.push_str("    resolved\n");
     out.push_str("}\n\n");
     out.push_str(
         r#"#[allow(dead_code)]
@@ -1325,101 +1435,111 @@ fn axiom_loopback_socket_addr(host: String, port: i64) -> Option<std::net::Socke
 #[allow(dead_code)]
 fn axiom_net_tcp_listen_loopback_once(response: String, timeout_ms: i64) -> Option<i64> {
     use std::io::{Read, Write};
-    let timeout = axiom_net_timeout(timeout_ms)?;
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
-    listener.set_nonblocking(false).ok()?;
-    let port = listener.local_addr().ok()?.port();
-    std::thread::spawn(move || {
-        let _ = listener.set_nonblocking(true);
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            match listener.accept() {
-                Ok((mut stream, _peer)) => {
-                    let _ = stream.set_read_timeout(Some(timeout));
-                    let _ = stream.set_write_timeout(Some(timeout));
-                    let mut total_read = 0usize;
-                    let mut buf = [0u8; 4096];
-                    loop {
-                        match stream.read(&mut buf) {
-                            Ok(0) => break,
-                            Ok(read) => {
-                                total_read = total_read.saturating_add(read);
-                                if total_read >= 65_536 {
-                                    break;
+    let args = axiom_host_arg_summary(&[("response", format!("string:{}", response.len())), ("timeout_ms", format!("int:{}", timeout_ms))]);
+    let result = (|| {
+        let timeout = axiom_net_timeout(timeout_ms)?;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).ok()?;
+        listener.set_nonblocking(false).ok()?;
+        let port = listener.local_addr().ok()?.port();
+        std::thread::spawn(move || {
+            let _ = listener.set_nonblocking(true);
+            let deadline = std::time::Instant::now() + timeout;
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _peer)) => {
+                        let _ = stream.set_read_timeout(Some(timeout));
+                        let _ = stream.set_write_timeout(Some(timeout));
+                        let mut total_read = 0usize;
+                        let mut buf = [0u8; 4096];
+                        loop {
+                            match stream.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(read) => {
+                                    total_read = total_read.saturating_add(read);
+                                    if total_read >= 65_536 { break; }
                                 }
+                                Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => break,
+                                Err(_) => break,
                             }
-                            Err(err)
-                                if matches!(
-                                    err.kind(),
-                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                                ) =>
-                            {
-                                break;
-                            }
-                            Err(_) => break,
                         }
-                    }
-                    let _ = stream.write_all(response.as_bytes());
-                    let _ = stream.flush();
-                    break;
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    if std::time::Instant::now() >= deadline {
+                        let _ = stream.write_all(response.as_bytes());
+                        let _ = stream.flush();
                         break;
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        if std::time::Instant::now() >= deadline { break; }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
-        }
-    });
-    Some(i64::from(port))
+        });
+        Some(i64::from(port))
+    })();
+    axiom_host_audit("net_tcp_listen_loopback_once", args, if result.is_some() { "ok" } else { "denied" });
+    result
 }
 
 #[allow(dead_code)]
 fn axiom_net_tcp_dial(host: String, port: i64, message: String, timeout_ms: i64) -> Option<String> {
     use std::io::{Read, Write};
-    let timeout = axiom_net_timeout(timeout_ms)?;
-    let addr = axiom_loopback_socket_addr(host, port)?;
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).ok()?;
-    stream.set_read_timeout(Some(timeout)).ok()?;
-    stream.set_write_timeout(Some(timeout)).ok()?;
-    stream.write_all(message.as_bytes()).ok()?;
-    stream.shutdown(std::net::Shutdown::Write).ok()?;
-    let mut response = Vec::new();
-    stream.take(64 * 1024).read_to_end(&mut response).ok()?;
-    String::from_utf8(response).ok()
+    let args = axiom_host_arg_summary(&[("host", format!("string:{}", host.len())), ("port", format!("int:{}", port)), ("message", format!("string:{}", message.len())), ("timeout_ms", format!("int:{}", timeout_ms))]);
+    let result = (|| {
+        let timeout = axiom_net_timeout(timeout_ms)?;
+        let addr = axiom_loopback_socket_addr(host, port)?;
+        let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).ok()?;
+        stream.set_read_timeout(Some(timeout)).ok()?;
+        stream.set_write_timeout(Some(timeout)).ok()?;
+        stream.write_all(message.as_bytes()).ok()?;
+        stream.shutdown(std::net::Shutdown::Write).ok()?;
+        let mut response = Vec::new();
+        stream.take(64 * 1024).read_to_end(&mut response).ok()?;
+        String::from_utf8(response).ok()
+    })();
+    axiom_host_audit("net_tcp_dial", args, if result.is_some() { "ok" } else { "denied" });
+    result
 }
 
 #[allow(dead_code)]
 fn axiom_net_udp_bind_loopback_once(response: String, timeout_ms: i64) -> Option<i64> {
-    let timeout = axiom_net_timeout(timeout_ms)?;
-    let socket = std::net::UdpSocket::bind(("127.0.0.1", 0)).ok()?;
-    socket.set_read_timeout(Some(timeout)).ok()?;
-    socket.set_write_timeout(Some(timeout)).ok()?;
-    let port = socket.local_addr().ok()?.port();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 1024];
-        if let Ok((_n, peer)) = socket.recv_from(&mut buf) {
-            let _ = socket.send_to(response.as_bytes(), peer);
-        }
-    });
-    Some(i64::from(port))
+    let args = axiom_host_arg_summary(&[("response", format!("string:{}", response.len())), ("timeout_ms", format!("int:{}", timeout_ms))]);
+    let result = (|| {
+        let timeout = axiom_net_timeout(timeout_ms)?;
+        let socket = std::net::UdpSocket::bind(("127.0.0.1", 0)).ok()?;
+        socket.set_read_timeout(Some(timeout)).ok()?;
+        socket.set_write_timeout(Some(timeout)).ok()?;
+        let port = socket.local_addr().ok()?.port();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            if let Ok((_n, peer)) = socket.recv_from(&mut buf) {
+                let _ = socket.send_to(response.as_bytes(), peer);
+            }
+        });
+        Some(i64::from(port))
+    })();
+    axiom_host_audit("net_udp_bind_loopback_once", args, if result.is_some() { "ok" } else { "denied" });
+    result
 }
 
 #[allow(dead_code)]
 fn axiom_net_udp_send_recv(host: String, port: i64, message: String, timeout_ms: i64) -> Option<String> {
-    let timeout = axiom_net_timeout(timeout_ms)?;
-    let addr = axiom_loopback_socket_addr(host, port)?;
-    let socket = std::net::UdpSocket::bind(("127.0.0.1", 0)).ok()?;
-    socket.set_read_timeout(Some(timeout)).ok()?;
-    socket.set_write_timeout(Some(timeout)).ok()?;
-    socket.send_to(message.as_bytes(), addr).ok()?;
-    let mut response = vec![0u8; 64 * 1024];
-    let (n, _peer) = socket.recv_from(&mut response).ok()?;
-    response.truncate(n);
-    String::from_utf8(response).ok()
+    let args = axiom_host_arg_summary(&[("host", format!("string:{}", host.len())), ("port", format!("int:{}", port)), ("message", format!("string:{}", message.len())), ("timeout_ms", format!("int:{}", timeout_ms))]);
+    let result = (|| {
+        let timeout = axiom_net_timeout(timeout_ms)?;
+        let addr = axiom_loopback_socket_addr(host, port)?;
+        let socket = std::net::UdpSocket::bind(("127.0.0.1", 0)).ok()?;
+        socket.set_read_timeout(Some(timeout)).ok()?;
+        socket.set_write_timeout(Some(timeout)).ok()?;
+        socket.send_to(message.as_bytes(), addr).ok()?;
+        let mut response = vec![0u8; 64 * 1024];
+        let (n, _peer) = socket.recv_from(&mut response).ok()?;
+        response.truncate(n);
+        String::from_utf8(response).ok()
+    })();
+    axiom_host_audit("net_udp_send_recv", args, if result.is_some() { "ok" } else { "denied" });
+    result
 }
+
 
 "#,
     );
@@ -1791,41 +1911,46 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
 
 #[allow(dead_code)]
 fn axiom_http_get(url: String) -> Option<String> {
-    use std::io::Write;
-    use std::net::TcpStream;
-    use std::time::Duration;
+    let args = axiom_host_arg_summary(&[("url", format!("string:{}", url.len()))]);
+    let result = (|| -> Option<String> {
+        use std::io::Write;
+        use std::net::TcpStream;
+        use std::time::Duration;
 
-    let (scheme, host, port, path) = axiom_http_split_url(&url)?;
-    let clean_host = axiom_http_strip_crlf(host);
-    let clean_path = axiom_http_strip_crlf(path);
-    if clean_host.is_empty() || clean_path.is_empty() {
-        return None;
-    }
-    let request = axiom_http_request(clean_host.as_str(), clean_path.as_str());
-    if scheme == "https" {
-        let response = match axiom_https_get_native_tls(clean_host.as_str(), port, &request) {
-            Ok(response) => response,
-            Err(err) => {
-                axiom_runtime_report("net", &err);
-                return None;
-            }
-        };
-        return axiom_http_read_response(&mut response.as_slice());
-    }
-
-    let addrs = axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?;
-    let mut stream = None;
-    for addr in addrs {
-        if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
-            stream = Some(candidate);
-            break;
+        let (scheme, host, port, path) = axiom_http_split_url(&url)?;
+        let clean_host = axiom_http_strip_crlf(host);
+        let clean_path = axiom_http_strip_crlf(path);
+        if clean_host.is_empty() || clean_path.is_empty() {
+            return None;
         }
-    }
-    let mut stream = stream?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-    stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;
-    stream.write_all(request.as_bytes()).ok()?;
-    axiom_http_read_response(&mut stream)
+        let request = axiom_http_request(clean_host.as_str(), clean_path.as_str());
+        if scheme == "https" {
+            let response = match axiom_https_get_native_tls(clean_host.as_str(), port, &request) {
+                Ok(response) => response,
+                Err(err) => {
+                    axiom_runtime_report("net", &err);
+                    return None;
+                }
+            };
+            return axiom_http_read_response(&mut response.as_slice());
+        }
+
+        let addrs = axiom_resolve_public_socket_addrs(clean_host.as_str(), port)?;
+        let mut stream = None;
+        for addr in addrs {
+            if let Ok(candidate) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
+                stream = Some(candidate);
+                break;
+            }
+        }
+        let mut stream = stream?;
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+        stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;
+        stream.write_all(request.as_bytes()).ok()?;
+        axiom_http_read_response(&mut stream)
+    })();
+    axiom_host_audit("http_get", args, if result.is_some() { "ok" } else { "denied" });
+    result
 }
 
 #[allow(dead_code)]
@@ -1885,6 +2010,8 @@ fn axiom_http_loopback_bind_addr(bind: &str) -> Option<std::net::SocketAddr> {
 
 #[allow(dead_code)]
 fn axiom_http_serve_route(bind: String, route_path: String, body: String, max_requests: i64) -> bool {
+    let args = axiom_host_arg_summary(&[("bind", format!("string:{}", bind.len())), ("route_path", format!("string:{}", route_path.len())), ("body", format!("string:{}", body.len())), ("max_requests", format!("int:{max_requests}"))]);
+    let result = (|| -> bool {
     use std::io::Write;
     use std::net::TcpListener;
     use std::time::Duration;
@@ -1939,10 +2066,15 @@ fn axiom_http_serve_route(bind: String, route_path: String, body: String, max_re
         ok = handle.join().unwrap_or(false) && ok;
     }
     ok
+    })();
+    axiom_host_audit("http_serve_route", args, if result { "ok" } else { "denied" });
+    result
 }
 
 #[allow(dead_code)]
 fn axiom_http_serve_once(bind: String, body: String) -> bool {
+    let args = axiom_host_arg_summary(&[("bind", format!("string:{}", bind.len())), ("body", format!("string:{}", body.len()))]);
+    let result = (|| -> bool {
     use std::io::Write;
     use std::net::TcpListener;
     use std::time::Duration;
@@ -1983,6 +2115,9 @@ fn axiom_http_serve_once(bind: String, body: String) -> bool {
         return false;
     }
     true
+    })();
+    axiom_host_audit("http_serve_once", args, if result { "ok" } else { "denied" });
+    result
 }
 
 "#,
@@ -1990,12 +2125,15 @@ fn axiom_http_serve_once(bind: String, body: String) -> bool {
     }
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_process_status(program: String) -> i64 {\n");
-    out.push_str("    std::process::Command::new(program)\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"program\", format!(\"string:{}\", program.len()))]);\n");
+    out.push_str("    let status = std::process::Command::new(program)\n");
     out.push_str("        .status()\n");
     out.push_str("        .ok()\n");
     out.push_str("        .and_then(|status| status.code())\n");
     out.push_str("        .map(i64::from)\n");
-    out.push_str("        .unwrap_or(-1)\n");
+    out.push_str("        .unwrap_or(-1);\n");
+    out.push_str("    axiom_host_audit(\"process_status\", args, if status >= 0 { \"ok\" } else { \"denied\" });\n");
+    out.push_str("    status\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_clock_now_ms() -> i64 {\n");
@@ -2031,7 +2169,10 @@ fn axiom_http_serve_once(bind: String, body: String) -> bool {
     );
     out.push_str("        return None;\n");
     out.push_str("    }\n");
-    out.push_str("    std::env::var(name).ok()\n");
+    out.push_str("    let args = axiom_host_arg_summary(&[(\"name\", format!(\"string:{}\", name.len()))]);\n");
+    out.push_str("    let value = std::env::var(name).ok();\n");
+    out.push_str("    axiom_host_audit(\"env_get\", args, if value.is_some() { \"ok\" } else { \"missing\" });\n");
+    out.push_str("    value\n");
     out.push_str("}\n\n");
     out.push_str("#[allow(dead_code)]\n");
     out.push_str("fn axiom_crypto_sha256(input: String) -> String {\n");

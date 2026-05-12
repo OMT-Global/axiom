@@ -3550,6 +3550,170 @@ print strlen("hello")
     }
 
     #[test]
+    fn generated_runtime_emits_optional_host_audit_jsonl_without_secret_values() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("host-audit");
+        create_project(&project, Some("host-audit-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"host-audit-app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nenv = [\"FOO_SECRET\"]\n",
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "match env_get(\"FOO_SECRET\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let audit_log = project.join("host-audit.jsonl");
+        let output = compiled_binary_command(&built.binary)
+            .env("FOO_SECRET", "super-secret-value")
+            .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
+            .output()
+            .expect("run compiled binary");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "super-secret-value\n"
+        );
+        let audit = fs::read_to_string(audit_log).expect("read audit log");
+        assert!(audit.contains("\"intrinsic\":\"env_get\""));
+        assert!(audit.contains("\"package\":"));
+        assert!(audit.contains("\"args\":{\"name\":\"string:10\"}"));
+        assert!(audit.contains("\"outcome\":\"ok\""));
+        assert!(!audit.contains("FOO_SECRET"));
+        assert!(!audit.contains("super-secret-value"));
+    }
+
+    #[test]
+    fn generated_runtime_audits_write_and_http_host_intrinsics() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("host-audit-write-http");
+        create_project(&project, Some("host-audit-write-http-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "host-audit-write-http-app",
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "print fs_write(\"out.txt\", \"secret-content\")\nprint fs_create(\"created.txt\")\nprint fs_append(\"out.txt\", \"more-secret-content\")\nprint fs_mkdir(\"dir\")\nprint fs_mkdir_all(\"nested/dir\")\nprint fs_remove_file(\"created.txt\")\nprint fs_remove_dir(\"dir\")\nmatch http_get(\"http://127.0.0.1/\") {\nSome(_body) {\nprint \"unexpected\"\n}\nNone {\nprint \"http none\"\n}\n}\nprint http_serve_once(\"0.0.0.0:0\", \"secret-body\")\nprint http_serve_route(\"0.0.0.0:0\", \"/\", \"secret-route-body\", 1)\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let audit_log = project.join("host-audit-write-http.jsonl");
+        let output = compiled_binary_command(&built.binary)
+            .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
+            .output()
+            .expect("run compiled binary");
+
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "0\n0\n0\n0\n0\n0\n0\nhttp none\nfalse\nfalse\n"
+        );
+        let audit = fs::read_to_string(audit_log).expect("read audit log");
+        for intrinsic in [
+            "fs_write",
+            "fs_create",
+            "fs_append",
+            "fs_mkdir",
+            "fs_mkdir_all",
+            "fs_remove_file",
+            "fs_remove_dir",
+            "http_get",
+            "http_serve_once",
+            "http_serve_route",
+        ] {
+            assert!(
+                audit.contains(&format!("\"intrinsic\":\"{intrinsic}\"")),
+                "missing {intrinsic} in audit log: {audit}"
+            );
+        }
+        assert!(audit.contains("\"outcome\":\"ok\""), "audit log: {audit}");
+        assert!(audit.contains("\"outcome\":\"denied\""), "audit log: {audit}");
+        assert!(!audit.contains("secret-content"));
+        assert!(!audit.contains("more-secret-content"));
+        assert!(!audit.contains("secret-body"));
+        assert!(!audit.contains("secret-route-body"));
+    }
+
+    #[test]
+    fn generated_runtime_audits_failed_network_intrinsic_paths() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("host-audit-net-failure");
+        create_project(&project, Some("host-audit-net-failure-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "host-audit-net-failure-app",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net.ax\"\nmatch tcp_dial(\"127.0.0.1\", 1, \"ping\", 1) {\nSome(_reply) {\nprint \"unexpected\"\n}\nNone {\nprint \"tcp none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let audit_log = project.join("host-audit-net-failure.jsonl");
+        let output = compiled_binary_command(&built.binary)
+            .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
+            .output()
+            .expect("run compiled binary");
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "tcp none\n");
+        let audit = fs::read_to_string(audit_log).expect("read audit log");
+        assert!(
+            audit.contains("\"intrinsic\":\"net_tcp_dial\""),
+            "audit log: {audit}"
+        );
+        assert!(
+            audit.contains("\"outcome\":\"denied\""),
+            "audit log: {audit}"
+        );
+        assert!(
+            audit.contains("\"args\":{\"host\":\"string:9\""),
+            "audit log: {audit}"
+        );
+        assert!(!audit.contains("ping"));
+    }
+
+    #[test]
     fn legacy_env_bool_still_checks_with_deprecation_warning() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("legacy-env");
