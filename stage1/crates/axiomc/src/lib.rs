@@ -11302,7 +11302,7 @@ print 0
         .expect("write source");
         let error = check_project(&project).expect_err("recursive generic struct should fail");
         assert_eq!(error.kind, "type");
-        assert_eq!(error.code.as_deref(), Some("generic_instantiation_cycle"));
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_limit"));
     }
 
     #[test]
@@ -11323,7 +11323,28 @@ print answer
         .expect("write source");
         let error = check_project(&project).expect_err("recursive generic function should fail");
         assert_eq!(error.kind, "type");
-        assert_eq!(error.code.as_deref(), Some("generic_instantiation_cycle"));
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_limit"));
+    }
+
+    #[test]
+    fn check_project_allows_more_than_bounded_nonrecursive_generic_instantiations() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("many-generic-instantiations");
+        create_project(&project, Some("many-generic-instantiations-app")).expect("create project");
+
+        let mut source = String::from("fn accept<T>(value: Option<T>): int {\nreturn 1\n}\n\n");
+        for i in 0..70 {
+            let mut ty = String::from("int");
+            for _ in 0..i {
+                ty = format!("Option<{ty}>");
+            }
+            source.push_str(&format!("let value{i}: int = accept<{ty}>(None)\n"));
+        }
+        source.push_str("print 0\n");
+
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+        check_project(&project)
+            .expect("finite generic instantiations beyond the former cap should pass");
     }
 
     #[test]
