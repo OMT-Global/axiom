@@ -2,7 +2,34 @@ use crate::diagnostics::Diagnostic;
 use serde::Serialize;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
+pub struct AstNodeId(pub String);
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
+pub struct SourceSpan {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+impl SourceSpan {
+    pub fn new(file: impl Into<String>, line: usize, column: usize) -> Self {
+        Self {
+            file: file.into(),
+            line,
+            column,
+        }
+    }
+
+    pub fn stable_id(&self, kind: &str, name: Option<&str>) -> AstNodeId {
+        let suffix = name.unwrap_or("");
+        AstNodeId(format!(
+            "{}:{}:{}:{}:{}",
+            self.file, self.line, self.column, kind, suffix
+        ))
+    }
+}
+
 /// Parser-owned AST for a single stage1 source file.
 ///
 /// This layer records syntax only: imports are raw module references, names are
@@ -10,6 +37,8 @@ use std::path::Path;
 /// Visibility, duplicate-symbol checks, imported symbol availability, concrete
 /// type resolution, and ownership/borrow validation are intentionally deferred
 /// to project flattening and HIR lowering.
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Program {
     pub path: String,
     pub imports: Vec<Import>,
@@ -419,6 +448,115 @@ pub enum CompareOp {
     Le,
     Gt,
     Ge,
+}
+
+impl Import {
+    pub fn span_in(&self, file: &str) -> SourceSpan {
+        SourceSpan::new(file, self.line, self.column)
+    }
+
+    pub fn stable_id_in(&self, file: &str) -> AstNodeId {
+        self.span_in(file).stable_id("import", Some(&self.path))
+    }
+}
+
+impl Function {
+    pub fn span(&self) -> SourceSpan {
+        SourceSpan::new(&self.path, self.line, self.column)
+    }
+    pub fn stable_id(&self) -> AstNodeId {
+        self.span().stable_id("function", Some(&self.source_name))
+    }
+}
+
+impl ConstDecl {
+    pub fn span_in(&self, file: &str) -> SourceSpan {
+        SourceSpan::new(file, self.line, self.column)
+    }
+    pub fn stable_id_in(&self, file: &str) -> AstNodeId {
+        self.span_in(file).stable_id(
+            if self.is_static { "static" } else { "const" },
+            Some(&self.name),
+        )
+    }
+}
+
+impl TypeAliasDecl {
+    pub fn span_in(&self, file: &str) -> SourceSpan {
+        SourceSpan::new(file, self.line, self.column)
+    }
+    pub fn stable_id_in(&self, file: &str) -> AstNodeId {
+        self.span_in(file).stable_id("type_alias", Some(&self.name))
+    }
+}
+
+impl StructDecl {
+    pub fn span_in(&self, file: &str) -> SourceSpan {
+        SourceSpan::new(file, self.line, self.column)
+    }
+    pub fn stable_id_in(&self, file: &str) -> AstNodeId {
+        self.span_in(file).stable_id("struct", Some(&self.name))
+    }
+}
+
+impl EnumDecl {
+    pub fn span_in(&self, file: &str) -> SourceSpan {
+        SourceSpan::new(file, self.line, self.column)
+    }
+    pub fn stable_id_in(&self, file: &str) -> AstNodeId {
+        self.span_in(file).stable_id("enum", Some(&self.name))
+    }
+}
+
+impl Stmt {
+    pub fn span_in(&self, file: &str) -> SourceSpan {
+        let (line, column) = match self {
+            Stmt::Let { line, column, .. }
+            | Stmt::Print { line, column, .. }
+            | Stmt::Panic { line, column, .. }
+            | Stmt::Defer { line, column, .. }
+            | Stmt::If { line, column, .. }
+            | Stmt::IfLet { line, column, .. }
+            | Stmt::While { line, column, .. }
+            | Stmt::Match { line, column, .. }
+            | Stmt::Return { line, column, .. } => (*line, *column),
+        };
+        SourceSpan::new(file, line, column)
+    }
+
+    pub fn stable_id_in(&self, file: &str) -> AstNodeId {
+        self.span_in(file).stable_id("stmt", None)
+    }
+}
+
+impl Expr {
+    pub fn span_in(&self, file: &str) -> Option<SourceSpan> {
+        let (line, column) = match self {
+            Expr::Literal(_) => return None,
+            Expr::VarRef { line, column, .. }
+            | Expr::Call { line, column, .. }
+            | Expr::MethodCall { line, column, .. }
+            | Expr::BinaryAdd { line, column, .. }
+            | Expr::BinaryCompare { line, column, .. }
+            | Expr::Cast { line, column, .. }
+            | Expr::Try { line, column, .. }
+            | Expr::Await { line, column, .. }
+            | Expr::StructLiteral { line, column, .. }
+            | Expr::FieldAccess { line, column, .. }
+            | Expr::TupleLiteral { line, column, .. }
+            | Expr::TupleIndex { line, column, .. }
+            | Expr::MapLiteral { line, column, .. }
+            | Expr::ArrayLiteral { line, column, .. }
+            | Expr::Slice { line, column, .. }
+            | Expr::Index { line, column, .. }
+            | Expr::Closure { line, column, .. } => (*line, *column),
+        };
+        Some(SourceSpan::new(file, line, column))
+    }
+
+    pub fn stable_id_in(&self, file: &str) -> Option<AstNodeId> {
+        self.span_in(file).map(|span| span.stable_id("expr", None))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -3966,5 +4104,94 @@ impl CompareOp {
             CompareOp::Gt => ">",
             CompareOp::Ge => ">=",
         }
+    }
+}
+
+#[cfg(test)]
+mod ast_identity_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn top_level_ast_items_have_stable_file_spans_and_ids() {
+        let source = r#"
+import "./nested.ax"
+pub struct Agent {
+    id: int
+}
+const LIMIT: int = 7
+fn run(): int {
+    let value: int = LIMIT
+    return value
+}
+"#;
+        let program = parse_program(source, Path::new("root.ax")).expect("parse program");
+
+        let import = &program.imports[0];
+        assert_eq!(import.line, 2);
+        assert_eq!(import.column, 1);
+        assert_eq!(
+            import.span_in(&program.path),
+            SourceSpan::new("root.ax", 2, 1)
+        );
+        assert_eq!(
+            import.stable_id_in(&program.path),
+            AstNodeId("root.ax:2:1:import:./nested.ax".to_string())
+        );
+
+        let structure = &program.structs[0];
+        assert_eq!(
+            structure.span_in(&program.path),
+            SourceSpan::new("root.ax", 3, 1)
+        );
+        assert_eq!(
+            structure.stable_id_in(&program.path),
+            AstNodeId("root.ax:3:1:struct:Agent".to_string())
+        );
+
+        let constant = &program.consts[0];
+        assert_eq!(
+            constant.span_in(&program.path),
+            SourceSpan::new("root.ax", 6, 1)
+        );
+        assert_eq!(
+            constant.stable_id_in(&program.path),
+            AstNodeId("root.ax:6:1:const:LIMIT".to_string())
+        );
+
+        let function = &program.functions[0];
+        assert_eq!(function.span(), SourceSpan::new("root.ax", 7, 1));
+        assert_eq!(
+            function.stable_id(),
+            AstNodeId("root.ax:7:1:function:run".to_string())
+        );
+        assert_eq!(
+            function.body[0].span_in(&program.path),
+            SourceSpan::new("root.ax", 8, 1)
+        );
+    }
+
+    #[test]
+    fn nested_module_item_ids_are_stable_across_repeated_parses() {
+        let source = r#"
+pub enum ResultKind {
+    Ok(int)
+}
+"#;
+        let first = parse_program(source, Path::new("modules/nested.ax")).expect("first parse");
+        let second = parse_program(source, Path::new("modules/nested.ax")).expect("second parse");
+
+        assert_eq!(
+            first.enums[0].span_in(&first.path),
+            SourceSpan::new("modules/nested.ax", 2, 1)
+        );
+        assert_eq!(
+            first.enums[0].stable_id_in(&first.path),
+            AstNodeId("modules/nested.ax:2:1:enum:ResultKind".to_string())
+        );
+        assert_eq!(
+            first.enums[0].stable_id_in(&first.path),
+            second.enums[0].stable_id_in(&second.path)
+        );
     }
 }
