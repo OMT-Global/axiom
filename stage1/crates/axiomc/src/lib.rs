@@ -11285,6 +11285,48 @@ print c
     }
 
     #[test]
+    fn check_project_rejects_recursive_generic_struct_instantiation_cycle() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-generic-struct");
+        create_project(&project, Some("recursive-generic-struct-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Loop<T> {
+next: Loop<Loop<T>>
+}
+
+let value: Loop<int> = Loop { next: Loop { next: 0 } }
+print 0
+",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("recursive generic struct should fail");
+        assert_eq!(error.kind, "type");
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_cycle"));
+    }
+
+    #[test]
+    fn check_project_rejects_recursive_generic_function_instantiation_cycle() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("recursive-generic-function");
+        create_project(&project, Some("recursive-generic-function-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn grow<T>(value: T): int {
+return grow<Option<T>>(None)
+}
+
+let answer: int = grow<int>(1)
+print answer
+",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("recursive generic function should fail");
+        assert_eq!(error.kind, "type");
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_cycle"));
+    }
+
+    #[test]
     fn hir_recovery_collects_independent_type_errors_in_source_order() {
         // Three functions each reference an undefined variable; recovery must
         // accumulate all three errors rather than short-circuit after the first.
