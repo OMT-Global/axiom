@@ -3,5 +3,5 @@ Named { item: T }
 Empty
 }
 fn make(): Pair<int> {
-return Named<string> { item: 1 }
+return Named { item: "wrong" }
 }

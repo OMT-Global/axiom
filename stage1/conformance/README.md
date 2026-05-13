@@ -96,10 +96,15 @@ Current compile-fail fixtures cover:
   statement incorrectly supplies type arguments.
 - `generic_struct_constructor_extra_type_args`: parse diagnostics for explicit
   generic struct constructor type arguments that cannot lower to codegen.
+- `generic_struct_constructor_missing_type_args`: type diagnostics for generic
+  struct constructors whose contextual generic type has too few type arguments.
+- `generic_struct_constructor_mismatched_type_args`: type diagnostics for generic
+  struct constructors whose payload does not match the contextual type argument.
 - `generic_tuple_enum_constructor_type_args`: type diagnostics for tuple enum
   constructors that incorrectly supply explicit type arguments.
-- `generic_named_enum_constructor_type_args`: parse diagnostics for named-payload
-  enum constructors that incorrectly supply explicit type arguments.
+- `generic_named_enum_constructor_mismatched_type_args`: type diagnostics for
+  named-payload enum constructors whose payload does not match the contextual
+  type argument.
 - `result_ok_without_context`: type diagnostics for `Ok(...)` without an
   expected `Result<T, E>` context.
 - `stdlib_clock_without_capability`: capability diagnostics for clock
