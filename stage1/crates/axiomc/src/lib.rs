@@ -11302,7 +11302,7 @@ print 0
         .expect("write source");
         let error = check_project(&project).expect_err("recursive generic struct should fail");
         assert_eq!(error.kind, "type");
-        assert_eq!(error.code.as_deref(), Some("generic_instantiation_cycle"));
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_limit"));
     }
 
     #[test]
@@ -11323,27 +11323,32 @@ print answer
         .expect("write source");
         let error = check_project(&project).expect_err("recursive generic function should fail");
         assert_eq!(error.kind, "type");
-        assert_eq!(error.code.as_deref(), Some("generic_instantiation_cycle"));
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_limit"));
     }
 
     #[test]
-    fn check_project_allows_many_finite_nonrecursive_generic_instantiations() {
+    fn check_project_reports_resource_limit_for_many_finite_nonrecursive_generic_instantiations() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("many-generic-instantiations");
         create_project(&project, Some("many-generic-instantiations-app")).expect("create project");
 
-        let mut source = String::from("fn accept<T>(value: Option<T>): int {\nreturn 1\n}\n\n");
-        for i in 0..80 {
-            let mut ty = String::from("int");
-            for _ in 0..i {
-                ty = format!("Option<{ty}>");
-            }
-            source.push_str(&format!("let value{i}: int = accept<{ty}>(None)\n"));
+        let mut source = String::from("fn accept<T>(value: T): int {\nreturn 1\n}\n\n");
+        for i in 0..300 {
+            source.push_str(&format!("struct S{i} {{\nvalue: int\n}}\n"));
+        }
+        source.push_str("\n");
+        for i in 0..300 {
+            source.push_str(&format!(
+                "let value{i}: int = accept<S{i}>(S{i} {{ value: {i} }})\n"
+            ));
         }
         source.push_str("print 0\n");
 
         fs::write(project.join("src/main.ax"), source).expect("write source");
-        check_project(&project).expect("finite generic instantiations should pass");
+        let error = check_project(&project)
+            .expect_err("finite generic instantiations beyond the active cap should be bounded");
+        assert_eq!(error.kind, "type");
+        assert_eq!(error.code.as_deref(), Some("generic_instantiation_limit"));
     }
 
     #[test]
