@@ -8729,7 +8729,9 @@ fn lower_expr_with_expected_inner(
                     .with_span(*line, *column));
                 }
             };
-            if !lowered.ty().is_copy() {
+            if !lowered.ty().is_copy()
+                && !matches!(lowered, Expr::FieldAccess { .. } | Expr::TupleIndex { .. })
+            {
                 move_lowered_owner_value(&lowered, env)?;
             }
             Ok(Expr::Try {
