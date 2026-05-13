@@ -7571,8 +7571,8 @@ print serve_health("127.0.0.1:18080", 1, started)
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 63);
-        assert_eq!(output.passed, 63);
+        assert_eq!(output.cases.len(), 64);
+        assert_eq!(output.passed, 64);
         let failures: Vec<_> = output
             .cases
             .iter()
@@ -7586,7 +7586,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count()
-                == 43
+                == 44
         );
         assert_eq!(
             output
@@ -7999,6 +7999,66 @@ print serve_health("127.0.0.1:18080", 1, started)
         fs::write(
             project.join("src/main.ax"),
             "fn load(): Result<int, string> {\nreturn Err(\"boom\")\n}\n\nfn bad(): Result<int, int> {\nlet count: int = load()?\nreturn Ok(count)\n}\n\nprint 0\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("type error");
+        assert_eq!(error.kind, "type");
+        assert!(
+            error
+                .message
+                .contains("`?` cannot propagate Result error type string")
+        );
+    }
+
+    #[test]
+    fn check_project_accepts_try_in_nested_generic_option_and_result_helpers() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-nested-generics");
+        create_project(&project, Some("try-nested-generics-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Wrapper<T> {
+item: T
+}
+
+fn peel_option<T>(wrapped: Wrapper<Option<T>>): Option<T> {
+let item: T = wrapped.item?
+return Some(item)
+}
+
+fn peel_result<T>(wrapped: Wrapper<Result<T, string>>): Result<Wrapper<T>, string> {
+let item: T = wrapped.item?
+return Ok(Wrapper { item: item })
+}
+
+let maybe_count: Option<int> = peel_option<int>(Wrapper { item: Some(7) })
+let loaded_count: Result<Wrapper<int>, string> = peel_result<int>(Wrapper { item: Ok(9) })
+print 0
+",
+        )
+        .expect("write source");
+        check_project(&project).expect("nested generic try helpers should type-check");
+    }
+
+    #[test]
+    fn check_project_rejects_try_nested_generic_result_error_mismatch() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("try-nested-generic-error-mismatch");
+        create_project(&project, Some("try-nested-generic-error-mismatch-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Wrapper<T> {
+item: T
+}
+
+fn bad(wrapped: Wrapper<Result<int, string>>): Result<Wrapper<int>, int> {
+let item: int = wrapped.item?
+return Ok(Wrapper { item: item })
+}
+
+print 0
+",
         )
         .expect("write source");
         let error = check_project(&project).expect_err("type error");
