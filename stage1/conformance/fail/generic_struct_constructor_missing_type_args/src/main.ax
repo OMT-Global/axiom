@@ -2,6 +2,6 @@ struct Pair<T, E> {
 left: T
 right: E
 }
-fn make(): Pair<int> {
-return Pair { left: 1, right: "ok" }
+fn make(): Pair<int, string> {
+return Pair<int> { left: 1, right: "ok" }
 }

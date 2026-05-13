@@ -94,10 +94,12 @@ Current compile-fail fixtures cover:
   message is not a `string`.
 - `panic_rejects_type_arguments`: type diagnostics for `panic(...)` when the
   statement incorrectly supplies type arguments.
-- `generic_struct_constructor_extra_type_args`: parse diagnostics for explicit
-  generic struct constructor type arguments that cannot lower to codegen.
-- `generic_struct_constructor_missing_type_args`: type diagnostics for generic
-  struct constructors whose contextual generic type has too few type arguments.
+- `generic_struct_constructor_extra_type_args`: type diagnostics tied to the
+  constructor path for explicit generic struct constructor type arguments with
+  invalid arity.
+- `generic_struct_constructor_missing_type_args`: type diagnostics tied to the
+  constructor path when a generic struct constructor spelling supplies too few
+  explicit type arguments.
 - `generic_struct_constructor_mismatched_type_args`: type diagnostics for generic
   struct constructors whose payload does not match the contextual type argument.
 - `generic_tuple_enum_constructor_type_args`: type diagnostics for tuple enum
@@ -105,9 +107,9 @@ Current compile-fail fixtures cover:
   enum constructors are covered through contextual generic validation because
   the current named-literal surface has no valid explicit `Variant<T> { ... }`
   form that reaches HIR lowering.
-- `generic_named_enum_constructor_missing_type_args`: type diagnostics for
-  named-payload enum constructors whose contextual generic type has too few
-  type arguments.
+- `generic_named_enum_constructor_missing_type_args`: type diagnostics tied to
+  the named-payload constructor path when the current syntax surface sees an
+  explicitly generic variant constructor spelling.
 - `generic_named_enum_constructor_mismatched_type_args`: type diagnostics for
   named-payload enum constructors whose payload does not match the contextual
   type argument.

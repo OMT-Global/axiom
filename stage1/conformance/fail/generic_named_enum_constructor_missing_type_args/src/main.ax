@@ -2,6 +2,6 @@ enum Pair<T, E> {
 Named { left: T, right: E }
 Empty
 }
-fn make(): Pair<int> {
-return Named { left: 1, right: "ok" }
+fn make(): Pair<int, string> {
+return Named<int> { left: 1, right: "ok" }
 }
