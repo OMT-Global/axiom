@@ -4157,7 +4157,9 @@ fn build_module_symbols(module: &LoadedModule) -> Result<ModuleSymbols, Diagnost
     }
     for const_decl in &module.program.consts {
         let mut internal_decl = const_decl.clone();
-        internal_decl.name = format!("{module_id}_{}", const_decl.name);
+        if !const_decl.is_static {
+            internal_decl.name = format!("{module_id}_{}", const_decl.name);
+        }
         if functions.contains_key(&const_decl.name)
             || structs.contains_key(&const_decl.name)
             || enums.contains_key(&const_decl.name)
