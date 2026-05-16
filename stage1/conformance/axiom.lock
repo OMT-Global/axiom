@@ -151,6 +151,11 @@ version = "0.1.0"
 source = "path:fail/nested_match_pattern_not_supported"
 
 [[package]]
+name = "conformance-numeric-literal-suffix-mismatch"
+version = "0.1.0"
+source = "path:fail/numeric_literal_suffix_mismatch"
+
+[[package]]
 name = "conformance-ownership-across-dependency-boundary"
 version = "0.1.0"
 source = "path:fail/ownership_across_dependency_boundary"
@@ -301,6 +306,11 @@ version = "0.1.0"
 source = "path:pass/legacy_core_programs"
 
 [[package]]
+name = "conformance-numeric-literal-suffixes"
+version = "0.1.0"
+source = "path:pass/numeric_literal_suffixes"
+
+[[package]]
 name = "conformance-outcome-control-flow"
 version = "0.1.0"
 source = "path:pass/outcome_control_flow"
@@ -359,4 +369,3 @@ source = "path:pass/struct_field_access"
 name = "conformance-type-system-aggregates"
 version = "0.1.0"
 source = "path:pass/type_system_aggregates"
-
