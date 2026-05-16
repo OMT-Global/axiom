@@ -3704,9 +3704,11 @@ clock = false
         assert!(manifest.capabilities.process);
         assert!(manifest.capabilities.unsafe_rationale.is_none());
         assert!(
-            !manifest.capabilities.warnings().iter().any(|warning| {
-                warning.contains("unrestricted process execution")
-            })
+            !manifest
+                .capabilities
+                .warnings()
+                .iter()
+                .any(|warning| { warning.contains("unrestricted process execution") })
         );
     }
 
@@ -7002,8 +7004,7 @@ print serve_once("127.0.0.1:18080", "hello")
     fn manifest_test_expected_error_passes_on_diagnostic_match() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("manifest-expected-error-pass");
-        create_project(&project, Some("manifest-expected-error-pass-app"))
-            .expect("create project");
+        create_project(&project, Some("manifest-expected-error-pass-app")).expect("create project");
         fs::write(
             project.join("src/broken_test.ax"),
             "let x: int = \"not an int\"\n",
@@ -7827,8 +7828,8 @@ print serve_health("127.0.0.1:18080", 1, started)
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 70);
-        assert_eq!(output.passed, 70);
+        assert_eq!(output.cases.len(), 72);
+        assert_eq!(output.passed, 72);
         let failures: Vec<_> = output
             .cases
             .iter()
@@ -7842,7 +7843,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count(),
-            50
+            51
         );
         assert_eq!(
             output
@@ -7850,7 +7851,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            18
+            19
         );
         assert_eq!(
             output
@@ -9824,6 +9825,49 @@ print takes_two(three)
             .expect("run compiled binary");
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
+    fn build_project_accepts_mutable_local_borrow_write_through() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-local-borrow");
+        create_project(&project, Some("mut-local-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let value: string = \"alpha\"\nlet local: &mut string = &mut value\n*local = \"beta\"\nprint *local\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("let mut value: String"));
+        assert!(generated.contains("let local: &mut String = &mut value;"));
+        assert!(generated.contains("*local = String::from(\"beta\");"));
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "beta\n");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owned_value_while_mutable_local_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-local-borrow-move");
+        create_project(&project, Some("mut-local-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let value: string = \"alpha\"\nlet local: &mut string = &mut value\nprint value\nprint *local\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("moving a mutably borrowed value should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"value\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
     }
 
     #[test]

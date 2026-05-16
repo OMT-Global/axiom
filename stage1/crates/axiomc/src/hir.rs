@@ -83,6 +83,11 @@ pub enum Stmt {
         expr: Expr,
         span: SourceSpan,
     },
+    Assign {
+        target: Expr,
+        expr: Expr,
+        span: SourceSpan,
+    },
     Print {
         expr: Expr,
         span: SourceSpan,
@@ -189,6 +194,14 @@ pub enum Expr {
         expr: Box<Expr>,
         ty: Type,
     },
+    MutBorrow {
+        expr: Box<Expr>,
+        ty: Type,
+    },
+    Deref {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     Try {
         expr: Box<Expr>,
         ty: Type,
@@ -265,6 +278,7 @@ pub enum Type {
     Enum(String),
     Ptr(Box<Type>),
     MutPtr(Box<Type>),
+    MutRef(Box<Type>),
     Slice(Box<Type>),
     MutSlice(Box<Type>),
     Option(Box<Type>),
@@ -293,6 +307,7 @@ impl PartialEq for Type {
             }
             (Type::Ptr(lhs), Type::Ptr(rhs))
             | (Type::MutPtr(lhs), Type::MutPtr(rhs))
+            | (Type::MutRef(lhs), Type::MutRef(rhs))
             | (Type::Slice(lhs), Type::Slice(rhs))
             | (Type::MutSlice(lhs), Type::MutSlice(rhs))
             | (Type::Option(lhs), Type::Option(rhs))
@@ -328,6 +343,7 @@ fn type_assignable_to(actual: &Type, expected: &Type) -> bool {
         }
         (Type::Ptr(actual_inner), Type::Ptr(expected_inner))
         | (Type::MutPtr(actual_inner), Type::MutPtr(expected_inner))
+        | (Type::MutRef(actual_inner), Type::MutRef(expected_inner))
         | (Type::Slice(actual_inner), Type::Slice(expected_inner))
         | (Type::MutSlice(actual_inner), Type::MutSlice(expected_inner))
         | (Type::Option(actual_inner), Type::Option(expected_inner))
@@ -699,6 +715,10 @@ fn collect_stmt_calls(stmt: &syntax::Stmt, calls: &mut VecDeque<String>) {
         | syntax::Stmt::Panic { expr, .. }
         | syntax::Stmt::Defer { expr, .. }
         | syntax::Stmt::Return { expr, .. } => collect_expr_calls(expr, calls),
+        syntax::Stmt::Assign { target, expr, .. } => {
+            collect_expr_calls(target, calls);
+            collect_expr_calls(expr, calls);
+        }
         syntax::Stmt::If {
             cond,
             then_block,
@@ -769,7 +789,9 @@ fn collect_expr_calls(expr: &syntax::Expr, calls: &mut VecDeque<String>) {
         }
         syntax::Expr::Try { expr, .. }
         | syntax::Expr::Await { expr, .. }
-        | syntax::Expr::Cast { expr, .. } => {
+        | syntax::Expr::Cast { expr, .. }
+        | syntax::Expr::MutBorrow { expr, .. }
+        | syntax::Expr::Deref { expr, .. } => {
             collect_expr_calls(expr, calls);
         }
         syntax::Expr::StructLiteral { fields, .. } => {
@@ -899,7 +921,8 @@ fn type_has_unboxed_recursive_path(
         | Type::String
         | Type::Str
         | Type::Ptr(_)
-        | Type::MutPtr(_) => false,
+        | Type::MutPtr(_)
+        | Type::MutRef(_) => false,
         Type::Struct(name) => {
             let current = AggregateRef::Struct(name.clone());
             if &current == owner {
@@ -1049,6 +1072,17 @@ fn infer_generic_calls_in_stmt(
             }
         }
         syntax::Stmt::Print { expr, line, column } => syntax::Stmt::Print {
+            expr: infer_generic_calls_in_expr(expr, None, env, generic_functions)?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Assign {
+            target,
+            expr,
+            line,
+            column,
+        } => syntax::Stmt::Assign {
+            target: infer_generic_calls_in_expr(target, None, env, generic_functions)?,
             expr: infer_generic_calls_in_expr(expr, None, env, generic_functions)?,
             line: *line,
             column: *column,
@@ -1346,6 +1380,26 @@ fn infer_generic_calls_in_expr(
             column: *column,
         },
         syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
+            expr: Box::new(infer_generic_calls_in_expr(
+                expr,
+                None,
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::MutBorrow { expr, line, column } => syntax::Expr::MutBorrow {
+            expr: Box::new(infer_generic_calls_in_expr(
+                expr,
+                None,
+                env,
+                generic_functions,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Deref { expr, line, column } => syntax::Expr::Deref {
             expr: Box::new(infer_generic_calls_in_expr(
                 expr,
                 None,
@@ -1721,6 +1775,7 @@ fn contains_generic_type_param(ty: &syntax::TypeName, type_params: &HashSet<Stri
         }
         syntax::TypeName::Ptr(inner)
         | syntax::TypeName::MutPtr(inner)
+        | syntax::TypeName::MutRef(inner)
         | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
         | syntax::TypeName::LifetimeSlice(_, inner)
@@ -1795,6 +1850,15 @@ fn unify_generic_type_name(
         }
         syntax::TypeName::MutPtr(lhs) => {
             if let syntax::TypeName::MutPtr(rhs) = actual {
+                unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
+            } else if contains_generic_type_param(pattern, type_params) {
+                Err(generic_constraint_mismatch(pattern, actual, line, column))
+            } else {
+                Ok(())
+            }
+        }
+        syntax::TypeName::MutRef(lhs) => {
+            if let syntax::TypeName::MutRef(rhs) = actual {
                 unify_generic_type_name(lhs, rhs, type_params, bindings, line, column)
             } else if contains_generic_type_param(pattern, type_params) {
                 Err(generic_constraint_mismatch(pattern, actual, line, column))
@@ -2327,6 +2391,7 @@ fn collect_type_params(ty: &syntax::TypeName, type_params: &[String], found: &mu
         }
         syntax::TypeName::Ptr(inner)
         | syntax::TypeName::MutPtr(inner)
+        | syntax::TypeName::MutRef(inner)
         | syntax::TypeName::Slice(inner)
         | syntax::TypeName::MutSlice(inner)
         | syntax::TypeName::LifetimeSlice(_, inner)
@@ -2638,6 +2703,17 @@ fn rewrite_aggregate_type_name(
                 column,
             )?))
         }
+        syntax::TypeName::MutRef(inner) => {
+            syntax::TypeName::MutRef(Box::new(rewrite_aggregate_type_name(
+                inner,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+                line,
+                column,
+            )?))
+        }
         syntax::TypeName::Slice(inner) => {
             syntax::TypeName::Slice(Box::new(rewrite_aggregate_type_name(
                 inner,
@@ -2850,6 +2926,29 @@ fn rewrite_stmt_aggregate_types(
             column: *column,
         },
         syntax::Stmt::Print { expr, line, column } => syntax::Stmt::Print {
+            expr: rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Assign {
+            target,
+            expr,
+            line,
+            column,
+        } => syntax::Stmt::Assign {
+            target: rewrite_expr_aggregate_types(
+                target,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?,
             expr: rewrite_expr_aggregate_types(
                 expr,
                 generic_structs,
@@ -3226,6 +3325,28 @@ fn rewrite_expr_aggregate_types(
             line: *line,
             column: *column,
         },
+        syntax::Expr::MutBorrow { expr, line, column } => syntax::Expr::MutBorrow {
+            expr: Box::new(rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Deref { expr, line, column } => syntax::Expr::Deref {
+            expr: Box::new(rewrite_expr_aggregate_types(
+                expr,
+                generic_structs,
+                generic_enums,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
         syntax::Expr::Await { expr, line, column } => syntax::Expr::Await {
             expr: Box::new(rewrite_expr_aggregate_types(
                 expr,
@@ -3550,6 +3671,29 @@ fn rewrite_stmt_generic_calls(
             column: *column,
         },
         syntax::Stmt::Print { expr, line, column } => syntax::Stmt::Print {
+            expr: rewrite_expr_generic_calls(
+                expr,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?,
+            line: *line,
+            column: *column,
+        },
+        syntax::Stmt::Assign {
+            target,
+            expr,
+            line,
+            column,
+        } => syntax::Stmt::Assign {
+            target: rewrite_expr_generic_calls(
+                target,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?,
             expr: rewrite_expr_generic_calls(
                 expr,
                 type_bindings,
@@ -3966,6 +4110,28 @@ fn rewrite_expr_generic_calls(
             line: *line,
             column: *column,
         },
+        syntax::Expr::MutBorrow { expr, line, column } => syntax::Expr::MutBorrow {
+            expr: Box::new(rewrite_expr_generic_calls(
+                expr,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Deref { expr, line, column } => syntax::Expr::Deref {
+            expr: Box::new(rewrite_expr_generic_calls(
+                expr,
+                type_bindings,
+                generic_functions,
+                queue,
+                queued,
+            )?),
+            line: *line,
+            column: *column,
+        },
         syntax::Expr::Await { expr, line, column } => syntax::Expr::Await {
             expr: Box::new(rewrite_expr_generic_calls(
                 expr,
@@ -4226,6 +4392,9 @@ fn substitute_type_name(
         syntax::TypeName::MutPtr(inner) => {
             syntax::TypeName::MutPtr(Box::new(substitute_type_name(inner, type_bindings)))
         }
+        syntax::TypeName::MutRef(inner) => {
+            syntax::TypeName::MutRef(Box::new(substitute_type_name(inner, type_bindings)))
+        }
         syntax::TypeName::Slice(inner) => {
             syntax::TypeName::Slice(Box::new(substitute_type_name(inner, type_bindings)))
         }
@@ -4345,6 +4514,9 @@ fn type_name_monomorph_suffix(ty: &syntax::TypeName) -> String {
         syntax::TypeName::MutPtr(inner) => {
             format!("mutptr_{}", type_name_monomorph_suffix(inner))
         }
+        syntax::TypeName::MutRef(inner) => {
+            format!("mutref_{}", type_name_monomorph_suffix(inner))
+        }
         syntax::TypeName::Slice(inner) => format!("slice_{}", type_name_monomorph_suffix(inner)),
         syntax::TypeName::MutSlice(inner) => {
             format!("mutslice_{}", type_name_monomorph_suffix(inner))
@@ -4425,7 +4597,7 @@ impl Type {
             | Type::Ptr(_)
             | Type::MutPtr(_)
             | Type::Slice(_) => true,
-            Type::MutSlice(_) => false,
+            Type::MutRef(_) | Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
             Type::Tuple(elements) => elements.iter().all(Type::is_copy),
@@ -4451,6 +4623,7 @@ impl Type {
             | Type::Enum(_)
             | Type::Ptr(_)
             | Type::MutPtr(_)
+            | Type::MutRef(_)
             | Type::Slice(_)
             | Type::MutSlice(_)
             | Type::Option(_)
@@ -5706,6 +5879,47 @@ fn lower_stmt(
                 },
             })
         }
+        syntax::Stmt::Assign {
+            target,
+            expr,
+            line,
+            column,
+        } => {
+            let lowered_target = lower_expr(target, env, ctx)?;
+            if !matches!(lowered_target, Expr::Deref { .. }) {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "assignment target must dereference a mutable reference, got {}",
+                        lowered_target.ty()
+                    ),
+                )
+                .with_span(*line, *column));
+            }
+            let target_ty = lowered_target.ty().clone();
+            let lowered_expr = lower_expr_with_expected(expr, Some(&target_ty), env, ctx)?;
+            if !type_assignable_to(lowered_expr.ty(), &target_ty) {
+                return Err(Diagnostic::new(
+                    "type",
+                    format!(
+                        "assignment expects value type {target_ty}, got {}",
+                        lowered_expr.ty()
+                    ),
+                )
+                .with_span(expr.line(), expr.column()));
+            }
+            if !target_ty.is_copy() {
+                move_lowered_value(&lowered_expr, env)?;
+            }
+            Ok(Stmt::Assign {
+                target: lowered_target,
+                expr: lowered_expr,
+                span: SourceSpan {
+                    line: *line,
+                    column: *column,
+                },
+            })
+        }
         syntax::Stmt::Print { expr, line, column } => {
             let lowered = lower_expr(expr, env, ctx)?;
             if !matches!(
@@ -6419,6 +6633,13 @@ fn lower_expr_with_expected_inner(
                     .with_help("consider restructuring to avoid the move, or ensure the value is only used once")
                     .with_span(*line, *column));
                 }
+                if binding.active_mut_borrow_count > 0 && !binding.ty.is_copy() {
+                    return Err(ownership_error(
+                        OWNERSHIP_MOVE_WHILE_BORROWED,
+                        format!("cannot move value {name:?} while borrowed slices are still live"),
+                    )
+                    .with_span(*line, *column));
+                }
                 return Ok(Expr::VarRef {
                     name: name.clone(),
                     ty: binding.ty.clone(),
@@ -6463,6 +6684,57 @@ fn lower_expr_with_expected_inner(
                 message_with_suggestion(format!("undefined variable {name:?}"), name, env.keys()),
             )
             .with_span(*line, *column))
+        }
+        syntax::Expr::MutBorrow { expr, line, column } => {
+            let syntax::Expr::VarRef { name, .. } = expr.as_ref() else {
+                return Err(Diagnostic::new(
+                    "type",
+                    "mutable local borrows currently require a named local target",
+                )
+                .with_span(*line, *column));
+            };
+            let Some(binding) = env.get(name) else {
+                return Err(Diagnostic::new(
+                    "type",
+                    message_with_suggestion(
+                        format!("undefined variable {name:?}"),
+                        name,
+                        env.keys(),
+                    ),
+                )
+                .with_span(*line, *column));
+            };
+            if binding.moved {
+                return Err(ownership_error(
+                    OWNERSHIP_USE_AFTER_MOVE,
+                    format!("use of moved value {name:?}"),
+                )
+                .with_span(*line, *column));
+            }
+            Ok(Expr::MutBorrow {
+                expr: Box::new(Expr::VarRef {
+                    name: name.clone(),
+                    ty: binding.ty.clone(),
+                }),
+                ty: Type::MutRef(Box::new(binding.ty.clone())),
+            })
+        }
+        syntax::Expr::Deref { expr, line, column } => {
+            let lowered = lower_expr(expr, env, ctx)?;
+            let inner_ty = match lowered.ty() {
+                Type::MutRef(inner_ty) => (*inner_ty.clone()).clone(),
+                ty => {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("dereference expects a mutable reference, got {ty}"),
+                    )
+                    .with_span(*line, *column));
+                }
+            };
+            Ok(Expr::Deref {
+                expr: Box::new(lowered),
+                ty: inner_ty,
+            })
         }
         syntax::Expr::Call {
             name,
@@ -9526,7 +9798,9 @@ fn collect_var_refs(expr: &syntax::Expr, refs: &mut HashSet<String>) {
         }
         syntax::Expr::Try { expr, .. }
         | syntax::Expr::Await { expr, .. }
-        | syntax::Expr::Cast { expr, .. } => collect_var_refs(expr, refs),
+        | syntax::Expr::Cast { expr, .. }
+        | syntax::Expr::MutBorrow { expr, .. }
+        | syntax::Expr::Deref { expr, .. } => collect_var_refs(expr, refs),
         syntax::Expr::StructLiteral { fields, .. } => {
             for field in fields {
                 collect_var_refs(&field.expr, refs);
@@ -10608,6 +10882,8 @@ fn expr_borrow_origin(
             Type::Array(_, _) => Some(BorrowOrigin::Local),
             _ => Some(BorrowOrigin::Local),
         },
+        Expr::MutBorrow { .. } => Some(BorrowOrigin::Local),
+        Expr::Deref { expr, .. } => expr_borrow_origin(expr, env, ctx),
         Expr::Call { name, args, .. } => ctx
             .functions
             .get(name)
@@ -10761,6 +11037,8 @@ fn expr_borrowed_owners(
             Type::Array(_, _) => owned_borrow_root(base).into_iter().collect(),
             _ => HashSet::new(),
         },
+        Expr::MutBorrow { expr, .. } => owned_borrow_root(expr).into_iter().collect(),
+        Expr::Deref { expr, .. } => expr_borrowed_owners(expr, env, ctx),
         Expr::Call { name, args, .. } => ctx
             .functions
             .get(name)
@@ -10857,7 +11135,7 @@ fn contains_borrowed_slice_type_inner(
     visiting_enums: &mut HashSet<String>,
 ) -> bool {
     match ty {
-        Type::Slice(_) | Type::MutSlice(_) | Type::Str => true,
+        Type::Slice(_) | Type::MutSlice(_) | Type::MutRef(_) | Type::Str => true,
         Type::Option(inner) => contains_borrowed_slice_type_inner(
             inner,
             structs,
@@ -10983,7 +11261,7 @@ fn contains_mut_borrowed_slice_type_inner(
     visiting_enums: &mut HashSet<String>,
 ) -> bool {
     match ty {
-        Type::MutSlice(_) => true,
+        Type::MutSlice(_) | Type::MutRef(_) => true,
         Type::Error
         | Type::Slice(_)
         | Type::Int
@@ -11380,6 +11658,9 @@ fn lower_type_inner<T, U>(
         syntax::TypeName::MutPtr(inner) => Ok(Type::MutPtr(Box::new(lower_type_inner(
             inner, structs, enums, aliases, consts, resolving, line, column,
         )?))),
+        syntax::TypeName::MutRef(inner) => Ok(Type::MutRef(Box::new(lower_type_inner(
+            inner, structs, enums, aliases, consts, resolving, line, column,
+        )?))),
         syntax::TypeName::Slice(inner) | syntax::TypeName::LifetimeSlice(_, inner) => {
             Ok(Type::Slice(Box::new(lower_type_inner(
                 inner, structs, enums, aliases, consts, resolving, line, column,
@@ -11614,6 +11895,8 @@ impl Expr {
             Expr::BinaryAdd { ty, .. } => ty,
             Expr::BinaryCompare { ty, .. } => ty,
             Expr::Cast { ty, .. } => ty,
+            Expr::MutBorrow { ty, .. } => ty,
+            Expr::Deref { ty, .. } => ty,
             Expr::Try { ty, .. } => ty,
             Expr::Await { ty, .. } => ty,
             Expr::StructLiteral { ty, .. } => ty,
@@ -11635,7 +11918,7 @@ impl Stmt {
     fn always_returns(&self) -> bool {
         match self {
             Stmt::Return { .. } | Stmt::Panic { .. } => true,
-            Stmt::Defer { .. } => false,
+            Stmt::Defer { .. } | Stmt::Assign { .. } => false,
             Stmt::If {
                 cond,
                 then_block,
@@ -11676,6 +11959,7 @@ impl syntax::Stmt {
             | syntax::Stmt::IfLet { line, .. }
             | syntax::Stmt::While { line, .. }
             | syntax::Stmt::Match { line, .. }
+            | syntax::Stmt::Assign { line, .. }
             | syntax::Stmt::Return { line, .. } => *line,
         }
     }
@@ -11690,6 +11974,7 @@ impl syntax::Stmt {
             | syntax::Stmt::IfLet { column, .. }
             | syntax::Stmt::While { column, .. }
             | syntax::Stmt::Match { column, .. }
+            | syntax::Stmt::Assign { column, .. }
             | syntax::Stmt::Return { column, .. } => *column,
         }
     }
@@ -11715,6 +12000,8 @@ impl syntax::Expr {
             | syntax::Expr::ArrayLiteral { line, .. }
             | syntax::Expr::Slice { line, .. }
             | syntax::Expr::Index { line, .. }
+            | syntax::Expr::MutBorrow { line, .. }
+            | syntax::Expr::Deref { line, .. }
             | syntax::Expr::Closure { line, .. } => *line,
         }
     }
@@ -11738,6 +12025,8 @@ impl syntax::Expr {
             | syntax::Expr::ArrayLiteral { column, .. }
             | syntax::Expr::Slice { column, .. }
             | syntax::Expr::Index { column, .. }
+            | syntax::Expr::MutBorrow { column, .. }
+            | syntax::Expr::Deref { column, .. }
             | syntax::Expr::Closure { column, .. } => *column,
         }
     }
@@ -11769,6 +12058,7 @@ impl std::fmt::Display for Type {
             Type::Enum(name) => write!(f, "{name}"),
             Type::Ptr(inner) => write!(f, "ptr<{inner}>"),
             Type::MutPtr(inner) => write!(f, "mutptr<{inner}>"),
+            Type::MutRef(inner) => write!(f, "&mut {inner}"),
             Type::Slice(inner) => write!(f, "&[{inner}]"),
             Type::MutSlice(inner) => write!(f, "&mut [{inner}]"),
             Type::Option(inner) => write!(f, "Option<{inner}>"),
