@@ -1447,7 +1447,7 @@ Variant(
 
     #[test]
     fn parser_lowers_numeric_tower_literals_and_casts() {
-        let source = "fn widen(value: u8): u32 {\nreturn value as u32\n}\n\nlet byte: u8 = 255u8\nlet word: u32 = widen(byte) + 1u32\nlet signed: i16 = -1i16\nlet big: i64 = signed as i64\nlet ratio: f64 = 3.5f64\nlet half: f32 = 0.5f32\nprint word as int\nprint big\n";
+        let source = "fn widen(value: u8): u32 {\nreturn value as u32\n}\n\nlet byte: u8 = 255u8\nlet word: u32 = widen(byte) + 1u32\nlet signed: i16 = -1i16\nlet same: i16 = signed as i16\nlet big: i64 = signed as i64\nlet ratio: f64 = 3.5f64\nlet half: f32 = 0.5f32\nprint word as int\nprint same\nprint big\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         let hir = hir::lower(&parsed).expect("lower");
         let mir = mir::lower(&hir);
@@ -1457,6 +1457,8 @@ Variant(
         assert!(rendered.contains("let byte: u8 = 255u8;"));
         assert!(rendered.contains("let word: u32 = widen(byte) + 1u32;"));
         assert!(rendered.contains("let signed: i16 = -1i16;"));
+        assert!(rendered.contains("let same: i16 = signed;"));
+        assert!(!rendered.contains("let same: i16 = (signed) as i16;"));
         assert!(rendered.contains("let big: i64 = (signed) as i64;"));
         assert!(rendered.contains("let ratio: f64 = 3.5f64;"));
         assert!(rendered.contains("let half: f32 = 0.5f32;"));
@@ -7827,8 +7829,8 @@ print serve_health("127.0.0.1:18080", 1, started)
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 70);
-        assert_eq!(output.passed, 70);
+        assert_eq!(output.cases.len(), 71);
+        assert_eq!(output.passed, 71);
         let failures: Vec<_> = output
             .cases
             .iter()
@@ -7850,7 +7852,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            18
+            19
         );
         assert_eq!(
             output

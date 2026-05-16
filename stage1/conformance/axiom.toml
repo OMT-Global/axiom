@@ -58,6 +58,7 @@ members = [
   "pass/comparison_strict_typing",
   "pass/functions_across_modules",
   "pass/legacy_core_programs",
+  "pass/numeric_cross_width_casts",
   "pass/outcome_control_flow",
   "pass/runtime_negative_diagnostics",
   "pass/ownership_borrowing",

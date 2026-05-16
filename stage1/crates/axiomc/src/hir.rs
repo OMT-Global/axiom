@@ -8690,6 +8690,9 @@ fn lower_expr_with_expected_inner(
                 )
                 .with_span(*line, *column));
             }
+            if expr.ty() == &target {
+                return Ok(expr);
+            }
             Ok(Expr::Cast {
                 expr: Box::new(expr),
                 ty: target,
