@@ -796,7 +796,7 @@ fn expand_declarative_macros(source: &str, path: &Path) -> Result<String, Vec<Di
     if macros.is_empty() {
         return Ok(expanded);
     }
-    const MAX_MACRO_EXPANSION_DEPTH: usize = 32;
+    const MAX_MACRO_EXPANSION_DEPTH: usize = 64;
     for _ in 0..MAX_MACRO_EXPANSION_DEPTH {
         let (next, changed) = expand_macro_invocations_once(&expanded, &macros, path)?;
         expanded = next;
