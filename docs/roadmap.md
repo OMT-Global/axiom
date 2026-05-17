@@ -5,6 +5,8 @@ the Rust-only `axiomc` workflow.
 
 For issue-level roadmap disposition, current execution scope, and deferred
 ecosystem work, see the [Roadmap Status Ledger](roadmap-status.md).
+For agent-native semantic-layer canonical issues and duplicate handling, see
+the [Agent-Native Roadmap Ledger](roadmap-agent-native-ledger.md).
 
 The Python `stage0` interpreter and bytecode VM are retired as supported
 implementation surfaces; see
