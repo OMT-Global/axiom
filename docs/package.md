@@ -60,6 +60,9 @@ Checked-in editor and agent metadata lives under `stage1/schemas/`:
 - `stage1/schemas/axiom.stage1.v1.schema.json` describes the shared JSON
   envelope emitted by `axiomc check`, `build`, `test`, and `caps` with
   `--json`.
+- `stage1/schemas/axiom-intent-ir-v0.schema.json` describes the first
+  agent-facing Intent IR / semantic graph contract. See
+  [intent-ir-v0.md](intent-ir-v0.md).
 
 These schemas are intentionally metadata for editor completion, validation, and
 agent contract discovery. The compiler remains the source of truth for semantic
