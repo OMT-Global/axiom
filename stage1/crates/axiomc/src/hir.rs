@@ -411,12 +411,19 @@ struct Binding {
     moved_projections: HashSet<ProjectionPath>,
     borrow_kind: Option<BorrowKind>,
     borrow_origin: Option<BorrowOrigin>,
-    borrowed_owners: HashSet<String>,
+    borrowed_owners: HashSet<BorrowedOwner>,
     active_borrow_count: usize,
     active_mut_borrow_count: usize,
+    active_borrows: HashMap<ProjectionPath, borrowck::BorrowState>,
 }
 
 type ProjectionPath = Vec<ProjectionSegment>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BorrowedOwner {
+    name: String,
+    projection: ProjectionPath,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ProjectionSegment {
@@ -5194,6 +5201,7 @@ fn lower_function(
                 borrowed_owners: HashSet::new(),
                 active_borrow_count: 0,
                 active_mut_borrow_count: 0,
+                active_borrows: HashMap::new(),
             },
         );
         params.push(Param {
@@ -5238,6 +5246,7 @@ fn lower_function(
                 borrowed_owners: HashSet::new(),
                 active_borrow_count: 0,
                 active_mut_borrow_count: 0,
+                active_borrows: HashMap::new(),
             },
         );
         params.push(Param {
@@ -5377,6 +5386,7 @@ fn insert_type_error_binding_for_failed_stmt(
             borrowed_owners: HashSet::new(),
             active_borrow_count: 0,
             active_mut_borrow_count: 0,
+            active_borrows: HashMap::new(),
         });
     }
 }
@@ -5723,6 +5733,7 @@ fn lower_match_stmt(
                     ),
                     active_borrow_count: 0,
                     active_mut_borrow_count: 0,
+                    active_borrows: HashMap::new(),
                 },
             );
         }
@@ -5867,6 +5878,7 @@ fn lower_stmt(
                     borrowed_owners,
                     active_borrow_count: 0,
                     active_mut_borrow_count: 0,
+                    active_borrows: HashMap::new(),
                 },
             );
             Ok(Stmt::Let {
@@ -6365,6 +6377,7 @@ fn merge_branch_state(
                         branch.get(name).map(|entry| entry.active_mut_borrow_count)
                     }),
                 ),
+                active_borrows: binding.active_borrows.clone(),
             },
         );
     }
@@ -6432,6 +6445,7 @@ fn merge_loop_state(
                         .unwrap_or(binding.active_mut_borrow_count);
                     binding.active_mut_borrow_count.max(body_count)
                 },
+                active_borrows: binding.active_borrows.clone(),
             },
         );
     }
@@ -6485,6 +6499,7 @@ fn merge_match_state(
                     })
                     .max()
                     .unwrap_or(binding.active_mut_borrow_count),
+                active_borrows: binding.active_borrows.clone(),
             },
         );
     }
@@ -9670,6 +9685,7 @@ fn lower_expr_with_expected_inner(
                         borrowed_owners: HashSet::new(),
                         active_borrow_count: 0,
                         active_mut_borrow_count: 0,
+                        active_borrows: HashMap::new(),
                     },
                 );
             }
@@ -10858,7 +10874,7 @@ fn binding_borrowed_owners_from_expr(
     expr: &Expr,
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-) -> HashSet<String> {
+) -> HashSet<BorrowedOwner> {
     if !contains_borrowed_slice_type(ty, ctx.structs, ctx.enums) {
         return HashSet::new();
     }
@@ -10933,7 +10949,7 @@ fn expr_borrow_origin(
         Expr::Closure { .. } => None,
         Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => None,
         Expr::StringBorrow { expr, .. } => expr_borrow_origin(expr, env, ctx)
-            .or_else(|| owned_borrow_root(expr).map(|_| BorrowOrigin::Local)),
+            .or_else(|| owned_borrow_owner(expr).map(|_| BorrowOrigin::Local)),
     }
 }
 
@@ -11007,7 +11023,7 @@ fn match_binding_borrowed_owners(
     payload_ty: &Type,
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-) -> HashSet<String> {
+) -> HashSet<BorrowedOwner> {
     if !contains_borrowed_slice_type(payload_ty, ctx.structs, ctx.enums) {
         return HashSet::new();
     }
@@ -11023,7 +11039,7 @@ fn expr_borrowed_owners(
     expr: &Expr,
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-) -> HashSet<String> {
+) -> HashSet<BorrowedOwner> {
     if !contains_borrowed_slice_type(expr.ty(), ctx.structs, ctx.enums) {
         return HashSet::new();
     }
@@ -11034,10 +11050,10 @@ fn expr_borrowed_owners(
             .unwrap_or_default(),
         Expr::Slice { base, .. } => match base.ty() {
             Type::Slice(_) | Type::MutSlice(_) => expr_borrowed_owners(base, env, ctx),
-            Type::Array(_, _) => owned_borrow_root(base).into_iter().collect(),
+            Type::Array(_, _) => owned_borrow_owner(base).into_iter().collect(),
             _ => HashSet::new(),
         },
-        Expr::MutBorrow { expr, .. } => owned_borrow_root(expr).into_iter().collect(),
+        Expr::MutBorrow { expr, .. } => owned_borrow_owner(expr).into_iter().collect(),
         Expr::Deref { expr, .. } => expr_borrowed_owners(expr, env, ctx),
         Expr::Call { name, args, .. } => ctx
             .functions
@@ -11071,7 +11087,7 @@ fn expr_borrowed_owners(
         Expr::Literal { .. } | Expr::BinaryAdd { .. } | Expr::BinaryCompare { .. } => {
             HashSet::new()
         }
-        Expr::StringBorrow { expr, .. } => owned_borrow_root(expr).into_iter().collect(),
+        Expr::StringBorrow { expr, .. } => owned_borrow_owner(expr).into_iter().collect(),
         Expr::StructLiteral { fields, .. } => {
             let mut owners = HashSet::new();
             for field in fields {
@@ -11086,7 +11102,7 @@ fn collect_expr_borrowed_owners(
     exprs: &[Expr],
     env: &HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-) -> HashSet<String> {
+) -> HashSet<BorrowedOwner> {
     let mut owners = HashSet::new();
     for expr in exprs {
         owners.extend(expr_borrowed_owners(expr, env, ctx));
@@ -11094,15 +11110,15 @@ fn collect_expr_borrowed_owners(
     owners
 }
 
-fn owned_borrow_root(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::VarRef { name, ty } if !matches!(ty, Type::Slice(_) | Type::MutSlice(_)) => {
-            Some(name.clone())
-        }
-        Expr::FieldAccess { base, .. } => owned_borrow_root(base),
-        Expr::TupleIndex { base, .. } => owned_borrow_root(base),
-        _ => None,
+fn owned_borrow_owner(expr: &Expr) -> Option<BorrowedOwner> {
+    let (name, projection) = ownership_projection(expr)?;
+    if matches!(expr.ty(), Type::Slice(_) | Type::MutSlice(_)) {
+        return None;
     }
+    Some(BorrowedOwner {
+        name: name.to_string(),
+        projection,
+    })
 }
 
 fn contains_borrowed_slice_type(
@@ -11111,20 +11127,6 @@ fn contains_borrowed_slice_type(
     enums: &HashMap<String, EnumDef>,
 ) -> bool {
     contains_borrowed_slice_type_inner(ty, structs, enums, &mut HashSet::new(), &mut HashSet::new())
-}
-
-fn contains_mut_borrowed_slice_type(
-    ty: &Type,
-    structs: &HashMap<String, StructDef>,
-    enums: &HashMap<String, EnumDef>,
-) -> bool {
-    contains_mut_borrowed_slice_type_inner(
-        ty,
-        structs,
-        enums,
-        &mut HashSet::new(),
-        &mut HashSet::new(),
-    )
 }
 
 fn contains_borrowed_slice_type_inner(
@@ -11406,30 +11408,59 @@ fn borrow_kind_for_type(
 }
 
 fn increment_active_borrows(
-    owner_names: &HashSet<String>,
+    owner_names: &HashSet<BorrowedOwner>,
     env: &mut HashMap<String, Binding>,
     borrow_kind: BorrowKind,
     line: usize,
     column: usize,
 ) -> Result<(), Diagnostic> {
-    for owner_name in owner_names {
-        let binding = env.get_mut(owner_name).ok_or_else(|| {
+    for owner in owner_names {
+        let binding = env.get_mut(&owner.name).ok_or_else(|| {
             Diagnostic::new(
                 "type",
-                format!("internal error: missing borrow owner {owner_name:?}"),
+                format!("internal error: missing borrow owner {:?}", owner.name),
             )
         })?;
-        let mut state = borrowck::BorrowState {
-            active_shared_or_mutable: binding.active_borrow_count,
-            active_mutable: binding.active_mut_borrow_count,
-        };
-        state.begin_borrow(
-            owner_name,
+        let mut conflicting = borrowck::BorrowState::default();
+        for (active_projection, state) in &binding.active_borrows {
+            if projection_conflicts(active_projection, &owner.projection) {
+                conflicting.active_shared_or_mutable += state.active_shared_or_mutable;
+                conflicting.active_mutable += state.active_mutable;
+            }
+        }
+        if binding.active_borrow_count > 0 && binding.active_borrows.is_empty() {
+            conflicting.active_shared_or_mutable = binding.active_borrow_count;
+            conflicting.active_mutable = binding.active_mut_borrow_count;
+        }
+        let projected_name = format_projected_name(&owner.name, &owner.projection);
+        conflicting.begin_borrow(
+            &projected_name,
             borrow_kind,
             borrowck::SourceSpan::new(line, column),
         )?;
-        binding.active_borrow_count = state.active_shared_or_mutable;
-        binding.active_mut_borrow_count = state.active_mutable;
+        let mut state = borrowck::BorrowState {
+            active_shared_or_mutable: binding
+                .active_borrows
+                .get(&owner.projection)
+                .map(|state| state.active_shared_or_mutable)
+                .unwrap_or_default(),
+            active_mutable: binding
+                .active_borrows
+                .get(&owner.projection)
+                .map(|state| state.active_mutable)
+                .unwrap_or_default(),
+        };
+        state.active_shared_or_mutable += 1;
+        if matches!(borrow_kind, BorrowKind::Mutable) {
+            state.active_mutable += 1;
+        }
+        binding
+            .active_borrows
+            .insert(owner.projection.clone(), state);
+        binding.active_borrow_count += 1;
+        if matches!(borrow_kind, BorrowKind::Mutable) {
+            binding.active_mut_borrow_count += 1;
+        }
     }
     Ok(())
 }
@@ -11438,7 +11469,7 @@ fn record_temporary_borrows(
     expr: &Expr,
     env: &mut HashMap<String, Binding>,
     ctx: &LowerContext<'_>,
-    temporary_borrows: &mut Vec<(HashSet<String>, BorrowKind)>,
+    temporary_borrows: &mut Vec<(HashSet<BorrowedOwner>, BorrowKind)>,
 ) -> Result<(), Diagnostic> {
     let owners = expr_borrowed_owners(expr, env, ctx);
     let Some(borrow_kind) = borrow_kind_for_type(expr.ty(), ctx.structs, ctx.enums) else {
@@ -11450,7 +11481,7 @@ fn record_temporary_borrows(
 }
 
 fn release_temporary_borrows(
-    temporary_borrows: &[(HashSet<String>, BorrowKind)],
+    temporary_borrows: &[(HashSet<BorrowedOwner>, BorrowKind)],
     env: &mut HashMap<String, Binding>,
 ) {
     for (owner_names, borrow_kind) in temporary_borrows.iter().rev() {
@@ -11459,23 +11490,34 @@ fn release_temporary_borrows(
 }
 
 fn release_active_borrow_owners(
-    owner_names: &HashSet<String>,
+    owner_names: &HashSet<BorrowedOwner>,
     env: &mut HashMap<String, Binding>,
     borrow_kind: BorrowKind,
 ) {
-    for owner_name in owner_names {
-        decrement_active_borrow(owner_name, env, borrow_kind);
+    for owner in owner_names {
+        decrement_active_borrow(owner, env, borrow_kind);
     }
 }
 
 fn decrement_active_borrow(
-    owner_name: &str,
+    owner: &BorrowedOwner,
     env: &mut HashMap<String, Binding>,
     borrow_kind: BorrowKind,
 ) {
-    let Some(binding) = env.get_mut(owner_name) else {
+    let Some(binding) = env.get_mut(&owner.name) else {
         return;
     };
+    let mut remove_projection = false;
+    if let Some(state) = binding.active_borrows.get_mut(&owner.projection) {
+        state.active_shared_or_mutable = state.active_shared_or_mutable.saturating_sub(1);
+        if matches!(borrow_kind, BorrowKind::Mutable) {
+            state.active_mutable = state.active_mutable.saturating_sub(1);
+        }
+        remove_projection = state.active_shared_or_mutable == 0 && state.active_mutable == 0;
+    }
+    if remove_projection {
+        binding.active_borrows.remove(&owner.projection);
+    }
     binding.active_borrow_count = binding.active_borrow_count.saturating_sub(1);
     if matches!(borrow_kind, BorrowKind::Mutable) {
         binding.active_mut_borrow_count = binding.active_mut_borrow_count.saturating_sub(1);
@@ -11501,8 +11543,8 @@ fn release_scope_borrows(env: &mut HashMap<String, Binding>, scope_names: &HashS
         let Some(borrow_kind) = borrow_kind else {
             continue;
         };
-        for owner_name in owner_names {
-            decrement_active_borrow(&owner_name, env, borrow_kind);
+        for owner in owner_names {
+            decrement_active_borrow(&owner, env, borrow_kind);
         }
     }
     for name in released {
