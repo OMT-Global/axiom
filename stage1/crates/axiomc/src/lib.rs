@@ -5675,6 +5675,82 @@ print "missing"
     }
 
     #[test]
+    fn stage1_project_imports_synthetic_stdlib_net_udp_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-net-udp-app");
+        create_project(&project, Some("stdlib-net-udp-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-net-udp-app",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/net_udp.ax\"\nmatch bind_loopback_once(\"udp pong\", 1000) {\nSome(port) {\nmatch send_recv(\"127.0.0.1\", port, \"udp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"udp none\"\n}\n}\n}\nNone {\nprint \"udp bind none\"\n}\n}\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        let expected = if loopback_socket_bind_available() {
+            "udp pong\n"
+        } else {
+            "udp bind none\n"
+        };
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_net_udp_without_net_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-net-udp-denied");
+        create_project(&project, Some("stdlib-net-udp-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-net-udp-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net_udp.ax\"\nmatch bind_loopback_once(\"pong\", 1000) {\nSome(_port) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].net = true"),
+            "unexpected diagnostic: {err:?}",
+        );
+    }
+
+    #[test]
     fn stage1_project_imports_synthetic_stdlib_io_module() {
         // `std/io.ax` is the first stdlib module not tied to a capability
         // flag: `io_eprintln` is ungated, matching the ambient status of the
