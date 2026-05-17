@@ -3704,9 +3704,11 @@ clock = false
         assert!(manifest.capabilities.process);
         assert!(manifest.capabilities.unsafe_rationale.is_none());
         assert!(
-            !manifest.capabilities.warnings().iter().any(|warning| {
-                warning.contains("unrestricted process execution")
-            })
+            !manifest
+                .capabilities
+                .warnings()
+                .iter()
+                .any(|warning| { warning.contains("unrestricted process execution") })
         );
     }
 
@@ -7106,8 +7108,7 @@ print serve_once("127.0.0.1:18080", "hello")
     fn manifest_test_expected_error_passes_on_diagnostic_match() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("manifest-expected-error-pass");
-        create_project(&project, Some("manifest-expected-error-pass-app"))
-            .expect("create project");
+        create_project(&project, Some("manifest-expected-error-pass-app")).expect("create project");
         fs::write(
             project.join("src/broken_test.ax"),
             "let x: int = \"not an int\"\n",
@@ -7931,8 +7932,8 @@ print serve_health("127.0.0.1:18080", 1, started)
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 70);
-        assert_eq!(output.passed, 70);
+        assert_eq!(output.cases.len(), 78);
+        assert_eq!(output.passed, 78);
         let failures: Vec<_> = output
             .cases
             .iter()
@@ -7946,7 +7947,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count(),
-            50
+            57
         );
         assert_eq!(
             output
@@ -7954,7 +7955,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            18
+            20
         );
         assert_eq!(
             output
@@ -9947,6 +9948,74 @@ print takes_two(three)
             .expect("run compiled binary");
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    }
+
+    #[test]
+    fn build_project_accepts_disjoint_mutable_slice_borrows_from_projection_roots() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-disjoint-projection-slice-borrows");
+        create_project(&project, Some("mut-disjoint-projection-slice-borrows-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Pair {\nfirst: [int]\nsecond: [int]\n}\n\nlet pair: Pair = Pair { first: [1, 2], second: [3, 4, 5] }\nlet left: &mut [int] = (pair.first)[:]\nlet right: &mut [int] = (pair.second)[:]\nprint len(left)\nprint len(right)\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "2\n3\n");
+    }
+
+    #[test]
+    fn check_project_rejects_overlapping_mutable_slice_borrows_from_projection_roots() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-overlapping-projection-slice-borrows");
+        create_project(
+            &project,
+            Some("mut-overlapping-projection-slice-borrows-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Pair {\nfirst: [int]\nsecond: [int]\n}\n\nlet pair: Pair = Pair { first: [1, 2], second: [3, 4] }\nlet first: &mut [int] = (pair.first)[:]\nlet second: &mut [int] = (pair.first)[:]\nprint len(first)\nprint len(second)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("overlapping projection mutable borrow should fail");
+        assert_eq!(error.kind, "ownership");
+        assert_eq!(
+            error.code.as_deref(),
+            Some("mutable_borrow_while_mutable_live")
+        );
+        assert!(error.message.contains(
+            "cannot create mutable borrow of value \"pair.first\" while another mutable borrow is still live"
+        ));
+    }
+
+    #[test]
+    fn check_project_rejects_moving_whole_value_while_projection_mutably_borrowed() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-projection-borrow-whole-move");
+        create_project(&project, Some("mut-projection-borrow-whole-move-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct Pair {\nfirst: [string]\nsecond: [string]\n}\n\nlet pair: Pair = Pair { first: [\"alpha\"], second: [\"beta\"] }\nlet first: &mut [string] = (pair.first)[:]\nlet moved: Pair = pair\nprint len(first)\nprint len(moved.second)\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("whole move should fail while projection borrowed");
+        assert_eq!(error.kind, "ownership");
+        assert_eq!(error.code.as_deref(), Some("move_while_borrowed"));
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"pair\" while borrowed slices are still live")
+        );
     }
 
     #[test]
