@@ -4166,8 +4166,10 @@ fn render_expr(expr: &Expr) -> String {
             let rendered_args = args.iter().map(render_expr).collect::<Vec<_>>().join(", ");
             format!("{name}({rendered_args})")
         }
-        Expr::BinaryAdd { lhs, rhs, ty } => match ty {
-            Type::Int | Type::Numeric(_) => format!("{} + {}", render_expr(lhs), render_expr(rhs)),
+        Expr::BinaryAdd { op, lhs, rhs, ty } => match ty {
+            Type::Int | Type::Numeric(_) => {
+                format!("{} {} {}", render_expr(lhs), op.lexeme(), render_expr(rhs))
+            }
             Type::String | Type::Str => format!(
                 "format!(\"{{}}{{}}\", {}, {})",
                 render_expr(lhs),
@@ -4529,6 +4531,17 @@ impl crate::mir::CompareOp {
             crate::mir::CompareOp::Le => "<=",
             crate::mir::CompareOp::Gt => ">",
             crate::mir::CompareOp::Ge => ">=",
+        }
+    }
+}
+
+impl crate::mir::ArithmeticOp {
+    fn lexeme(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
         }
     }
 }

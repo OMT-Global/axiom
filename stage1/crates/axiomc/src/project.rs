@@ -2356,8 +2356,9 @@ fn run_manifest_compile_fail_case(
         expected_stderr: None,
         expected_error: Some(expected),
         duration_ms: started.elapsed().as_millis() as u64,
-        error: mismatch
-            .map(|message| Diagnostic::new("test", message).with_path(entry_path.display().to_string())),
+        error: mismatch.map(|message| {
+            Diagnostic::new("test", message).with_path(entry_path.display().to_string())
+        }),
     }
 }
 
@@ -4976,11 +4977,13 @@ fn rewrite_expr(
             }
         }
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(rewrite_expr(
                 lhs,
                 visible_functions,
@@ -5711,11 +5714,13 @@ fn resolve_const_expr(
         }
         syntax::Expr::Literal(_) => Ok(expr.clone()),
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => Ok(syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(resolve_const_expr(
                 lhs,
                 visible_consts,
