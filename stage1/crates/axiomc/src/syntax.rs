@@ -797,21 +797,24 @@ fn expand_declarative_macros(source: &str, path: &Path) -> Result<String, Vec<Di
         return Ok(expanded);
     }
     const MAX_MACRO_EXPANSION_DEPTH: usize = 64;
-    for _ in 0..MAX_MACRO_EXPANSION_DEPTH {
+    for pass in 0..=MAX_MACRO_EXPANSION_DEPTH {
         let (next, changed) = expand_macro_invocations_once(&expanded, &macros, path)?;
         expanded = next;
         if !changed {
             return Ok(expanded);
         }
+        if pass >= MAX_MACRO_EXPANSION_DEPTH {
+            return Err(vec![Diagnostic::new(
+                "parse",
+                format!(
+                    "declarative macro expansion exceeded bounded depth of {MAX_MACRO_EXPANSION_DEPTH}; check for recursive macro invocation"
+                ),
+            )
+            .with_path(path.display().to_string())
+            .with_span(1, 1)]);
+        }
     }
-    Err(vec![Diagnostic::new(
-        "parse",
-        format!(
-            "declarative macro expansion exceeded bounded depth of {MAX_MACRO_EXPANSION_DEPTH}; check for recursive macro invocation"
-        ),
-    )
-    .with_path(path.display().to_string())
-    .with_span(1, 1)])
+    Ok(expanded)
 }
 
 fn collect_macro_rules(
