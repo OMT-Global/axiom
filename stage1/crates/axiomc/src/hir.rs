@@ -180,6 +180,7 @@ pub enum Expr {
         span: SourceSpan,
     },
     BinaryAdd {
+        op: ArithmeticOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
         ty: Type,
@@ -396,6 +397,14 @@ pub enum CompareOp {
     Le,
     Gt,
     Ge,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1327,11 +1336,13 @@ fn infer_generic_calls_in_expr(
             column: *column,
         },
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(infer_generic_calls_in_expr(
                 lhs,
                 expected,
@@ -3249,11 +3260,13 @@ fn rewrite_expr_aggregate_types(
             column: *column,
         },
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(rewrite_expr_aggregate_types(
                 lhs,
                 generic_structs,
@@ -4042,11 +4055,13 @@ fn rewrite_expr_generic_calls(
             column: *column,
         },
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(rewrite_expr_generic_calls(
                 lhs,
                 type_bindings,
@@ -5441,9 +5456,20 @@ fn resolve_const_array_len(
 fn eval_const_int_expr(expr: &syntax::Expr) -> Option<i64> {
     match expr {
         syntax::Expr::Literal(syntax::Literal::Int(value)) => Some(*value),
-        syntax::Expr::BinaryAdd { lhs, rhs, .. } => {
-            Some(eval_const_int_expr(lhs)? + eval_const_int_expr(rhs)?)
-        }
+        syntax::Expr::BinaryAdd { op, lhs, rhs, .. } => match op {
+            syntax::ArithmeticOp::Add => {
+                Some(eval_const_int_expr(lhs)? + eval_const_int_expr(rhs)?)
+            }
+            syntax::ArithmeticOp::Sub => {
+                Some(eval_const_int_expr(lhs)? - eval_const_int_expr(rhs)?)
+            }
+            syntax::ArithmeticOp::Mul => {
+                Some(eval_const_int_expr(lhs)? * eval_const_int_expr(rhs)?)
+            }
+            syntax::ArithmeticOp::Div => {
+                Some(eval_const_int_expr(lhs)? / eval_const_int_expr(rhs)?)
+            }
+        },
         _ => None,
     }
 }
@@ -9079,6 +9105,7 @@ fn lower_expr_with_expected_inner(
             })
         }
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
@@ -9090,20 +9117,25 @@ fn lower_expr_with_expected_inner(
             let rhs_ty = rhs.ty().clone();
             let result_ty = if lhs_ty == rhs_ty && is_addable_numeric(&lhs_ty) {
                 lhs_ty.clone()
-            } else if is_string_like_type(&lhs_ty) && is_string_like_type(&rhs_ty) {
+            } else if *op == syntax::ArithmeticOp::Add
+                && is_string_like_type(&lhs_ty)
+                && is_string_like_type(&rhs_ty)
+            {
                 Type::String
             } else {
                 return Err(
                     Diagnostic::new(
                         "type",
                         format!(
-                            "operator '+' expects matching numeric or string operands, got {lhs_ty} and {rhs_ty}"
+                            "operator '{}' expects matching numeric or string operands, got {lhs_ty} and {rhs_ty}",
+                            op.lexeme()
                         ),
                     )
                     .with_span(*line, *column),
                 );
             };
             Ok(Expr::BinaryAdd {
+                op: lower_arithmetic_op(*op),
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 ty: result_ty,
@@ -12001,6 +12033,15 @@ fn lower_compare_op(op: syntax::CompareOp) -> CompareOp {
         syntax::CompareOp::Le => CompareOp::Le,
         syntax::CompareOp::Gt => CompareOp::Gt,
         syntax::CompareOp::Ge => CompareOp::Ge,
+    }
+}
+
+fn lower_arithmetic_op(op: syntax::ArithmeticOp) -> ArithmeticOp {
+    match op {
+        syntax::ArithmeticOp::Add => ArithmeticOp::Add,
+        syntax::ArithmeticOp::Sub => ArithmeticOp::Sub,
+        syntax::ArithmeticOp::Mul => ArithmeticOp::Mul,
+        syntax::ArithmeticOp::Div => ArithmeticOp::Div,
     }
 }
 

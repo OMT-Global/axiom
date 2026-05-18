@@ -1467,6 +1467,16 @@ Variant(
     }
 
     #[test]
+    fn render_rust_preserves_grouped_numeric_arithmetic() {
+        let source = "let grouped: f64 = (1.0f64 + 2.0f64) * 3.0f64\nprint grouped as int\n";
+        let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
+        let hir = hir::lower(&parsed).expect("lower");
+        let mir = mir::lower(&hir);
+        let rendered = render_rust(&mir);
+        assert!(rendered.contains("let grouped: f64 = (1.0f64 + 2.0f64) * 3.0f64;"));
+    }
+
+    #[test]
     fn checker_rejects_mixed_numeric_width_arithmetic_without_cast() {
         let source = "let byte: u8 = 1u8\nlet word: u32 = 2u32\nlet bad: u32 = byte + word\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
@@ -6356,9 +6366,12 @@ true
         let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
         assert!(generated.contains("axiom_task_deferred(move ||"));
         assert!(generated.contains("struct AxiomRuntimeScheduler"));
-        assert!(generated.contains("fn schedule<T: Send + 'static>(&mut self, task: AxiomTask<T>)"));
         assert!(
-            generated.contains("fn join<T: Send + 'static>(&mut self, mut handle: AxiomJoinHandle<T>)")
+            generated.contains("fn schedule<T: Send + 'static>(&mut self, task: AxiomTask<T>)")
+        );
+        assert!(
+            generated
+                .contains("fn join<T: Send + 'static>(&mut self, mut handle: AxiomJoinHandle<T>)")
         );
         assert!(!generated.contains("AXIOM_ASYNC_EXECUTOR"));
         assert!(!generated.contains("std::thread::JoinHandle"));
@@ -8103,8 +8116,8 @@ print serve_health("127.0.0.1:18080", 1, started)
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 91);
-        assert_eq!(output.passed, 91);
+        assert_eq!(output.cases.len(), 93);
+        assert_eq!(output.passed, 93);
         let failures: Vec<_> = output
             .cases
             .iter()
@@ -8118,7 +8131,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count(),
-            62
+            63
         );
         assert_eq!(
             output
@@ -8126,7 +8139,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            27
+            28
         );
         assert_eq!(
             output

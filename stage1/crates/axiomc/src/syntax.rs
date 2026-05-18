@@ -341,6 +341,7 @@ pub enum Expr {
         column: usize,
     },
     BinaryAdd {
+        op: ArithmeticOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
         line: usize,
@@ -466,6 +467,14 @@ pub enum CompareOp {
     Le,
     Gt,
     Ge,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
 
 impl Import {
@@ -2814,12 +2823,34 @@ fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
 }
 
 fn parse_add(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<Expr, Diagnostic> {
-    let terms = split_top_level(raw, '+');
+    let terms =
+        split_top_level_arithmetic(raw, &[('+', ArithmeticOp::Add), ('-', ArithmeticOp::Sub)]);
     if terms.len() > 1 {
-        let mut expr = parse_term(terms[0].trim(), path, line_no, column)?;
-        for term in &terms[1..] {
+        let mut expr = parse_mul(terms[0].0.trim(), path, line_no, column)?;
+        for (term, op) in &terms[1..] {
+            let rhs = parse_mul(term.trim(), path, line_no, column)?;
+            expr = Expr::BinaryAdd {
+                op: *op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+                line: line_no,
+                column,
+            };
+        }
+        return Ok(expr);
+    }
+    parse_mul(raw.trim(), path, line_no, column)
+}
+
+fn parse_mul(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<Expr, Diagnostic> {
+    let terms =
+        split_top_level_arithmetic(raw, &[('*', ArithmeticOp::Mul), ('/', ArithmeticOp::Div)]);
+    if terms.len() > 1 {
+        let mut expr = parse_term(terms[0].0.trim(), path, line_no, column)?;
+        for (term, op) in &terms[1..] {
             let rhs = parse_term(term.trim(), path, line_no, column)?;
             expr = Expr::BinaryAdd {
+                op: *op,
                 lhs: Box::new(expr),
                 rhs: Box::new(rhs),
                 line: line_no,
@@ -3705,6 +3736,87 @@ fn split_top_level_with_offsets(raw: &str, delimiter: char) -> Vec<(usize, &str)
     parts
 }
 
+fn split_top_level_arithmetic<'a>(
+    raw: &'a str,
+    operators: &[(char, ArithmeticOp)],
+) -> Vec<(&'a str, ArithmeticOp)> {
+    let mut parts = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut start = 0;
+    let mut next_op = ArithmeticOp::Add;
+    let chars: Vec<(usize, char)> = raw.char_indices().collect();
+    for (cursor, (index, ch)) in chars.iter().copied().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            _ if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if ch == '-' && is_unary_minus(raw, cursor, &chars) {
+                    continue;
+                }
+                if ch == '*' && is_unary_deref(raw, cursor, &chars) {
+                    continue;
+                }
+                if let Some((_, op)) = operators.iter().find(|(candidate, _)| *candidate == ch) {
+                    parts.push((&raw[start..index], next_op));
+                    start = index + ch.len_utf8();
+                    next_op = *op;
+                }
+            }
+            _ => {}
+        }
+    }
+    parts.push((&raw[start..], next_op));
+    parts
+}
+
+fn is_unary_minus(raw: &str, cursor: usize, chars: &[(usize, char)]) -> bool {
+    if cursor == 0 {
+        return true;
+    }
+    let before = raw[..chars[cursor].0].trim_end();
+    if before.ends_with('e') || before.ends_with('E') {
+        return true;
+    }
+    matches!(
+        before.chars().next_back(),
+        None | Some('(' | '[' | '{' | ',' | ':' | '=' | '<' | '>' | '+' | '-' | '*' | '/')
+    )
+}
+
+fn is_unary_deref(raw: &str, cursor: usize, chars: &[(usize, char)]) -> bool {
+    if cursor == 0 {
+        return true;
+    }
+    let before = raw[..chars[cursor].0].trim_end();
+    matches!(
+        before.chars().next_back(),
+        None | Some('(' | '[' | '{' | ',' | ':' | '=' | '<' | '>' | '+' | '-' | '*' | '/')
+    )
+}
+
 fn find_top_level_keyword(raw: &str, keyword: &str) -> Option<usize> {
     let mut in_string = false;
     let mut escaped = false;
@@ -4239,6 +4351,17 @@ impl CompareOp {
             CompareOp::Le => "<=",
             CompareOp::Gt => ">",
             CompareOp::Ge => ">=",
+        }
+    }
+}
+
+impl ArithmeticOp {
+    pub fn lexeme(self) -> &'static str {
+        match self {
+            ArithmeticOp::Add => "+",
+            ArithmeticOp::Sub => "-",
+            ArithmeticOp::Mul => "*",
+            ArithmeticOp::Div => "/",
         }
     }
 }

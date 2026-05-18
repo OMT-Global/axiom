@@ -3086,8 +3086,13 @@ fn render_static(static_def: &StaticDef, type_context: &TypeContext<'_>, out: &m
 fn render_static_expr(expr: &Expr) -> String {
     match expr {
         Expr::Literal(LiteralValue::String(value)) => format!("{value:?}"),
-        Expr::BinaryAdd { lhs, rhs, .. } => {
-            format!("{} + {}", render_static_expr(lhs), render_static_expr(rhs))
+        Expr::BinaryAdd { op, lhs, rhs, .. } => {
+            format!(
+                "{} {} {}",
+                render_static_binary_operand(lhs),
+                op.lexeme(),
+                render_static_binary_operand(rhs)
+            )
         }
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!(
@@ -3098,6 +3103,13 @@ fn render_static_expr(expr: &Expr) -> String {
             )
         }
         _ => render_expr(expr),
+    }
+}
+
+fn render_static_binary_operand(expr: &Expr) -> String {
+    match expr {
+        Expr::BinaryAdd { .. } => format!("({})", render_static_expr(expr)),
+        _ => render_static_expr(expr),
     }
 }
 
@@ -4252,8 +4264,15 @@ fn render_expr(expr: &Expr) -> String {
             let rendered_args = args.iter().map(render_expr).collect::<Vec<_>>().join(", ");
             format!("{name}({rendered_args})")
         }
-        Expr::BinaryAdd { lhs, rhs, ty } => match ty {
-            Type::Int | Type::Numeric(_) => format!("{} + {}", render_expr(lhs), render_expr(rhs)),
+        Expr::BinaryAdd { op, lhs, rhs, ty } => match ty {
+            Type::Int | Type::Numeric(_) => {
+                format!(
+                    "{} {} {}",
+                    render_binary_operand(lhs),
+                    op.lexeme(),
+                    render_binary_operand(rhs)
+                )
+            }
             Type::String | Type::Str => format!(
                 "format!(\"{{}}{{}}\", {}, {})",
                 render_expr(lhs),
@@ -4461,6 +4480,13 @@ fn render_expr(expr: &Expr) -> String {
     }
 }
 
+fn render_binary_operand(expr: &Expr) -> String {
+    match expr {
+        Expr::BinaryAdd { .. } => format!("({})", render_expr(expr)),
+        _ => render_expr(expr),
+    }
+}
+
 fn rust_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
     rust_type_inner(ty, None, type_context)
 }
@@ -4624,6 +4650,17 @@ impl crate::mir::CompareOp {
             crate::mir::CompareOp::Le => "<=",
             crate::mir::CompareOp::Gt => ">",
             crate::mir::CompareOp::Ge => ">=",
+        }
+    }
+}
+
+impl crate::mir::ArithmeticOp {
+    fn lexeme(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
         }
     }
 }

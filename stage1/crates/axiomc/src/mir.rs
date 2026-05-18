@@ -147,6 +147,7 @@ pub enum Expr {
         ty: Type,
     },
     BinaryAdd {
+        op: ArithmeticOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
         ty: Type,
@@ -253,6 +254,14 @@ pub enum CompareOp {
     Le,
     Gt,
     Ge,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -561,7 +570,8 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             args: args.iter().map(lower_expr).collect(),
             ty: lower_type(ty),
         },
-        hir::Expr::BinaryAdd { lhs, rhs, ty } => Expr::BinaryAdd {
+        hir::Expr::BinaryAdd { op, lhs, rhs, ty } => Expr::BinaryAdd {
+            op: lower_arithmetic_op(*op),
             lhs: Box::new(lower_expr(lhs)),
             rhs: Box::new(lower_expr(rhs)),
             ty: lower_type(ty),
@@ -715,6 +725,15 @@ fn lower_compare_op(op: hir::CompareOp) -> CompareOp {
         hir::CompareOp::Le => CompareOp::Le,
         hir::CompareOp::Gt => CompareOp::Gt,
         hir::CompareOp::Ge => CompareOp::Ge,
+    }
+}
+
+fn lower_arithmetic_op(op: hir::ArithmeticOp) -> ArithmeticOp {
+    match op {
+        hir::ArithmeticOp::Add => ArithmeticOp::Add,
+        hir::ArithmeticOp::Sub => ArithmeticOp::Sub,
+        hir::ArithmeticOp::Mul => ArithmeticOp::Mul,
+        hir::ArithmeticOp::Div => ArithmeticOp::Div,
     }
 }
 

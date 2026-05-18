@@ -5070,11 +5070,13 @@ fn rewrite_expr(
             }
         }
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(rewrite_expr(
                 lhs,
                 visible_functions,
@@ -5920,11 +5922,13 @@ fn resolve_const_expr(
         }
         syntax::Expr::Literal(_) => Ok(expr.clone()),
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => Ok(syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(resolve_const_expr(
                 lhs,
                 visible_consts,

@@ -206,6 +206,11 @@ version = "0.1.0"
 source = "path:fail/nested_match_pattern_not_supported"
 
 [[package]]
+name = "conformance-numeric-float-mixed-width-add"
+version = "0.1.0"
+source = "path:fail/numeric_float_mixed_width_add"
+
+[[package]]
 name = "conformance-numeric-literal-suffix-mismatch"
 version = "0.1.0"
 source = "path:fail/numeric_literal_suffix_mismatch"
@@ -389,6 +394,11 @@ source = "path:pass/mutable_projection_borrows"
 name = "conformance-numeric-cross-width-casts"
 version = "0.1.0"
 source = "path:pass/numeric_cross_width_casts"
+
+[[package]]
+name = "conformance-numeric-float-mean"
+version = "0.1.0"
+source = "path:pass/numeric_float_mean"
 
 [[package]]
 name = "conformance-numeric-literal-suffixes"

@@ -1,0 +1,7 @@
+{
+  "kind": "type",
+  "message": "operator '+' expects matching numeric or string operands, got f32 and f64",
+  "path": "src/main.ax",
+  "line": 3,
+  "column": 13
+}
