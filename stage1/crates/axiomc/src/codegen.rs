@@ -617,6 +617,31 @@ fn axiom_async_recv<T: Send + 'static>(channel: AxiomChannel<T>) -> AxiomTask<Op
     out.push_str("        Err(_) => -1,\n");
     out.push_str("    }\n");
     out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_io_readline() -> Option<String> {\n");
+    out.push_str("    let stdin = std::io::stdin();\n");
+    out.push_str("    let mut handle = stdin.lock();\n");
+    out.push_str("    let mut line = String::new();\n");
+    out.push_str("    match std::io::BufRead::read_line(&mut handle, &mut line) {\n");
+    out.push_str("        Ok(0) => None,\n");
+    out.push_str("        Ok(_) => {\n");
+    out.push_str("            if line.ends_with('\\n') { line.pop(); }\n");
+    out.push_str("            if line.ends_with('\\r') { line.pop(); }\n");
+    out.push_str("            Some(line)\n");
+    out.push_str("        }\n");
+    out.push_str("        Err(_) => None,\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
+    out.push_str("#[allow(dead_code)]\n");
+    out.push_str("fn axiom_io_read_to_string() -> String {\n");
+    out.push_str("    let stdin = std::io::stdin();\n");
+    out.push_str("    let mut handle = stdin.lock();\n");
+    out.push_str("    let mut content = String::new();\n");
+    out.push_str("    match std::io::Read::read_to_string(&mut handle, &mut content) {\n");
+    out.push_str("        Ok(_) => content,\n");
+    out.push_str("        Err(_) => String::new(),\n");
+    out.push_str("    }\n");
+    out.push_str("}\n\n");
     out.push_str(
         r##"#[allow(dead_code)]
 fn axiom_json_escape(value: &str) -> String {
@@ -2727,6 +2752,11 @@ fn axiom_crypto_sha512_bytes(input: &[u8]) -> Vec<u8> {
 fn axiom_crypto_constant_time_eq(left: String, right: String) -> bool {
     let left = left.as_bytes();
     let right = right.as_bytes();
+    axiom_crypto_constant_time_eq_u8(left, right)
+}
+
+#[allow(dead_code)]
+fn axiom_crypto_constant_time_eq_u8(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }
@@ -2860,6 +2890,9 @@ fn stmt_uses_call(stmt: &Stmt, name: &str) -> bool {
                     .iter()
                     .any(|arm| arm.body.iter().any(|stmt| stmt_uses_call(stmt, name)))
         }
+        Stmt::Assign { target, expr, .. } => {
+            expr_uses_call(target, name) || expr_uses_call(expr, name)
+        }
     }
 }
 
@@ -2876,7 +2909,9 @@ fn expr_uses_call(expr: &Expr, name: &str) -> bool {
         Expr::Cast { expr, .. } => expr_uses_call(expr, name),
         Expr::Try { expr, .. }
         | Expr::Await { expr, .. }
-        | Expr::FieldAccess { base: expr, .. } => expr_uses_call(expr, name),
+        | Expr::FieldAccess { base: expr, .. }
+        | Expr::MutBorrow { expr, .. }
+        | Expr::Deref { expr, .. } => expr_uses_call(expr, name),
         Expr::StructLiteral { fields, .. } => {
             fields.iter().any(|field| expr_uses_call(&field.expr, name))
         }
@@ -2960,7 +2995,7 @@ impl<'a> TypeContext<'a> {
             | Type::Ptr(_)
             | Type::MutPtr(_) => false,
             Type::Str => true,
-            Type::Slice(_) | Type::MutSlice(_) => true,
+            Type::Slice(_) | Type::MutSlice(_) | Type::MutRef(_) => true,
             Type::Struct(name) => {
                 if !visiting_structs.insert(name.clone()) {
                     return false;
@@ -3051,8 +3086,13 @@ fn render_static(static_def: &StaticDef, type_context: &TypeContext<'_>, out: &m
 fn render_static_expr(expr: &Expr) -> String {
     match expr {
         Expr::Literal(LiteralValue::String(value)) => format!("{value:?}"),
-        Expr::BinaryAdd { lhs, rhs, .. } => {
-            format!("{} + {}", render_static_expr(lhs), render_static_expr(rhs))
+        Expr::BinaryAdd { op, lhs, rhs, .. } => {
+            format!(
+                "{} {} {}",
+                render_static_binary_operand(lhs),
+                op.lexeme(),
+                render_static_binary_operand(rhs)
+            )
         }
         Expr::BinaryCompare { op, lhs, rhs, .. } => {
             format!(
@@ -3063,6 +3103,13 @@ fn render_static_expr(expr: &Expr) -> String {
             )
         }
         _ => render_expr(expr),
+    }
+}
+
+fn render_static_binary_operand(expr: &Expr) -> String {
+    match expr {
+        Expr::BinaryAdd { .. } => format!("({})", render_static_expr(expr)),
+        _ => render_static_expr(expr),
     }
 }
 
@@ -3311,6 +3358,7 @@ fn rust_ffi_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
         Type::String => String::from("*const c_char"),
         Type::Ptr(inner) => format!("*const {}", rust_type(inner, type_context)),
         Type::MutPtr(inner) => format!("*mut {}", rust_type(inner, type_context)),
+        Type::MutRef(inner) => format!("&mut {}", rust_type(inner, type_context)),
         _ => rust_type(ty, type_context),
     }
 }
@@ -3344,6 +3392,7 @@ fn collect_mutably_borrowed_locals(stmts: &[Stmt]) -> HashSet<String> {
 fn collect_stmt_mutable_borrows(stmt: &Stmt, locals: &mut HashSet<String>) {
     match stmt {
         Stmt::Let { expr, .. }
+        | Stmt::Assign { expr, .. }
         | Stmt::Print { expr, .. }
         | Stmt::Defer { expr, .. }
         | Stmt::Return { expr, .. } => collect_expr_mutable_borrows(expr, locals),
@@ -3413,6 +3462,12 @@ fn collect_expr_mutable_borrows(expr: &Expr, locals: &mut HashSet<String>) {
                 collect_expr_mutable_borrows(end, locals);
             }
         }
+        Expr::MutBorrow { expr, .. } => {
+            if let Some(name) = mutable_borrow_root_name(expr) {
+                locals.insert(name.to_string());
+            }
+            collect_expr_mutable_borrows(expr, locals);
+        }
         Expr::Call { args, .. }
         | Expr::TupleLiteral { elements: args, .. }
         | Expr::ArrayLiteral { elements: args, .. } => {
@@ -3428,6 +3483,7 @@ fn collect_expr_mutable_borrows(expr: &Expr, locals: &mut HashSet<String>) {
         | Expr::Await { expr, .. }
         | Expr::Cast { expr, .. }
         | Expr::StringBorrow { expr, .. }
+        | Expr::Deref { expr, .. }
         | Expr::FieldAccess { base: expr, .. }
         | Expr::TupleIndex { base: expr, .. } => collect_expr_mutable_borrows(expr, locals),
         Expr::StructLiteral { fields, .. } => {
@@ -3530,6 +3586,14 @@ fn render_stmt(
                 "{pad}let {mutability}{name}: {} = {};
 ",
                 rust_type(ty, type_context),
+                render_expr(expr)
+            ));
+        }
+        Stmt::Assign { target, expr, span } => {
+            render_source_marker(source_path, *span, out, indent, debug);
+            out.push_str(&format!(
+                "{pad}{} = {};\n",
+                render_expr(target),
                 render_expr(expr)
             ));
         }
@@ -3860,6 +3924,14 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Call { name, args, .. } if name == "io_eprintln" => {
             format!("axiom_io_eprintln({})", render_expr(&args[0]))
         }
+        Expr::Call { name, args, .. } if name == "io_readline" => {
+            debug_assert!(args.is_empty());
+            String::from("axiom_io_readline()")
+        }
+        Expr::Call { name, args, .. } if name == "io_read_to_string" => {
+            debug_assert!(args.is_empty());
+            String::from("axiom_io_read_to_string()")
+        }
         Expr::Call { name, args, .. } if name == "json_parse_int" => {
             format!("axiom_json_parse_int({})", render_expr(&args[0]))
         }
@@ -4120,6 +4192,13 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(&args[1])
             )
         }
+        Expr::Call { name, args, .. } if name == "crypto_constant_time_eq_u8" => {
+            format!(
+                "axiom_crypto_constant_time_eq_u8({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
         Expr::Call { name, args, .. } if name == "async_ready" => {
             format!("axiom_task_ready({})", render_expr(&args[0]))
         }
@@ -4185,8 +4264,15 @@ fn render_expr(expr: &Expr) -> String {
             let rendered_args = args.iter().map(render_expr).collect::<Vec<_>>().join(", ");
             format!("{name}({rendered_args})")
         }
-        Expr::BinaryAdd { lhs, rhs, ty } => match ty {
-            Type::Int | Type::Numeric(_) => format!("{} + {}", render_expr(lhs), render_expr(rhs)),
+        Expr::BinaryAdd { op, lhs, rhs, ty } => match ty {
+            Type::Int | Type::Numeric(_) => {
+                format!(
+                    "{} {} {}",
+                    render_binary_operand(lhs),
+                    op.lexeme(),
+                    render_binary_operand(rhs)
+                )
+            }
             Type::String | Type::Str => format!(
                 "format!(\"{{}}{{}}\", {}, {})",
                 render_expr(lhs),
@@ -4195,7 +4281,11 @@ fn render_expr(expr: &Expr) -> String {
             Type::Bool => unreachable!("type checker rejects bool addition"),
             Type::Struct(_) => unreachable!("type checker rejects struct addition"),
             Type::Enum(_) => unreachable!("type checker rejects enum addition"),
-            Type::Ptr(_) | Type::MutPtr(_) | Type::Slice(_) | Type::MutSlice(_) => {
+            Type::Ptr(_)
+            | Type::MutPtr(_)
+            | Type::MutRef(_)
+            | Type::Slice(_)
+            | Type::MutSlice(_) => {
                 unreachable!("type checker rejects slice addition")
             }
             Type::Option(_) => unreachable!("type checker rejects option addition"),
@@ -4217,6 +4307,8 @@ fn render_expr(expr: &Expr) -> String {
             render_expr(expr),
             rust_type(ty, &TypeContext::empty())
         ),
+        Expr::MutBorrow { expr, .. } => format!("&mut {}", render_expr(expr)),
+        Expr::Deref { expr, .. } => format!("*{}", render_expr(expr)),
         Expr::Try { expr, .. } => format!("({})?", render_expr(expr)),
         Expr::Await { expr, .. } => format!("axiom_await({})", render_expr(expr)),
         Expr::StructLiteral { name, fields, .. } => {
@@ -4388,6 +4480,13 @@ fn render_expr(expr: &Expr) -> String {
     }
 }
 
+fn render_binary_operand(expr: &Expr) -> String {
+    match expr {
+        Expr::BinaryAdd { .. } => format!("({})", render_expr(expr)),
+        _ => render_expr(expr),
+    }
+}
+
 fn rust_type(ty: &Type, type_context: &TypeContext<'_>) -> String {
     rust_type_inner(ty, None, type_context)
 }
@@ -4433,6 +4532,9 @@ fn rust_type_inner(ty: &Type, lifetime: Option<&str>, type_context: &TypeContext
         }
         Type::MutPtr(inner) => {
             format!("*mut {}", rust_type_inner(inner, lifetime, type_context))
+        }
+        Type::MutRef(inner) => {
+            format!("&mut {}", rust_type_inner(inner, lifetime, type_context))
         }
         Type::Slice(inner) => {
             let inner = rust_type_inner(inner, lifetime, type_context);
@@ -4548,6 +4650,17 @@ impl crate::mir::CompareOp {
             crate::mir::CompareOp::Le => "<=",
             crate::mir::CompareOp::Gt => ">",
             crate::mir::CompareOp::Ge => ">=",
+        }
+    }
+}
+
+impl crate::mir::ArithmeticOp {
+    fn lexeme(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
         }
     }
 }
