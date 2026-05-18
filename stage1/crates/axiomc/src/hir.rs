@@ -4780,6 +4780,26 @@ fn collect_trait_definitions(
         }
     }
 
+    // First pass: validate all trait type references now that we have the complete trait names map
+    for trait_decl in traits {
+        for method in &trait_decl.methods {
+            for param in &method.params {
+                validate_trait_type_use_in_namespace(
+                    &param.ty,
+                    &names,
+                    param.line,
+                    param.column,
+                )?;
+            }
+            validate_trait_type_use_in_namespace(
+                &method.return_ty,
+                &names,
+                method.line,
+                method.column,
+            )?;
+        }
+    }
+
     let mut lowered = HashMap::new();
     for trait_decl in traits {
         let mut seen_methods = HashMap::new();
@@ -4801,12 +4821,6 @@ fn collect_trait_definitions(
                     .params
                     .iter()
                     .map(|param| {
-                        validate_trait_type_use_in_namespace(
-                            &param.ty,
-                            &names,
-                            param.line,
-                            param.column,
-                        )?;
                         lower_type(
                             &param.ty,
                             structs,
@@ -4818,12 +4832,6 @@ fn collect_trait_definitions(
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                validate_trait_type_use_in_namespace(
-                    &method.return_ty,
-                    &names,
-                    method.line,
-                    method.column,
-                )?;
                 let return_ty = lower_type(
                     &method.return_ty,
                     structs,
