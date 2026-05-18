@@ -68,6 +68,7 @@ members = [
   "pass/comparison_package_resources",
   "pass/comparison_strict_typing",
   "pass/const_match_patterns",
+  "pass/crypto_constant_time",
   "pass/functions_across_modules",
   "pass/legacy_core_programs",
   "pass/mutable_local_borrow_write_through",

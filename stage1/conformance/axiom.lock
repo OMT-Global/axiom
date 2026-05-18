@@ -351,6 +351,11 @@ version = "0.1.0"
 source = "path:pass/const_match_patterns"
 
 [[package]]
+name = "conformance-crypto-constant-time"
+version = "0.1.0"
+source = "path:pass/crypto_constant_time"
+
+[[package]]
 name = "conformance-functions-across-modules"
 version = "0.1.0"
 source = "path:pass/functions_across_modules"
