@@ -386,6 +386,11 @@ version = "0.1.0"
 source = "path:pass/mutable_projection_borrows"
 
 [[package]]
+name = "conformance-numeric-cross-width-casts"
+version = "0.1.0"
+source = "path:pass/numeric_cross_width_casts"
+
+[[package]]
 name = "conformance-numeric-literal-suffixes"
 version = "0.1.0"
 source = "path:pass/numeric_literal_suffixes"
