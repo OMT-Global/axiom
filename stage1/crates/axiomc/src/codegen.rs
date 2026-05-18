@@ -2815,6 +2815,7 @@ fn axiom_crypto_fill_random_bytes(buffer: &mut [u8]) -> bool {
     #[cfg(target_os = "windows")]
     {
         const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+        #[link(name = "bcrypt")]
         unsafe extern "system" {
             fn BCryptGenRandom(
                 h_algorithm: *mut std::ffi::c_void,
