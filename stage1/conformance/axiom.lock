@@ -171,6 +171,11 @@ version = "0.1.0"
 source = "path:fail/mutable_local_borrow_use_after_borrow"
 
 [[package]]
+name = "conformance-mutable-call-boundary-move"
+version = "0.1.0"
+source = "path:fail/mutable_call_boundary_move"
+
+[[package]]
 name = "conformance-mutable-projection-overlap"
 version = "0.1.0"
 source = "path:fail/mutable_projection_overlap"
@@ -344,6 +349,11 @@ source = "path:pass/legacy_core_programs"
 name = "conformance-mutable-local-borrow-write-through"
 version = "0.1.0"
 source = "path:pass/mutable_local_borrow_write_through"
+
+[[package]]
+name = "conformance-mutable-call-boundaries"
+version = "0.1.0"
+source = "path:pass/mutable_call_boundaries"
 
 [[package]]
 name = "conformance-mutable-projection-borrows"

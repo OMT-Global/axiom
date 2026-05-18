@@ -9984,6 +9984,25 @@ print takes_two(three)
     }
 
     #[test]
+    fn build_project_accepts_mutable_slice_parameter_call_and_releases_owner() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-slice-param-call-release");
+        create_project(&project, Some("mut-slice-param-call-release-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn measure(values: &mut [int]): int {\nprint len(values)\nreturn first(values)\n}\nlet values: [int] = [5, 8, 13]\nprint measure(values[:])\nprint first(values)\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n5\n5\n");
+    }
+
+    #[test]
     fn check_project_rejects_moving_owned_value_while_mutable_local_borrow_is_live() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("mut-local-borrow-move");
@@ -9999,6 +10018,28 @@ print takes_two(three)
             error
                 .message
                 .contains("cannot move value \"value\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owner_during_mutable_slice_call_argument() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-slice-param-call-owner-move");
+        create_project(&project, Some("mut-slice-param-call-owner-move-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "fn consume(view: &mut [string], values: [string]): string {\nprint len(view)\nreturn first(values)\n}\nlet values: [string] = [\"alpha\", \"beta\"]\nprint consume(values[:], values)\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project)
+            .expect_err("moving owner while mutable call argument is active should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"values\" while borrowed slices are still live")
         );
         assert_eq!(error.kind, "ownership");
     }
