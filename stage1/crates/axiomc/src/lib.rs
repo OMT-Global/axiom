@@ -6354,8 +6354,10 @@ true
         let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
         assert!(generated.contains("axiom_task_deferred(move ||"));
         assert!(generated.contains("struct AxiomRuntimeScheduler"));
-        assert!(generated.contains("fn schedule<T>(&mut self, task: AxiomTask<T>)"));
-        assert!(generated.contains("fn join<T>(&mut self, mut handle: AxiomJoinHandle<T>)"));
+        assert!(generated.contains("fn schedule<T: Send + 'static>(&mut self, task: AxiomTask<T>)"));
+        assert!(
+            generated.contains("fn join<T: Send + 'static>(&mut self, mut handle: AxiomJoinHandle<T>)")
+        );
         assert!(!generated.contains("AXIOM_ASYNC_EXECUTOR"));
         assert!(!generated.contains("std::thread::JoinHandle"));
         assert!(
@@ -6389,6 +6391,44 @@ true
         let tests = run_project_tests(&project).expect("run tests");
         assert_eq!(tests.passed, 1);
         assert_eq!(tests.failed, 0);
+    }
+
+    #[test]
+    fn stage1_project_rejects_async_net_without_net_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-async-net-denied");
+        create_project(&project, Some("stdlib-async-net-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-async-net-denied",
+                false,
+                false,
+                false,
+                false,
+                true,
+                false,
+            )
+            .replace("async = false", "async = true"),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/async_net.ax\"\nlet missing_socket: Option<string> = await tcp_dial(\"127.0.0.1\", 1, \"ping\", 1)\nmatch missing_socket {\nSome(_reply) {\nprint \"unexpected\"\n}\nNone {\nprint \"net none\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].net = true"),
+            "unexpected diagnostic: {err:?}",
+        );
     }
 
     #[test]
@@ -8061,8 +8101,8 @@ print serve_health("127.0.0.1:18080", 1, started)
     fn conformance_corpus_reports_stable_results() {
         let output =
             run_project_tests(&conformance_fixture()).expect("run stage1 conformance corpus");
-        assert_eq!(output.cases.len(), 82);
-        assert_eq!(output.passed, 82);
+        assert_eq!(output.cases.len(), 87);
+        assert_eq!(output.passed, 87);
         let failures: Vec<_> = output
             .cases
             .iter()
@@ -8076,7 +8116,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_error.is_some())
                 .count(),
-            58
+            61
         );
         assert_eq!(
             output
@@ -8084,7 +8124,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                 .iter()
                 .filter(|case| case.expected_stdout.is_some())
                 .count(),
-            22
+            24
         );
         assert_eq!(
             output
@@ -10061,11 +10101,33 @@ print takes_two(three)
     }
 
     #[test]
+    fn build_project_accepts_mutable_local_borrow_write_through() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-local-borrow");
+        create_project(&project, Some("mut-local-borrow-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let value: string = \"alpha\"\nlet local: &mut string = &mut value\n*local = \"beta\"\nprint *local\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let generated = fs::read_to_string(&built.generated_rust).expect("read generated rust");
+        assert!(generated.contains("let mut value: String"));
+        assert!(generated.contains("let local: &mut String = &mut value;"));
+        assert!(generated.contains("*local = String::from(\"beta\");"));
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "beta\n");
+    }
+
+    #[test]
     fn build_project_accepts_mutable_slice_parameter_call_and_releases_owner() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("mut-slice-param-call-release");
-        create_project(&project, Some("mut-slice-param-call-release-app"))
-            .expect("create project");
+        create_project(&project, Some("mut-slice-param-call-release-app")).expect("create project");
         fs::write(
             project.join("src/main.ax"),
             "fn measure(values: &mut [int]): int {\nprint len(values)\nreturn first(values)\n}\nlet values: [int] = [5, 8, 13]\nprint measure(values[:])\nprint first(values)\n",
@@ -10078,6 +10140,26 @@ print takes_two(three)
             .expect("run compiled binary");
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n5\n5\n");
+    }
+
+    #[test]
+    fn check_project_rejects_moving_owned_value_while_mutable_local_borrow_is_live() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("mut-local-borrow-move");
+        create_project(&project, Some("mut-local-borrow-move-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let value: string = \"alpha\"\nlet local: &mut string = &mut value\nprint value\nprint *local\n",
+        )
+        .expect("write source");
+        let error =
+            check_project(&project).expect_err("moving a mutably borrowed value should fail");
+        assert!(
+            error
+                .message
+                .contains("cannot move value \"value\" while borrowed slices are still live")
+        );
+        assert_eq!(error.kind, "ownership");
     }
 
     #[test]
@@ -10585,6 +10667,64 @@ print takes_two(three)
         let error = check_project(&project).expect_err("match should reject unknown variant");
         assert!(error.message.contains("has no variant \"Reday\""));
         assert!(error.message.contains("did you mean \"Ready\"?"));
+        assert_eq!(error.kind, "type");
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "run-native-tests"), ignore)]
+    fn build_project_matches_int_against_const_pattern() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("const-match-pattern");
+        create_project(&project, Some("const-match-pattern-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "const READY: int = 7\n\nlet status: int = 7\nmatch status {\nREADY {\nprint \"ready\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build const match pattern project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run const match pattern binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "ready\n");
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "run-native-tests"), ignore)]
+    fn build_project_matches_imported_public_const_pattern() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("imported-const-match-pattern");
+        create_project(&project, Some("imported-const-match-pattern-app")).expect("create project");
+        fs::write(project.join("src/codes.ax"), "pub const READY: int = 7\n")
+            .expect("write imported source");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"codes.ax\"\n\nlet status: int = 7\nmatch status {\nREADY {\nprint \"imported\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        let built = build_project(&project).expect("build imported const match pattern project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run imported const match pattern binary");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "imported\n");
+    }
+
+    #[test]
+    fn check_project_rejects_lowercase_const_match_pattern() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("lowercase-const-match-pattern");
+        create_project(&project, Some("lowercase-const-match-pattern-app"))
+            .expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "let status: int = 7\nmatch status {\nread_y {\nprint \"bad\"\n}\n}\n",
+        )
+        .expect("write source");
+        let error = check_project(&project).expect_err("match should reject lowercase pattern");
+        assert!(error.message.contains("uppercase int const"));
         assert_eq!(error.kind, "type");
     }
 
