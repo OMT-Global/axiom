@@ -79,6 +79,11 @@ pub enum Stmt {
         expr: Expr,
         span: SourceSpan,
     },
+    Assign {
+        target: Expr,
+        expr: Expr,
+        span: SourceSpan,
+    },
     Print {
         expr: Expr,
         span: SourceSpan,
@@ -142,6 +147,7 @@ pub enum Expr {
         ty: Type,
     },
     BinaryAdd {
+        op: ArithmeticOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
         ty: Type,
@@ -153,6 +159,14 @@ pub enum Expr {
         ty: Type,
     },
     Cast {
+        expr: Box<Expr>,
+        ty: Type,
+    },
+    MutBorrow {
+        expr: Box<Expr>,
+        ty: Type,
+    },
+    Deref {
         expr: Box<Expr>,
         ty: Type,
     },
@@ -242,6 +256,14 @@ pub enum CompareOp {
     Ge,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum ArithmeticOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum Type {
     Int,
@@ -253,6 +275,7 @@ pub enum Type {
     Enum(String),
     Ptr(Box<Type>),
     MutPtr(Box<Type>),
+    MutRef(Box<Type>),
     Slice(Box<Type>),
     MutSlice(Box<Type>),
     Option(Box<Type>),
@@ -277,7 +300,7 @@ impl Type {
             | Type::Ptr(_)
             | Type::MutPtr(_)
             | Type::Slice(_) => true,
-            Type::MutSlice(_) => false,
+            Type::MutRef(_) | Type::MutSlice(_) => false,
             Type::Option(inner) => inner.is_copy(),
             Type::Result(ok, err) => ok.is_copy() && err.is_copy(),
             Type::Tuple(elements) => elements.iter().all(Type::is_copy),
@@ -356,6 +379,8 @@ impl Expr {
             Expr::Slice { ty, .. } => ty.clone(),
             Expr::Index { ty, .. } => ty.clone(),
             Expr::StringBorrow { ty, .. } => ty.clone(),
+            Expr::MutBorrow { ty, .. } => ty.clone(),
+            Expr::Deref { ty, .. } => ty.clone(),
         }
     }
 }
@@ -363,6 +388,7 @@ impl Expr {
 fn count_stmt(stmt: &Stmt) -> usize {
     match stmt {
         Stmt::Let { .. }
+        | Stmt::Assign { .. }
         | Stmt::Print { .. }
         | Stmt::Panic { .. }
         | Stmt::Defer { .. }
@@ -454,6 +480,11 @@ fn lower_stmt(stmt: &hir::Stmt) -> Stmt {
             expr: lower_expr(expr),
             span: lower_source_span(span),
         },
+        hir::Stmt::Assign { target, expr, span } => Stmt::Assign {
+            target: lower_expr(target),
+            expr: lower_expr(expr),
+            span: lower_source_span(span),
+        },
         hir::Stmt::Print { expr, span } => Stmt::Print {
             expr: lower_expr(expr),
             span: lower_source_span(span),
@@ -539,7 +570,8 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             args: args.iter().map(lower_expr).collect(),
             ty: lower_type(ty),
         },
-        hir::Expr::BinaryAdd { lhs, rhs, ty } => Expr::BinaryAdd {
+        hir::Expr::BinaryAdd { op, lhs, rhs, ty } => Expr::BinaryAdd {
+            op: lower_arithmetic_op(*op),
             lhs: Box::new(lower_expr(lhs)),
             rhs: Box::new(lower_expr(rhs)),
             ty: lower_type(ty),
@@ -551,6 +583,14 @@ fn lower_expr(expr: &hir::Expr) -> Expr {
             ty: lower_type(ty),
         },
         hir::Expr::Cast { expr, ty } => Expr::Cast {
+            expr: Box::new(lower_expr(expr)),
+            ty: lower_type(ty),
+        },
+        hir::Expr::MutBorrow { expr, ty } => Expr::MutBorrow {
+            expr: Box::new(lower_expr(expr)),
+            ty: lower_type(ty),
+        },
+        hir::Expr::Deref { expr, ty } => Expr::Deref {
             expr: Box::new(lower_expr(expr)),
             ty: lower_type(ty),
         },
@@ -654,6 +694,7 @@ fn lower_type(ty: &hir::Type) -> Type {
         hir::Type::Enum(name) => Type::Enum(name.clone()),
         hir::Type::Ptr(inner) => Type::Ptr(Box::new(lower_type(inner))),
         hir::Type::MutPtr(inner) => Type::MutPtr(Box::new(lower_type(inner))),
+        hir::Type::MutRef(inner) => Type::MutRef(Box::new(lower_type(inner))),
         hir::Type::Slice(inner) => Type::Slice(Box::new(lower_type(inner))),
         hir::Type::MutSlice(inner) => Type::MutSlice(Box::new(lower_type(inner))),
         hir::Type::Option(inner) => Type::Option(Box::new(lower_type(inner))),
@@ -684,6 +725,15 @@ fn lower_compare_op(op: hir::CompareOp) -> CompareOp {
         hir::CompareOp::Le => CompareOp::Le,
         hir::CompareOp::Gt => CompareOp::Gt,
         hir::CompareOp::Ge => CompareOp::Ge,
+    }
+}
+
+fn lower_arithmetic_op(op: hir::ArithmeticOp) -> ArithmeticOp {
+    match op {
+        hir::ArithmeticOp::Add => ArithmeticOp::Add,
+        hir::ArithmeticOp::Sub => ArithmeticOp::Sub,
+        hir::ArithmeticOp::Mul => ArithmeticOp::Mul,
+        hir::ArithmeticOp::Div => ArithmeticOp::Div,
     }
 }
 
