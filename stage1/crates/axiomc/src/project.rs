@@ -807,6 +807,7 @@ fn collect_discovered_tests(
         tests.push(crate::manifest::TestTarget {
             name: relative.with_extension("").display().to_string(),
             entry: relative.display().to_string(),
+            stdin: None,
             stdout,
             stderr,
             kind,
@@ -2114,6 +2115,9 @@ fn run_test_case(
     let build_output_dir = out_dir_path(project_root, manifest);
     let command_result = if test.http.is_some() {
         run_http_fixture_case(&binary, &build_output_dir, test)
+    } else if let Some(stdin) = &test.stdin {
+        command_for_build_output(&binary, &build_output_dir)
+            .and_then(|command| run_command_with_stdin(command, stdin))
     } else {
         command_for_build_output(&binary, &build_output_dir)
             .and_then(|mut command| command.output())
@@ -2230,6 +2234,18 @@ fn run_test_case(
             ),
         },
     }
+}
+
+fn run_command_with_stdin(mut command: Command, stdin: &str) -> io::Result<std::process::Output> {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    if let Some(mut input) = child.stdin.take() {
+        input.write_all(stdin.as_bytes())?;
+    }
+    child.wait_with_output()
 }
 
 fn run_http_fixture_case(
@@ -2356,8 +2372,9 @@ fn run_manifest_compile_fail_case(
         expected_stderr: None,
         expected_error: Some(expected),
         duration_ms: started.elapsed().as_millis() as u64,
-        error: mismatch
-            .map(|message| Diagnostic::new("test", message).with_path(entry_path.display().to_string())),
+        error: mismatch.map(|message| {
+            Diagnostic::new("test", message).with_path(entry_path.display().to_string())
+        }),
     }
 }
 
@@ -2897,6 +2914,10 @@ fn collect_hir_stmt_intrinsic_use(
         | hir::Stmt::Return { expr, span } => {
             collect_hir_expr_intrinsic_use(module_path, expr, span.line, span.column, uses)
         }
+        hir::Stmt::Assign { target, expr, span } => {
+            collect_hir_expr_intrinsic_use(module_path, target, span.line, span.column, uses);
+            collect_hir_expr_intrinsic_use(module_path, expr, span.line, span.column, uses);
+        }
         hir::Stmt::Panic { message, span } => {
             collect_hir_expr_intrinsic_use(module_path, message, span.line, span.column, uses)
         }
@@ -2966,7 +2987,9 @@ fn collect_hir_expr_intrinsic_use(
         hir::Expr::Cast { expr, .. }
         | hir::Expr::Try { expr, .. }
         | hir::Expr::Await { expr, .. }
-        | hir::Expr::StringBorrow { expr, .. } => {
+        | hir::Expr::StringBorrow { expr, .. }
+        | hir::Expr::MutBorrow { expr, .. }
+        | hir::Expr::Deref { expr, .. } => {
             collect_hir_expr_intrinsic_use(module_path, expr, fallback_line, fallback_column, uses)
         }
         hir::Expr::StructLiteral { fields, .. } => {
@@ -3107,6 +3130,10 @@ fn validate_stmt_capabilities(
         | syntax::Stmt::Return { expr, .. } => {
             validate_expr_capabilities(module_path, expr, capabilities)?;
         }
+        syntax::Stmt::Assign { target, expr, .. } => {
+            validate_expr_capabilities(module_path, target, capabilities)?;
+            validate_expr_capabilities(module_path, expr, capabilities)?;
+        }
         syntax::Stmt::If {
             cond,
             then_block,
@@ -3215,7 +3242,10 @@ fn validate_expr_capabilities(
         syntax::Expr::Cast { expr, .. } => {
             validate_expr_capabilities(module_path, expr, capabilities)
         }
-        syntax::Expr::Try { expr, .. } | syntax::Expr::Await { expr, .. } => {
+        syntax::Expr::Try { expr, .. }
+        | syntax::Expr::Await { expr, .. }
+        | syntax::Expr::MutBorrow { expr, .. }
+        | syntax::Expr::Deref { expr, .. } => {
             validate_expr_capabilities(module_path, expr, capabilities)
         }
         syntax::Expr::StructLiteral { fields, .. } => {
@@ -3331,6 +3361,7 @@ fn intrinsic_capability(name: &str) -> Option<CapabilityKind> {
         "crypto_hmac_sha256" => Some(CapabilityKind::Crypto),
         "crypto_hmac_sha512" => Some(CapabilityKind::Crypto),
         "crypto_constant_time_eq" => Some(CapabilityKind::Crypto),
+        "crypto_constant_time_eq_u8" => Some(CapabilityKind::Crypto),
         _ => None,
     }
 }
@@ -4002,6 +4033,7 @@ fn format_type_name(ty: &syntax::TypeName) -> String {
         ),
         syntax::TypeName::Ptr(inner) => format!("&{}", format_type_name(inner)),
         syntax::TypeName::MutPtr(inner) => format!("&mut {}", format_type_name(inner)),
+        syntax::TypeName::MutRef(inner) => format!("&mut {}", format_type_name(inner)),
         syntax::TypeName::Slice(inner) => format!("&[{}]", format_type_name(inner)),
         syntax::TypeName::MutSlice(inner) => format!("&mut [{}]", format_type_name(inner)),
         syntax::TypeName::LifetimeSlice(lifetime, inner) => {
@@ -4577,6 +4609,37 @@ fn rewrite_stmt(
             line: *line,
             column: *column,
         },
+        syntax::Stmt::Assign {
+            target,
+            expr,
+            line,
+            column,
+        } => syntax::Stmt::Assign {
+            target: rewrite_expr(
+                target,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?,
+            expr: rewrite_expr(
+                expr,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?,
+            line: *line,
+            column: *column,
+        },
         syntax::Stmt::Panic { expr, line, column } => syntax::Stmt::Panic {
             expr: rewrite_expr(
                 expr,
@@ -5007,11 +5070,13 @@ fn rewrite_expr(
             }
         }
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(rewrite_expr(
                 lhs,
                 visible_functions,
@@ -5100,6 +5165,36 @@ fn rewrite_expr(
             column: *column,
         },
         syntax::Expr::Try { expr, line, column } => syntax::Expr::Try {
+            expr: Box::new(rewrite_expr(
+                expr,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::MutBorrow { expr, line, column } => syntax::Expr::MutBorrow {
+            expr: Box::new(rewrite_expr(
+                expr,
+                visible_functions,
+                visible_consts,
+                visible_structs,
+                visible_types,
+                private_imported,
+                private_imported_consts,
+                private_imported_types,
+                module_path,
+            )?),
+            line: *line,
+            column: *column,
+        },
+        syntax::Expr::Deref { expr, line, column } => syntax::Expr::Deref {
             expr: Box::new(rewrite_expr(
                 expr,
                 visible_functions,
@@ -5496,6 +5591,17 @@ fn rewrite_type_name(
                 column,
             )?)))
         }
+        syntax::TypeName::MutRef(inner) => {
+            Ok(syntax::TypeName::MutRef(Box::new(rewrite_type_name(
+                inner,
+                visible_consts,
+                visible_types,
+                private_imported_types,
+                module_path,
+                line,
+                column,
+            )?)))
+        }
         syntax::TypeName::Option(inner) => {
             Ok(syntax::TypeName::Option(Box::new(rewrite_type_name(
                 inner,
@@ -5816,11 +5922,13 @@ fn resolve_const_expr(
         }
         syntax::Expr::Literal(_) => Ok(expr.clone()),
         syntax::Expr::BinaryAdd {
+            op,
             lhs,
             rhs,
             line,
             column,
         } => Ok(syntax::Expr::BinaryAdd {
+            op: *op,
             lhs: Box::new(resolve_const_expr(
                 lhs,
                 visible_consts,
@@ -6253,6 +6361,7 @@ fn stmt_line(stmt: &syntax::Stmt) -> usize {
         | syntax::Stmt::IfLet { line, .. }
         | syntax::Stmt::While { line, .. }
         | syntax::Stmt::Match { line, .. }
+        | syntax::Stmt::Assign { line, .. }
         | syntax::Stmt::Return { line, .. } => *line,
     }
 }
@@ -6267,6 +6376,7 @@ fn stmt_column(stmt: &syntax::Stmt) -> usize {
         | syntax::Stmt::IfLet { column, .. }
         | syntax::Stmt::While { column, .. }
         | syntax::Stmt::Match { column, .. }
+        | syntax::Stmt::Assign { column, .. }
         | syntax::Stmt::Return { column, .. } => *column,
     }
 }
@@ -6555,6 +6665,7 @@ mod tests {
             crate::manifest::TestTarget {
                 name: "unit".to_string(),
                 entry: "src/unit_test.ax".to_string(),
+                stdin: None,
                 stdout: None,
                 stderr: None,
                 kind: TestKind::Unit,
@@ -6566,6 +6677,7 @@ mod tests {
             crate::manifest::TestTarget {
                 name: "bench".to_string(),
                 entry: "src/demo_bench.ax".to_string(),
+                stdin: None,
                 stdout: None,
                 stderr: None,
                 kind: TestKind::Benchmark,
@@ -6618,6 +6730,7 @@ mod tests {
         manifest.tests.push(crate::manifest::TestTarget {
             name: "manifest_bench".to_string(),
             entry: "src/manifest_bench.ax".to_string(),
+            stdin: None,
             stdout: None,
             stderr: None,
             kind: TestKind::Benchmark,

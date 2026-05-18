@@ -1,0 +1,103 @@
+{
+  "schema_version": "axiom.intent_ir.v0",
+  "graph_id": "axiom://graph/intent-ir-smoke",
+  "package": "axiom://package/intent-ir-smoke",
+  "nodes": [
+    {
+      "id": "axiom://package/intent-ir-smoke",
+      "kind": "Package",
+      "name": "intent-ir-smoke",
+      "description": "Smoke package for Intent IR v0 schema validation."
+    },
+    {
+      "id": "axiom://package/intent-ir-smoke/module/main",
+      "kind": "Module",
+      "name": "main",
+      "source_span": {
+        "path": "src/main.ax",
+        "line": 1,
+        "column": 1
+      }
+    },
+    {
+      "id": "axiom://package/intent-ir-smoke/function/greet",
+      "kind": "Function",
+      "name": "greet",
+      "source_span": {
+        "path": "src/main.ax",
+        "line": 1,
+        "column": 1
+      }
+    },
+    {
+      "id": "axiom://package/intent-ir-smoke/capability/clock",
+      "kind": "Capability",
+      "name": "clock",
+      "description": "Manifest capability allowing wall-clock time access.",
+      "metadata": {
+        "manifest_capability": true
+      }
+    },
+    {
+      "id": "axiom://package/intent-ir-smoke/effect/clock.now",
+      "kind": "Effect",
+      "name": "clock.now",
+      "metadata": {
+        "capability_gate": "clock",
+        "operation": "read"
+      }
+    },
+    {
+      "id": "axiom://package/intent-ir-smoke/evidence/unit-test-placeholder",
+      "kind": "Evidence",
+      "name": "unit-test-placeholder",
+      "description": "Placeholder evidence record for the v0 smoke graph.",
+      "metadata": {
+        "status": "planned",
+        "kind": "unit_test"
+      }
+    },
+    {
+      "id": "axiom://package/intent-ir-smoke/artifact/native-binary",
+      "kind": "Artifact",
+      "name": "native-binary",
+      "description": "Placeholder artifact for a generated native binary.",
+      "metadata": {
+        "status": "planned",
+        "kind": "native_binary"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "axiom://package/intent-ir-smoke",
+      "kind": "declares",
+      "to": "axiom://package/intent-ir-smoke/module/main"
+    },
+    {
+      "from": "axiom://package/intent-ir-smoke/module/main",
+      "kind": "declares",
+      "to": "axiom://package/intent-ir-smoke/function/greet"
+    },
+    {
+      "from": "axiom://package/intent-ir-smoke/function/greet",
+      "kind": "requires",
+      "to": "axiom://package/intent-ir-smoke/capability/clock"
+    },
+    {
+      "from": "axiom://package/intent-ir-smoke/capability/clock",
+      "kind": "allows_effect",
+      "to": "axiom://package/intent-ir-smoke/effect/clock.now"
+    },
+    {
+      "from": "axiom://package/intent-ir-smoke/function/greet",
+      "kind": "verified_by",
+      "to": "axiom://package/intent-ir-smoke/evidence/unit-test-placeholder"
+    },
+    {
+      "from": "axiom://package/intent-ir-smoke/artifact/native-binary",
+      "kind": "generated_from",
+      "to": "axiom://package/intent-ir-smoke/function/greet"
+    }
+  ]
+}
