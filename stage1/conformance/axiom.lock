@@ -176,6 +176,16 @@ version = "0.1.0"
 source = "path:fail/mutable_call_boundary_move"
 
 [[package]]
+name = "conformance-mutable-local-borrow-copy-use-after-borrow"
+version = "0.1.0"
+source = "path:fail/mutable_local_borrow_copy_use_after_borrow"
+
+[[package]]
+name = "conformance-mutable-local-borrow-use-after-borrow"
+version = "0.1.0"
+source = "path:fail/mutable_local_borrow_use_after_borrow"
+
+[[package]]
 name = "conformance-mutable-projection-overlap"
 version = "0.1.0"
 source = "path:fail/mutable_projection_overlap"
@@ -194,6 +204,16 @@ source = "path:fail/named_nested_match_pattern_not_supported"
 name = "conformance-nested-match-pattern-not-supported"
 version = "0.1.0"
 source = "path:fail/nested_match_pattern_not_supported"
+
+[[package]]
+name = "conformance-numeric-float-mixed-width-add"
+version = "0.1.0"
+source = "path:fail/numeric_float_mixed_width_add"
+
+[[package]]
+name = "conformance-numeric-literal-suffix-mismatch"
+version = "0.1.0"
+source = "path:fail/numeric_literal_suffix_mismatch"
 
 [[package]]
 name = "conformance-ownership-across-dependency-boundary"
@@ -341,6 +361,11 @@ version = "0.1.0"
 source = "path:pass/const_match_patterns"
 
 [[package]]
+name = "conformance-crypto-constant-time"
+version = "0.1.0"
+source = "path:pass/crypto_constant_time"
+
+[[package]]
 name = "conformance-functions-across-modules"
 version = "0.1.0"
 source = "path:pass/functions_across_modules"
@@ -356,9 +381,29 @@ version = "0.1.0"
 source = "path:pass/mutable_call_boundaries"
 
 [[package]]
+name = "conformance-mutable-local-borrow-write-through"
+version = "0.1.0"
+source = "path:pass/mutable_local_borrow_write_through"
+
+[[package]]
 name = "conformance-mutable-projection-borrows"
 version = "0.1.0"
 source = "path:pass/mutable_projection_borrows"
+
+[[package]]
+name = "conformance-numeric-cross-width-casts"
+version = "0.1.0"
+source = "path:pass/numeric_cross_width_casts"
+
+[[package]]
+name = "conformance-numeric-float-mean"
+version = "0.1.0"
+source = "path:pass/numeric_float_mean"
+
+[[package]]
+name = "conformance-numeric-literal-suffixes"
+version = "0.1.0"
+source = "path:pass/numeric_literal_suffixes"
 
 [[package]]
 name = "conformance-outcome-control-flow"
@@ -404,6 +449,11 @@ source = "path:pass/slice_type_alias_in_signature"
 name = "conformance-slice-type-alias-in-struct"
 version = "0.1.0"
 source = "path:pass/slice_type_alias_in_struct"
+
+[[package]]
+name = "conformance-stdlib-io-stdin"
+version = "0.1.0"
+source = "path:pass/stdlib_io_stdin"
 
 [[package]]
 name = "conformance-string-param-by-value"
