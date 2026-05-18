@@ -119,6 +119,9 @@ emit the versioned schema envelope `schema_version = "axiom.stage1.v1"`.
 The checked-in compiler JSON schema is
 `stage1/schemas/axiom.stage1.v1.schema.json`; the manifest editor schema is
 `stage1/schemas/axiom.toml.schema.json`.
+The first agent-facing Intent IR / semantic graph schema is
+`stage1/schemas/axiom-intent-ir-v0.schema.json`; see
+[intent-ir-v0.md](intent-ir-v0.md).
 Successful payloads always include `ok`, `command`, and `project`, while
 `axiomc test --json` additionally reports `filter` and per-run/per-case
 `duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
