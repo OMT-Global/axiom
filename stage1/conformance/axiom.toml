@@ -32,6 +32,7 @@ members = [
   "fail/mutable_borrow_overlapping_slice_mut",
   "fail/mutable_borrow_use_after_borrow",
   "fail/mutable_borrow_whole_then_projection",
+  "fail/mutable_local_borrow_copy_use_after_borrow",
   "fail/mutable_local_borrow_use_after_borrow",
   "fail/mutable_call_boundary_move",
   "fail/mutable_projection_overlap",

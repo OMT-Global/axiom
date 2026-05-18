@@ -6648,7 +6648,7 @@ fn lower_expr_with_expected_inner(
                     .with_help("consider restructuring to avoid the move, or ensure the value is only used once")
                     .with_span(*line, *column));
                 }
-                if binding.active_mut_borrow_count > 0 && !binding.ty.is_copy() {
+                if binding.active_mut_borrow_count > 0 {
                     return Err(ownership_error(
                         OWNERSHIP_MOVE_WHILE_BORROWED,
                         format!("cannot move value {name:?} while borrowed slices are still live"),
