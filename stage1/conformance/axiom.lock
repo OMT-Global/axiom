@@ -206,6 +206,11 @@ version = "0.1.0"
 source = "path:fail/nested_match_pattern_not_supported"
 
 [[package]]
+name = "conformance-numeric-literal-suffix-mismatch"
+version = "0.1.0"
+source = "path:fail/numeric_literal_suffix_mismatch"
+
+[[package]]
 name = "conformance-ownership-across-dependency-boundary"
 version = "0.1.0"
 source = "path:fail/ownership_across_dependency_boundary"
@@ -379,6 +384,11 @@ source = "path:pass/mutable_local_borrow_write_through"
 name = "conformance-mutable-projection-borrows"
 version = "0.1.0"
 source = "path:pass/mutable_projection_borrows"
+
+[[package]]
+name = "conformance-numeric-literal-suffixes"
+version = "0.1.0"
+source = "path:pass/numeric_literal_suffixes"
 
 [[package]]
 name = "conformance-outcome-control-flow"
