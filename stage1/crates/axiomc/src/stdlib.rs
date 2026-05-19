@@ -8,8 +8,8 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides twenty-two stdlib modules. Six are thin wrappers over
-//! single-intrinsic capability-gated surfaces, one per capability class:
+//! Today this provides twenty-three stdlib modules. The capability-gated
+//! wrappers include the six manifest capability classes:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
 //!   `elapsed_ms(start)`, and `sleep(duration)` on top of `clock_now_ms`,
@@ -19,6 +19,8 @@
 //! * `std/net.ax` — `resolve(host)` on top of `net_resolve`, plus a bounded
 //!   loopback-only TCP/UDP socket floor on top of `net_tcp_*` and `net_udp_*`
 //!   intrinsics (net).
+//! * `std/net_tcp.ax` — dedicated TCP wrappers over the current bounded
+//!   loopback-only `net_tcp_*` intrinsics (net).
 //! * `std/net_udp.ax` — dedicated UDP loopback helpers on top of `net_udp_*`
 //!   intrinsics (net).
 //! * `std/process.ax` — `run_status(command)` on top of `process_status`
@@ -33,11 +35,11 @@
 //!   and `constant_time_eq_u8(left, right)` on top of `crypto_hmac_*` and
 //!   `crypto_constant_time_eq*` (crypto).
 //! * `std/crypto.ax` — umbrella re-export module for the stage1 crypto hash
-//!   and MAC helpers.
+//!   MAC, and random helpers.
 //!
-//! The seventh module shares an existing capability class with a peer
-//! wrapper, demonstrating that the `std.*` surface is not limited to one
-//! wrapper per capability:
+//! Additional modules share existing capability classes with peer wrappers,
+//! demonstrating that the `std.*` surface is not limited to one wrapper per
+//! capability:
 //!
 //! * `std/http.ax` — `get(url)`, `serve_once(bind, body)`, and the route-shaped
 //!   `serve(bind, route(path, body), max_requests)` helper on top of the new
@@ -159,6 +161,11 @@ pub fn udp_bind_loopback_once(response: string, timeout_ms: int): Option<int> {\
 pub fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
     ),
     (
+        "net_tcp.ax",
+        "pub fn listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
+pub fn dial(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_tcp_dial(host, port, message, timeout_ms)\n}\n",
+    ),
+    (
         "net_udp.ax",
         "pub fn bind_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_udp_bind_loopback_once(response, timeout_ms)\n}\n\
 pub fn send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
@@ -181,6 +188,11 @@ pub fn verify_sha256(tag: string, key: string, message: string): bool {\nreturn 
 pub fn verify_sha512(tag: string, key: string, message: string): bool {\nreturn constant_time_eq(tag, hmac_sha512(key, message))\n}\n",
     ),
     (
+        "crypto_rand.ax",
+        "pub fn random_bytes(n: int): [u8] {\nreturn crypto_rand_bytes(n)\n}\n\
+pub fn random_u64(): u64 {\nreturn crypto_rand_u64()\n}\n",
+    ),
+    (
         "crypto.ax",
         "pub fn sha256(input: string): string {\nreturn crypto_sha256(input)\n}\n\
 pub fn hmac_sha256(key: string, message: string): string {\nreturn crypto_hmac_sha256(key, message)\n}\n\
@@ -188,7 +200,9 @@ pub fn hmac_sha512(key: string, message: string): string {\nreturn crypto_hmac_s
 pub fn constant_time_eq(left: string, right: string): bool {\nreturn crypto_constant_time_eq(left, right)\n}\n\
 pub fn constant_time_eq_u8(left: &[u8], right: &[u8]): bool {\nreturn crypto_constant_time_eq_u8(left, right)\n}\n\
 pub fn verify_sha256(tag: string, key: string, message: string): bool {\nreturn constant_time_eq(tag, hmac_sha256(key, message))\n}\n\
-pub fn verify_sha512(tag: string, key: string, message: string): bool {\nreturn constant_time_eq(tag, hmac_sha512(key, message))\n}\n",
+pub fn verify_sha512(tag: string, key: string, message: string): bool {\nreturn constant_time_eq(tag, hmac_sha512(key, message))\n}\n\
+pub fn random_bytes(n: int): [u8] {\nreturn crypto_rand_bytes(n)\n}\n\
+pub fn random_u64(): u64 {\nreturn crypto_rand_u64()\n}\n",
     ),
     (
         "io.ax",

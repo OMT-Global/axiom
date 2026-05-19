@@ -1522,6 +1522,7 @@ Variant(
         let source = "let byte: u8 = 255u8
 let wrapped: u8 = byte.wrapping_add(1u8)
 let checked: Option<u8> = byte.checked_add(1u8)
+let saturated: u8 = byte.saturating_add(1u8)
 ";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
         let hir = hir::lower(&parsed).expect("lower");
@@ -1529,6 +1530,7 @@ let checked: Option<u8> = byte.checked_add(1u8)
         let rendered = render_rust(&mir);
         assert!(rendered.contains("let wrapped: u8 = (byte).wrapping_add(1u8);"));
         assert!(rendered.contains("let checked: Option<u8> = (byte).checked_add(1u8);"));
+        assert!(rendered.contains("let saturated: u8 = (byte).saturating_add(1u8);"));
     }
 
     #[test]
@@ -2041,7 +2043,10 @@ let bad: u8 = byte.wrapping_add(1u16)
         assert!(error.message.contains(
             "cannot infer which parameter the returned borrow originates from; this case will require an explicit annotation when origin syntax lands"
         ));
-        assert_eq!(error.code.as_deref(), Some("borrow_return_origin_ambiguous"));
+        assert_eq!(
+            error.code.as_deref(),
+            Some("borrow_return_origin_ambiguous")
+        );
         assert_eq!(error.kind, "type");
     }
 
@@ -5675,6 +5680,47 @@ print "missing"
     }
 
     #[test]
+    #[cfg_attr(not(feature = "run-native-tests"), ignore)]
+    fn stage1_project_imports_synthetic_stdlib_net_tcp_module() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-net-tcp-app");
+        create_project(&project, Some("stdlib-net-tcp-app")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-net-tcp-app",
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        let source = "import \"std/net_tcp.ax\"\nmatch listen_loopback_once(\"tcp pong\", 1000) {\nSome(port) {\nmatch dial(\"127.0.0.1\", port, \"tcp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"tcp none\"\n}\n}\n}\nNone {\nprint \"tcp listen none\"\n}\n}\n";
+        fs::write(project.join("src/main.ax"), source).expect("write source");
+
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        let expected = if loopback_socket_bind_available() {
+            "tcp pong\n"
+        } else {
+            "tcp listen none\n"
+        };
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "run-native-tests"), ignore)]
     fn stage1_project_imports_synthetic_stdlib_net_udp_module() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("stdlib-net-udp-app");
@@ -5711,6 +5757,43 @@ print "missing"
             "udp bind none\n"
         };
         assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    }
+
+    #[test]
+    fn stage1_project_rejects_stdlib_net_tcp_without_net_capability() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-net-tcp-denied");
+        create_project(&project, Some("stdlib-net-tcp-denied")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            render_manifest_with_capabilities(
+                "stdlib-net-tcp-denied",
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+            ),
+        )
+        .expect("write manifest");
+        let manifest = load_manifest(&project).expect("load manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            render_lockfile_for_project(&project, &manifest).expect("lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net_tcp.ax\"\nmatch listen_loopback_once(\"pong\", 1000) {\nSome(_port) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let err = check_project(&project).expect_err("expected capability denial");
+        assert!(
+            err.message.contains("requires [capabilities].net = true"),
+            "unexpected diagnostic: {err:?}",
+        );
     }
 
     #[test]
@@ -7987,7 +8070,12 @@ print false
     #[test]
     fn ownership_compile_fail_corpus_reports_stable_codes() {
         let cases = [
-            ("use_after_move", "ownership", "use_after_move", "use of moved value"),
+            (
+                "use_after_move",
+                "ownership",
+                "use_after_move",
+                "use of moved value",
+            ),
             (
                 "borrow_return_requires_param_origin",
                 "ownership",
@@ -10033,7 +10121,10 @@ print takes_two(three)
         assert!(error.message.contains(
             "cannot infer which parameter the returned borrow originates from; this case will require an explicit annotation when origin syntax lands"
         ));
-        assert_eq!(error.code.as_deref(), Some("borrow_return_origin_ambiguous"));
+        assert_eq!(
+            error.code.as_deref(),
+            Some("borrow_return_origin_ambiguous")
+        );
         assert_eq!(error.kind, "type");
     }
 
