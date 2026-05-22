@@ -26,6 +26,8 @@ members = [
   "fail/import_reserved_namespace",
   "fail/import_unsupported_alias",
   "fail/lowercase_const_match_pattern",
+  "fail/match_expression_arm_type_mismatch",
+  "fail/match_expression_non_exhaustive",
   "fail/match_guard_not_supported",
   "fail/move_while_mutably_borrowed",
   "fail/mutable_borrow_double_mut",
@@ -92,4 +94,5 @@ members = [
   "pass/string_param_by_value",
   "pass/struct_field_access",
   "pass/type_system_aggregates",
+  "pass/typed_match_expressions",
 ]

@@ -1,0 +1,6 @@
+fn render(value: Option<int>): string {
+return match value { Some(count) => count, None => "missing" }
+}
+
+print render(Some(7))
+

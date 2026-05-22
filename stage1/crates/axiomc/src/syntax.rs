@@ -258,6 +258,16 @@ pub struct MatchArm {
     pub column: usize,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MatchExprArm {
+    pub variant: String,
+    pub bindings: Vec<String>,
+    pub is_named: bool,
+    pub expr: Expr,
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
 pub enum NumericType {
     I8,
@@ -454,6 +464,12 @@ pub enum Expr {
         line: usize,
         column: usize,
     },
+    Match {
+        expr: Box<Expr>,
+        arms: Vec<MatchExprArm>,
+        line: usize,
+        column: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -609,7 +625,8 @@ impl Expr {
             | Expr::ArrayLiteral { line, column, .. }
             | Expr::Slice { line, column, .. }
             | Expr::Index { line, column, .. }
-            | Expr::Closure { line, column, .. } => (*line, *column),
+            | Expr::Closure { line, column, .. }
+            | Expr::Match { line, column, .. } => (*line, *column),
         };
         Some(SourceSpan::new(file, line, column))
     }
@@ -2640,6 +2657,89 @@ fn parse_match_arms(
         .with_span(lines.len().max(1), 1))
 }
 
+fn parse_match_expr(
+    raw: &str,
+    path: &Path,
+    line_no: usize,
+    column: usize,
+) -> Result<Expr, Diagnostic> {
+    let body_open = find_top_level_char(raw, '{').ok_or_else(|| {
+        Diagnostic::new("parse", "match expression must use `match <expr> { ... }` syntax")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column)
+    })?;
+    if !matches!(find_matching_brace(raw, body_open), Some(close) if close == raw.len() - 1) {
+        return Err(Diagnostic::new("parse", "match expression body is incomplete")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column));
+    }
+    let expr_raw = raw["match ".len()..body_open].trim();
+    if expr_raw.is_empty() {
+        return Err(Diagnostic::new("parse", "match expression is missing a scrutinee")
+            .with_path(path.display().to_string())
+            .with_span(line_no, column));
+    }
+    let inner = &raw[body_open + 1..raw.len() - 1];
+    let mut arms = Vec::new();
+    for (arm_offset, arm_raw) in split_top_level_with_offsets(inner, ',') {
+        let arm_raw = arm_raw.trim();
+        if arm_raw.is_empty() {
+            continue;
+        }
+        let Some(arrow) = find_top_level_arrow(arm_raw) else {
+            return Err(Diagnostic::new(
+                "parse",
+                "match expression arm must use `Pattern => expr` syntax",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + body_open + 1 + arm_offset));
+        };
+        let pattern = arm_raw[..arrow].trim();
+        let expr_text = arm_raw[arrow + 2..].trim();
+        if expr_text.is_empty() {
+            return Err(Diagnostic::new(
+                "parse",
+                "match expression arm is missing a result expression",
+            )
+            .with_path(path.display().to_string())
+            .with_span(line_no, column + body_open + 1 + arm_offset + arrow + 2));
+        }
+        let (variant, bindings, is_named) = parse_match_pattern(pattern, path, line_no)?;
+        arms.push(MatchExprArm {
+            variant,
+            bindings,
+            is_named,
+            expr: parse_expr(
+                expr_text,
+                path,
+                line_no,
+                column + body_open + 1 + arm_offset + arrow + 2,
+            )?,
+            line: line_no,
+            column: column + body_open + 1 + arm_offset,
+        });
+    }
+    if arms.is_empty() {
+        return Err(Diagnostic::new(
+            "parse",
+            "match expression must contain at least one arm",
+        )
+        .with_path(path.display().to_string())
+        .with_span(line_no, column + body_open + 1));
+    }
+    Ok(Expr::Match {
+        expr: Box::new(parse_expr(
+            expr_raw,
+            path,
+            line_no,
+            column + "match ".len(),
+        )?),
+        arms,
+        line: line_no,
+        column,
+    })
+}
+
 fn parse_let_stmt(rest: &str, path: &Path, line_no: usize) -> Result<Stmt, Diagnostic> {
     let colon = find_top_level_char(rest, ':').ok_or_else(|| {
         Diagnostic::new("parse", "let binding is missing ':'")
@@ -2966,6 +3066,9 @@ fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<E
     let raw = raw.trim();
     if raw.starts_with('|') {
         return parse_term(raw, path, line_no, column);
+    }
+    if raw.starts_with("match ") {
+        return parse_match_expr(raw, path, line_no, column);
     }
     if let Some(split_index) = find_top_level_as(raw) {
         let lhs_raw = raw[..split_index].trim();
@@ -4210,6 +4313,47 @@ fn find_top_level_char(raw: &str, target: char) -> Option<usize> {
                 && angle_depth == 0 =>
             {
                 return Some(index);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn find_top_level_arrow(raw: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut paren_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut chars = raw.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '=' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
+                if chars.peek().is_some_and(|(_, next)| *next == '>') {
+                    return Some(index);
+                }
             }
             _ => {}
         }
