@@ -2911,7 +2911,7 @@ fn collect_hir_stmt_intrinsic_use(
         hir::Stmt::Let { expr, span, .. }
         | hir::Stmt::Print { expr, span }
         | hir::Stmt::Defer { expr, span }
-        | hir::Stmt::Return { expr, span } => {
+        | hir::Stmt::Return { expr, span, .. } => {
             collect_hir_expr_intrinsic_use(module_path, expr, span.line, span.column, uses)
         }
         hir::Stmt::Assign { target, expr, span } => {

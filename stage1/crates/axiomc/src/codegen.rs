@@ -3843,7 +3843,7 @@ fn render_stmt(
 "
             ));
         }
-        Stmt::Return { expr, span } => {
+        Stmt::Return { expr, span, .. } => {
             render_source_marker(source_path, *span, out, indent, debug);
             render_deferred_exprs(out, indent, source_path, debug, local_defers);
             render_deferred_exprs(out, indent, source_path, debug, active_defers);
