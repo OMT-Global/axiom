@@ -406,6 +406,11 @@ version = "0.1.0"
 source = "path:pass/mutable_local_borrow_write_through"
 
 [[package]]
+name = "conformance-mutable-match-expression-bindings"
+version = "0.1.0"
+source = "path:pass/mutable_match_expression_bindings"
+
+[[package]]
 name = "conformance-mutable-projection-borrows"
 version = "0.1.0"
 source = "path:pass/mutable_projection_borrows"

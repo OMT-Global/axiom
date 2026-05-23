@@ -4606,6 +4606,8 @@ fn render_expr(expr: &Expr) -> String {
         Expr::Match { expr, arms, .. } => {
             let mut rendered = format!("match {} {{ ", render_expr(expr));
             for arm in arms {
+                let mut arm_mutable_locals = HashSet::new();
+                collect_expr_mutable_borrows(&arm.expr, &mut arm_mutable_locals);
                 if arm.bindings.is_empty() {
                     rendered.push_str(&format!(
                         "{}::{} => {}, ",
@@ -4618,7 +4620,7 @@ fn render_expr(expr: &Expr) -> String {
                         "{}::{} {{ {} }} => {}, ",
                         arm.enum_name,
                         arm.variant,
-                        render_match_bindings(&arm.bindings, &HashSet::new()),
+                        render_match_bindings(&arm.bindings, &arm_mutable_locals),
                         render_expr(&arm.expr)
                     ));
                 } else {
@@ -4626,7 +4628,7 @@ fn render_expr(expr: &Expr) -> String {
                         "{}::{}({}) => {}, ",
                         arm.enum_name,
                         arm.variant,
-                        render_match_bindings(&arm.bindings, &HashSet::new()),
+                        render_match_bindings(&arm.bindings, &arm_mutable_locals),
                         render_expr(&arm.expr)
                     ));
                 }

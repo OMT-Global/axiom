@@ -3,6 +3,6 @@
   "code": null,
   "message": "match expression arm \"Some\" expects string, got int",
   "path": "src/main.ax",
-  "line": 2,
-  "column": 21
+  "line": 4,
+  "column": 1
 }

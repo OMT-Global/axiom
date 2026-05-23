@@ -2698,44 +2698,49 @@ fn parse_match_expr(
         if arm_raw.is_empty() {
             continue;
         }
+        let arm_source_offset = body_open + 1 + arm_offset;
+        let (arm_line, arm_column) =
+            source_position_for_offset(line_no, column, raw, arm_source_offset);
         let Some(arrow) = find_top_level_arrow(arm_raw) else {
             return Err(Diagnostic::new(
                 "parse",
                 "match expression arm must use `Pattern => expr` syntax",
             )
             .with_path(path.display().to_string())
-            .with_span(line_no, column + body_open + 1 + arm_offset));
+            .with_span(arm_line, arm_column));
         };
         let pattern = arm_raw[..arrow].trim();
-        let expr_text = arm_raw[arrow + 2..].trim();
+        let expr_raw = &arm_raw[arrow + 2..];
+        let expr_leading_ws = expr_raw.len().saturating_sub(expr_raw.trim_start().len());
+        let expr_offset = arm_source_offset + arrow + 2 + expr_leading_ws;
+        let (expr_line, expr_column) =
+            source_position_for_offset(line_no, column, raw, expr_offset);
+        let expr_text = expr_raw.trim();
         if expr_text.is_empty() {
             return Err(Diagnostic::new(
                 "parse",
                 "match expression arm is missing a result expression",
             )
             .with_path(path.display().to_string())
-            .with_span(line_no, column + body_open + 1 + arm_offset + arrow + 2));
+            .with_span(expr_line, expr_column));
         }
-        let (variant, bindings, is_named) = parse_match_pattern(pattern, path, line_no)?;
+        let (variant, bindings, is_named) = parse_match_pattern(pattern, path, arm_line)?;
         arms.push(MatchExprArm {
             variant,
             bindings,
             is_named,
-            expr: parse_expr(
-                expr_text,
-                path,
-                line_no,
-                column + body_open + 1 + arm_offset + arrow + 2,
-            )?,
-            line: line_no,
-            column: column + body_open + 1 + arm_offset,
+            expr: parse_expr(expr_text, path, expr_line, expr_column)?,
+            line: arm_line,
+            column: arm_column,
         });
     }
     if arms.is_empty() {
+        let (body_line, body_column) =
+            source_position_for_offset(line_no, column, raw, body_open + 1);
         return Err(
             Diagnostic::new("parse", "match expression must contain at least one arm")
                 .with_path(path.display().to_string())
-                .with_span(line_no, column + body_open + 1),
+                .with_span(body_line, body_column),
         );
     }
     Ok(Expr::Match {
@@ -3151,6 +3156,25 @@ fn parse_type_name(
             Ok(TypeName::Named(raw.to_string(), Vec::new()))
         }
     }
+}
+
+fn source_position_for_offset(
+    line_no: usize,
+    column: usize,
+    raw: &str,
+    offset: usize,
+) -> (usize, usize) {
+    let mut line = line_no;
+    let mut current_column = column;
+    for ch in raw[..offset.min(raw.len())].chars() {
+        if ch == '\n' {
+            line += 1;
+            current_column = 1;
+        } else {
+            current_column += 1;
+        }
+    }
+    (line, current_column)
 }
 
 fn parse_expr(raw: &str, path: &Path, line_no: usize, column: usize) -> Result<Expr, Diagnostic> {

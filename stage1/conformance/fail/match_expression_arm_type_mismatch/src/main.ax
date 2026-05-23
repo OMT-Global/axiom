@@ -1,6 +1,9 @@
 fn render(value: Option<int>): string {
-return match value { Some(count) => count, None => "missing" }
+let rendered: string = match value {
+None => "missing"
+Some(count) => count
+}
+return rendered
 }
 
 print render(Some(7))
-
