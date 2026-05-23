@@ -3693,6 +3693,7 @@ fn render_stmt(
             ty,
             expr,
             span,
+            ..
         } => {
             render_source_marker(source_path, *span, out, indent, debug);
             let mutability = mutable_locals
