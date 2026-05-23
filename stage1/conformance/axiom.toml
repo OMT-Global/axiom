@@ -64,6 +64,7 @@ members = [
   "fail/stdlib_fs_write_without_capability",
   "fail/string_borrow_local_return",
   "fail/string_use_after_move",
+  "fail/trait_type_position_not_supported",
   "pass/closures",
   "pass/collection_operations",
   "pass/collection_lookup_helpers",
@@ -91,5 +92,6 @@ members = [
   "pass/stdlib_io_stdin",
   "pass/string_param_by_value",
   "pass/struct_field_access",
+  "pass/trait_declaration_syntax",
   "pass/type_system_aggregates",
 ]
