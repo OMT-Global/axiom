@@ -84,6 +84,8 @@ members = [
   "pass/mutable_call_boundaries",
   "pass/mutable_projection_borrows",
   "pass/mutable_slice_write_through",
+  "pass/projection_struct_disjoint",
+  "pass/projection_tuple_disjoint",
   "pass/outcome_control_flow",
   "pass/runtime_negative_diagnostics",
   "pass/numeric_cross_width_casts",
