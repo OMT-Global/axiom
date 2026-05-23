@@ -259,20 +259,8 @@ enum InspectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Emit manifest capability effects for agent tooling.
+    /// Emit semantic effect nodes for known runtime and stdlib surfaces.
     Effects {
-        path: PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Emit available verification evidence such as lockfile and test metadata.
-    Evidence {
-        path: PathBuf,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Emit configured and currently available build, test, and docs artifacts.
-    Artifacts {
         path: PathBuf,
         #[arg(long)]
         json: bool,
@@ -683,51 +671,17 @@ fn main() {
                     } else {
                         for effect in &report.effects {
                             println!(
-                                "{} enabled={} resource={}",
-                                effect.name, effect.enabled, effect.resource
+                                "{} {} {}:{}",
+                                effect.kind,
+                                effect.resource,
+                                effect.source_span.path,
+                                effect.source_span.line
                             );
                         }
                     }
                     0
                 }
                 Err(error) => print_error("inspect effects", error, json),
-            },
-            InspectCommand::Evidence { path, json } => match inspect_evidence(&path) {
-                Ok(report) => {
-                    if json {
-                        println!(
-                            "{}",
-                            json_contract::to_pretty_string(&report)
-                                .unwrap_or_else(|_| String::from("{}"))
-                        );
-                    } else {
-                        for item in &report.evidence {
-                            println!("{} {} {}", item.kind, item.name, item.status);
-                        }
-                    }
-                    0
-                }
-                Err(error) => print_error("inspect evidence", error, json),
-            },
-            InspectCommand::Artifacts { path, json } => match inspect_artifacts(&path) {
-                Ok(report) => {
-                    if json {
-                        println!(
-                            "{}",
-                            json_contract::to_pretty_string(&report)
-                                .unwrap_or_else(|_| String::from("{}"))
-                        );
-                    } else {
-                        for artifact in &report.artifacts {
-                            println!(
-                                "{} {} exists={}",
-                                artifact.kind, artifact.path, artifact.exists
-                            );
-                        }
-                    }
-                    0
-                }
-                Err(error) => print_error("inspect artifacts", error, json),
             },
         },
         Command::Pkg { command } => match command {
@@ -1546,44 +1500,29 @@ fn normalized_id_component(value: &str, fallback: &str) -> String {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct SemanticGraphNode {
+struct InspectEffectsReport {
+    schema_version: &'static str,
+    ok: bool,
+    command: &'static str,
+    project: String,
+    effects: Vec<EffectNode>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EffectNode {
     id: String,
     kind: &'static str,
-    name: String,
-    span: SymbolSpan,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    scope: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    severity: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    assertion: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    inputs: Vec<SemanticGraphInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    effects: Vec<SemanticGraphEffect>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    evidence: Vec<String>,
+    resource: String,
+    operation: &'static str,
+    capability_gate: &'static str,
+    source_span: SymbolSpan,
+    policy: EffectPolicy,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct SemanticGraphInput {
-    name: String,
-    ty: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct SemanticGraphEffect {
-    kind: String,
-    target: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct SemanticGraphEdge {
-    from: String,
-    kind: &'static str,
-    to: String,
+struct EffectPolicy {
+    host_allowed: bool,
+    port_allowed: bool,
 }
 
 fn inspect_symbols(path: &Path) -> Result<InspectSymbolsReport, Diagnostic> {
@@ -1687,14 +1626,9 @@ fn inspect_symbols(path: &Path) -> Result<InspectSymbolsReport, Diagnostic> {
     })
 }
 
-const INSPECT_SCHEMA_PATH: &str = "stage1/schemas/axiom-inspect-v0.schema.json";
-
-fn inspect_semantic_graph(
-    path: &Path,
-) -> Result<(Vec<SemanticGraphNode>, Vec<SemanticGraphEdge>), Diagnostic> {
+fn inspect_effects(path: &Path) -> Result<InspectEffectsReport, Diagnostic> {
     let files = axiom_files(path)?;
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
+    let mut effects = Vec::new();
     for file in files {
         let source = fs::read_to_string(&file).map_err(|err| {
             Diagnostic::new(
@@ -1704,105 +1638,252 @@ fn inspect_semantic_graph(
             .with_path(file.display().to_string())
         })?;
         let program = parse_program(&source, &file)?;
-        for axiom in &program.axioms {
-            nodes.push(SemanticGraphNode {
-                id: semantic_node_id("axiom", &axiom.name),
-                kind: "axiom",
-                name: axiom.name.clone(),
-                span: symbol_span(&file, axiom.line, axiom.column),
-                scope: axiom.scope.clone(),
-                severity: axiom.severity.clone(),
-                description: axiom.description.clone(),
-                assertion: axiom.assertion.clone(),
-                inputs: Vec::new(),
-                effects: Vec::new(),
-                evidence: Vec::new(),
-            });
+        for decl in &program.consts {
+            collect_effects_in_expr(&decl.expr, &file, &mut effects);
         }
-        for evidence in &program.evidence {
-            nodes.push(SemanticGraphNode {
-                id: semantic_node_id("evidence", &evidence.name),
-                kind: "evidence",
-                name: evidence.name.clone(),
-                span: symbol_span(&file, evidence.line, evidence.column),
-                scope: None,
-                severity: None,
-                description: evidence.description.clone(),
-                assertion: None,
-                inputs: Vec::new(),
-                effects: Vec::new(),
-                evidence: Vec::new(),
-            });
+        for function in &program.functions {
+            collect_effects_in_stmts(&function.body, &file, &mut effects);
         }
-        for capability in &program.semantic_capabilities {
-            let capability_id = semantic_node_id("capability", &capability.name);
-            nodes.push(SemanticGraphNode {
-                id: capability_id.clone(),
-                kind: "capability",
-                name: capability.name.clone(),
-                span: symbol_span(&file, capability.line, capability.column),
-                scope: None,
-                severity: None,
-                description: None,
-                assertion: None,
-                inputs: capability
-                    .inputs
-                    .iter()
-                    .map(|input| SemanticGraphInput {
-                        name: input.name.clone(),
-                        ty: render_type(&input.ty),
-                    })
-                    .collect(),
-                effects: capability
-                    .effects
-                    .iter()
-                    .map(|effect| SemanticGraphEffect {
-                        kind: effect.kind.clone(),
-                        target: effect.target.clone(),
-                    })
-                    .collect(),
-                evidence: capability
-                    .evidence
-                    .iter()
-                    .map(|reference| reference.name.clone())
-                    .collect(),
-            });
-            for reference in &capability.preserves {
-                edges.push(SemanticGraphEdge {
-                    from: capability_id.clone(),
-                    kind: "preserves",
-                    to: semantic_node_id("axiom", &reference.name),
-                });
+    }
+    for (index, effect) in effects.iter_mut().enumerate() {
+        effect.id = format!(
+            "axiom://package/{}/effect/{}-{}",
+            effect_id_component(&effect.source_span.path),
+            effect.kind.replace('.', "-"),
+            index + 1
+        );
+    }
+    effects.sort_by(|left, right| {
+        left.source_span
+            .path
+            .cmp(&right.source_span.path)
+            .then_with(|| left.source_span.line.cmp(&right.source_span.line))
+            .then_with(|| left.kind.cmp(right.kind))
+    });
+    Ok(InspectEffectsReport {
+        schema_version: "axiom.effects.v0",
+        ok: true,
+        command: "inspect effects",
+        project: path.display().to_string(),
+        effects,
+    })
+}
+
+fn collect_effects_in_stmts(
+    stmts: &[axiomc::syntax::Stmt],
+    file: &Path,
+    effects: &mut Vec<EffectNode>,
+) {
+    use axiomc::syntax::Stmt;
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let { expr, .. }
+            | Stmt::Print { expr, .. }
+            | Stmt::Panic { expr, .. }
+            | Stmt::Defer { expr, .. }
+            | Stmt::Return { expr, .. } => collect_effects_in_expr(expr, file, effects),
+            Stmt::Assign { target, expr, .. } => {
+                collect_effects_in_expr(target, file, effects);
+                collect_effects_in_expr(expr, file, effects);
             }
-            for reference in &capability.evidence {
-                edges.push(SemanticGraphEdge {
-                    from: capability_id.clone(),
-                    kind: "requires_evidence",
-                    to: semantic_node_id("evidence", &reference.name),
-                });
+            Stmt::If {
+                cond,
+                then_block,
+                else_block,
+                ..
+            } => {
+                collect_effects_in_expr(cond, file, effects);
+                collect_effects_in_stmts(then_block, file, effects);
+                for block in else_block.iter().flatten() {
+                    collect_effects_in_stmts(std::slice::from_ref(block), file, effects);
+                }
+            }
+            Stmt::IfLet {
+                expr,
+                then_block,
+                else_block,
+                ..
+            } => {
+                collect_effects_in_expr(expr, file, effects);
+                collect_effects_in_stmts(then_block, file, effects);
+                for block in else_block.iter().flatten() {
+                    collect_effects_in_stmts(std::slice::from_ref(block), file, effects);
+                }
+            }
+            Stmt::While { cond, body, .. } => {
+                collect_effects_in_expr(cond, file, effects);
+                collect_effects_in_stmts(body, file, effects);
+            }
+            Stmt::Match { expr, arms, .. } => {
+                collect_effects_in_expr(expr, file, effects);
+                for arm in arms {
+                    collect_effects_in_stmts(&arm.body, file, effects);
+                }
             }
         }
     }
-    nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    edges.sort_by(|left, right| {
-        left.from
-            .cmp(&right.from)
-            .then_with(|| left.kind.cmp(right.kind))
-            .then_with(|| left.to.cmp(&right.to))
-    });
-    Ok((nodes, edges))
 }
 
-fn semantic_node_id(kind: &str, name: &str) -> String {
-    format!("axiom://semantic/{kind}/{}", semantic_id_segment(name))
+fn collect_effects_in_expr(
+    expr: &axiomc::syntax::Expr,
+    file: &Path,
+    effects: &mut Vec<EffectNode>,
+) {
+    use axiomc::syntax::Expr;
+    match expr {
+        Expr::Call {
+            name,
+            args,
+            line,
+            column,
+            ..
+        } => {
+            if let Some((kind, operation, gate)) = effect_for_call(name) {
+                effects.push(EffectNode {
+                    id: String::new(),
+                    kind,
+                    resource: effect_resource(name, args),
+                    operation,
+                    capability_gate: gate,
+                    source_span: symbol_span(file, *line, *column),
+                    policy: EffectPolicy {
+                        host_allowed: true,
+                        port_allowed: true,
+                    },
+                });
+            }
+            for arg in args {
+                collect_effects_in_expr(arg, file, effects);
+            }
+        }
+        Expr::MethodCall { base, args, .. } => {
+            collect_effects_in_expr(base, file, effects);
+            for arg in args {
+                collect_effects_in_expr(arg, file, effects);
+            }
+        }
+        Expr::BinaryAdd { lhs, rhs, .. } | Expr::BinaryCompare { lhs, rhs, .. } => {
+            collect_effects_in_expr(lhs, file, effects);
+            collect_effects_in_expr(rhs, file, effects);
+        }
+        Expr::Cast { expr, .. }
+        | Expr::Try { expr, .. }
+        | Expr::Await { expr, .. }
+        | Expr::MutBorrow { expr, .. }
+        | Expr::Deref { expr, .. } => collect_effects_in_expr(expr, file, effects),
+        Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_effects_in_expr(&field.expr, file, effects);
+            }
+        }
+        Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
+            collect_effects_in_expr(base, file, effects);
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            collect_effects_in_expr(base, file, effects);
+            if let Some(start) = start {
+                collect_effects_in_expr(start, file, effects);
+            }
+            if let Some(end) = end {
+                collect_effects_in_expr(end, file, effects);
+            }
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_effects_in_expr(element, file, effects);
+            }
+        }
+        Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                collect_effects_in_expr(&entry.key, file, effects);
+                collect_effects_in_expr(&entry.value, file, effects);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_effects_in_expr(base, file, effects);
+            collect_effects_in_expr(index, file, effects);
+        }
+        Expr::Closure { body, .. } => collect_effects_in_expr(body, file, effects),
+        Expr::Literal(_) | Expr::VarRef { .. } => {}
+    }
 }
 
-fn semantic_id_segment(value: &str) -> String {
+fn effect_for_call(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match name {
+        "clock_now_ms" | "clock_elapsed_ms" => Some(("clock.now", "read", "clock")),
+        "clock_sleep_ms" => Some(("clock.sleep", "sleep", "clock")),
+        "env_get" => Some(("env.read", "read", "env")),
+        "fs_read" => Some(("fs.read", "read", "fs")),
+        "fs_write" | "fs_create" | "fs_append" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file"
+        | "fs_remove_dir" | "fs_replace" => Some(("fs.write", "write", "fs:write")),
+        "net_resolve" => Some(("network.dns.resolve", "resolve", "net")),
+        "http_get" => Some(("network.http.get", "get", "net")),
+        "http_serve_once"
+        | "http_serve_route"
+        | "net_tcp_listen_loopback_once"
+        | "tcp_listen_loopback_once" => Some(("network.tcp.bind", "bind", "net")),
+        "net_tcp_dial" | "tcp_dial" => Some(("network.tcp.connect", "connect", "net")),
+        "net_udp_bind_loopback_once"
+        | "udp_bind_loopback_once"
+        | "net_udp_send_recv"
+        | "udp_send_recv" => Some(("network.udp.send", "send", "net")),
+        "process_status" => Some(("process.status", "read", "process")),
+        "crypto_sha256" | "verify_sha256" | "verify_sha512" => {
+            Some(("crypto.hash", "hash", "crypto"))
+        }
+        "crypto_hmac_sha256"
+        | "crypto_hmac_sha512"
+        | "hmac_sha256"
+        | "hmac_sha512"
+        | "crypto_constant_time_eq"
+        | "crypto_constant_time_eq_u8"
+        | "constant_time_eq"
+        | "constant_time_eq_u8" => Some(("crypto.mac", "authenticate", "crypto")),
+        _ => None,
+    }
+}
+
+fn effect_resource(name: &str, args: &[axiomc::syntax::Expr]) -> String {
+    match name {
+        "clock_now_ms" | "clock_elapsed_ms" | "clock_sleep_ms" => String::from("system_clock"),
+        "process_status" => String::from("process"),
+        "crypto_sha256"
+        | "crypto_hmac_sha256"
+        | "crypto_hmac_sha512"
+        | "crypto_constant_time_eq"
+        | "crypto_constant_time_eq_u8"
+        | "hmac_sha256"
+        | "hmac_sha512"
+        | "verify_sha256"
+        | "verify_sha512"
+        | "constant_time_eq"
+        | "constant_time_eq_u8" => String::from("runtime_crypto"),
+        _ => args
+            .first()
+            .map(effect_literal_resource)
+            .unwrap_or_else(|| String::from("*")),
+    }
+}
+
+fn effect_literal_resource(expr: &axiomc::syntax::Expr) -> String {
+    match expr {
+        axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::String(value)) => value.clone(),
+        axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::Int(value)) => value.to_string(),
+        axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::Bool(value)) => value.to_string(),
+        axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::Numeric { raw, .. }) => raw.clone(),
+        axiomc::syntax::Expr::VarRef { name, .. } => format!("${name}"),
+        _ => String::from("<dynamic>"),
+    }
+}
+
+fn effect_id_component(value: &str) -> String {
     let mut out = String::new();
     let mut last_dash = false;
     for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '~') {
-            out.push(ch);
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
             last_dash = false;
         } else if !last_dash {
             out.push('-');
@@ -1811,7 +1892,7 @@ fn semantic_id_segment(value: &str) -> String {
     }
     let trimmed = out.trim_matches('-');
     if trimmed.is_empty() {
-        String::from("node")
+        String::from("source")
     } else {
         trimmed.to_string()
     }
@@ -4286,85 +4367,54 @@ mod tests {
     }
 
     #[test]
-    fn inspect_graph_reports_semantic_axiom_and_capability_edges() {
+    fn inspect_effects_reports_known_runtime_surfaces() {
         let dir = tempfile::tempdir().expect("tempdir");
-        write_semantic_project(
-            dir.path(),
-            "axiom NoNegativeBalance {\nscope Authorization\nseverity fatal\n}\n\ncapability AuthorizePayment {\ninput account: AccountRef\neffects {\nread AccountStore\nemit PaymentAuthorized\n}\npreserves NoNegativeBalance\nrequires evidence PaymentAuthorizationEvidence\n}\n\nevidence PaymentAuthorizationEvidence {\ndescription \"request evidence\"\n}\n\nfn main(): int {\nreturn 0\n}\n",
-        );
-
-        let report = inspect_graph(dir.path()).expect("inspect graph");
-
-        assert_eq!(report.command, "inspect graph");
-        assert!(report.nodes.iter().any(|node| {
-            node.id == "axiom://semantic/axiom/NoNegativeBalance" && node.kind == "axiom"
-        }));
-        assert!(report.nodes.iter().any(|node| {
-            node.id == "axiom://semantic/capability/AuthorizePayment"
-                && node.kind == "capability"
-                && node.inputs.len() == 1
-                && node.effects.len() == 2
-        }));
-        assert!(report.edges.iter().any(|edge| {
-            edge.from == "axiom://semantic/capability/AuthorizePayment"
-                && edge.kind == "preserves"
-                && edge.to == "axiom://semantic/axiom/NoNegativeBalance"
-        }));
-    }
-
-    fn write_semantic_project(root: &Path, source: &str) {
-        fs::create_dir_all(root.join("src")).expect("create src");
+        let source_dir = dir.path().join("src");
+        fs::create_dir_all(&source_dir).expect("create source dir");
         fs::write(
-            root.join("axiom.toml"),
-            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+            source_dir.join("main.ax"),
+            "pub fn main(): int {\nlet now: int = clock_now_ms()\nlet home: string = env_get(\"HOME\")\nlet body: string = http_get(\"https://example.com\")\nlet ok: bool = fs_write(\"tmp.txt\", body)\nlet digest: string = crypto_sha256(home)\nreturn now\n}\n",
         )
-        .expect("write manifest");
-        fs::write(
-            root.join("axiom.lock"),
-            "version = 1\n\n[[package]]\nname = \"demo\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
-        )
-        .expect("write lockfile");
-        fs::write(root.join("src/main.ax"), source).expect("write source");
-    }
+        .expect("write source");
 
-    #[test]
-    fn semantic_declarations_allow_axiom_capability_and_evidence_metadata() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_semantic_project(
-            dir.path(),
-            "axiom NoNegativeBalance {\nscope Authorization\nseverity fatal\ndescription \"Authorization must not go negative.\"\n}\n\nevidence PaymentAuthorizationEvidence {\ndescription \"request evidence\"\n}\n\ncapability AuthorizePayment {\ninput account: AccountRef\ninput amount: Money\neffects {\nread AccountStore\nwrite AuthorizationStore\nemit PaymentAuthorized\n}\npreserves NoNegativeBalance\nrequires evidence PaymentAuthorizationEvidence\n}\n\nfn main(): int {\nreturn 0\n}\n",
+        let report = inspect_effects(dir.path()).expect("inspect effects");
+        let payload = serde_json::to_value(&report).expect("serialize effects report");
+        let schema_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../schemas/axiom-effects-v0.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(schema_path).expect("read schema"))
+                .expect("schema json");
+        let validator = jsonschema::validator_for(&schema).expect("compile schema");
+        validator
+            .validate(&payload)
+            .expect("effects report matches schema");
+
+        assert_eq!(report.schema_version, "axiom.effects.v0");
+        assert_eq!(report.command, "inspect effects");
+        let kinds = report
+            .effects
+            .iter()
+            .map(|effect| effect.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                "clock.now",
+                "env.read",
+                "network.http.get",
+                "fs.write",
+                "crypto.hash"
+            ]
         );
-
-        check_project_with_options(dir.path(), &CheckOptions::default())
-            .expect("semantic declarations should check");
-    }
-
-    #[test]
-    fn semantic_declarations_reject_duplicate_axiom_names() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_semantic_project(
-            dir.path(),
-            "axiom NoNegativeBalance {\nseverity fatal\n}\n\naxiom NoNegativeBalance {\nseverity fatal\n}\n\nfn main(): int {\nreturn 0\n}\n",
-        );
-
-        let error = check_project_with_options(dir.path(), &CheckOptions::default())
-            .expect_err("duplicate axiom should fail");
-        assert_eq!(error.kind, "semantic");
-        assert!(error.message.contains("duplicate axiom declaration"));
-    }
-
-    #[test]
-    fn semantic_capabilities_reject_missing_preserved_axioms() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        write_semantic_project(
-            dir.path(),
-            "capability AuthorizePayment {\npreserves NoNegativeBalance\n}\n\nfn main(): int {\nreturn 0\n}\n",
-        );
-
-        let error = check_project_with_options(dir.path(), &CheckOptions::default())
-            .expect_err("missing axiom should fail");
-        assert_eq!(error.kind, "semantic");
-        assert!(error.message.contains("preserves unknown axiom"));
+        let http = report
+            .effects
+            .iter()
+            .find(|effect| effect.kind == "network.http.get")
+            .expect("http effect");
+        assert_eq!(http.resource, "https://example.com");
+        assert_eq!(http.capability_gate, "net");
+        assert!(http.policy.host_allowed);
+        assert!(http.policy.port_allowed);
     }
 
     #[test]
