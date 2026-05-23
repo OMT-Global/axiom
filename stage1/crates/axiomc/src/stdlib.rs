@@ -34,6 +34,8 @@
 //!   `verify_sha512(tag, key, message)`, `constant_time_eq(left, right)`,
 //!   and `constant_time_eq_u8(left, right)` on top of `crypto_hmac_*` and
 //!   `crypto_constant_time_eq*` (crypto).
+//! * `std/crypto_rand.ax` — `random_bytes(n)` and `random_u64()` on top of
+//!   `crypto_rand_*` intrinsics (crypto).
 //! * `std/crypto.ax` — umbrella re-export module for the stage1 crypto hash
 //!   MAC, and random helpers.
 //!
