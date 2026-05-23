@@ -56,6 +56,11 @@ version = "0.1.0"
 source = "path:fail/comparison_strict_type_mismatch"
 
 [[package]]
+name = "conformance-const-fn-host-runtime-call"
+version = "0.1.0"
+source = "path:fail/const_fn_host_runtime_call"
+
+[[package]]
 name = "conformance-double-mutable-borrow"
 version = "0.1.0"
 source = "path:fail/double_mutable_borrow"
@@ -364,6 +369,11 @@ source = "path:pass/comparison_strict_typing"
 name = "conformance-const-match-patterns"
 version = "0.1.0"
 source = "path:pass/const_match_patterns"
+
+[[package]]
+name = "conformance-const-fn-array-length"
+version = "0.1.0"
+source = "path:pass/const_fn_array_length"
 
 [[package]]
 name = "conformance-crypto-constant-time"
