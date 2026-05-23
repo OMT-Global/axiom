@@ -7138,7 +7138,10 @@ fn coerce_expr_to_expected(
 }
 
 fn is_stable_string_borrow_owner(expr: &Expr) -> bool {
-    matches!(expr, Expr::VarRef { .. } | Expr::FieldAccess { .. })
+    matches!(
+        expr,
+        Expr::VarRef { .. } | Expr::FieldAccess { .. } | Expr::TupleIndex { .. }
+    )
 }
 
 fn lower_expr_with_expected(
