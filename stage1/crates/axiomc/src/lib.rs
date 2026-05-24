@@ -8403,6 +8403,7 @@ print serve_health("127.0.0.1:18080", 1, started)
                         .expect("test checked-in proof workload example");
                     let expected_passed = match example {
                         "proof_cli" => 2,
+                        "proof_http_service" => 2,
                         _ => 1,
                     };
                     assert_eq!(tests.passed, expected_passed, "example {example}");
