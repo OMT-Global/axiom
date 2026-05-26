@@ -4677,6 +4677,8 @@ fn render_assignment_target(expr: &Expr) -> String {
             )
         }
         _ => render_expr(expr),
+    }
+}
 
 fn render_numeric_binary(
     op: &crate::mir::ArithmeticOp,
