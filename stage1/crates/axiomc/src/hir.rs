@@ -7027,6 +7027,15 @@ fn starts_with_ascii_uppercase(value: &str) -> bool {
         .map(|ch| ch.is_ascii_uppercase())
         .unwrap_or(false)
 }
+
+fn is_assignment_target(expr: &Expr) -> bool {
+    match expr {
+        Expr::Deref { .. } => true,
+        Expr::Index { base, .. } => matches!(base.ty(), Type::MutSlice(_)),
+        _ => false,
+    }
+}
+
 fn lower_stmt(
     stmt: &syntax::Stmt,
     env: &mut HashMap<String, Binding>,
@@ -7141,11 +7150,7 @@ fn lower_stmt(
             column,
         } => {
             let lowered_target = lower_expr(target, env, ctx)?;
-            let target_is_mutable_slice_element = matches!(
-                &lowered_target,
-                Expr::Index { base, .. } if matches!(base.ty(), Type::MutSlice(_))
-            );
-            if !matches!(lowered_target, Expr::Deref { .. }) && !target_is_mutable_slice_element {
+            if !is_assignment_target(&lowered_target) {
                 return Err(Diagnostic::new(
                     "type",
                     format!(
