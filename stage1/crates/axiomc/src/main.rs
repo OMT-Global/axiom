@@ -1500,6 +1500,47 @@ fn normalized_id_component(value: &str, fallback: &str) -> String {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct SemanticGraphNode {
+    id: String,
+    kind: &'static str,
+    name: String,
+    span: SymbolSpan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assertion: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    inputs: Vec<SemanticGraphInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    effects: Vec<SemanticGraphEffect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SemanticGraphInput {
+    name: String,
+    ty: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SemanticGraphEffect {
+    kind: String,
+    target: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SemanticGraphEdge {
+    from: String,
+    kind: &'static str,
+    to: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct InspectEffectsReport {
     schema_version: &'static str,
     ok: bool,
@@ -1523,6 +1564,136 @@ struct EffectNode {
 struct EffectPolicy {
     host_allowed: bool,
     port_allowed: bool,
+}
+
+const INSPECT_SCHEMA_PATH: &str = "stage1/schemas/axiom-inspect-v0.schema.json";
+
+fn inspect_semantic_graph(
+    path: &Path,
+) -> Result<(Vec<SemanticGraphNode>, Vec<SemanticGraphEdge>), Diagnostic> {
+    let files = axiom_files(path)?;
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for file in files {
+        let source = fs::read_to_string(&file).map_err(|err| {
+            Diagnostic::new(
+                "inspect",
+                format!("failed to read {}: {err}", file.display()),
+            )
+            .with_path(file.display().to_string())
+        })?;
+        let program = parse_program(&source, &file)?;
+        for axiom in &program.axioms {
+            nodes.push(SemanticGraphNode {
+                id: semantic_node_id("axiom", &axiom.name),
+                kind: "axiom",
+                name: axiom.name.clone(),
+                span: symbol_span(&file, axiom.line, axiom.column),
+                scope: axiom.scope.clone(),
+                severity: axiom.severity.clone(),
+                description: axiom.description.clone(),
+                assertion: axiom.assertion.clone(),
+                inputs: Vec::new(),
+                effects: Vec::new(),
+                evidence: Vec::new(),
+            });
+        }
+        for evidence in &program.evidence {
+            nodes.push(SemanticGraphNode {
+                id: semantic_node_id("evidence", &evidence.name),
+                kind: "evidence",
+                name: evidence.name.clone(),
+                span: symbol_span(&file, evidence.line, evidence.column),
+                scope: None,
+                severity: None,
+                description: evidence.description.clone(),
+                assertion: None,
+                inputs: Vec::new(),
+                effects: Vec::new(),
+                evidence: Vec::new(),
+            });
+        }
+        for capability in &program.semantic_capabilities {
+            let capability_id = semantic_node_id("capability", &capability.name);
+            nodes.push(SemanticGraphNode {
+                id: capability_id.clone(),
+                kind: "capability",
+                name: capability.name.clone(),
+                span: symbol_span(&file, capability.line, capability.column),
+                scope: None,
+                severity: None,
+                description: None,
+                assertion: None,
+                inputs: capability
+                    .inputs
+                    .iter()
+                    .map(|input| SemanticGraphInput {
+                        name: input.name.clone(),
+                        ty: render_type(&input.ty),
+                    })
+                    .collect(),
+                effects: capability
+                    .effects
+                    .iter()
+                    .map(|effect| SemanticGraphEffect {
+                        kind: effect.kind.clone(),
+                        target: effect.target.clone(),
+                    })
+                    .collect(),
+                evidence: capability
+                    .evidence
+                    .iter()
+                    .map(|reference| reference.name.clone())
+                    .collect(),
+            });
+            for reference in &capability.preserves {
+                edges.push(SemanticGraphEdge {
+                    from: capability_id.clone(),
+                    kind: "preserves",
+                    to: semantic_node_id("axiom", &reference.name),
+                });
+            }
+            for reference in &capability.evidence {
+                edges.push(SemanticGraphEdge {
+                    from: capability_id.clone(),
+                    kind: "requires_evidence",
+                    to: semantic_node_id("evidence", &reference.name),
+                });
+            }
+        }
+    }
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    edges.sort_by(|left, right| {
+        left.from
+            .cmp(&right.from)
+            .then_with(|| left.kind.cmp(right.kind))
+            .then_with(|| left.to.cmp(&right.to))
+    });
+    Ok((nodes, edges))
+}
+
+fn semantic_node_id(kind: &str, name: &str) -> String {
+    format!("axiom://semantic/{kind}/{}", semantic_id_segment(name))
+}
+
+fn semantic_id_segment(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '~') {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        String::from("node")
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn inspect_symbols(path: &Path) -> Result<InspectSymbolsReport, Diagnostic> {
@@ -1806,6 +1977,12 @@ fn collect_effects_in_expr(
             collect_effects_in_expr(index, file, effects);
         }
         Expr::Closure { body, .. } => collect_effects_in_expr(body, file, effects),
+        Expr::Match { expr, arms, .. } => {
+            collect_effects_in_expr(expr, file, effects);
+            for arm in arms {
+                collect_effects_in_expr(&arm.expr, file, effects);
+            }
+        }
         Expr::Literal(_) | Expr::VarRef { .. } => {}
     }
 }
@@ -3279,68 +3456,6 @@ fn collect_program_type_refs(program: &axiomc::syntax::Program) -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct InspectEffectsReport {
-    schema_version: &'static str,
-    schema: &'static str,
-    ok: bool,
-    command: &'static str,
-    project: String,
-    effects: Vec<EffectNode>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct EffectNode {
-    name: String,
-    enabled: bool,
-    resource: &'static str,
-    allowed: Vec<String>,
-    source: &'static str,
-    deny_by_default: bool,
-    unsafe_opt_in: bool,
-    owner: Option<String>,
-    rationale: Option<String>,
-}
-
-fn inspect_effects(project: &Path) -> Result<InspectEffectsReport, Diagnostic> {
-    let effects = project_capabilities(project)?
-        .into_iter()
-        .map(|descriptor| EffectNode {
-            resource: capability_resource(&descriptor.name),
-            name: descriptor.name,
-            enabled: descriptor.enabled,
-            allowed: descriptor.allowed,
-            source: "manifest",
-            deny_by_default: descriptor.deny_by_default,
-            unsafe_opt_in: descriptor.unsafe_opt_in || descriptor.unsafe_unrestricted,
-            owner: descriptor.owner,
-            rationale: descriptor.rationale.or(descriptor.unsafe_rationale),
-        })
-        .collect::<Vec<_>>();
-    Ok(InspectEffectsReport {
-        schema_version: json_contract::JSON_SCHEMA_VERSION,
-        schema: INSPECT_SCHEMA_PATH,
-        ok: true,
-        command: "inspect effects",
-        project: project.display().to_string(),
-        effects,
-    })
-}
-
-fn capability_resource(name: &str) -> &'static str {
-    match name {
-        "fs" | "fs:write" => "filesystem",
-        "net" => "network",
-        "process" => "process",
-        "env" => "environment",
-        "clock" => "time",
-        "crypto" => "cryptography",
-        "ffi" => "foreign_function_interface",
-        "async" => "runtime",
-        _ => "capability",
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
 struct InspectEvidenceReport {
     schema_version: &'static str,
     schema: &'static str,
@@ -4609,12 +4724,14 @@ mod tests {
 
         let effects = inspect_effects(&project).expect("inspect effects");
         assert_eq!(effects.command, "inspect effects");
-        assert_eq!(effects.schema, INSPECT_SCHEMA_PATH);
+        assert_eq!(effects.schema_version, "axiom.effects.v0");
         assert!(effects.effects.iter().any(|effect| {
-            effect.name == "clock" && effect.enabled && effect.resource == "time"
+            effect.kind == "clock.now"
+                && effect.resource == "system_clock"
+                && effect.capability_gate == "clock"
         }));
         assert!(effects.effects.iter().any(|effect| {
-            effect.name == "fs" && effect.enabled && effect.resource == "filesystem"
+            effect.kind == "clock.now" && effect.operation == "read" && effect.policy.host_allowed
         }));
 
         let evidence = inspect_evidence(&project).expect("inspect evidence");
