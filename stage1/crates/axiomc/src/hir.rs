@@ -348,41 +348,6 @@ pub enum BorrowRegionProjection {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum BorrowRegionScope {
     Binding(String),
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub enum BorrowRegionSource {
-    Direct,
-    EnumPayload {
-        enum_origin: BorrowRegionOrigin,
-        variant: String,
-        payload_index: usize,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BorrowRegionFact {
-    pub binding: String,
-    pub origin: BorrowRegionOrigin,
-    pub scope: BorrowRegionScope,
-    pub source: BorrowRegionSource,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BorrowRegionOrigin {
-    pub name: String,
-    pub projection: Vec<BorrowRegionProjection>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub enum BorrowRegionProjection {
-    Field(String),
-    TupleIndex(usize),
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub enum BorrowRegionScope {
-    Binding(String),
     Return {
         function: String,
         projection: Vec<BorrowRegionProjection>,
