@@ -296,6 +296,22 @@ enum GenerateCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Generate deterministic SQL forward and rollback migrations from declared schemas.
+    Sql {
+        path: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate a deterministic OpenTofu-compatible module from runtime surfaces.
+    Terraform {
+        path: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate a deterministic operator runbook from semantic intent and evidence.
     Runbook {
         path: PathBuf,
@@ -776,6 +792,47 @@ fn main() {
                 }
                 Err(error) => print_error("generate policy", error, json),
             },
+            GenerateCommand::Sql { path, out, json } => match generate_sql(&path, &out) {
+                Ok(report) => {
+                    if json {
+                        println!(
+                            "{}",
+                            json_contract::to_pretty_string(&report)
+                                .unwrap_or_else(|_| String::from("{}"))
+                        );
+                    } else if report.artifacts.is_empty() {
+                        eprintln!("no SQL migration output");
+                    } else {
+                        for artifact in &report.artifacts {
+                            eprintln!("wrote {}", artifact.path);
+                        }
+                    }
+                    0
+                }
+                Err(error) => print_error("generate sql", error, json),
+            },
+            GenerateCommand::Terraform { path, out, json } => {
+                match generate_terraform(&path, &out) {
+                    Ok(report) => {
+                        if json {
+                            println!(
+                                "{}",
+                                json_contract::to_pretty_string(&report)
+                                    .unwrap_or_else(|_| String::from("{}"))
+                            );
+                        } else if report.artifact.status == "generated" {
+                            eprintln!("wrote {}", report.artifact.path);
+                        } else {
+                            eprintln!("no Terraform module output");
+                            for diagnostic in &report.diagnostics {
+                                eprintln!("{}", diagnostic.message);
+                            }
+                        }
+                        0
+                    }
+                    Err(error) => print_error("generate terraform", error, json),
+                }
+            }
             GenerateCommand::Runbook { path, out, json } => match generate_runbook(&path, &out) {
                 Ok(report) => {
                     if json {
@@ -2907,6 +2964,17 @@ const POLICY_TARGET_ID: &str = "axiom://target/stage1-policy-bundle-v0";
 const POLICY_ARTIFACT_KIND: &str = "policy_bundle";
 const POLICY_SCHEMA_VERSION: &str = "axiom.policy_bundle.v0";
 const GENERATE_POLICY_SCHEMA_VERSION: &str = "axiom.generate.policy.v0";
+const SQL_TARGET_ID: &str = "axiom://target/stage1-sql-migration-v0";
+const SQL_ARTIFACT_KIND: &str = "sql_migration";
+const SQL_SCHEMA_VERSION: &str = "axiom.sql_schema.v0";
+const GENERATE_SQL_SCHEMA_VERSION: &str = "axiom.generate.sql.v0";
+const SQL_FORWARD_FILE: &str = "001_schema_forward.sql";
+const SQL_ROLLBACK_FILE: &str = "001_schema_rollback.sql";
+const SQL_SNAPSHOT_FILE: &str = "schema.snapshot.json";
+const TERRAFORM_TARGET_ID: &str = "axiom://target/stage1-terraform-module-v0";
+const TERRAFORM_ARTIFACT_KIND: &str = "terraform_module";
+const GENERATE_TERRAFORM_SCHEMA_VERSION: &str = "axiom.generate.terraform.v0";
+const TERRAFORM_MAIN_FILE: &str = "main.tf";
 const RUNBOOK_TARGET_ID: &str = "axiom://target/stage1-runbook-v0";
 const RUNBOOK_ARTIFACT_KIND: &str = "runbook";
 const GENERATE_RUNBOOK_SCHEMA_VERSION: &str = "axiom.generate.runbook.v0";
@@ -3154,6 +3222,703 @@ fn policy_observed_effect(effect: &EffectNode) -> PolicyObservedEffect {
         capability_gate: effect.capability_gate,
         source_span: effect.source_span.clone(),
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GenerateSqlReport {
+    schema_version: &'static str,
+    ok: bool,
+    command: &'static str,
+    project: String,
+    target_contract: TargetContract,
+    artifacts: Vec<GeneratedArtifact>,
+    previous_schema: SqlSchemaSnapshot,
+    current_schema: SqlSchemaSnapshot,
+    changed: bool,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SqlSchemaSnapshot {
+    schema_version: String,
+    package: String,
+    tables: Vec<SqlTable>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SqlTable {
+    name: String,
+    columns: Vec<SqlColumn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SqlColumn {
+    name: String,
+    axiom_type: String,
+    sql_type: String,
+    nullable: bool,
+    primary_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GenerateTerraformReport {
+    schema_version: &'static str,
+    ok: bool,
+    command: &'static str,
+    project: String,
+    target_contract: TargetContract,
+    artifact: GeneratedArtifact,
+    surfaces: Vec<RuntimeSurface>,
+    changed: bool,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct RuntimeSurface {
+    kind: String,
+    name: String,
+    capability_gate: String,
+    allowed: Vec<String>,
+    observed_effect_kinds: Vec<String>,
+    observed_resources: Vec<String>,
+}
+
+fn generate_sql(project: &Path, out: &Path) -> Result<GenerateSqlReport, Diagnostic> {
+    let manifest = load_manifest(project)?;
+    let _package = manifest.package.as_ref().ok_or_else(|| {
+        Diagnostic::new(
+            "sql",
+            "SQL migration generation requires a package manifest with [package].",
+        )
+    })?;
+    let output_dir = if out.is_absolute() {
+        out.to_path_buf()
+    } else {
+        project.join(out)
+    };
+    let package_id = package_node_for_path(project);
+    let (current_schema, diagnostics) = collect_sql_schema(project, &package_id)?;
+    let previous_schema = read_previous_sql_schema(project, &output_dir, &package_id)?;
+    let forward = render_sql_migration(&previous_schema, &current_schema, true);
+    let rollback = render_sql_migration(&previous_schema, &current_schema, false);
+    let snapshot = serde_json::to_string_pretty(&current_schema)
+        .map_err(|err| Diagnostic::new("json", format!("failed to serialize SQL schema: {err}")))?;
+
+    let forward_path = output_dir.join(SQL_FORWARD_FILE);
+    let rollback_path = output_dir.join(SQL_ROLLBACK_FILE);
+    let snapshot_path = output_dir.join(SQL_SNAPSHOT_FILE);
+    let forward_changed = write_text_if_changed("sql", &forward_path, &forward)?;
+    let rollback_changed = write_text_if_changed("sql", &rollback_path, &rollback)?;
+    let snapshot_changed = write_text_if_changed("sql", &snapshot_path, &format!("{snapshot}\n"))?;
+
+    let artifacts = vec![
+        sql_artifact(project, &forward_path, &package_id, "generated"),
+        sql_artifact(project, &rollback_path, &package_id, "generated"),
+        sql_artifact(project, &snapshot_path, &package_id, "generated"),
+    ];
+    Ok(GenerateSqlReport {
+        schema_version: GENERATE_SQL_SCHEMA_VERSION,
+        ok: true,
+        command: "generate sql",
+        project: project.display().to_string(),
+        target_contract: sql_target_contract(artifacts.clone()),
+        artifacts,
+        previous_schema,
+        current_schema,
+        changed: forward_changed || rollback_changed || snapshot_changed,
+        diagnostics,
+    })
+}
+
+fn collect_sql_schema(
+    project: &Path,
+    package_id: &str,
+) -> Result<(SqlSchemaSnapshot, Vec<Diagnostic>), Diagnostic> {
+    let mut tables = Vec::new();
+    let mut diagnostics = Vec::new();
+    for file in axiom_files(project)? {
+        if !is_sql_schema_file(project, &file) {
+            continue;
+        }
+        let source = fs::read_to_string(&file).map_err(|err| {
+            Diagnostic::new("sql", format!("failed to read {}: {err}", file.display()))
+                .with_path(file.display().to_string())
+        })?;
+        let program = parse_program(&source, &file)?;
+        for decl in &program.structs {
+            if !decl.visibility.is_public() || !decl.type_params.is_empty() {
+                continue;
+            }
+            let table_name = sql_identifier(&decl.name);
+            let mut columns = Vec::new();
+            for field in &decl.fields {
+                match sql_column_from_field(field) {
+                    Some(column) => columns.push(column),
+                    None => diagnostics.push(
+                        Diagnostic::new(
+                            "sql",
+                            format!(
+                                "field {}.{} uses unsupported SQL migration type {}",
+                                decl.name,
+                                field.name,
+                                render_type(&field.ty)
+                            ),
+                        )
+                        .with_path(file.display().to_string())
+                        .with_span(field.line, field.column)
+                        .normalized_for_json(),
+                    ),
+                }
+            }
+            columns.sort_by(|left, right| left.name.cmp(&right.name));
+            if !columns.iter().any(|column| column.primary_key) {
+                diagnostics.push(
+                    Diagnostic::new(
+                        "sql",
+                        format!("schema table {table_name} has no `id: int` primary key field"),
+                    )
+                    .with_path(file.display().to_string())
+                    .with_span(decl.line, decl.column)
+                    .normalized_for_json(),
+                );
+            }
+            tables.push(SqlTable {
+                name: table_name,
+                columns,
+            });
+        }
+    }
+    tables.sort_by(|left, right| left.name.cmp(&right.name));
+    tables.dedup_by(|left, right| left.name == right.name);
+    Ok((
+        SqlSchemaSnapshot {
+            schema_version: SQL_SCHEMA_VERSION.to_string(),
+            package: package_id.to_string(),
+            tables,
+        },
+        diagnostics,
+    ))
+}
+
+fn is_sql_schema_file(project: &Path, file: &Path) -> bool {
+    let relative = file.strip_prefix(project).unwrap_or(file);
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|part| part == "schema" || part.starts_with("schema."))
+    }) || file
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem == "schema" || stem.starts_with("schema_"))
+}
+
+fn sql_column_from_field(field: &axiomc::syntax::StructField) -> Option<SqlColumn> {
+    let (sql_type, nullable, axiom_type) = sql_type_for_axiom_type(&field.ty)?;
+    let name = sql_identifier(&field.name);
+    Some(SqlColumn {
+        primary_key: name == "id" && !nullable && matches!(field.ty, axiomc::syntax::TypeName::Int),
+        name,
+        axiom_type,
+        sql_type,
+        nullable,
+    })
+}
+
+fn sql_type_for_axiom_type(ty: &axiomc::syntax::TypeName) -> Option<(String, bool, String)> {
+    use axiomc::syntax::{NumericType, TypeName};
+    match ty {
+        TypeName::Option(inner) => {
+            let (sql_type, _, axiom_type) = sql_type_for_axiom_type(inner)?;
+            Some((sql_type, true, format!("Option<{axiom_type}>")))
+        }
+        TypeName::Int => Some(("BIGINT".to_string(), false, "int".to_string())),
+        TypeName::Bool => Some(("BOOLEAN".to_string(), false, "bool".to_string())),
+        TypeName::String | TypeName::Str => Some(("TEXT".to_string(), false, render_type(ty))),
+        TypeName::Numeric(numeric) => {
+            let sql_type = match numeric {
+                NumericType::I8 | NumericType::I16 | NumericType::I32 => "INTEGER",
+                NumericType::I64 | NumericType::Isize => "BIGINT",
+                NumericType::U8 | NumericType::U16 | NumericType::U32 => "BIGINT",
+                NumericType::U64 | NumericType::Usize => "NUMERIC(20,0)",
+                NumericType::F32 => "REAL",
+                NumericType::F64 => "DOUBLE PRECISION",
+            };
+            Some((sql_type.to_string(), false, numeric.as_str().to_string()))
+        }
+        _ => None,
+    }
+}
+
+fn read_previous_sql_schema(
+    project: &Path,
+    output_dir: &Path,
+    package_id: &str,
+) -> Result<SqlSchemaSnapshot, Diagnostic> {
+    let explicit = project.join("schema.previous.json");
+    let generated = output_dir.join(SQL_SNAPSHOT_FILE);
+    let previous_path = if explicit.exists() {
+        Some(explicit)
+    } else if generated.exists() {
+        Some(generated)
+    } else {
+        None
+    };
+    let Some(path) = previous_path else {
+        return Ok(empty_sql_schema(package_id));
+    };
+    let content = fs::read_to_string(&path).map_err(|err| {
+        Diagnostic::new("sql", format!("failed to read {}: {err}", path.display()))
+            .with_path(path.display().to_string())
+    })?;
+    serde_json::from_str(&content).map_err(|err| {
+        Diagnostic::new(
+            "sql",
+            format!("failed to parse previous schema {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })
+}
+
+fn empty_sql_schema(package_id: &str) -> SqlSchemaSnapshot {
+    SqlSchemaSnapshot {
+        schema_version: SQL_SCHEMA_VERSION.to_string(),
+        package: package_id.to_string(),
+        tables: Vec::new(),
+    }
+}
+
+fn render_sql_migration(
+    previous: &SqlSchemaSnapshot,
+    current: &SqlSchemaSnapshot,
+    forward: bool,
+) -> String {
+    let (from, to) = if forward {
+        (previous, current)
+    } else {
+        (current, previous)
+    };
+    let mut statements = Vec::new();
+    let from_tables = from
+        .tables
+        .iter()
+        .map(|table| (table.name.as_str(), table))
+        .collect::<BTreeMap<_, _>>();
+    let to_tables = to
+        .tables
+        .iter()
+        .map(|table| (table.name.as_str(), table))
+        .collect::<BTreeMap<_, _>>();
+
+    for (name, table) in &to_tables {
+        if !from_tables.contains_key(name) {
+            statements.push(render_create_table(table));
+        }
+    }
+    for name in from_tables.keys() {
+        if !to_tables.contains_key(name) {
+            statements.push(format!("DROP TABLE IF EXISTS {};", quote_sql_ident(name)));
+        }
+    }
+    for (name, next_table) in &to_tables {
+        let Some(previous_table) = from_tables.get(name) else {
+            continue;
+        };
+        statements.extend(render_column_delta(previous_table, next_table));
+    }
+
+    let label = if forward { "forward" } else { "rollback" };
+    let mut out = format!(
+        "-- Generated by axiomc generate sql\n-- dialect: postgresql\n-- direction: {label}\n\n"
+    );
+    if statements.is_empty() {
+        out.push_str("-- no schema changes\n");
+    } else {
+        out.push_str(&statements.join("\n\n"));
+        out.push('\n');
+    }
+    out
+}
+
+fn render_column_delta(from: &SqlTable, to: &SqlTable) -> Vec<String> {
+    let from_columns = from
+        .columns
+        .iter()
+        .map(|column| (column.name.as_str(), column))
+        .collect::<BTreeMap<_, _>>();
+    let to_columns = to
+        .columns
+        .iter()
+        .map(|column| (column.name.as_str(), column))
+        .collect::<BTreeMap<_, _>>();
+    let mut statements = Vec::new();
+    for (name, column) in &to_columns {
+        if !from_columns.contains_key(name) {
+            statements.push(format!(
+                "ALTER TABLE {} ADD COLUMN {};",
+                quote_sql_ident(&to.name),
+                render_sql_column(column)
+            ));
+        }
+    }
+    for name in from_columns.keys() {
+        if !to_columns.contains_key(name) {
+            statements.push(format!(
+                "ALTER TABLE {} DROP COLUMN {};",
+                quote_sql_ident(&to.name),
+                quote_sql_ident(name)
+            ));
+        }
+    }
+    for (name, next) in &to_columns {
+        let Some(previous) = from_columns.get(name) else {
+            continue;
+        };
+        if previous.sql_type != next.sql_type {
+            statements.push(format!(
+                "ALTER TABLE {} ALTER COLUMN {} TYPE {};",
+                quote_sql_ident(&to.name),
+                quote_sql_ident(name),
+                next.sql_type
+            ));
+        }
+        if previous.nullable != next.nullable {
+            let nullability = if next.nullable {
+                "DROP NOT NULL"
+            } else {
+                "SET NOT NULL"
+            };
+            statements.push(format!(
+                "ALTER TABLE {} ALTER COLUMN {} {};",
+                quote_sql_ident(&to.name),
+                quote_sql_ident(name),
+                nullability
+            ));
+        }
+    }
+    statements
+}
+
+fn render_create_table(table: &SqlTable) -> String {
+    let columns = table
+        .columns
+        .iter()
+        .map(|column| format!("    {}", render_sql_column(column)))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    format!(
+        "CREATE TABLE {} (\n{}\n);",
+        quote_sql_ident(&table.name),
+        columns
+    )
+}
+
+fn render_sql_column(column: &SqlColumn) -> String {
+    let mut out = format!("{} {}", quote_sql_ident(&column.name), column.sql_type);
+    if !column.nullable {
+        out.push_str(" NOT NULL");
+    }
+    if column.primary_key {
+        out.push_str(" PRIMARY KEY");
+    }
+    out
+}
+
+fn sql_identifier(value: &str) -> String {
+    normalized_id_component(value, "identifier").replace('-', "_")
+}
+
+fn quote_sql_ident(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+fn sql_target_contract(artifacts: Vec<GeneratedArtifact>) -> TargetContract {
+    TargetContract {
+        id: SQL_TARGET_ID,
+        target_class: SQL_ARTIFACT_KIND,
+        description: "Stage 1 SQL migration generator for declared schema structs and invariants.",
+        status: "experimental",
+        input_node_kinds: vec!["Package", "Module", "Type", "Axiom"],
+        supported_effect_kinds: Vec::new(),
+        supported_type_features: vec![
+            "numeric.signed",
+            "numeric.unsigned",
+            "numeric.float",
+            "aggregate.struct",
+        ],
+        artifact_outputs: artifacts,
+        evidence_requirements: vec!["unit_test", "fixture"],
+        unsupported_feature_diagnostics: Vec::new(),
+    }
+}
+
+fn sql_artifact(
+    project: &Path,
+    output_path: &Path,
+    package_id: &str,
+    status: &'static str,
+) -> GeneratedArtifact {
+    GeneratedArtifact {
+        id: format!(
+            "{package_id}/artifact/sql-migration/{}",
+            normalized_id_component(
+                output_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("migration"),
+                "migration",
+            )
+        ),
+        kind: SQL_ARTIFACT_KIND,
+        path: project_relative_path(project, output_path),
+        generated_from: vec![package_id.to_string()],
+        status,
+    }
+}
+
+fn generate_terraform(project: &Path, out: &Path) -> Result<GenerateTerraformReport, Diagnostic> {
+    let manifest = load_manifest(project)?;
+    let _package = manifest.package.as_ref().ok_or_else(|| {
+        Diagnostic::new(
+            "terraform",
+            "Terraform generation requires a package manifest with [package].",
+        )
+    })?;
+    let output_dir = if out.is_absolute() {
+        out.to_path_buf()
+    } else {
+        project.join(out)
+    };
+    let output_path = output_dir.join(TERRAFORM_MAIN_FILE);
+    let package_id = package_node_for_path(project);
+    let surfaces = collect_runtime_surfaces(project)?;
+    let mut diagnostics = Vec::new();
+    let (status, changed) = if surfaces.is_empty() {
+        diagnostics.push(
+            Diagnostic::new(
+                "terraform",
+                "no runtime surfaces discovered for Terraform generation",
+            )
+            .with_help("Declare net/env/process/fs:write capability surfaces or call matching stdlib helpers.")
+            .normalized_for_json(),
+        );
+        ("planned", false)
+    } else {
+        let module = render_terraform_module(&package_id, &surfaces);
+        (
+            "generated",
+            write_text_if_changed("terraform", &output_path, &module)?,
+        )
+    };
+    let artifact = terraform_artifact(project, &output_path, &package_id, status);
+    Ok(GenerateTerraformReport {
+        schema_version: GENERATE_TERRAFORM_SCHEMA_VERSION,
+        ok: true,
+        command: "generate terraform",
+        project: project.display().to_string(),
+        target_contract: terraform_target_contract(artifact.clone()),
+        artifact,
+        surfaces,
+        changed,
+        diagnostics,
+    })
+}
+
+fn collect_runtime_surfaces(project: &Path) -> Result<Vec<RuntimeSurface>, Diagnostic> {
+    let capabilities = project_capabilities(project)?;
+    let effects = inspect_effects(project)?.effects;
+    let by_name = capabilities
+        .iter()
+        .map(|capability| (capability.name.as_str(), capability))
+        .collect::<BTreeMap<_, _>>();
+    let mut surfaces = Vec::new();
+    if let Some(surface) = runtime_surface_from_capability(
+        "network",
+        "network",
+        by_name.get("net").copied(),
+        &effects,
+        |kind| kind.starts_with("network."),
+    ) {
+        surfaces.push(surface);
+    }
+    if let Some(surface) = runtime_surface_from_capability(
+        "environment",
+        "environment",
+        by_name.get("env").copied(),
+        &effects,
+        |kind| kind == "env.read",
+    ) {
+        surfaces.push(surface);
+    }
+    if let Some(surface) = runtime_surface_from_capability(
+        "process",
+        "process",
+        by_name.get("process").copied(),
+        &effects,
+        |kind| kind == "process.status",
+    ) {
+        surfaces.push(surface);
+    }
+    if let Some(surface) = runtime_surface_from_capability(
+        "filesystem_write",
+        "filesystem-write",
+        by_name.get("fs:write").copied(),
+        &effects,
+        |kind| kind == "fs.write",
+    ) {
+        surfaces.push(surface);
+    }
+    surfaces.sort_by(|left, right| left.kind.cmp(&right.kind));
+    Ok(surfaces)
+}
+
+fn runtime_surface_from_capability(
+    kind: &str,
+    name: &str,
+    capability: Option<&CapabilityDescriptor>,
+    effects: &[EffectNode],
+    accepts_effect: impl Fn(&str) -> bool,
+) -> Option<RuntimeSurface> {
+    let observed = effects
+        .iter()
+        .filter(|effect| accepts_effect(effect.kind))
+        .collect::<Vec<_>>();
+    let enabled = capability.is_some_and(|capability| capability.enabled);
+    if !enabled && observed.is_empty() {
+        return None;
+    }
+    let mut allowed = capability
+        .map(|capability| capability.allowed.clone())
+        .unwrap_or_default();
+    allowed.sort();
+    allowed.dedup();
+    let mut observed_effect_kinds = observed
+        .iter()
+        .map(|effect| effect.kind.to_string())
+        .collect::<Vec<_>>();
+    observed_effect_kinds.sort();
+    observed_effect_kinds.dedup();
+    let mut observed_resources = observed
+        .iter()
+        .map(|effect| effect.resource.clone())
+        .collect::<Vec<_>>();
+    observed_resources.sort();
+    observed_resources.dedup();
+    Some(RuntimeSurface {
+        kind: kind.to_string(),
+        name: name.to_string(),
+        capability_gate: capability
+            .map(|capability| capability.name.clone())
+            .unwrap_or_else(|| name.to_string()),
+        allowed,
+        observed_effect_kinds,
+        observed_resources,
+    })
+}
+
+fn render_terraform_module(package_id: &str, surfaces: &[RuntimeSurface]) -> String {
+    let mut out = String::from(
+        "# Generated by axiomc generate terraform\nterraform {\n  required_version = \">= 1.5.0\"\n}\n\nlocals {\n",
+    );
+    out.push_str(&format!(
+        "  axiom_package = {}\n  axiom_target_id = {}\n  axiom_runtime_surfaces = {{\n",
+        hcl_string(package_id),
+        hcl_string(TERRAFORM_TARGET_ID)
+    ));
+    for surface in surfaces {
+        out.push_str(&format!("    {} = {{\n", hcl_identifier(&surface.kind)));
+        out.push_str(&format!(
+            "      name = {}\n      capability_gate = {}\n      allowed = {}\n      observed_effect_kinds = {}\n      observed_resources = {}\n",
+            hcl_string(&surface.name),
+            hcl_string(&surface.capability_gate),
+            hcl_list(&surface.allowed),
+            hcl_list(&surface.observed_effect_kinds),
+            hcl_list(&surface.observed_resources)
+        ));
+        out.push_str("    }\n");
+    }
+    out.push_str(
+        "  }\n}\n\noutput \"axiom_runtime_surfaces\" {\n  value = local.axiom_runtime_surfaces\n}\n",
+    );
+    out
+}
+
+fn hcl_identifier(value: &str) -> String {
+    normalized_id_component(value, "surface").replace('-', "_")
+}
+
+fn hcl_list(values: &[String]) -> String {
+    if values.is_empty() {
+        String::from("[]")
+    } else {
+        format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| hcl_string(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+fn hcl_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn terraform_target_contract(artifact: GeneratedArtifact) -> TargetContract {
+    TargetContract {
+        id: TERRAFORM_TARGET_ID,
+        target_class: TERRAFORM_ARTIFACT_KIND,
+        description: "Stage 1 OpenTofu-compatible module generator for declared runtime surfaces.",
+        status: "experimental",
+        input_node_kinds: vec!["Package", "Capability", "Effect", "RuntimeSurface"],
+        supported_effect_kinds: policy_known_effect_kinds(),
+        supported_type_features: Vec::new(),
+        artifact_outputs: vec![artifact],
+        evidence_requirements: vec!["unit_test", "fixture"],
+        unsupported_feature_diagnostics: Vec::new(),
+    }
+}
+
+fn terraform_artifact(
+    project: &Path,
+    output_path: &Path,
+    package_id: &str,
+    status: &'static str,
+) -> GeneratedArtifact {
+    GeneratedArtifact {
+        id: format!("{package_id}/artifact/terraform-module"),
+        kind: TERRAFORM_ARTIFACT_KIND,
+        path: project_relative_path(project, output_path),
+        generated_from: vec![package_id.to_string()],
+        status,
+    }
+}
+
+fn write_text_if_changed(kind: &str, path: &Path, body: &str) -> Result<bool, Diagnostic> {
+    if path.exists() {
+        let existing = fs::read_to_string(path).map_err(|err| {
+            Diagnostic::new(kind, format!("failed to read {}: {err}", path.display()))
+                .with_path(path.display().to_string())
+        })?;
+        if existing == body {
+            return Ok(false);
+        }
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            Diagnostic::new(
+                kind,
+                format!("failed to create {}: {err}", parent.display()),
+            )
+        })?;
+    }
+    fs::write(path, body).map_err(|err| {
+        Diagnostic::new(kind, format!("failed to write {}: {err}", path.display()))
+            .with_path(path.display().to_string())
+    })?;
+    Ok(true)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -5099,6 +5864,34 @@ fn inspect_artifacts(project: &Path) -> Result<InspectArtifactsReport, Diagnosti
     push_artifact(
         &mut artifacts,
         &package_id,
+        SQL_ARTIFACT_KIND,
+        out_dir_path(project, &manifest).join(SQL_FORWARD_FILE),
+        "target_contract",
+    );
+    push_artifact(
+        &mut artifacts,
+        &package_id,
+        SQL_ARTIFACT_KIND,
+        out_dir_path(project, &manifest).join(SQL_ROLLBACK_FILE),
+        "target_contract",
+    );
+    push_artifact(
+        &mut artifacts,
+        &package_id,
+        SQL_ARTIFACT_KIND,
+        out_dir_path(project, &manifest).join(SQL_SNAPSHOT_FILE),
+        "target_contract",
+    );
+    push_artifact(
+        &mut artifacts,
+        &package_id,
+        TERRAFORM_ARTIFACT_KIND,
+        out_dir_path(project, &manifest).join(TERRAFORM_MAIN_FILE),
+        "target_contract",
+    );
+    push_artifact(
+        &mut artifacts,
+        &package_id,
         RUNBOOK_ARTIFACT_KIND,
         out_dir_path(project, &manifest).join("runbook.md"),
         "target_contract",
@@ -5256,6 +6049,10 @@ fn inspect_existing_output_artifacts(
             POLICY_ARTIFACT_KIND
         } else if name == "openapi.json" || name.ends_with(".openapi.json") {
             OPENAPI_ARTIFACT_KIND
+        } else if name.ends_with(".sql") || name == SQL_SNAPSHOT_FILE {
+            SQL_ARTIFACT_KIND
+        } else if name == TERRAFORM_MAIN_FILE {
+            TERRAFORM_ARTIFACT_KIND
         } else if name.ends_with(".generated.rs") {
             "generated_rust"
         } else if name.ends_with(".debug-map.json") {
@@ -5546,6 +6343,46 @@ mod tests {
                 assert!(json);
             }
             other => panic!("expected generate policy command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generate_sql_cli_parses_output_dir_and_json_flag() {
+        let cli = Cli::parse_from([
+            "axiomc", "generate", "sql", ".", "--out", "dist/sql", "--json",
+        ]);
+        match cli.command {
+            Command::Generate {
+                command: GenerateCommand::Sql { path, out, json },
+            } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert_eq!(out, PathBuf::from("dist/sql"));
+                assert!(json);
+            }
+            other => panic!("expected generate sql command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generate_terraform_cli_parses_output_dir_and_json_flag() {
+        let cli = Cli::parse_from([
+            "axiomc",
+            "generate",
+            "terraform",
+            ".",
+            "--out",
+            "dist/terraform",
+            "--json",
+        ]);
+        match cli.command {
+            Command::Generate {
+                command: GenerateCommand::Terraform { path, out, json },
+            } => {
+                assert_eq!(path, PathBuf::from("."));
+                assert_eq!(out, PathBuf::from("dist/terraform"));
+                assert!(json);
+            }
+            other => panic!("expected generate terraform command, got {other:?}"),
         }
     }
 
@@ -6410,6 +7247,16 @@ mod tests {
                 && artifact.status == "planned"
         }));
         assert!(artifacts.artifacts.iter().any(|artifact| {
+            artifact.kind == SQL_ARTIFACT_KIND
+                && artifact.source == "target_contract"
+                && artifact.status == "planned"
+        }));
+        assert!(artifacts.artifacts.iter().any(|artifact| {
+            artifact.kind == TERRAFORM_ARTIFACT_KIND
+                && artifact.source == "target_contract"
+                && artifact.status == "planned"
+        }));
+        assert!(artifacts.artifacts.iter().any(|artifact| {
             artifact.kind == RUNBOOK_ARTIFACT_KIND
                 && artifact.source == "target_contract"
                 && artifact.status == "planned"
@@ -6587,6 +7434,158 @@ mod tests {
             vec!["clock.now", "clock.sleep"]
         );
         assert!(without_clock.allowed_effect_kinds.is_empty());
+    }
+
+    #[test]
+    fn generate_sql_writes_diff_based_forward_and_rollback_migrations() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("sql-service");
+        create_project(&project, Some("sql-service")).expect("create project");
+        fs::write(
+            project.join("src/schema.ax"),
+            "pub struct Customer {\nid: int\nname: string\nemail: Option<string>\nactive: bool\n}\n",
+        )
+        .expect("write schema source");
+        let package_id = package_node_for_path(&project);
+        let previous = serde_json::json!({
+            "schema_version": SQL_SCHEMA_VERSION,
+            "package": package_id,
+            "tables": [
+                {
+                    "name": "customer",
+                    "columns": [
+                        {
+                            "name": "id",
+                            "axiom_type": "int",
+                            "sql_type": "BIGINT",
+                            "nullable": false,
+                            "primary_key": true
+                        },
+                        {
+                            "name": "name",
+                            "axiom_type": "string",
+                            "sql_type": "TEXT",
+                            "nullable": false,
+                            "primary_key": false
+                        }
+                    ]
+                }
+            ]
+        });
+        fs::write(
+            project.join("schema.previous.json"),
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&previous).expect("previous schema json")
+            ),
+        )
+        .expect("write previous schema");
+
+        let report = generate_sql(&project, Path::new("dist/sql")).expect("generate sql");
+
+        assert_eq!(report.schema_version, GENERATE_SQL_SCHEMA_VERSION);
+        assert_eq!(report.target_contract.id, SQL_TARGET_ID);
+        assert_eq!(report.target_contract.target_class, SQL_ARTIFACT_KIND);
+        let target_payload =
+            serde_json::to_value(&report.target_contract).expect("serialize target contract");
+        let target_schema_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/axiom-target-v0.schema.json");
+        let target_schema: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(target_schema_path).expect("read schema"))
+                .expect("target schema json");
+        jsonschema::validator_for(&target_schema)
+            .expect("compile target schema")
+            .validate(&target_payload)
+            .expect("SQL target contract matches target schema");
+        assert!(report.changed);
+        assert_eq!(report.current_schema.tables.len(), 1);
+        assert!(report.diagnostics.is_empty());
+
+        let forward = fs::read_to_string(project.join("dist/sql/001_schema_forward.sql"))
+            .expect("read forward migration");
+        assert!(
+            forward.contains("ALTER TABLE \"customer\" ADD COLUMN \"active\" BOOLEAN NOT NULL;")
+        );
+        assert!(forward.contains("ALTER TABLE \"customer\" ADD COLUMN \"email\" TEXT;"));
+        let rollback = fs::read_to_string(project.join("dist/sql/001_schema_rollback.sql"))
+            .expect("read rollback migration");
+        assert!(rollback.contains("ALTER TABLE \"customer\" DROP COLUMN \"active\";"));
+        assert!(rollback.contains("ALTER TABLE \"customer\" DROP COLUMN \"email\";"));
+
+        let unchanged = generate_sql(&project, Path::new("dist/sql")).expect("rerun sql");
+        assert!(!unchanged.changed);
+    }
+
+    #[test]
+    fn generate_terraform_writes_runtime_surface_module() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("terraform-service");
+        create_project(&project, Some("terraform-service")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"terraform-service\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\n\"fs:write\" = false\nnet = { hosts = [\"api.internal\"], ports = [443] }\nprocess = false\nenv = [\"SERVICE_MODE\"]\nclock = false\ncrypto = false\nffi = false\nasync = false\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/env.ax\"\nimport \"std/net.ax\"\n\nlet _mode: Option<string> = get_env(\"SERVICE_MODE\")\nlet _reply: Option<string> = tcp_dial(\"api.internal\", 443, \"ping\", 100)\nprint \"ok\"\n",
+        )
+        .expect("write source");
+
+        let report = generate_terraform(&project, Path::new("dist/terraform")).expect("terraform");
+
+        assert_eq!(report.schema_version, GENERATE_TERRAFORM_SCHEMA_VERSION);
+        assert_eq!(report.target_contract.id, TERRAFORM_TARGET_ID);
+        assert_eq!(report.target_contract.target_class, TERRAFORM_ARTIFACT_KIND);
+        let target_payload =
+            serde_json::to_value(&report.target_contract).expect("serialize target contract");
+        let target_schema_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/axiom-target-v0.schema.json");
+        let target_schema: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(target_schema_path).expect("read schema"))
+                .expect("target schema json");
+        jsonschema::validator_for(&target_schema)
+            .expect("compile target schema")
+            .validate(&target_payload)
+            .expect("Terraform target contract matches target schema");
+        assert!(report.changed);
+        assert_eq!(report.artifact.status, "generated");
+        assert!(report.surfaces.iter().any(|surface| {
+            surface.kind == "network"
+                && surface.allowed.contains(&"host:api.internal".to_string())
+                && surface.allowed.contains(&"port:443".to_string())
+                && surface
+                    .observed_effect_kinds
+                    .contains(&"network.tcp.connect".to_string())
+        }));
+        assert!(report.surfaces.iter().any(|surface| {
+            surface.kind == "environment"
+                && surface.allowed.contains(&"SERVICE_MODE".to_string())
+                && surface
+                    .observed_resources
+                    .contains(&"SERVICE_MODE".to_string())
+        }));
+
+        let module =
+            fs::read_to_string(project.join("dist/terraform/main.tf")).expect("read module");
+        assert!(module.contains("axiom_runtime_surfaces"));
+        assert!(module.contains("host:api.internal"));
+        assert!(module.contains("SERVICE_MODE"));
+    }
+
+    #[test]
+    fn generate_terraform_without_runtime_surfaces_skips_module_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("no-surfaces");
+        create_project(&project, Some("no-surfaces")).expect("create project");
+        fs::write(project.join("src/main.ax"), "print \"hello\"\n").expect("write source");
+
+        let report = generate_terraform(&project, Path::new("dist/terraform")).expect("terraform");
+
+        assert_eq!(report.artifact.status, "planned");
+        assert!(report.surfaces.is_empty());
+        assert_eq!(report.diagnostics.len(), 1);
+        assert!(!project.join("dist/terraform/main.tf").exists());
     }
 
     #[test]
