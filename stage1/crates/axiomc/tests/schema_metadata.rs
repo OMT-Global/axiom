@@ -311,8 +311,8 @@ fn openapi_service_fixture_is_deterministic() {
         "get_ready"
     );
     assert_eq!(
-        fixture["paths"]["/ready"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
-            ["type"],
+        fixture["paths"]["/ready"]["get"]["responses"]["200"]["content"]["text/plain; charset=utf-8"]
+            ["schema"]["type"],
         "string"
     );
     assert_eq!(

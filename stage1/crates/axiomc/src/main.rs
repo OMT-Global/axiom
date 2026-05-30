@@ -2361,7 +2361,7 @@ fn collect_openapi_routes(project: &Path) -> Result<Vec<OpenApiRoute>, Diagnosti
             .any(|import| import.path == "std/http.ax");
         let mut top_level = OpenApiRouteContext::default();
         for decl in &program.consts {
-            collect_openapi_routes_in_expr(
+            collect_openapi_served_routes_in_expr(
                 &decl.expr,
                 &file,
                 http_imported,
@@ -2401,7 +2401,7 @@ fn collect_openapi_routes_in_stmts(
     for stmt in stmts {
         match stmt {
             Stmt::Let { name, expr, .. } => {
-                collect_openapi_routes_in_expr(expr, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes);
                 if let Some(response) = openapi_response_from_expr(expr, context) {
                     context.response_vars.insert(name.clone(), response);
                 }
@@ -2413,11 +2413,11 @@ fn collect_openapi_routes_in_stmts(
             | Stmt::Panic { expr, .. }
             | Stmt::Defer { expr, .. }
             | Stmt::Return { expr, .. } => {
-                collect_openapi_routes_in_expr(expr, file, http_imported, context, routes)
+                collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes)
             }
             Stmt::Assign { target, expr, .. } => {
-                collect_openapi_routes_in_expr(target, file, http_imported, context, routes);
-                collect_openapi_routes_in_expr(expr, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(target, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes);
             }
             Stmt::If {
                 cond,
@@ -2425,7 +2425,7 @@ fn collect_openapi_routes_in_stmts(
                 else_block,
                 ..
             } => {
-                collect_openapi_routes_in_expr(cond, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(cond, file, http_imported, context, routes);
                 collect_openapi_routes_in_stmts(then_block, file, http_imported, context, routes);
                 for block in else_block.iter().flatten() {
                     collect_openapi_routes_in_stmts(
@@ -2443,7 +2443,7 @@ fn collect_openapi_routes_in_stmts(
                 else_block,
                 ..
             } => {
-                collect_openapi_routes_in_expr(expr, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes);
                 collect_openapi_routes_in_stmts(then_block, file, http_imported, context, routes);
                 for block in else_block.iter().flatten() {
                     collect_openapi_routes_in_stmts(
@@ -2456,11 +2456,11 @@ fn collect_openapi_routes_in_stmts(
                 }
             }
             Stmt::While { cond, body, .. } => {
-                collect_openapi_routes_in_expr(cond, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(cond, file, http_imported, context, routes);
                 collect_openapi_routes_in_stmts(body, file, http_imported, context, routes);
             }
             Stmt::Match { expr, arms, .. } => {
-                collect_openapi_routes_in_expr(expr, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes);
                 for arm in arms {
                     collect_openapi_routes_in_stmts(
                         &arm.body,
@@ -2475,7 +2475,7 @@ fn collect_openapi_routes_in_stmts(
     }
 }
 
-fn collect_openapi_routes_in_expr(
+fn collect_openapi_served_routes_in_expr(
     expr: &axiomc::syntax::Expr,
     file: &Path,
     http_imported: bool,
@@ -2483,80 +2483,110 @@ fn collect_openapi_routes_in_expr(
     routes: &mut Vec<OpenApiRoute>,
 ) {
     use axiomc::syntax::Expr;
-    if let Some(route) = openapi_route_from_expr(expr, file, http_imported, context) {
+    if let Some(route) = openapi_served_route_from_expr(expr, file, http_imported, context) {
         routes.push(route);
     }
     match expr {
         Expr::Call { args, .. } => {
             for arg in args {
-                collect_openapi_routes_in_expr(arg, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(arg, file, http_imported, context, routes);
             }
         }
         Expr::MethodCall { base, args, .. } => {
-            collect_openapi_routes_in_expr(base, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(base, file, http_imported, context, routes);
             for arg in args {
-                collect_openapi_routes_in_expr(arg, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(arg, file, http_imported, context, routes);
             }
         }
         Expr::BinaryAdd { lhs, rhs, .. } | Expr::BinaryCompare { lhs, rhs, .. } => {
-            collect_openapi_routes_in_expr(lhs, file, http_imported, context, routes);
-            collect_openapi_routes_in_expr(rhs, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(lhs, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(rhs, file, http_imported, context, routes);
         }
         Expr::Cast { expr, .. }
         | Expr::Try { expr, .. }
         | Expr::Await { expr, .. }
         | Expr::MutBorrow { expr, .. }
         | Expr::Deref { expr, .. } => {
-            collect_openapi_routes_in_expr(expr, file, http_imported, context, routes)
+            collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes)
         }
         Expr::StructLiteral { fields, .. } => {
             for field in fields {
-                collect_openapi_routes_in_expr(&field.expr, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(
+                    &field.expr,
+                    file,
+                    http_imported,
+                    context,
+                    routes,
+                );
             }
         }
         Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
-            collect_openapi_routes_in_expr(base, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(base, file, http_imported, context, routes);
         }
         Expr::Slice {
             base, start, end, ..
         } => {
-            collect_openapi_routes_in_expr(base, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(base, file, http_imported, context, routes);
             if let Some(start) = start {
-                collect_openapi_routes_in_expr(start, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(start, file, http_imported, context, routes);
             }
             if let Some(end) = end {
-                collect_openapi_routes_in_expr(end, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(end, file, http_imported, context, routes);
             }
         }
         Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
             for element in elements {
-                collect_openapi_routes_in_expr(element, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(
+                    element,
+                    file,
+                    http_imported,
+                    context,
+                    routes,
+                );
             }
         }
         Expr::MapLiteral { entries, .. } => {
             for entry in entries {
-                collect_openapi_routes_in_expr(&entry.key, file, http_imported, context, routes);
-                collect_openapi_routes_in_expr(&entry.value, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(
+                    &entry.key,
+                    file,
+                    http_imported,
+                    context,
+                    routes,
+                );
+                collect_openapi_served_routes_in_expr(
+                    &entry.value,
+                    file,
+                    http_imported,
+                    context,
+                    routes,
+                );
             }
         }
         Expr::Index { base, index, .. } => {
-            collect_openapi_routes_in_expr(base, file, http_imported, context, routes);
-            collect_openapi_routes_in_expr(index, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(base, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(index, file, http_imported, context, routes);
         }
         Expr::Closure { body, .. } => {
-            collect_openapi_routes_in_expr(body, file, http_imported, context, routes)
+            collect_openapi_served_routes_in_expr(body, file, http_imported, context, routes)
         }
         Expr::Match { expr, arms, .. } => {
-            collect_openapi_routes_in_expr(expr, file, http_imported, context, routes);
+            collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes);
             for arm in arms {
-                collect_openapi_routes_in_expr(&arm.expr, file, http_imported, context, routes);
+                collect_openapi_served_routes_in_expr(
+                    &arm.expr,
+                    file,
+                    http_imported,
+                    context,
+                    routes,
+                );
             }
         }
         Expr::Literal(_) | Expr::VarRef { .. } => {}
     }
 }
 
-fn openapi_route_from_expr(
+fn openapi_served_route_from_expr(
     expr: &axiomc::syntax::Expr,
     file: &Path,
     http_imported: bool,
@@ -2586,6 +2616,34 @@ fn openapi_route_from_expr(
             line,
             column,
             ..
+        } if http_imported && name == "serve" => {
+            let mut route = args
+                .get(1)
+                .and_then(|expr| openapi_route_from_expr(expr, file, http_imported, context))?;
+            let runtime_response = default_openapi_response();
+            route.status = runtime_response.status;
+            route.content_type = runtime_response.content_type;
+            route.source_span = symbol_span(file, *line, *column);
+            Some(route)
+        }
+        _ => None,
+    }
+}
+
+fn openapi_route_from_expr(
+    expr: &axiomc::syntax::Expr,
+    file: &Path,
+    http_imported: bool,
+    context: &OpenApiRouteContext,
+) -> Option<OpenApiRoute> {
+    use axiomc::syntax::Expr;
+    match expr {
+        Expr::Call {
+            name,
+            args,
+            line,
+            column,
+            ..
         } if http_imported && name == "route" => {
             let path = args.first().and_then(literal_string)?;
             Some(openapi_route(
@@ -2609,19 +2667,6 @@ fn openapi_route_from_expr(
                 .and_then(|expr| openapi_response_from_expr(expr, context))
                 .unwrap_or_else(default_openapi_response);
             Some(openapi_route(file, *line, *column, path, response))
-        }
-        Expr::Call {
-            name,
-            args,
-            line,
-            column,
-            ..
-        } if http_imported && name == "serve" => {
-            let mut route = args
-                .get(1)
-                .and_then(|expr| openapi_route_from_expr(expr, file, http_imported, context))?;
-            route.source_span = symbol_span(file, *line, *column);
-            Some(route)
         }
         Expr::StructLiteral {
             name,
@@ -5968,8 +6013,8 @@ mod tests {
         assert_eq!(report.artifact.status, "generated");
         assert_eq!(report.routes.len(), 1);
         assert_eq!(report.routes[0].path, "/ready");
-        assert_eq!(report.routes[0].response_status, 202);
-        assert_eq!(report.routes[0].content_type, "application/json");
+        assert_eq!(report.routes[0].response_status, 200);
+        assert_eq!(report.routes[0].content_type, "text/plain; charset=utf-8");
         assert!(report.diagnostics.is_empty());
 
         let spec: serde_json::Value = serde_json::from_str(
@@ -5980,8 +6025,8 @@ mod tests {
         assert_eq!(spec["info"]["title"], "openapi-service");
         assert_eq!(spec["paths"]["/ready"]["get"]["operationId"], "get_ready");
         assert_eq!(
-            spec["paths"]["/ready"]["get"]["responses"]["202"]["content"]["application/json"]["schema"]
-                ["type"],
+            spec["paths"]["/ready"]["get"]["responses"]["200"]["content"]["text/plain; charset=utf-8"]
+                ["schema"]["type"],
             "string"
         );
 
@@ -5991,6 +6036,37 @@ mod tests {
                 && artifact.path.ends_with("dist/openapi.json")
                 && artifact.status == "generated"
         }));
+    }
+
+    #[test]
+    fn generate_openapi_only_projects_routes_passed_to_serve() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("openapi-served-routes");
+        create_project(&project, Some("openapi-served-routes")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"openapi-served-routes\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = true\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/http.ax\"\n\nlet unused_route: HttpRoute = route(\"/debug\", \"debug\")\nlet selected_route: HttpRoute = route(\"/ready\", \"ready\")\nprint serve(\"127.0.0.1:0\", selected_route, 1)\n",
+        )
+        .expect("write source");
+
+        let report =
+            generate_openapi(&project, Path::new("dist/openapi.json")).expect("generate openapi");
+
+        assert_eq!(report.routes.len(), 1);
+        assert_eq!(report.routes[0].path, "/ready");
+
+        let spec: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("dist/openapi.json")).expect("read spec"),
+        )
+        .expect("spec json");
+        let paths = spec["paths"].as_object().expect("paths object");
+        assert!(paths.contains_key("/ready"));
+        assert!(!paths.contains_key("/debug"));
     }
 
     #[test]

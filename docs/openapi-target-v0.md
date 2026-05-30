@@ -43,19 +43,22 @@ discovered routes, and non-fatal diagnostics.
 
 The generator consumes the existing `std/http.ax` route surface:
 
-- `route(path, body)` produces a `GET` operation with a `200` plain-text
-  string response.
-- `route_response(path, response(...))` and `HttpResponse` literals preserve
-  literal status codes and literal `content-type` headers.
+- `route(path, body)` produces a `GET` operation with the current runtime
+  response shape: `200` plus `text/plain; charset=utf-8`.
+- `route_response(path, response(...))` and `HttpResponse` literals identify
+  the selected route body and path. Until the HTTP runtime can emit response
+  status and header metadata, served OpenAPI responses are normalized to the
+  current runtime response shape.
 - `serve(bind, selected_route, max_requests)` marks a discovered route as
   served when the route is passed directly or through a local `let` binding.
 - Direct `http_serve_route(bind, path, body, max_requests)` calls are accepted
   as the lowered intrinsic form.
 
-Only literal route paths are projected in v0. Dynamic paths are skipped instead
-of being guessed. A package with no discoverable HTTP-serving routes still
-emits a valid OpenAPI document with an empty `paths` object and a diagnostic in
-the command report.
+Only literal route paths that flow into `serve` or `http_serve_route` are
+projected in v0. Dynamic paths and unserved route candidates are skipped instead
+of being guessed. A package with no discoverable HTTP-serving routes still emits
+a valid OpenAPI document with an empty `paths` object and a diagnostic in the
+command report.
 
 ## Artifact Plan
 
