@@ -9631,6 +9631,192 @@ fn lower_expr_with_expected_inner(
                     ty: Type::Bool,
                 });
             }
+            if name == "http_server_listen" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("http_server_listen expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let bind = lower_expr_with_expected(&args[0], Some(&Type::String), env, ctx)?;
+                if bind.ty() != &Type::String {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "http_server_listen expects a string bind argument, got {}",
+                            bind.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                validate_net_socket_allowlist_hir(ctx.capabilities, name, &bind, *line, *column)?;
+                move_lowered_value(&bind, env)?;
+                return Ok(Expr::Call {
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
+                    name: name.clone(),
+                    args: vec![bind],
+                    ty: Type::Int,
+                });
+            }
+            if matches!(
+                name.as_str(),
+                "http_server_local_port" | "http_server_accept" | "http_server_close"
+            ) {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let server = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                if server.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects a Server handle argument, got {}",
+                            server.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let ty = match name.as_str() {
+                    "http_server_local_port" => Type::Int,
+                    "http_server_accept" => Type::Int,
+                    "http_server_close" => Type::Bool,
+                    _ => unreachable!("HTTP server intrinsic checked above"),
+                };
+                return Ok(Expr::Call {
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
+                    name: name.clone(),
+                    args: vec![server],
+                    ty,
+                });
+            }
+            if matches!(
+                name.as_str(),
+                "http_request_method" | "http_request_path" | "http_request_body"
+            ) {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!("{name} expects 1 argument, got {}", args.len()),
+                    )
+                    .with_span(*line, *column));
+                }
+                let stream = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                if stream.ty() != &Type::Int {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "{name} expects a Request stream handle, got {}",
+                            stream.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                return Ok(Expr::Call {
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
+                    name: name.clone(),
+                    args: vec![stream],
+                    ty: Type::String,
+                });
+            }
+            if name == "http_response_write" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                if args.len() != 3 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "http_response_write expects 3 arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let stream = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                let status = lower_expr_with_expected(&args[1], Some(&Type::Int), env, ctx)?;
+                let body = lower_expr_with_expected(&args[2], Some(&Type::String), env, ctx)?;
+                if stream.ty() != &Type::Int
+                    || status.ty() != &Type::Int
+                    || body.ty() != &Type::String
+                {
+                    return Err(Diagnostic::new(
+                        "type",
+                        "http_response_write expects Request, int, and string arguments",
+                    )
+                    .with_span(*line, *column));
+                }
+                move_lowered_value(&body, env)?;
+                return Ok(Expr::Call {
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
+                    name: name.clone(),
+                    args: vec![stream, status, body],
+                    ty: Type::Bool,
+                });
+            }
+            if name == "http_async_serve_route" {
+                require_capability(ctx.capabilities, CapabilityKind::Net, name, *line, *column)?;
+                require_capability(
+                    ctx.capabilities,
+                    CapabilityKind::Async,
+                    name,
+                    *line,
+                    *column,
+                )?;
+                if args.len() != 4 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "http_async_serve_route expects 4 arguments, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let server = lower_expr_with_expected(&args[0], Some(&Type::Int), env, ctx)?;
+                let route_path = lower_expr_with_expected(&args[1], Some(&Type::String), env, ctx)?;
+                let body = lower_expr_with_expected(&args[2], Some(&Type::String), env, ctx)?;
+                let max_requests = lower_expr_with_expected(&args[3], Some(&Type::Int), env, ctx)?;
+                if server.ty() != &Type::Int
+                    || route_path.ty() != &Type::String
+                    || body.ty() != &Type::String
+                    || max_requests.ty() != &Type::Int
+                {
+                    return Err(Diagnostic::new(
+                        "type",
+                        "http_async_serve_route expects Server, string, string, and int arguments",
+                    )
+                    .with_span(*line, *column));
+                }
+                move_lowered_value(&route_path, env)?;
+                move_lowered_value(&body, env)?;
+                return Ok(Expr::Call {
+                    span: SourceSpan {
+                        line: *line,
+                        column: *column,
+                    },
+                    name: name.clone(),
+                    args: vec![server, route_path, body, max_requests],
+                    ty: Type::Task(Box::new(Type::Bool)),
+                });
+            }
             if name == "process_status" {
                 require_capability(
                     ctx.capabilities,
