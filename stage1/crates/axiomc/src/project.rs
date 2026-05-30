@@ -958,7 +958,10 @@ pub fn capability_sbom(project_root: &Path) -> Result<CapabilitySbomOutput, Diag
                     grants.push(CapabilitySbomUnsafeGrant {
                         capability: capability.name.clone(),
                         kind: String::from("unsafe_unrestricted"),
-                        rationale: capability.rationale.clone(),
+                        rationale: capability
+                            .unsafe_rationale
+                            .clone()
+                            .or_else(|| capability.rationale.clone()),
                     });
                 }
                 if capability.unsafe_opt_in {
