@@ -210,13 +210,15 @@
         "type_refs": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "capabilities": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }
@@ -236,7 +238,8 @@
           "minLength": 1
         },
         "signature": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "span": {
           "$ref": "#/$defs/span"
@@ -244,7 +247,8 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       }

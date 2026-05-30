@@ -45,6 +45,8 @@
             "generated_rust",
             "openapi_spec",
             "policy_bundle",
+            "sql_migration",
+            "terraform_module",
             "runbook",
             "test_report",
             "benchmark_report",
