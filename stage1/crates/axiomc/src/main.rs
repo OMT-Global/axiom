@@ -2376,16 +2376,6 @@ fn collect_openapi_routes(project: &Path) -> Result<Vec<OpenApiRoute>, Diagnosti
             &mut top_level,
             &mut routes,
         );
-        for function in &program.functions {
-            let mut function_context = OpenApiRouteContext::default();
-            collect_openapi_routes_in_stmts(
-                &function.body,
-                &file,
-                http_imported,
-                &mut function_context,
-                &mut routes,
-            );
-        }
     }
     Ok(routes)
 }
@@ -2662,11 +2652,13 @@ fn openapi_route_from_expr(
             ..
         } if http_imported && name == "route_response" => {
             let path = args.first().and_then(literal_string)?;
-            let response = args
-                .get(1)
-                .and_then(|expr| openapi_response_from_expr(expr, context))
-                .unwrap_or_else(default_openapi_response);
-            Some(openapi_route(file, *line, *column, path, response))
+            Some(openapi_route(
+                file,
+                *line,
+                *column,
+                path,
+                default_openapi_response(),
+            ))
         }
         Expr::StructLiteral {
             name,
@@ -2676,10 +2668,13 @@ fn openapi_route_from_expr(
             ..
         } if http_imported && name == "HttpRoute" => {
             let path = struct_field_expr(fields, "path").and_then(literal_string)?;
-            let response = struct_field_expr(fields, "response")
-                .and_then(|expr| openapi_response_from_expr(expr, context))
-                .unwrap_or_else(default_openapi_response);
-            Some(openapi_route(file, *line, *column, path, response))
+            Some(openapi_route(
+                file,
+                *line,
+                *column,
+                path,
+                default_openapi_response(),
+            ))
         }
         Expr::VarRef { name, .. } => context.route_vars.get(name).cloned(),
         _ => None,
@@ -6091,6 +6086,55 @@ mod tests {
         )
         .expect("spec json");
         assert_eq!(spec["openapi"], OPENAPI_SPEC_VERSION);
+        assert!(spec["paths"].as_object().expect("paths object").is_empty());
+    }
+
+    #[test]
+    fn generate_openapi_does_not_project_unused_helper_routes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("openapi-helper-routes");
+        create_project(&project, Some("openapi-helper-routes")).expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "openapi-helper-routes"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = true
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/http.ax"
+
+fn helper(): bool {
+    return serve("127.0.0.1:0", route("/debug", "debug"), 1)
+}
+
+print "hello"
+"#,
+        )
+        .expect("write source");
+
+        let report =
+            generate_openapi(&project, Path::new("dist/openapi.json")).expect("generate openapi");
+
+        assert_eq!(report.routes.len(), 0);
+        let spec: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("dist/openapi.json")).expect("read spec"),
+        )
+        .expect("spec json");
         assert!(spec["paths"].as_object().expect("paths object").is_empty());
     }
 
