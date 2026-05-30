@@ -3946,6 +3946,10 @@ clock = false
 
         let manifest = load_manifest(&project).expect("allowlisted process should load");
         assert!(manifest.capabilities.process);
+        assert_eq!(
+            manifest.capabilities.process_commands.allowed_commands(),
+            Some(&[String::from("/bin/echo")][..])
+        );
         assert!(manifest.capabilities.unsafe_rationale.is_none());
         assert!(
             !manifest
@@ -3969,6 +3973,7 @@ clock = false
 
         let manifest = load_manifest(&project).expect("load manifest with rationale");
         let warnings = manifest.capabilities.warnings();
+        assert!(manifest.capabilities.process_commands.is_unrestricted());
         assert!(
             warnings
                 .iter()
