@@ -1819,8 +1819,12 @@ fn axiom_net_tcp_listener_port(listener: i64) -> i64 {
 fn axiom_net_tcp_accept(listener: i64) -> i64 {
     let args = axiom_host_arg_summary(&[("listener", format!("handle:{}", listener))]);
     let result = (|| {
+        let listener = {
+            let registry = axiom_tcp_registry().lock().ok()?;
+            registry.listeners.get(&listener)?.try_clone().ok()?
+        };
+        let (stream, _peer) = listener.accept().ok()?;
         let mut registry = axiom_tcp_registry().lock().ok()?;
-        let (stream, _peer) = registry.listeners.get(&listener)?.accept().ok()?;
         let handle = registry.allocate();
         registry.streams.insert(handle, stream);
         Some(handle)
@@ -2676,11 +2680,15 @@ fn axiom_http_server_local_port(server: i64) -> i64 {
 fn axiom_http_server_accept(server: i64) -> i64 {
     let args = axiom_host_arg_summary(&[("server", format!("handle:{server}"))]);
     let result = (|| {
-        let mut registry = axiom_tcp_registry().lock().ok()?;
-        let (mut stream, _peer) = registry.listeners.get(&server)?.accept().ok()?;
+        let listener = {
+            let registry = axiom_tcp_registry().lock().ok()?;
+            registry.listeners.get(&server)?.try_clone().ok()?
+        };
+        let (mut stream, _peer) = listener.accept().ok()?;
         stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok()?;
         stream.set_write_timeout(Some(std::time::Duration::from_secs(5))).ok()?;
         let request = axiom_http_read_request_parts(&mut stream)?;
+        let mut registry = axiom_tcp_registry().lock().ok()?;
         let handle = registry.allocate();
         registry.streams.insert(handle, stream);
         drop(registry);

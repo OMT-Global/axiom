@@ -1393,6 +1393,8 @@ Variant(
                 >= 3
         );
         assert!(rendered.contains("fn axiom_http_server_listen("));
+        assert!(rendered.contains("registry.listeners.get(&server)?.try_clone().ok()?"));
+        assert!(rendered.contains("let (mut stream, _peer) = listener.accept().ok()?;"));
     }
 
     #[test]
