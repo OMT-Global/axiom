@@ -36,6 +36,9 @@ For a buildable package, the artifact plan includes:
 - generated Rust beside the binary,
 - the OpenAPI target artifact at `<out_dir>/openapi.json`,
 - the policy bundle target artifact at `<out_dir>/policy-bundle.json`,
+- the SQL migration target artifacts at `<out_dir>/001_schema_forward.sql`,
+  `<out_dir>/001_schema_rollback.sql`, and `<out_dir>/schema.snapshot.json`,
+- the Terraform/OpenTofu module target artifact at `<out_dir>/main.tf`,
 - the runbook target artifact at `<out_dir>/runbook.md`,
 - docs at `docs/axiom/index.md`,
 - one test report for each manifest test target,
@@ -47,6 +50,11 @@ document. `policy_bundle` records move from `planned` to `generated` after
 `axiomc generate policy <path> --out <out_dir>/policy-bundle.json` writes the
 allowlist. `runbook` records move from `planned` to `generated` after
 `axiomc generate runbook <path> --out <out_dir>/runbook.md` writes the
-operator document. The inspect command does not generate files and does not
-replace `axiomc build`, `axiomc test`, `axiomc doc`, `axiomc bench`, or target
-generators.
+operator document. `sql_migration` records move after
+`axiomc generate sql <path> --out <out_dir>` writes the migration pair and
+snapshot. `terraform_module` records move after
+`axiomc generate terraform <path> --out <out_dir>` writes `main.tf`; packages
+with no declared runtime surface intentionally keep that artifact planned and
+produce no module file. The inspect command does not generate files and does
+not replace `axiomc build`, `axiomc test`, `axiomc doc`, `axiomc bench`, or
+target generators.
