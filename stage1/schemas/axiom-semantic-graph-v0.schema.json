@@ -5,6 +5,7 @@
   "type": "object",
   "required": [
     "schema_version",
+    "schema",
     "ok",
     "command",
     "project",
@@ -24,8 +25,7 @@
       "const": "axiom.stage1.v1"
     },
     "schema": {
-      "type": "string",
-      "minLength": 1
+      "const": "stage1/schemas/axiom-inspect-v0.schema.json"
     },
     "ok": {
       "type": "boolean"
@@ -204,7 +204,7 @@
         "functions": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/function"
+            "$ref": "#/$defs/moduleFunction"
           }
         },
         "type_refs": {
@@ -223,7 +223,7 @@
         }
       }
     },
-    "function": {
+    "moduleFunction": {
       "type": "object",
       "required": [
         "name",

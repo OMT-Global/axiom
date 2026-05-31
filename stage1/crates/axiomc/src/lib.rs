@@ -3276,6 +3276,7 @@ crypto = false
                 package: Some(String::from("dependency-boundary-app")),
                 include_exports: false,
                 include_debug_symbols: false,
+                ..CheckOptions::default()
             },
         )
         .expect("declared workspace sibling dependency should check");
@@ -12527,10 +12528,15 @@ print main_value()
         let cases = [
             (
                 "parse",
-                "missing closing brace for block",
-                "parse.missing_closing_brace",
+                "unexpected token in expression",
+                "parse.unexpected_token",
             ),
             ("manifest", "invalid axiom.toml", "manifest.invalid"),
+            (
+                "manifest",
+                "dependency path resolves outside the workspace root",
+                "manifest.bad_dependency_path",
+            ),
             (
                 "import",
                 "import not found: ./missing.ax",
@@ -12547,6 +12553,7 @@ print main_value()
                 "type.undefined_symbol",
             ),
             ("build", "failed to invoke rustc", "build.failed"),
+            ("codegen", "internal lowering failure", "codegen.internal"),
             ("runtime", "process exited with status 1", "runtime.failed"),
         ];
 
