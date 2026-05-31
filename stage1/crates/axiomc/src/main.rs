@@ -2170,6 +2170,8 @@ const OPENAPI_TARGET_ID: &str = "axiom://target/stage1-openapi-v0";
 const OPENAPI_ARTIFACT_KIND: &str = "openapi_spec";
 const OPENAPI_SCHEMA_VERSION: &str = "axiom.generate.openapi.v0";
 const OPENAPI_SPEC_VERSION: &str = "3.1.0";
+const OPENAPI_RUNTIME_RESPONSE_STATUS: u16 = 200;
+const OPENAPI_RUNTIME_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
 #[derive(Debug, Clone, Serialize)]
 struct GenerateOpenApiReport {
@@ -2227,16 +2229,9 @@ struct OpenApiRoute {
     source_span: SymbolSpan,
 }
 
-#[derive(Debug, Clone)]
-struct OpenApiResponse {
-    status: u16,
-    content_type: String,
-}
-
 #[derive(Debug, Default)]
 struct OpenApiRouteContext {
     route_vars: BTreeMap<String, OpenApiRoute>,
-    response_vars: BTreeMap<String, OpenApiResponse>,
 }
 
 fn generate_openapi(project: &Path, out: &Path) -> Result<GenerateOpenApiReport, Diagnostic> {
@@ -2392,9 +2387,6 @@ fn collect_openapi_routes_in_stmts(
         match stmt {
             Stmt::Let { name, expr, .. } => {
                 collect_openapi_served_routes_in_expr(expr, file, http_imported, context, routes);
-                if let Some(response) = openapi_response_from_expr(expr, context) {
-                    context.response_vars.insert(name.clone(), response);
-                }
                 if let Some(route) = openapi_route_from_expr(expr, file, http_imported, context) {
                     context.route_vars.insert(name.clone(), route);
                 }
@@ -2592,13 +2584,7 @@ fn openapi_served_route_from_expr(
             ..
         } if name == "http_serve_route" => {
             let path = args.get(1).and_then(literal_string)?;
-            Some(openapi_route(
-                file,
-                *line,
-                *column,
-                path,
-                default_openapi_response(),
-            ))
+            Some(openapi_route(file, *line, *column, path))
         }
         Expr::Call {
             name,
@@ -2610,9 +2596,6 @@ fn openapi_served_route_from_expr(
             let mut route = args
                 .get(1)
                 .and_then(|expr| openapi_route_from_expr(expr, file, http_imported, context))?;
-            let runtime_response = default_openapi_response();
-            route.status = runtime_response.status;
-            route.content_type = runtime_response.content_type;
             route.source_span = symbol_span(file, *line, *column);
             Some(route)
         }
@@ -2636,13 +2619,7 @@ fn openapi_route_from_expr(
             ..
         } if http_imported && name == "route" => {
             let path = args.first().and_then(literal_string)?;
-            Some(openapi_route(
-                file,
-                *line,
-                *column,
-                path,
-                default_openapi_response(),
-            ))
+            Some(openapi_route(file, *line, *column, path))
         }
         Expr::Call {
             name,
@@ -2652,13 +2629,7 @@ fn openapi_route_from_expr(
             ..
         } if http_imported && name == "route_response" => {
             let path = args.first().and_then(literal_string)?;
-            Some(openapi_route(
-                file,
-                *line,
-                *column,
-                path,
-                default_openapi_response(),
-            ))
+            Some(openapi_route(file, *line, *column, path))
         }
         Expr::StructLiteral {
             name,
@@ -2668,69 +2639,18 @@ fn openapi_route_from_expr(
             ..
         } if http_imported && name == "HttpRoute" => {
             let path = struct_field_expr(fields, "path").and_then(literal_string)?;
-            Some(openapi_route(
-                file,
-                *line,
-                *column,
-                path,
-                default_openapi_response(),
-            ))
+            Some(openapi_route(file, *line, *column, path))
         }
         Expr::VarRef { name, .. } => context.route_vars.get(name).cloned(),
         _ => None,
     }
 }
 
-fn openapi_response_from_expr(
-    expr: &axiomc::syntax::Expr,
-    context: &OpenApiRouteContext,
-) -> Option<OpenApiResponse> {
-    use axiomc::syntax::Expr;
-    match expr {
-        Expr::Call { name, args, .. } if name == "text_response" => Some(OpenApiResponse {
-            status: args.first().and_then(literal_u16).unwrap_or(200),
-            content_type: String::from("text/plain; charset=utf-8"),
-        }),
-        Expr::Call { name, args, .. } if name == "response" => Some(OpenApiResponse {
-            status: args.first().and_then(literal_u16).unwrap_or(200),
-            content_type: args
-                .get(2)
-                .and_then(content_type_from_headers)
-                .unwrap_or_else(|| String::from("application/octet-stream")),
-        }),
-        Expr::StructLiteral { name, fields, .. } if name == "HttpResponse" => {
-            Some(OpenApiResponse {
-                status: struct_field_expr(fields, "status")
-                    .and_then(literal_u16)
-                    .unwrap_or(200),
-                content_type: struct_field_expr(fields, "headers")
-                    .and_then(content_type_from_headers)
-                    .unwrap_or_else(|| String::from("application/octet-stream")),
-            })
-        }
-        Expr::VarRef { name, .. } => context.response_vars.get(name).cloned(),
-        _ => None,
-    }
-}
-
-fn default_openapi_response() -> OpenApiResponse {
-    OpenApiResponse {
-        status: 200,
-        content_type: String::from("text/plain; charset=utf-8"),
-    }
-}
-
-fn openapi_route(
-    file: &Path,
-    line: usize,
-    column: usize,
-    path: &str,
-    response: OpenApiResponse,
-) -> OpenApiRoute {
+fn openapi_route(file: &Path, line: usize, column: usize, path: &str) -> OpenApiRoute {
     OpenApiRoute {
         path: normalize_openapi_path(path),
-        status: response.status,
-        content_type: response.content_type,
+        status: OPENAPI_RUNTIME_RESPONSE_STATUS,
+        content_type: String::from(OPENAPI_RUNTIME_CONTENT_TYPE),
         source_span: symbol_span(file, line, column),
     }
 }
@@ -2748,51 +2668,6 @@ fn struct_field_expr<'a>(
 fn literal_string(expr: &axiomc::syntax::Expr) -> Option<&str> {
     match expr {
         axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::String(value)) => Some(value),
-        _ => None,
-    }
-}
-
-fn literal_u16(expr: &axiomc::syntax::Expr) -> Option<u16> {
-    match expr {
-        axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::Int(value)) => {
-            u16::try_from(*value).ok()
-        }
-        axiomc::syntax::Expr::Literal(axiomc::syntax::Literal::Numeric { raw, .. }) => {
-            raw.parse::<u16>().ok()
-        }
-        _ => None,
-    }
-}
-
-fn content_type_from_headers(expr: &axiomc::syntax::Expr) -> Option<String> {
-    match expr {
-        axiomc::syntax::Expr::ArrayLiteral { elements, .. } => {
-            elements.iter().find_map(content_type_from_header_expr)
-        }
-        _ => None,
-    }
-}
-
-fn content_type_from_header_expr(expr: &axiomc::syntax::Expr) -> Option<String> {
-    match expr {
-        axiomc::syntax::Expr::Call { name, args, .. } if name == "header" => {
-            let key = args.first().and_then(literal_string)?;
-            if key.eq_ignore_ascii_case("content-type") {
-                args.get(1).and_then(literal_string).map(str::to_string)
-            } else {
-                None
-            }
-        }
-        axiomc::syntax::Expr::StructLiteral { name, fields, .. } if name == "HttpHeader" => {
-            let key = struct_field_expr(fields, "name").and_then(literal_string)?;
-            if key.eq_ignore_ascii_case("content-type") {
-                struct_field_expr(fields, "value")
-                    .and_then(literal_string)
-                    .map(str::to_string)
-            } else {
-                None
-            }
-        }
         _ => None,
     }
 }
@@ -6024,6 +5899,14 @@ mod tests {
                 ["schema"]["type"],
             "string"
         );
+        let responses = spec["paths"]["/ready"]["get"]["responses"]
+            .as_object()
+            .expect("responses object");
+        assert!(!responses.contains_key("202"));
+        let content = responses["200"]["content"]
+            .as_object()
+            .expect("response content object");
+        assert!(!content.contains_key("application/json"));
 
         let artifacts = inspect_artifacts(&project).expect("inspect artifacts");
         assert!(artifacts.artifacts.iter().any(|artifact| {
@@ -6045,7 +5928,7 @@ mod tests {
         .expect("write manifest");
         fs::write(
             project.join("src/main.ax"),
-            "import \"std/http.ax\"\n\nlet unused_route: HttpRoute = route(\"/debug\", \"debug\")\nlet selected_route: HttpRoute = route(\"/ready\", \"ready\")\nprint serve(\"127.0.0.1:0\", selected_route, 1)\n",
+            "import \"std/http.ax\"\n\nfn helper_route(): HttpRoute {\nreturn route(\"/debug-function\", \"debug\")\n}\n\nlet unused_route: HttpRoute = route(\"/debug\", \"debug\")\nlet selected_route: HttpRoute = route(\"/ready\", \"ready\")\nprint serve(\"127.0.0.1:0\", selected_route, 1)\n",
         )
         .expect("write source");
 
@@ -6062,6 +5945,7 @@ mod tests {
         let paths = spec["paths"].as_object().expect("paths object");
         assert!(paths.contains_key("/ready"));
         assert!(!paths.contains_key("/debug"));
+        assert!(!paths.contains_key("/debug-function"));
     }
 
     #[test]
