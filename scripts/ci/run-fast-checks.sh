@@ -13,6 +13,7 @@ bash scripts/ci/test-pr-fast-ci-workflow.sh
 python3 scripts/ci/test-pr-queue-remediation.py
 python3 scripts/ci/test-report-delivery-signals.py
 bash scripts/ci/test-validate-capability-manifests.sh
+python3 scripts/ci/test-issue-pr-traceability.py
 bash scripts/ci/validate-capability-manifests.sh
 
 if [[ "${AXIOM_FAST_CI_PROOF_WORKLOADS:-1}" != "1" ]]; then
