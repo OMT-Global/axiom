@@ -9037,10 +9037,7 @@ fn lower_expr_with_expected_inner(
                     move_lowered_value(&value, env)?;
                 }
                 return Ok(Expr::Call {
-                    span: SourceSpan {
-                        line: *line,
-                        column: *column,
-                    },
+                    span: SourceSpan::point(*line, *column),
                     name: name.clone(),
                     args: vec![stream, value],
                     ty: if name == "net_tcp_read_string" {
