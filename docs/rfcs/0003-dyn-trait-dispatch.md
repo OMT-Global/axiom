@@ -41,7 +41,7 @@ value borrows an existing concrete value that implements the trait:
 
 ```axiom
 trait Render {
-fn render(self): string
+fn render(&self): string
 }
 
 struct Label {
@@ -49,7 +49,7 @@ text: string
 }
 
 impl Render for Label {
-fn render(self): string {
+fn render(&self): string {
 return self.text
 }
 }
@@ -89,13 +89,20 @@ function return can be tied to a borrowed input.
 A trait is object-safe in stage1 when every required method satisfies all of the
 following rules:
 
-- The method has a receiver represented by `self`.
+- The method has a non-consuming immutable receiver represented by `&self`.
 - The method is not generic.
 - The method does not mention `Self` except in the receiver.
 - Parameters and return types are concrete stage1 types, borrowed slices, or
   other already object-safe `dyn Trait` references.
 - The method does not require compile-time const evaluation.
 - The method is not `property`, `async`, or `extern`.
+
+Current stage1 `self` receivers are by-value receivers. A by-value `self`
+method is not object-safe for borrowed `dyn Trait` because dispatch would have
+to move out of the opaque borrowed data pointer. The first dynamic-dispatch
+implementation must land borrowed receiver syntax and checking before allowing
+object-safe method calls. By-value receivers can only become object-safe later
+if Axiom adds an owned trait-object representation such as `Box<dyn Trait>`.
 
 The checker rejects `dyn Trait` creation for non-object-safe traits with a
 diagnostic naming the first failing method and rule.
@@ -108,9 +115,11 @@ A `dyn Trait` value has two implementation-level fields:
 - `vtable`: a trait-specific method table for that concrete implementation.
 
 The vtable contains one function entry per object-safe trait method in
-declaration order. Each entry receives the opaque data pointer plus the method's
-explicit arguments and returns the declared result. The method table is
-generated per `(Trait, ConcreteType)` implementation.
+declaration order. Each entry receives an immutable erased borrow of the
+concrete value plus the method's explicit arguments and returns the declared
+result. Vtable entries must not move from borrowed storage and must not
+reinterpret a consuming by-value receiver as a borrowed receiver. The method
+table is generated per `(Trait, ConcreteType)` implementation.
 
 The declaration order is part of the compiler contract so method lookup is
 deterministic, but the physical layout is not a public ABI. Generated Rust,
@@ -176,10 +185,12 @@ The implementation must add pass and fail coverage for:
 Implementation should land in small PRs:
 
 1. Parser and type representation for `dyn Trait` plus object-safety checks.
-2. Explicit `as dyn Trait` construction and borrow-origin validation.
-3. MIR representation for dynamic method calls.
-4. Generated-Rust lowering through opaque data pointers and method tables.
-5. Conformance pass/fail fixtures and docs updates.
+2. Borrowed `&self` receiver syntax, lowering, and diagnostics for rejecting
+   by-value receivers in borrowed trait-object dispatch.
+3. Explicit `as dyn Trait` construction and borrow-origin validation.
+4. MIR representation for dynamic method calls.
+5. Generated-Rust lowering through opaque data pointers and method tables.
+6. Conformance pass/fail fixtures and docs updates.
 
 The issue should not close until all acceptance criteria in #626 are satisfied:
 design, diagnostics, implementation, and conformance coverage.
