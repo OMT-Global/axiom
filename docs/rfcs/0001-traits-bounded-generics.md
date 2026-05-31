@@ -118,6 +118,10 @@ settle object safety, ownership/reference shape (`dyn Trait` by value versus
 behind `ptr`/`Box`), vtable layout, codegen representation, nullability, and the
 capability/runtime implications of crossing host boundaries with trait objects.
 
+RFC 0003 defines the proposed stage1 dynamic-dispatch contract. Implementation
+must still land behind focused parser, checker, MIR, backend, and conformance
+PRs before #626 can close.
+
 ## Diagnostics required before stretch work
 
 Until later slices land, the compiler should reject these forms with explicit
