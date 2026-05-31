@@ -2617,9 +2617,9 @@ fn syntax_expr_children(expr: &syntax::Expr) -> Vec<&syntax::Expr> {
             children.extend(args.iter());
             children
         }
-        syntax::Expr::BinaryAdd { lhs, rhs, .. } | syntax::Expr::BinaryCompare { lhs, rhs, .. } => {
-            vec![lhs.as_ref(), rhs.as_ref()]
-        }
+        syntax::Expr::BinaryAdd { lhs, rhs, .. }
+        | syntax::Expr::BinaryCompare { lhs, rhs, .. }
+        | syntax::Expr::BinaryLogic { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
         syntax::Expr::Cast { expr, .. }
         | syntax::Expr::Try { expr, .. }
         | syntax::Expr::MutBorrow { expr, .. }
