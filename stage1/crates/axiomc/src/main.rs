@@ -2268,20 +2268,19 @@ fn generate_openapi(project: &Path, out: &Path) -> Result<GenerateOpenApiReport,
     })?;
     let package_id = package_node_for_path(project);
     let artifact = openapi_artifact(project, &output_path, &package_id, "generated");
-    let diagnostics = if routes.is_empty() {
-        vec![
-            Diagnostic::new(
-                "openapi",
-                "no HTTP-serving routes discovered for OpenAPI generation",
-            )
-            .with_help(
-                "The generated document is valid and intentionally contains an empty paths object.",
-            )
-            .normalized_for_json(),
-        ]
-    } else {
-        Vec::new()
-    };
+    let diagnostics =
+        if routes.is_empty() {
+            vec![Diagnostic::new(
+            "openapi",
+            "no HTTP-serving routes discovered for OpenAPI generation",
+        )
+        .with_help(
+            "The generated document is valid and intentionally contains an empty paths object.",
+        )
+        .normalized_for_json()]
+        } else {
+            Vec::new()
+        };
     Ok(GenerateOpenApiReport {
         schema_version: OPENAPI_SCHEMA_VERSION,
         ok: true,
