@@ -2772,6 +2772,7 @@ print 0
                 filter: None,
                 package: Some(String::from("workspace-app")),
                 include_benchmarks: false,
+                properties_only: false,
             },
         )
         .expect("test selected workspace package");
@@ -8379,7 +8380,7 @@ print false
         create_project(&project, Some("runner-std-testing-app")).expect("create project");
         fs::write(
             project.join("src/main_test.ax"),
-            "import \"std/testing.ax\"\nlet int_case: int = table_int(\"double two\", 2 + 2, 4)\nlet bool_case: int = table_bool(\"bool equality\", true, true)\nlet string_case: int = table_string(\"greeting\", \"hello\" + \" world\", \"hello world\")\nlet property_case: int = property(\"addition identity\", 40 + 2 == 42)\nlet snapshot_case: int = snapshot(\"json line\", \"{\\\"ok\\\":true}\", \"{\\\"ok\\\":true}\")\nprint int_case + bool_case + string_case + property_case + snapshot_case\n",
+            "import \"std/testing.ax\"\nlet true_case: int = assert_true_case(42 == 42)\nlet assert_int: int = assert_eq_int(40 + 2, 42)\nlet assert_bool: int = assert_eq_bool(true, true)\nlet assert_string: int = assert_eq_string(\"hello\" + \" world\", \"hello world\")\nlet int_case: int = table_int(\"double two\", 2 + 2, 4)\nlet bool_case: int = table_bool(\"bool equality\", true, true)\nlet string_case: int = table_string(\"greeting\", \"hello\" + \" world\", \"hello world\")\nlet property_case: int = property(\"addition identity\", 40 + 2 == 42)\nlet snapshot_case: int = snapshot(\"json line\", \"{\\\"ok\\\":true}\", \"{\\\"ok\\\":true}\")\nprint true_case + assert_int + assert_bool + assert_string + int_case + bool_case + string_case + property_case + snapshot_case\n",
         )
         .expect("write std testing test");
         fs::write(project.join("src/main_test.stdout"), "0\n").expect("write golden");
@@ -8390,6 +8391,44 @@ print false
         let case = output.cases.first().expect("test case");
         assert_eq!(case.stdout, "0\n");
         assert!(case.ok);
+    }
+
+    #[test]
+    fn std_testing_source_file_backs_virtual_module() {
+        let virtual_path = crate::stdlib::stdlib_source_path("testing.ax");
+        let virtual_source =
+            crate::stdlib::stdlib_source_for(&virtual_path).expect("testing stdlib source");
+
+        assert_eq!(
+            virtual_source,
+            include_str!("../../../stdlib/std/testing.ax")
+        );
+        assert!(virtual_source.contains("pub fn assert_true(value: bool): int"));
+        assert!(virtual_source.contains("pub fn assert_eq<T>(left: T, right: T): int"));
+        assert!(virtual_source.contains("pub fn property(name: string, holds: bool): int"));
+    }
+
+    #[test]
+    fn run_project_tests_reports_std_testing_helper_failure_details() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-std-testing-fail");
+        create_project(&project, Some("runner-std-testing-fail-app")).expect("create project");
+        fs::write(
+            project.join("src/main_test.ax"),
+            "import \"std/testing.ax\"\nlet failed: int = assert_eq_int(41, 42)\nprint failed\n",
+        )
+        .expect("write failing std testing test");
+        fs::remove_file(project.join("src/main_test.stdout")).expect("remove default golden");
+
+        let output = run_project_tests(&project).expect("run tests");
+
+        assert_eq!(output.passed, 0);
+        assert_eq!(output.failed, 1);
+        let case = output.cases.first().expect("test case");
+        assert!(!case.ok);
+        assert!(case.stderr.contains(
+            "{\"kind\":\"assertion\",\"message\":\"table case \\\"assert_eq_int\\\" failed: expected 42, got 41\"}"
+        ));
     }
 
     #[test]
@@ -8496,6 +8535,40 @@ print false
     }
 
     #[test]
+    fn run_project_tests_properties_only_filters_to_property_cases() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("runner-property-only");
+        create_project(&project, Some("runner-property-only-app")).expect("create project");
+        fs::write(project.join("src/main_test.ax"), "print \"unit\"\n").expect("write unit test");
+        fs::write(project.join("src/main_test.stdout"), "unit\n").expect("write unit golden");
+        fs::write(
+            project.join("src/addition_property.ax"),
+            "import \"std/testing.ax\"\nlet ok: int = property(\"addition identity\", 40 + 2 == 42)\nprint ok\n",
+        )
+        .expect("write property test");
+        fs::write(project.join("src/addition_property.stdout"), "0\n")
+            .expect("write property golden");
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: None,
+                package: None,
+                include_benchmarks: false,
+                properties_only: true,
+            },
+        )
+        .expect("run property-only tests");
+
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.cases.len(), 1);
+        assert_eq!(output.cases[0].kind, TestKind::Property);
+        assert_eq!(output.cases[0].entry, "src/addition_property.ax");
+        assert_eq!(output.kinds.get(&TestKind::Property), Some(&1));
+        assert_eq!(output.kinds.get(&TestKind::Unit), None);
+    }
+
+    #[test]
     fn list_project_tests_reports_stable_names_paths_and_package_membership() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("list-tests-discovery");
@@ -8569,6 +8642,7 @@ print false
                 filter: None,
                 package: None,
                 include_benchmarks: true,
+                properties_only: false,
             },
         )
         .expect("run benchmark smoke tests");
@@ -12272,6 +12346,7 @@ print takes_two(three)
                 filter: Some(String::from("math")),
                 package: None,
                 include_benchmarks: false,
+                properties_only: false,
             },
         )
         .expect("run filtered tests");
@@ -12522,10 +12597,11 @@ print main_value()
                 filter: Some(String::from("main")),
                 package: None,
                 include_benchmarks: false,
+                properties_only: false,
             },
         )
         .expect("test project");
-        let payload = json_contract::test_success(&project, Some("main"), &output);
+        let payload = json_contract::test_success(&project, Some("main"), false, &output);
 
         assert_eq!(
             payload["schema_version"],
@@ -12533,9 +12609,13 @@ print main_value()
         );
         assert_eq!(payload["command"], "test");
         assert_eq!(payload["filter"], "main");
+        assert_eq!(payload["properties_only"], false);
         assert_eq!(payload["skipped"], 0);
         assert_eq!(payload["cases"][0]["kind"], "unit");
         assert_eq!(payload["kinds"]["unit"], 1);
+        assert_eq!(payload["properties"]["total"], 0);
+        assert_eq!(payload["properties"]["passed"], 0);
+        assert_eq!(payload["properties"]["failed"], 0);
         assert!(payload["duration_ms"].is_u64());
     }
 
