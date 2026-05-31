@@ -426,18 +426,68 @@ fn verify_archive_attestation(
     let mut declared_package = None;
     let mut declared_version = None;
     let mut declared_hash = None;
+    let mut declared_integrity = None;
     for line in signature_payload.lines() {
         if header.is_none() {
             header = Some(line);
             continue;
         }
+        if line.is_empty() {
+            return Err(Diagnostic::new(
+                "registry",
+                "signature payload contains an empty line",
+            ));
+        }
         if let Some((key, value)) = line.split_once('=') {
             match key {
-                "package" => declared_package = Some(value.to_string()),
-                "version" => declared_version = Some(value.to_string()),
-                "archive_hash" => declared_hash = Some(value.to_string()),
-                _ => {}
+                "package" => {
+                    if declared_package.is_some() {
+                        return Err(Diagnostic::new(
+                            "registry",
+                            "signature payload repeats package",
+                        ));
+                    }
+                    declared_package = Some(value.to_string())
+                }
+                "version" => {
+                    if declared_version.is_some() {
+                        return Err(Diagnostic::new(
+                            "registry",
+                            "signature payload repeats version",
+                        ));
+                    }
+                    declared_version = Some(value.to_string())
+                }
+                "archive_hash" => {
+                    if declared_hash.is_some() {
+                        return Err(Diagnostic::new(
+                            "registry",
+                            "signature payload repeats archive_hash",
+                        ));
+                    }
+                    declared_hash = Some(value.to_string())
+                }
+                "integrity" => {
+                    if declared_integrity.is_some() {
+                        return Err(Diagnostic::new(
+                            "registry",
+                            "signature payload repeats integrity",
+                        ));
+                    }
+                    declared_integrity = Some(value.to_string())
+                }
+                _ => {
+                    return Err(Diagnostic::new(
+                        "registry",
+                        format!("signature payload contains unexpected field {key}"),
+                    ));
+                }
             }
+        } else {
+            return Err(Diagnostic::new(
+                "registry",
+                "signature payload contains an invalid line",
+            ));
         }
     }
     if header != Some("axiom-integrity-v1") {
@@ -452,6 +502,8 @@ fn verify_archive_attestation(
         .ok_or_else(|| Diagnostic::new("registry", "signature payload missing version"))?;
     let declared_hash = declared_hash
         .ok_or_else(|| Diagnostic::new("registry", "signature payload missing archive_hash"))?;
+    let declared_integrity = declared_integrity
+        .ok_or_else(|| Diagnostic::new("registry", "signature payload missing integrity tag"))?;
     if declared_package != package || declared_version != version {
         return Err(Diagnostic::new(
             "registry",
@@ -465,6 +517,12 @@ fn verify_archive_attestation(
             format!(
                 "archive hash mismatch: payload declares {declared_hash}, archive hashes to {actual_hash}"
             ),
+        ));
+    }
+    if declared_integrity.is_empty() {
+        return Err(Diagnostic::new(
+            "registry",
+            "signature payload has an empty integrity tag",
         ));
     }
     Ok(())
@@ -1323,6 +1381,56 @@ integrity=ignored
             .expect_err("mismatched archive hash should fail");
         assert_eq!(error.kind, "registry");
         assert!(error.message.contains("archive hash mismatch"));
+    }
+
+    #[test]
+    fn rejects_archive_attestation_payload_without_integrity_field() {
+        let dir = tempdir().expect("tempdir");
+        let release = write_release(
+            dir.path(),
+            "core",
+            "1.0.0",
+            "[package]\nname = \"core\"\nversion = \"1.0.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        );
+        fs::write(release.join("package.axp"), "archive").expect("write archive");
+        let archive_hash = hash_bytes(b"archive");
+        fs::write(
+            release.join("package.axp.sig"),
+            format!(
+                "axiom-integrity-v1\npackage=core\nversion=1.0.0\narchive_hash={archive_hash}\n",
+            ),
+        )
+        .expect("write signature");
+
+        let error = build_registry_index(dir.path(), "https://packages.example.test")
+            .expect_err("missing integrity field should fail");
+        assert_eq!(error.kind, "registry");
+        assert!(error.message.contains("missing integrity tag"));
+    }
+
+    #[test]
+    fn rejects_archive_attestation_payload_with_unexpected_field() {
+        let dir = tempdir().expect("tempdir");
+        let release = write_release(
+            dir.path(),
+            "core",
+            "1.0.0",
+            "[package]\nname = \"core\"\nversion = \"1.0.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        );
+        fs::write(release.join("package.axp"), "archive").expect("write archive");
+        let archive_hash = hash_bytes(b"archive");
+        fs::write(
+            release.join("package.axp.sig"),
+            format!(
+                "axiom-integrity-v1\npackage=core\nversion=1.0.0\narchive_hash={archive_hash}\nintegrity=ignored\nunknown=field\n",
+            ),
+        )
+        .expect("write signature");
+
+        let error = build_registry_index(dir.path(), "https://packages.example.test")
+            .expect_err("unexpected field should fail");
+        assert_eq!(error.kind, "registry");
+        assert!(error.message.contains("unexpected field unknown"));
     }
 
     #[test]
