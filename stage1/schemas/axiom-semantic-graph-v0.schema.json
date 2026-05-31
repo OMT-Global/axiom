@@ -29,6 +29,10 @@
     "command": {
       "const": "inspect graph"
     },
+    "schema": {
+      "type": "string",
+      "minLength": 1
+    },
     "project": {
       "type": "string",
       "minLength": 1
@@ -192,6 +196,56 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/moduleImport"
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleFunction"
+          }
+        },
+        "type_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "moduleFunction": {
+      "type": "object",
+      "required": [
+        "name",
+        "signature",
+        "span",
+        "capabilities"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1
+        },
+        "span": {
+          "$ref": "#/$defs/span"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }

@@ -363,7 +363,11 @@ pub async fn udp_send_recv(host: string, port: int, message: string, timeout_ms:
     ),
     (
         "testing.ax",
-        "pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
+        "pub fn assert_true_case(value: bool): int {\nreturn assert_true(value)\n}\n\
+pub fn assert_eq_int(left: int, right: int): int {\nreturn assert_eq(left, right)\n}\n\
+pub fn assert_eq_bool(left: bool, right: bool): int {\nreturn assert_eq(left, right)\n}\n\
+pub fn assert_eq_string(left: string, right: string): int {\nreturn assert_eq(left, right)\n}\n\
+pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
 pub fn table_bool(name: string, actual: bool, expected: bool): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
 pub fn table_string(name: string, actual: string, expected: string): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
 pub fn property(name: string, holds: bool): int {\nreturn assert_property(name, holds)\n}\n\
