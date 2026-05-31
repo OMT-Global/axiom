@@ -107,12 +107,16 @@ and `*_golden_test.ax` as richer fixture kinds while preserving the ordinary
 `axiomc test --include-benchmarks` can smoke-run discovered `*_bench.ax`
 fixtures once so benchmark code participates in functional gates. The command
 also accepts `--filter <pattern>` to run a subset of discovered tests by test
-name or entry path, and the default CLI summary prints `passed` / `failed` /
-`skipped` counts. `axiomc test --list` exposes the same discovery pass without
-building or running the tests; text output emits package, test name, and entry
-path columns, while `--json` adds stable package membership plus golden-output
-and compile-fail markers for automation. Workspace-only roots are supported as
-long as build/run commands select a concrete member package with `-p/--package`.
+name or entry path. `axiomc test --properties` narrows discovery to property
+fixtures and prints an explicit `N/N properties passed` summary for Phase-H
+property gates. The `std/testing.ax` helper surface is backed by
+`stage1/stdlib/std/testing.ax` and embedded into the virtual stdlib at compiler
+build time. The default CLI summary prints `passed` / `failed` / `skipped`
+counts. `axiomc test --list` exposes the same discovery pass without building or
+running the tests; text output emits package, test name, and entry path columns,
+while `--json` adds stable package membership plus golden-output and compile-fail
+markers for automation. Workspace-only roots are supported as long as build/run
+commands select a concrete member package with `-p/--package`.
 
 ## JSON contract
 
@@ -132,8 +136,9 @@ duration, stdout, stderr, forwarded args, and selected package without changing
 the default human-readable streaming behavior.
 `axiomc mutation-report --json` reports survivor counts and grouped recommended
 fixtures in the same versioned envelope used by the other command contracts.
-`axiomc test --json` additionally reports `filter` and per-run/per-case
-`duration_ms` plus `passed` / `failed` / `skipped`. Build payloads report the
+`axiomc test --json` additionally reports `filter`, `properties_only`,
+property totals, and per-run/per-case `duration_ms` plus `passed` / `failed` /
+`skipped`. Build payloads report the
 requested Rust target triple when `--target <triple>` is used and report
 `debug: true` when `axiomc build --debug` requests an unoptimized debuginfo build
 

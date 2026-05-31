@@ -116,6 +116,8 @@ enum Command {
         #[arg(long)]
         filter: Option<String>,
         #[arg(long)]
+        properties: bool,
+        #[arg(long)]
         include_benchmarks: bool,
         #[arg(long)]
         list: bool,
@@ -513,6 +515,7 @@ fn main() {
             path,
             json,
             filter,
+            properties,
             include_benchmarks,
             list,
             package,
@@ -521,6 +524,7 @@ fn main() {
                 filter: filter.clone(),
                 package: package.clone(),
                 include_benchmarks,
+                properties_only: properties,
             };
             if list {
                 match list_project_tests_with_options(&path, &options) {
@@ -528,7 +532,12 @@ fn main() {
                         if json {
                             println!(
                                 "{}",
-                                json_contract::test_list_success(&path, filter.as_deref(), &output)
+                                json_contract::test_list_success(
+                                    &path,
+                                    filter.as_deref(),
+                                    properties,
+                                    &output
+                                )
                             );
                         } else {
                             for test in &output.tests {
@@ -551,7 +560,12 @@ fn main() {
                         if json {
                             println!(
                                 "{}",
-                                json_contract::test_success(&path, filter.as_deref(), &output)
+                                json_contract::test_success(
+                                    &path,
+                                    filter.as_deref(),
+                                    properties,
+                                    &output
+                                )
                             );
                         } else {
                             for case in &output.cases {
@@ -569,6 +583,19 @@ fn main() {
                                 "passed: {} failed: {} skipped: {} duration: {} ms",
                                 output.passed, output.failed, output.skipped, output.duration_ms
                             );
+                            if properties {
+                                let passed = output
+                                    .cases
+                                    .iter()
+                                    .filter(|case| case.kind == TestKind::Property && case.ok)
+                                    .count();
+                                let total = output
+                                    .cases
+                                    .iter()
+                                    .filter(|case| case.kind == TestKind::Property)
+                                    .count();
+                                eprintln!("{passed}/{total} properties passed");
+                            }
                         }
                         if ok { 0 } else { 1 }
                     }
@@ -1631,6 +1658,7 @@ fn evidence_report(project: &Path) -> Result<EvidenceReport, Diagnostic> {
                 filter: None,
                 package: None,
                 include_benchmarks: true,
+                properties_only: false,
             },
         )?;
         for case in &test_output.cases {
@@ -6787,6 +6815,7 @@ fn inspect_evidence(project: &Path) -> Result<InspectEvidenceReport, Diagnostic>
         filter: None,
         package: None,
         include_benchmarks: true,
+        properties_only: false,
     };
     match list_project_tests_with_options(project, &test_options) {
         Ok(list) => {
@@ -6974,6 +7003,7 @@ fn inspect_artifacts(project: &Path) -> Result<InspectArtifactsReport, Diagnosti
         filter: None,
         package: None,
         include_benchmarks: true,
+        properties_only: false,
     };
     if let Ok(list) = list_project_tests_with_options(project, &test_options) {
         for test in list.tests {
@@ -7302,6 +7332,13 @@ mod tests {
         assert!(build_help.contains("--locked"));
         assert!(build_help.contains("--offline"));
         assert!(!build_help.contains("direct-native"));
+        let mut command = Cli::command();
+        let test_help = command
+            .find_subcommand_mut("test")
+            .expect("test subcommand")
+            .render_long_help()
+            .to_string();
+        assert!(test_help.contains("--properties"));
         assert!(help.contains("Discover, build, and run package test entrypoints"));
         assert!(help.contains("Inspect manifest capability requirements"));
         assert!(help.contains("Inspect project metadata for agent tooling"));
