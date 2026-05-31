@@ -7836,6 +7836,59 @@ fn lower_call_arg_with_expected(
     })
 }
 
+fn lower_binary_add_chain(
+    expr: &syntax::Expr,
+    env: &mut HashMap<String, Binding>,
+    ctx: &LowerContext<'_>,
+) -> Result<Expr, Diagnostic> {
+    let mut current = expr;
+    let mut pending = Vec::new();
+    while let syntax::Expr::BinaryAdd {
+        op,
+        lhs,
+        rhs,
+        line,
+        column,
+    } = current
+    {
+        pending.push((*op, rhs.as_ref(), *line, *column));
+        current = lhs.as_ref();
+    }
+
+    let mut lowered = lower_expr(current, env, ctx)?;
+    for (op, rhs, line, column) in pending.into_iter().rev() {
+        let lowered_rhs = lower_expr(rhs, env, ctx)?;
+        let lhs_ty = lowered.ty().clone();
+        let rhs_ty = lowered_rhs.ty().clone();
+        let result_ty = if lhs_ty == rhs_ty && is_addable_numeric(&lhs_ty) {
+            lhs_ty.clone()
+        } else if op == syntax::ArithmeticOp::Add
+            && is_string_like_type(&lhs_ty)
+            && is_string_like_type(&rhs_ty)
+        {
+            Type::String
+        } else {
+            return Err(
+                Diagnostic::new(
+                    "type",
+                    format!(
+                        "operator '{}' expects matching numeric or string operands, got {lhs_ty} and {rhs_ty}",
+                        op.lexeme()
+                    ),
+                )
+                .with_span(line, column),
+            );
+        };
+        lowered = Expr::BinaryAdd {
+            op: lower_arithmetic_op(op),
+            lhs: Box::new(lowered),
+            rhs: Box::new(lowered_rhs),
+            ty: result_ty,
+        };
+    }
+    Ok(lowered)
+}
+
 fn lower_expr_with_expected_inner(
     expr: &syntax::Expr,
     expected: Option<&Type>,
@@ -9514,10 +9567,7 @@ fn lower_expr_with_expected_inner(
                 validate_net_socket_allowlist_hir(ctx.capabilities, name, &bind, *line, *column)?;
                 move_lowered_value(&bind, env)?;
                 return Ok(Expr::Call {
-                    span: SourceSpan {
-                        line: *line,
-                        column: *column,
-                    },
+                    span: SourceSpan::point(*line, *column),
                     name: name.clone(),
                     args: vec![bind],
                     ty: Type::Int,
@@ -9553,10 +9603,7 @@ fn lower_expr_with_expected_inner(
                     _ => unreachable!("HTTP server intrinsic checked above"),
                 };
                 return Ok(Expr::Call {
-                    span: SourceSpan {
-                        line: *line,
-                        column: *column,
-                    },
+                    span: SourceSpan::point(*line, *column),
                     name: name.clone(),
                     args: vec![server],
                     ty,
@@ -9586,10 +9633,7 @@ fn lower_expr_with_expected_inner(
                     .with_span(args[0].line(), args[0].column()));
                 }
                 return Ok(Expr::Call {
-                    span: SourceSpan {
-                        line: *line,
-                        column: *column,
-                    },
+                    span: SourceSpan::point(*line, *column),
                     name: name.clone(),
                     args: vec![stream],
                     ty: Type::String,
@@ -9622,10 +9666,7 @@ fn lower_expr_with_expected_inner(
                 }
                 move_lowered_value(&body, env)?;
                 return Ok(Expr::Call {
-                    span: SourceSpan {
-                        line: *line,
-                        column: *column,
-                    },
+                    span: SourceSpan::point(*line, *column),
                     name: name.clone(),
                     args: vec![stream, status, body],
                     ty: Type::Bool,
@@ -9668,10 +9709,7 @@ fn lower_expr_with_expected_inner(
                 move_lowered_value(&route_path, env)?;
                 move_lowered_value(&body, env)?;
                 return Ok(Expr::Call {
-                    span: SourceSpan {
-                        line: *line,
-                        column: *column,
-                    },
+                    span: SourceSpan::point(*line, *column),
                     name: name.clone(),
                     args: vec![server, route_path, body, max_requests],
                     ty: Type::Task(Box::new(Type::Bool)),
@@ -10712,43 +10750,7 @@ fn lower_expr_with_expected_inner(
                 ty: signature.return_ty.clone(),
             })
         }
-        syntax::Expr::BinaryAdd {
-            op,
-            lhs,
-            rhs,
-            line,
-            column,
-        } => {
-            let lhs = lower_expr(lhs, env, ctx)?;
-            let rhs = lower_expr(rhs, env, ctx)?;
-            let lhs_ty = lhs.ty().clone();
-            let rhs_ty = rhs.ty().clone();
-            let result_ty = if lhs_ty == rhs_ty && is_addable_numeric(&lhs_ty) {
-                lhs_ty.clone()
-            } else if *op == syntax::ArithmeticOp::Add
-                && is_string_like_type(&lhs_ty)
-                && is_string_like_type(&rhs_ty)
-            {
-                Type::String
-            } else {
-                return Err(
-                    Diagnostic::new(
-                        "type",
-                        format!(
-                            "operator '{}' expects matching numeric or string operands, got {lhs_ty} and {rhs_ty}",
-                            op.lexeme()
-                        ),
-                    )
-                    .with_span(*line, *column),
-                );
-            };
-            Ok(Expr::BinaryAdd {
-                op: lower_arithmetic_op(*op),
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-                ty: result_ty,
-            })
-        }
+        syntax::Expr::BinaryAdd { .. } => lower_binary_add_chain(expr, env, ctx),
         syntax::Expr::BinaryCompare {
             op,
             lhs,
