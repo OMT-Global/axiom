@@ -3368,11 +3368,7 @@ fn parse_match_pattern(
     line_no: usize,
 ) -> Result<(String, Vec<String>, bool), Diagnostic> {
     if pattern.starts_with('(') {
-        return Err(
-            Diagnostic::new("parse", "nested match patterns are not supported yet")
-                .with_path(path.display().to_string())
-                .with_span(line_no, 1),
-        );
+        return Err(nested_match_pattern_error(path, line_no, 1, pattern));
     }
     if pattern.ends_with('}')
         && let Some(open_brace) = find_top_level_char(pattern, '{')
@@ -3423,12 +3419,12 @@ fn parse_match_bindings(
                     .with_span(line_no, binding_column));
             }
             if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
-                return Err(Diagnostic::new(
-                    "parse",
-                    "nested match patterns are not supported yet",
-                )
-                .with_path(path.display().to_string())
-                .with_span(line_no, binding_column + nested_offset));
+                return Err(nested_match_pattern_error(
+                    path,
+                    line_no,
+                    binding_column + nested_offset,
+                    &binding[nested_offset..],
+                ));
             }
             validate_ident(binding, path, line_no, binding_column)?;
             Ok(binding.to_string())
@@ -3512,11 +3508,7 @@ fn parse_match_arms(
             );
         }
         if variant.starts_with('(') {
-            return Err(
-                Diagnostic::new("parse", "nested match patterns are not supported yet")
-                    .with_path(path.display().to_string())
-                    .with_span(line_no, 1),
-            );
+            return Err(nested_match_pattern_error(path, line_no, 1, variant));
         }
         let (variant, bindings, is_named) = if variant.ends_with('}')
             && let Some(open_brace) = find_top_level_char(variant, '{')
@@ -3544,12 +3536,12 @@ fn parse_match_arms(
                             .with_span(line_no, binding_column));
                     }
                     if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
-                        return Err(Diagnostic::new(
-                            "parse",
-                            "nested match patterns are not supported yet",
-                        )
-                        .with_path(path.display().to_string())
-                        .with_span(line_no, binding_column + nested_offset));
+                        return Err(nested_match_pattern_error(
+                            path,
+                            line_no,
+                            binding_column + nested_offset,
+                            &binding[nested_offset..],
+                        ));
                     }
                     validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
@@ -3582,12 +3574,12 @@ fn parse_match_arms(
                             .with_span(line_no, binding_column));
                     }
                     if let Some(nested_offset) = find_nested_match_pattern_offset(binding) {
-                        return Err(Diagnostic::new(
-                            "parse",
-                            "nested match patterns are not supported yet",
-                        )
-                        .with_path(path.display().to_string())
-                        .with_span(line_no, binding_column + nested_offset));
+                        return Err(nested_match_pattern_error(
+                            path,
+                            line_no,
+                            binding_column + nested_offset,
+                            &binding[nested_offset..],
+                        ));
                     }
                     validate_ident(binding, path, line_no, binding_column)?;
                     Ok(binding.to_string())
@@ -5039,6 +5031,17 @@ fn find_nested_match_pattern_offset(raw: &str) -> Option<usize> {
         .into_iter()
         .filter_map(|ch| find_top_level_char(raw, ch))
         .min()
+}
+
+fn nested_match_pattern_error(
+    path: &Path,
+    line_no: usize,
+    column: usize,
+    pattern_tail: &str,
+) -> Diagnostic {
+    Diagnostic::new("parse", "nested match patterns are not supported yet")
+        .with_path(path.display().to_string())
+        .with_span_extent(line_no, column, pattern_tail.chars().count())
 }
 
 fn split_top_level(raw: &str, delimiter: char) -> Vec<&str> {
