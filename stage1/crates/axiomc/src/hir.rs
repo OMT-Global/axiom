@@ -15047,6 +15047,38 @@ return tmp.eq(right)
     }
 
     #[test]
+    fn hir_rejects_unbounded_generic_method_call_through_projected_field() {
+        let parsed = parse(
+            r#"
+trait Eq {
+fn eq(self, other: Self): bool
+}
+struct Point {
+x: int
+}
+struct Box<T> {
+item: T
+}
+impl Eq for Point {
+fn eq(self, other: Point): bool {
+return self.x == other.x
+}
+}
+fn same<T>(holder: Box<T>, right: T): bool {
+return holder.item.eq(right)
+}
+"#,
+        );
+
+        let error =
+            lower(&parsed).expect_err("generic field method call requires an explicit bound");
+        assert_eq!(error.kind, "type");
+        assert!(error.message.contains(
+            "method call \"eq\" on generic parameter \"T\" requires an explicit trait bound"
+        ));
+    }
+
+    #[test]
     fn hir_rejects_trait_impl_missing_required_method() {
         let parsed = parse(
             r#"
