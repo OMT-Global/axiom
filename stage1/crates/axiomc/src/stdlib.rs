@@ -102,8 +102,9 @@ pub(crate) const STDLIB_PACKAGE_NAME: &str = "std";
 pub(crate) const STDLIB_PACKAGE_VERSION: &str = "0.0.0";
 
 /// Compile-time table of stdlib module sources keyed by their path relative to
-/// the stdlib import prefix. Keeping stage1 stdlib sources in-tree as `&str`
-/// avoids any filesystem lookup and keeps the bootstrap hermetic.
+/// the stdlib import prefix. The bootstrap remains hermetic because the compiler
+/// embeds sources at compile time; Phase-H modules may live as `.ax` files and
+/// enter this table through `include_str!`.
 const STDLIB_SOURCES: &[(&str, &str)] = &[
     (
         "time.ax",
@@ -174,7 +175,9 @@ pub fn listen(bind: string): TcpListener {\nreturn net_tcp_listen(bind)\n}\n\
 pub fn local_port(listener: TcpListener): int {\nreturn net_tcp_listener_port(listener)\n}\n\
 pub fn accept(listener: TcpListener): TcpStream {\nreturn net_tcp_accept(listener)\n}\n\
 pub fn read(stream: TcpStream, buf: &mut [u8]): int {\nreturn net_tcp_read(stream, buf)\n}\n\
+pub fn read_string(stream: TcpStream, max_bytes: int): string {\nreturn net_tcp_read_string(stream, max_bytes)\n}\n\
 pub fn write(stream: TcpStream, buf: &[u8]): int {\nreturn net_tcp_write(stream, buf)\n}\n\
+pub fn write_string(stream: TcpStream, message: string): int {\nreturn net_tcp_write_string(stream, message)\n}\n\
 pub fn close(stream: TcpStream): int {\nreturn net_tcp_close(stream)\n}\n\
 pub fn close_listener(listener: TcpListener): int {\nreturn net_tcp_close_listener(listener)\n}\n\
 pub fn listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
@@ -367,19 +370,22 @@ pub async fn sleep_duration_ms(milliseconds: int): int {\nreturn clock_sleep_ms(
     ),
     (
         "async_net.ax",
-        "pub async fn tcp_listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
+        "pub type TcpListener = int\n\
+pub type TcpStream = int\n\
+pub type UdpSocket = int\n\
+pub async fn listen(bind: string): TcpListener {\nreturn net_tcp_listen(bind)\n}\n\
+pub fn local_port(listener: TcpListener): int {\nreturn net_tcp_listener_port(listener)\n}\n\
+pub async fn accept(listener: TcpListener): TcpStream {\nreturn net_tcp_accept(listener)\n}\n\
+pub async fn recv_text(stream: TcpStream, max_bytes: int): string {\nreturn net_tcp_read_string(stream, max_bytes)\n}\n\
+pub async fn send_text(stream: TcpStream, message: string): int {\nreturn net_tcp_write_string(stream, message)\n}\n\
+pub fn close(stream: TcpStream): int {\nreturn net_tcp_close(stream)\n}\n\
+pub fn close_listener(listener: TcpListener): int {\nreturn net_tcp_close_listener(listener)\n}\n\
+pub async fn tcp_listen_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_tcp_listen_loopback_once(response, timeout_ms)\n}\n\
 pub async fn tcp_dial(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_tcp_dial(host, port, message, timeout_ms)\n}\n\
 pub async fn udp_bind_loopback_once(response: string, timeout_ms: int): Option<int> {\nreturn net_udp_bind_loopback_once(response, timeout_ms)\n}\n\
 pub async fn udp_send_recv(host: string, port: int, message: string, timeout_ms: int): Option<string> {\nreturn net_udp_send_recv(host, port, message, timeout_ms)\n}\n",
     ),
-    (
-        "testing.ax",
-        "pub fn table_int(name: string, actual: int, expected: int): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
-pub fn table_bool(name: string, actual: bool, expected: bool): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
-pub fn table_string(name: string, actual: string, expected: string): int {\nreturn assert_case_eq(name, actual, expected)\n}\n\
-pub fn property(name: string, holds: bool): int {\nreturn assert_property(name, holds)\n}\n\
-pub fn snapshot(name: string, actual: string, expected: string): int {\nreturn assert_snapshot(name, actual, expected)\n}\n",
-    ),
+    ("testing.ax", include_str!("../../../stdlib/std/testing.ax")),
     (
         "http.ax",
         "pub struct HttpHeader {

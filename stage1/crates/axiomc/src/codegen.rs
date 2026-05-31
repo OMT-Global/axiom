@@ -578,12 +578,13 @@ type AxiomRuntimeJob = Box<dyn FnOnce() + Send + 'static>;
 #[allow(dead_code)]
 struct AxiomRuntimePool {
     state: Arc<(Mutex<AxiomRuntimePoolState>, Condvar)>,
-    _workers: Vec<thread::JoinHandle<()>>,
+    max_workers: usize,
 }
 
 #[allow(dead_code)]
 struct AxiomRuntimePoolState {
     jobs: std::collections::VecDeque<AxiomRuntimeJob>,
+    workers: usize,
 }
 
 thread_local! {
@@ -623,13 +624,15 @@ impl AxiomRuntimePool {
         let state = Arc::new((
             Mutex::new(AxiomRuntimePoolState {
                 jobs: std::collections::VecDeque::new(),
+                workers: 0,
             }),
             Condvar::new(),
         ));
-        let mut workers = Vec::new();
-        for _ in 0..worker_count.max(1) {
-            let worker_state = Arc::clone(&state);
-            workers.push(thread::spawn(move || loop {
+        Self { state, max_workers: worker_count.max(1) }
+    }
+
+    fn start_worker(worker_state: Arc<(Mutex<AxiomRuntimePoolState>, Condvar)>) {
+        let _ = thread::spawn(move || loop {
                 let job = {
                     let (lock, wakeup) = &*worker_state;
                     let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -642,15 +645,17 @@ impl AxiomRuntimePool {
                 };
                 let _worker_guard = AxiomRuntimeWorkerGuard::enter();
                 let _ = panic::catch_unwind(panic::AssertUnwindSafe(job));
-            }));
-        }
-        Self { state, _workers: workers }
+        });
     }
 
     fn schedule(&self, job: AxiomRuntimeJob) {
         let (lock, wakeup) = &*self.state;
         let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         state.jobs.push_back(job);
+        if state.workers < self.max_workers {
+            state.workers += 1;
+            Self::start_worker(Arc::clone(&self.state));
+        }
         wakeup.notify_one();
     }
 
@@ -846,7 +851,6 @@ fn axiom_async_timeout<T: Send + 'static>(task: AxiomTask<T>, timeout_ms: i64) -
         }
         enum AxiomTimeoutEvent<T> {
             Value(T),
-            TimedOut,
             Panicked,
         }
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -862,14 +866,44 @@ fn axiom_async_timeout<T: Send + 'static>(task: AxiomTask<T>, timeout_ms: i64) -
                 }
             }
         }));
-        axiom_timer_wheel().after_ms(timeout_ms, Box::new(move || {
-            let _ = sender.try_send(AxiomTimeoutEvent::TimedOut);
-        }));
-        match axiom_runtime_recv(receiver, "timed task panicked") {
-            AxiomTimeoutEvent::Value(value) => Some(value),
-            AxiomTimeoutEvent::TimedOut => None,
-            AxiomTimeoutEvent::Panicked => {
-                axiom_runtime_error("async", "timed task panicked")
+        let timeout = std::time::Duration::from_millis(timeout_ms.clamp(0, 30_000) as u64);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match receiver.try_recv() {
+                Ok(AxiomTimeoutEvent::Value(value)) => return Some(value),
+                Ok(AxiomTimeoutEvent::Panicked) => {
+                    axiom_runtime_error("async", "timed task panicked")
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    axiom_runtime_error("async", "timed task panicked")
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return None;
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            if axiom_runtime_in_worker() {
+                if !axiom_runtime_pool().try_run_one() {
+                    let wait = if remaining > std::time::Duration::from_millis(1) {
+                        std::time::Duration::from_millis(1)
+                    } else {
+                        remaining
+                    };
+                    std::thread::sleep(wait);
+                }
+            } else {
+                match receiver.recv_timeout(remaining) {
+                    Ok(AxiomTimeoutEvent::Value(value)) => return Some(value),
+                    Ok(AxiomTimeoutEvent::Panicked) => {
+                        axiom_runtime_error("async", "timed task panicked")
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return None,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        axiom_runtime_error("async", "timed task panicked")
+                    }
+                }
             }
         }
     })
@@ -2230,6 +2264,24 @@ fn axiom_net_tcp_read(stream: i64, buf: &mut [u8]) -> i64 {
 }
 
 #[allow(dead_code)]
+fn axiom_net_tcp_read_string(stream: i64, max_bytes: i64) -> String {
+    use std::io::Read;
+    let bounded = max_bytes.clamp(0, 64 * 1024) as u64;
+    let args = axiom_host_arg_summary(&[("stream", format!("handle:{}", stream)), ("max_bytes", format!("int:{}", max_bytes))]);
+    let result = (|| {
+        let cloned = {
+            let registry = axiom_tcp_registry().lock().ok()?;
+            registry.streams.get(&stream)?.try_clone().ok()?
+        };
+        let mut response = Vec::new();
+        cloned.take(bounded).read_to_end(&mut response).ok()?;
+        String::from_utf8(response).ok()
+    })();
+    axiom_host_audit("net_tcp_read_string", args, if result.is_some() { "ok" } else { "denied" });
+    result.unwrap_or_default()
+}
+
+#[allow(dead_code)]
 fn axiom_net_tcp_write(stream: i64, buf: &[u8]) -> i64 {
     use std::io::Write;
     let args = axiom_host_arg_summary(&[("stream", format!("handle:{}", stream)), ("buf", format!("bytes:{}", buf.len()))]);
@@ -2239,6 +2291,23 @@ fn axiom_net_tcp_write(stream: i64, buf: &[u8]) -> i64 {
         .and_then(|mut registry| registry.streams.get_mut(&stream).and_then(|stream| stream.write(buf).ok()))
         .map(|written| written as i64);
     axiom_host_audit("net_tcp_write", args, if result.is_some() { "ok" } else { "denied" });
+    result.unwrap_or(-1)
+}
+
+#[allow(dead_code)]
+fn axiom_net_tcp_write_string(stream: i64, message: String) -> i64 {
+    use std::io::Write;
+    let args = axiom_host_arg_summary(&[("stream", format!("handle:{}", stream)), ("message", format!("string:{}", message.len()))]);
+    let result = (|| {
+        let mut cloned = {
+            let registry = axiom_tcp_registry().lock().ok()?;
+            registry.streams.get(&stream)?.try_clone().ok()?
+        };
+        cloned.write_all(message.as_bytes()).ok()?;
+        cloned.flush().ok()?;
+        Some(message.len() as i64)
+    })();
+    axiom_host_audit("net_tcp_write_string", args, if result.is_some() { "ok" } else { "denied" });
     result.unwrap_or(-1)
 }
 
@@ -5910,9 +5979,23 @@ fn render_expr(expr: &Expr) -> String {
                 render_expr(&args[1])
             )
         }
+        Expr::Call { name, args, .. } if name == "net_tcp_read_string" => {
+            format!(
+                "axiom_net_tcp_read_string({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
         Expr::Call { name, args, .. } if name == "net_tcp_write" => {
             format!(
                 "axiom_net_tcp_write({}, {})",
+                render_expr(&args[0]),
+                render_expr(&args[1])
+            )
+        }
+        Expr::Call { name, args, .. } if name == "net_tcp_write_string" => {
+            format!(
+                "axiom_net_tcp_write_string({}, {})",
                 render_expr(&args[0]),
                 render_expr(&args[1])
             )
