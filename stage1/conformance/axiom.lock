@@ -141,6 +141,16 @@ version = "0.1.0"
 source = "path:fail/lowercase_const_match_pattern"
 
 [[package]]
+name = "conformance-macro-missing-argument"
+version = "0.1.0"
+source = "path:fail/macro_missing_argument"
+
+[[package]]
+name = "conformance-macro-recursion-limit"
+version = "0.1.0"
+source = "path:fail/macro_recursion_limit"
+
+[[package]]
 name = "conformance-match-expression-arm-move-state"
 version = "0.1.0"
 source = "path:fail/match_expression_arm_move_state"
@@ -494,6 +504,11 @@ source = "path:pass/crypto_constant_time"
 name = "conformance-crypto-ed25519-sign-verify"
 version = "0.1.0"
 source = "path:pass/crypto_ed25519_sign_verify"
+
+[[package]]
+name = "conformance-declarative-macros"
+version = "0.1.0"
+source = "path:pass/declarative_macros"
 
 [[package]]
 name = "conformance-functions-across-modules"
