@@ -219,9 +219,18 @@ fn eval_numeric_literal(raw: &str, ty: NumericType) -> Result<SpikeValue, Diagno
 
 fn cast_spike_value(value: SpikeValue, ty: &Type) -> Result<SpikeValue, Diagnostic> {
     match ty {
-        Type::Int => cast_to_int(value),
+        Type::Int => cast_to_integer_like(value, NumericType::I64),
         Type::Numeric(numeric_ty) => cast_to_numeric(value, *numeric_ty),
         _ => Ok(value),
+    }
+}
+
+fn cast_to_integer_like(value: SpikeValue, ty: NumericType) -> Result<SpikeValue, Diagnostic> {
+    match value {
+        SpikeValue::Int(value) => Ok(cast_signed_integer(value, ty)),
+        SpikeValue::UInt(value) => Ok(cast_unsigned_integer(value, ty)),
+        SpikeValue::Float(value) => Ok(cast_float(value, ty)),
+        _ => Err(unsupported("only numeric values can be cast to int")),
     }
 }
 
@@ -233,15 +242,6 @@ fn cast_to_numeric(value: SpikeValue, ty: NumericType) -> Result<SpikeValue, Dia
         _ => Err(unsupported(
             "only numeric values can be cast to numeric types",
         )),
-    }
-}
-
-fn cast_to_int(value: SpikeValue) -> Result<SpikeValue, Diagnostic> {
-    match value {
-        SpikeValue::Int(value) => Ok(SpikeValue::Int(value)),
-        SpikeValue::UInt(value) => Ok(SpikeValue::Int(value as i64)),
-        SpikeValue::Float(value) => Ok(SpikeValue::Int(value as i64)),
-        _ => Err(unsupported("only numeric values can be cast to int")),
     }
 }
 
