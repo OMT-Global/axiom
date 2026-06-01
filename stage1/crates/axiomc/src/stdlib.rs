@@ -8,7 +8,7 @@
 //! enforcement continues to run against the importing package's manifest via
 //! `hir::lower_with_capabilities`.
 //!
-//! Today this provides thirty stdlib modules. The capability-gated
+//! Today this provides thirty-one stdlib modules. The capability-gated
 //! wrappers include the six manifest capability classes:
 //!
 //! * `std/time.ax` — `Duration`, `Instant`, `now_ms()`, `now()`,
@@ -89,6 +89,8 @@
 //!   layered over the bootstrap test intrinsics.
 //! * `std/doc.ax` — the AxiOM-side doc item contract and Markdown renderer
 //!   used to retire bootstrap Rust rendering in Phase-K.
+//! * `std/lsp.ax` — the AxiOM-side JSON-RPC/LSP protocol message contract used
+//!   to retire bootstrap Rust protocol handling in Phase-L.
 //! * `std/outcome.ax` — generic `Option<T>` / `Result<T, E>` predicates and
 //!   fallback unwrap helpers implemented in Axiom.
 //! * `std/encoding.ax` — URL query and path percent-encoding helpers.
@@ -399,6 +401,7 @@ pub async fn udp_send_recv(host: string, port: int, message: string, timeout_ms:
     ),
     ("testing.ax", include_str!("../../../stdlib/std/testing.ax")),
     ("doc.ax", include_str!("../../../stdlib/std/doc.ax")),
+    ("lsp.ax", include_str!("../../../stdlib/std/lsp.ax")),
     (
         "http.ax",
         "pub type Server = int

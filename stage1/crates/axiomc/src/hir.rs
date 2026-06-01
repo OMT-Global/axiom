@@ -9812,6 +9812,47 @@ fn lower_expr_with_expected_inner(
                     ty: Type::Result(Box::new(value_ty), Box::new(error_ty)),
                 });
             }
+            if name == "json_serdes_parse_str" {
+                if args.len() != 1 {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_serdes_parse_str expects 1 argument, got {}",
+                            args.len()
+                        ),
+                    )
+                    .with_span(*line, *column));
+                }
+                let lowered = lower_expr_with_expected(&args[0], Some(&Type::Str), env, ctx)?;
+                if lowered.ty() != &Type::Str {
+                    return Err(Diagnostic::new(
+                        "type",
+                        format!(
+                            "json_serdes_parse_str expects an &str argument, got {}",
+                            lowered.ty()
+                        ),
+                    )
+                    .with_span(args[0].line(), args[0].column()));
+                }
+                let value_ty = Type::Enum(String::from("std_serdes_Value"));
+                let error_ty = Type::Struct(String::from("std_serdes_ParseError"));
+                if !ctx.enums.contains_key("std_serdes_Value")
+                    || !ctx.structs.contains_key("std_serdes_ParseError")
+                {
+                    return Err(Diagnostic::new(
+                        "type",
+                        "json_serdes_parse_str requires std/serdes.ax Value and ParseError types",
+                    )
+                    .with_span(*line, *column));
+                }
+                move_lowered_value(&lowered, env)?;
+                return Ok(Expr::Call {
+                    span: SourceSpan::point(*line, *column),
+                    name: name.clone(),
+                    args: vec![lowered],
+                    ty: Type::Result(Box::new(value_ty), Box::new(error_ty)),
+                });
+            }
             if name == "json_serdes_value_to_json" {
                 if args.len() != 1 {
                     return Err(Diagnostic::new(

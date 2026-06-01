@@ -1,0 +1,20 @@
+[package]
+name = "stdlib-lsp"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+
+[[tests]]
+name = "stdlib-lsp-protocol"
+entry = "src/main_test.ax"
+stdout = "0\n0\n0\n0\n0\n0\n0\n0\n"
