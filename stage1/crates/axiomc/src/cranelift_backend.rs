@@ -211,15 +211,24 @@ fn eval_numeric_literal(raw: &str, ty: NumericType) -> Result<SpikeValue, Diagno
         | NumericType::U32
         | NumericType::U64
         | NumericType::Usize => raw
-            .parse::<u64>()
-            .map(|value| cast_unsigned_integer(value, ty))
-            .map_err(|_| unsupported("invalid unsigned integer numeric literal")),
+            .parse::<u128>()
+            .map_err(|_| unsupported("invalid unsigned integer numeric literal"))
+            .and_then(|value| {
+                u64::try_from(value)
+                    .map(|value| cast_unsigned_integer(value, ty))
+                    .map_err(|_| unsupported("invalid unsigned integer numeric literal"))
+            }),
     }
 }
 
 fn cast_spike_value(value: SpikeValue, ty: &Type) -> Result<SpikeValue, Diagnostic> {
     match ty {
-        Type::Int => cast_to_integer_like(value, NumericType::I64),
+        Type::Int => match value {
+            SpikeValue::Int(value) => Ok(SpikeValue::Int(value)),
+            SpikeValue::UInt(value) => Ok(SpikeValue::UInt(value)),
+            SpikeValue::Float(value) => Ok(SpikeValue::Int(value as i64)),
+            _ => Err(unsupported("only numeric values can be cast to int")),
+        },
         Type::Numeric(numeric_ty) => cast_to_numeric(value, *numeric_ty),
         _ => Ok(value),
     }

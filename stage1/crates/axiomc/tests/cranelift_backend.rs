@@ -147,7 +147,7 @@ fn cranelift_backend_builds_numeric_cross_width_binary() {
     );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
-        "7\n255\n3\n-4\n42\n255\n44\n-126\n-1\n18446744073709551615\n255\n0\n16777216\n"
+        "7\n255\n3\n-4\n42\n255\n44\n-126\n18446744073709551615\n18446744073709551615\n255\n0\n16777216\n"
     );
 }
 
