@@ -9,10 +9,14 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
+use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 pub const INTERNAL_COMPILER_ERROR_CODE: &str = "ICE-001";
 
@@ -7467,6 +7471,8 @@ fn compile_generated_rust(
     target: Option<&str>,
     debug: bool,
 ) -> Result<(), Diagnostic> {
+    ensure_parent_dir_writable(generated_rust)?;
+    ensure_parent_dir_writable(binary_path)?;
     let mut command = Command::new("rustc");
     command
         .arg("--crate-name")
@@ -7512,5 +7518,43 @@ fn compile_generated_rust(
             .with_code(BUILD_GENERATED_RUST_COMPILATION_FAILED)
             .with_path(generated_rust.display().to_string()));
     }
+    Ok(())
+}
+
+fn ensure_parent_dir_writable(path: &Path) -> Result<(), Diagnostic> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to create {}: {err}", parent.display()),
+        )
+        .with_path(parent.display().to_string())
+    })?;
+
+    #[cfg(unix)]
+    {
+        let metadata = fs::metadata(parent).map_err(|err| {
+            Diagnostic::new(
+                "build",
+                format!("failed to inspect {}: {err}", parent.display()),
+            )
+            .with_path(parent.display().to_string())
+        })?;
+        let mut permissions = metadata.permissions();
+        let mode = permissions.mode();
+        if mode & 0o200 == 0 {
+            permissions.set_mode(mode | 0o700);
+            fs::set_permissions(parent, permissions).map_err(|err| {
+                Diagnostic::new(
+                    "build",
+                    format!("failed to make {} writable: {err}", parent.display()),
+                )
+                .with_path(parent.display().to_string())
+            })?;
+        }
+    }
+
     Ok(())
 }
