@@ -7623,7 +7623,18 @@ return "ok"
         assert!(output.markdown.ends_with("index.md"));
         assert!(output.markdown.exists());
         assert!(!output.html.exists());
-        assert!(!project.join("dist/docs/index.html").exists());
+        let generated_files: Vec<_> = fs::read_dir(project.join("dist/docs"))
+            .expect("read generated docs directory")
+            .map(|entry| {
+                entry
+                    .expect("read generated doc entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+
+        assert_eq!(generated_files, vec![String::from("index.md")]);
     }
 
     #[test]
