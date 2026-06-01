@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, Write};
 
 pub const TEXT_DOCUMENT_SYNC_KIND_FULL: u8 = 1;
 
