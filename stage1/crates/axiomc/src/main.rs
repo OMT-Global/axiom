@@ -7615,6 +7615,7 @@ return "ok"
         )
         .expect("write source");
 
+        fs::create_dir_all(project.join("dist/docs")).expect("mkdir docs dir");
         fs::write(project.join("dist/docs/index.html"), "stale html").expect("write stale html");
 
         let output = generate_docs(&project, &project.join("dist/docs"), false)
