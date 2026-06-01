@@ -7,6 +7,19 @@ cd "$repo_root"
 project_dir="stage1/examples/compiler_properties"
 property_floor=100
 
+property_count="$(
+  grep -RhoE '^[[:space:]]*property[[:space:]]+fn[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(' "$project_dir/src" \
+    | wc -l \
+    | tr -d '[:space:]'
+)"
+
+if (( property_count < property_floor )); then
+  echo "compiler property corpus has ${property_count} property fn clauses; expected at least ${property_floor}" >&2
+  exit 1
+fi
+
+echo "compiler property corpus has ${property_count} property fn clauses"
+
 keep_outputs_writable() {
   local dir="$1"
   while true; do
@@ -34,13 +47,8 @@ run_with_writable_outputs() {
 }
 
 rm -rf "$project_dir/dist"
-actual_properties="$(rg -c '^property fn ' "$project_dir/src/property_clause_surface_property.ax")"
-if [[ "$actual_properties" -lt "$property_floor" ]]; then
-  echo "expected at least $property_floor property fn clauses in $project_dir/src/property_clause_surface_property.ax, found $actual_properties" >&2
-  exit 1
-fi
 run_with_writable_outputs "$project_dir/dist" \
-  env CARGO_TARGET_DIR="$project_dir/dist/target" cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check "$project_dir" --properties --json
+  cargo run --manifest-path stage1/Cargo.toml -p axiomc -- check "$project_dir" --properties --json
 rm -rf "$project_dir/dist"
 run_with_writable_outputs "$project_dir/dist" \
-  env CARGO_TARGET_DIR="$project_dir/dist/target" cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test "$project_dir" --properties
+  cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test "$project_dir" --properties

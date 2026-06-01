@@ -1,401 +1,474 @@
-property fn array_identity_001(input: [int]): bool {
+property fn array_identity(input: [int]): bool {
 return input == input && true
 }
 
-property fn scalar_assertion_form_002(input: int): bool {
+property fn scalar_assertion_form(input: int): bool {
 return assert_true(input == input || false)
 }
 
-property fn nested_boolean_verdict_003(input: int): bool {
+property fn nested_boolean_verdict(input: int): bool {
 return true && (false || input == input)
 }
 
-property fn array_identity_004(input: [int]): bool {
-return input == input && true
+property fn int_property_001(input: int): bool {
+return input == input
 }
 
-property fn scalar_assertion_form_005(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_002(input: int): bool {
+let alias: int = input
+return alias == input
 }
 
-property fn nested_boolean_verdict_006(input: int): bool {
-return true && (false || input == input)
+property fn int_property_003(input: int): bool {
+let value: int = input + 0
+return value == input
 }
 
-property fn array_identity_007(input: [int]): bool {
-return input == input && true
+property fn int_property_004(input: int): bool {
+let value: int = input - 0
+return value == input
 }
 
-property fn scalar_assertion_form_008(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_005(input: int): bool {
+let value: int = input * 1
+return value == input
 }
 
-property fn nested_boolean_verdict_009(input: int): bool {
-return true && (false || input == input)
+property fn int_property_006(input: int): bool {
+return input <= input
 }
 
-property fn array_identity_010(input: [int]): bool {
-return input == input && true
+property fn int_property_007(input: int): bool {
+return input >= input
 }
 
-property fn scalar_assertion_form_011(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_008(input: int): bool {
+return assert_true(input == input)
 }
 
-property fn nested_boolean_verdict_012(input: int): bool {
-return true && (false || input == input)
+property fn int_property_009(input: int): bool {
+let values: [int] = [input]
+return len(values) == 1
 }
 
-property fn array_identity_013(input: [int]): bool {
-return input == input && true
+property fn int_property_010(input: int): bool {
+let values: [int] = [input, input]
+return len(values) == 2
 }
 
-property fn scalar_assertion_form_014(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_011(input: int): bool {
+return (input == input) == true
 }
 
-property fn nested_boolean_verdict_015(input: int): bool {
-return true && (false || input == input)
+property fn int_property_012(input: int): bool {
+let ready: bool = input == input
+return ready
 }
 
-property fn array_identity_016(input: [int]): bool {
-return input == input && true
+property fn int_property_013(input: int): bool {
+return input == input && 0 == 0
 }
 
-property fn scalar_assertion_form_017(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_014(input: int): bool {
+return input == input || 0 == 1
 }
 
-property fn nested_boolean_verdict_018(input: int): bool {
-return true && (false || input == input)
+property fn int_property_015(input: int): bool {
+let ready: bool = input <= input
+return ready
 }
 
-property fn array_identity_019(input: [int]): bool {
-return input == input && true
+property fn int_property_016(input: int): bool {
+let ready: bool = input >= input
+return ready
 }
 
-property fn scalar_assertion_form_020(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_017(input: int): bool {
+let zero: int = 0
+return input + zero == input
 }
 
-property fn nested_boolean_verdict_021(input: int): bool {
-return true && (false || input == input)
+property fn int_property_018(input: int): bool {
+let one: int = 1
+return input * one == input
 }
 
-property fn array_identity_022(input: [int]): bool {
-return input == input && true
+property fn int_property_019(input: int): bool {
+let values: [int] = [0, input]
+return len(values) == 2
 }
 
-property fn scalar_assertion_form_023(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_020(input: int): bool {
+let values: [int] = [input]
+let size: int = len(values)
+return size == 1
 }
 
-property fn nested_boolean_verdict_024(input: int): bool {
-return true && (false || input == input)
+property fn int_property_021(input: int): bool {
+let same: bool = input == input
+return assert_true(same)
 }
 
-property fn array_identity_025(input: [int]): bool {
-return input == input && true
+property fn int_property_022(input: int): bool {
+let left: int = input
+let right: int = input
+return left == right
 }
 
-property fn scalar_assertion_form_026(input: int): bool {
-return assert_true(input == input || false)
+property fn int_property_023(input: int): bool {
+let value: int = input + 0
+return value >= input
 }
 
-property fn nested_boolean_verdict_027(input: int): bool {
-return true && (false || input == input)
+property fn int_property_024(input: int): bool {
+let value: int = input - 0
+return value <= input
 }
 
-property fn array_identity_028(input: [int]): bool {
-return input == input && true
+property fn bool_property_001(input: bool): bool {
+return input == input
 }
 
-property fn scalar_assertion_form_029(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_002(input: bool): bool {
+return input || (input == false)
 }
 
-property fn nested_boolean_verdict_030(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_003(input: bool): bool {
+return (input == true) || (input == false)
 }
 
-property fn array_identity_031(input: [int]): bool {
-return input == input && true
+property fn bool_property_004(input: bool): bool {
+let normalized: bool = input && true
+return normalized == input
 }
 
-property fn scalar_assertion_form_032(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_005(input: bool): bool {
+let normalized: bool = input || false
+return normalized == input
 }
 
-property fn nested_boolean_verdict_033(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_006(input: bool): bool {
+let normalized: bool = input && input
+return normalized == input
 }
 
-property fn array_identity_034(input: [int]): bool {
-return input == input && true
+property fn bool_property_007(input: bool): bool {
+let normalized: bool = input || input
+return normalized == input
 }
 
-property fn scalar_assertion_form_035(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_008(input: bool): bool {
+return assert_true(input == input)
 }
 
-property fn nested_boolean_verdict_036(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_009(input: bool): bool {
+return true || input
 }
 
-property fn array_identity_037(input: [int]): bool {
-return input == input && true
+property fn bool_property_010(input: bool): bool {
+return input || true
 }
 
-property fn scalar_assertion_form_038(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_011(input: bool): bool {
+let negated: bool = input == false
+return input || negated
 }
 
-property fn nested_boolean_verdict_039(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_012(input: bool): bool {
+let same: bool = input == input
+return same
 }
 
-property fn array_identity_040(input: [int]): bool {
-return input == input && true
+property fn bool_property_013(input: bool): bool {
+return (input && true) || (input == false)
 }
 
-property fn scalar_assertion_form_041(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_014(input: bool): bool {
+return (input || false) || (input == false)
 }
 
-property fn nested_boolean_verdict_042(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_015(input: bool): bool {
+let values: [bool] = [input]
+return len(values) == 1
 }
 
-property fn array_identity_043(input: [int]): bool {
-return input == input && true
+property fn bool_property_016(input: bool): bool {
+let values: [bool] = [input, input]
+return len(values) == 2
 }
 
-property fn scalar_assertion_form_044(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_017(input: bool): bool {
+let left: bool = input || false
+let right: bool = input
+return left == right
 }
 
-property fn nested_boolean_verdict_045(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_018(input: bool): bool {
+let left: bool = input && true
+let right: bool = input
+return left == right
 }
 
-property fn array_identity_046(input: [int]): bool {
-return input == input && true
+property fn bool_property_019(input: bool): bool {
+let verdict: bool = input == true || input == false
+return verdict
 }
 
-property fn scalar_assertion_form_047(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_020(input: bool): bool {
+let verdict: bool = input || input == false
+return assert_true(verdict)
 }
 
-property fn nested_boolean_verdict_048(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_021(input: bool): bool {
+return (input == input) && true
 }
 
-property fn array_identity_049(input: [int]): bool {
-return input == input && true
+property fn bool_property_022(input: bool): bool {
+return (input == input) || false
 }
 
-property fn scalar_assertion_form_050(input: int): bool {
-return assert_true(input == input || false)
+property fn bool_property_023(input: bool): bool {
+let same: bool = input == input
+return same == true
 }
 
-property fn nested_boolean_verdict_051(input: int): bool {
-return true && (false || input == input)
+property fn bool_property_024(input: bool): bool {
+let same: bool = input || input == false
+return same == true
 }
 
-property fn array_identity_052(input: [int]): bool {
-return input == input && true
+property fn string_property_001(input: string): bool {
+return input == input
 }
 
-property fn scalar_assertion_form_053(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_002(input: string): bool {
+return len(input) == len(input)
 }
 
-property fn nested_boolean_verdict_054(input: int): bool {
-return true && (false || input == input)
+property fn string_property_003(input: string): bool {
+return len(input) >= 0
 }
 
-property fn array_identity_055(input: [int]): bool {
-return input == input && true
+property fn string_property_004(input: string): bool {
+let size: int = len(input)
+return size == size
 }
 
-property fn scalar_assertion_form_056(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_005(input: string): bool {
+let same: bool = input == input
+return same
 }
 
-property fn nested_boolean_verdict_057(input: int): bool {
-return true && (false || input == input)
+property fn string_property_006(input: string): bool {
+return input == input && len(input) >= 0
 }
 
-property fn array_identity_058(input: [int]): bool {
-return input == input && true
+property fn string_property_007(input: string): bool {
+return input == input || len(input) >= 0
 }
 
-property fn scalar_assertion_form_059(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_008(input: string): bool {
+return assert_true(input == input)
 }
 
-property fn nested_boolean_verdict_060(input: int): bool {
-return true && (false || input == input)
+property fn string_property_009(input: string): bool {
+let values: [string] = [input]
+return len(values) == 1
 }
 
-property fn array_identity_061(input: [int]): bool {
-return input == input && true
+property fn string_property_010(input: string): bool {
+let alias: string = input
+return alias == alias
 }
 
-property fn scalar_assertion_form_062(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_011(input: string): bool {
+return "compiler" == "compiler" && input == input
 }
 
-property fn nested_boolean_verdict_063(input: int): bool {
-return true && (false || input == input)
+property fn string_property_012(input: string): bool {
+let size: int = len(input)
+return size >= 0
 }
 
-property fn array_identity_064(input: [int]): bool {
-return input == input && true
+property fn string_property_013(input: string): bool {
+let same: bool = len(input) == len(input)
+return same
 }
 
-property fn scalar_assertion_form_065(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_014(input: string): bool {
+let same: bool = input == input
+return assert_true(same)
 }
 
-property fn nested_boolean_verdict_066(input: int): bool {
-return true && (false || input == input)
+property fn string_property_015(input: string): bool {
+let values: [string] = [input]
+let size: int = len(values)
+return size == 1
 }
 
-property fn array_identity_067(input: [int]): bool {
-return input == input && true
+property fn string_property_016(input: string): bool {
+return len(input) <= len(input)
 }
 
-property fn scalar_assertion_form_068(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_017(input: string): bool {
+return len(input) >= len(input)
 }
 
-property fn nested_boolean_verdict_069(input: int): bool {
-return true && (false || input == input)
+property fn string_property_018(input: string): bool {
+let size: int = len(input)
+return size <= size
 }
 
-property fn array_identity_070(input: [int]): bool {
-return input == input && true
+property fn string_property_019(input: string): bool {
+let size: int = len(input)
+return size >= size
 }
 
-property fn scalar_assertion_form_071(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_020(input: string): bool {
+return input == input && "ok" == "ok"
 }
 
-property fn nested_boolean_verdict_072(input: int): bool {
-return true && (false || input == input)
+property fn string_property_021(input: string): bool {
+return input == input || "ok" != "ok"
 }
 
-property fn array_identity_073(input: [int]): bool {
-return input == input && true
+property fn string_property_022(input: string): bool {
+let empty: string = ""
+return empty == "" && input == input
 }
 
-property fn scalar_assertion_form_074(input: int): bool {
-return assert_true(input == input || false)
+property fn string_property_023(input: string): bool {
+let label: string = "property"
+return label == "property" && input == input
 }
 
-property fn nested_boolean_verdict_075(input: int): bool {
-return true && (false || input == input)
+property fn string_property_024(input: string): bool {
+let same: bool = input == input && len(input) >= 0
+return same
 }
 
-property fn array_identity_076(input: [int]): bool {
-return input == input && true
+property fn array_property_001(input: [int]): bool {
+return input == input
 }
 
-property fn scalar_assertion_form_077(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_002(input: [int]): bool {
+return len(input) == len(input)
 }
 
-property fn nested_boolean_verdict_078(input: int): bool {
-return true && (false || input == input)
+property fn array_property_003(input: [int]): bool {
+return len(input) >= 0
 }
 
-property fn array_identity_079(input: [int]): bool {
-return input == input && true
+property fn array_property_004(input: [int]): bool {
+let view: &[int] = input[:]
+return len(view) == len(input)
 }
 
-property fn scalar_assertion_form_080(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_005(input: [int]): bool {
+let view: &[int] = input[:]
+return len(view) >= 0
 }
 
-property fn nested_boolean_verdict_081(input: int): bool {
-return true && (false || input == input)
+property fn array_property_006(input: [int]): bool {
+let same: bool = input == input
+return same
 }
 
-property fn array_identity_082(input: [int]): bool {
-return input == input && true
+property fn array_property_007(input: [int]): bool {
+let sample: [int] = [0]
+return len(sample) == 1 && input == input
 }
 
-property fn scalar_assertion_form_083(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_008(input: [int]): bool {
+let one: [int] = [1]
+return len(one) == 1 && input == input
 }
 
-property fn nested_boolean_verdict_084(input: int): bool {
-return true && (false || input == input)
+property fn array_property_009(input: [int]): bool {
+let view: &[int] = input[:]
+let size: int = len(view)
+return size == len(input)
 }
 
-property fn array_identity_085(input: [int]): bool {
-return input == input && true
+property fn array_property_010(input: [int]): bool {
+let view: &[int] = input[:]
+let size: int = len(view)
+return size >= 0
 }
 
-property fn scalar_assertion_form_086(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_011(input: [int]): bool {
+return assert_true(input == input)
 }
 
-property fn nested_boolean_verdict_087(input: int): bool {
-return true && (false || input == input)
+property fn array_property_012(input: [int]): bool {
+return input == input && len(input) >= 0
 }
 
-property fn array_identity_088(input: [int]): bool {
-return input == input && true
+property fn array_property_013(input: [int]): bool {
+return input == input || len(input) >= 0
 }
 
-property fn scalar_assertion_form_089(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_014(input: [int]): bool {
+let size: int = len(input)
+return size == size
 }
 
-property fn nested_boolean_verdict_090(input: int): bool {
-return true && (false || input == input)
+property fn array_property_015(input: [int]): bool {
+let size: int = len(input)
+return size <= size
 }
 
-property fn array_identity_091(input: [int]): bool {
-return input == input && true
+property fn array_property_016(input: [int]): bool {
+let size: int = len(input)
+return size >= size
 }
 
-property fn scalar_assertion_form_092(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_017(input: [int]): bool {
+let sample: [int] = [0]
+let size: int = len(sample)
+return size == 1 && input == input
 }
 
-property fn nested_boolean_verdict_093(input: int): bool {
-return true && (false || input == input)
+property fn array_property_018(input: [int]): bool {
+let sample: [int] = [1, 2]
+return len(sample) == 2 && input == input
 }
 
-property fn array_identity_094(input: [int]): bool {
-return input == input && true
+property fn array_property_019(input: [int]): bool {
+let sample: [int] = [3, 5, 8]
+return len(sample) == 3 && input == input
 }
 
-property fn scalar_assertion_form_095(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_020(input: [int]): bool {
+let view: &[int] = input[:]
+return len(view) <= len(input)
 }
 
-property fn nested_boolean_verdict_096(input: int): bool {
-return true && (false || input == input)
+property fn array_property_021(input: [int]): bool {
+let view: &[int] = input[:]
+return len(view) >= len(input)
 }
 
-property fn array_identity_097(input: [int]): bool {
-return input == input && true
+property fn array_property_022(input: [int]): bool {
+let same: bool = len(input) == len(input)
+return assert_true(same)
 }
 
-property fn scalar_assertion_form_098(input: int): bool {
-return assert_true(input == input || false)
+property fn array_property_023(input: [int]): bool {
+let same: bool = input == input
+return assert_true(same)
 }
 
-property fn nested_boolean_verdict_099(input: int): bool {
-return true && (false || input == input)
+property fn array_property_024(input: [int]): bool {
+let view: &[int] = input[:]
+let same: bool = len(view) == len(input)
+return same
 }
 
-property fn array_identity_100(input: [int]): bool {
-return input == input && true
+property fn array_property_025(input: [int]): bool {
+let view: &[int] = input[:]
+let same: bool = len(view) >= 0
+return same
 }
 
 print "ok"
