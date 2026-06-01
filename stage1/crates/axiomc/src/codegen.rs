@@ -472,6 +472,7 @@ fn render_rust_for_package_with_backend_context(
     .any(|name| program_uses_call(program, name));
     let uses_json_serdes = [
         "json_serdes_parse",
+        "json_serdes_parse_str",
         "json_serdes_value_to_json",
         "json_serdes_to_json",
     ]
@@ -5256,7 +5257,12 @@ impl<'a> AxiomJsonSerdesParser<'a> {
 
 #[allow(dead_code)]
 fn axiom_json_serdes_parse(text: String) -> Result<std_serdes_Value, std_serdes_ParseError> {
-    let mut parser = AxiomJsonSerdesParser::new(text.as_str());
+    axiom_json_serdes_parse_str(text.as_str())
+}
+
+#[allow(dead_code)]
+fn axiom_json_serdes_parse_str(text: &str) -> Result<std_serdes_Value, std_serdes_ParseError> {
+    let mut parser = AxiomJsonSerdesParser::new(text);
     match parser.parse_value() {
         Ok(value) => {
             parser.skip_ws();
@@ -6442,6 +6448,9 @@ fn render_expr(expr: &Expr) -> String {
         }
         Expr::Call { name, args, .. } if name == "json_serdes_parse" => {
             format!("axiom_json_serdes_parse({})", render_expr(&args[0]))
+        }
+        Expr::Call { name, args, .. } if name == "json_serdes_parse_str" => {
+            format!("axiom_json_serdes_parse_str({})", render_expr(&args[0]))
         }
         Expr::Call { name, args, .. } if name == "json_serdes_value_to_json" => {
             format!("axiom_json_serdes_value_to_json({})", render_expr(&args[0]))

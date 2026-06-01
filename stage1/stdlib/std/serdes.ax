@@ -1,3 +1,5 @@
+import "std/collections.ax"
+
 pub struct ParseError {
 message: string
 }
@@ -24,6 +26,131 @@ pub fn from_json(text: string): Result<Value, ParseError> {
 return json_serdes_parse(text)
 }
 
+pub fn from_json_str(text: &str): Result<Value, ParseError> {
+return json_serdes_parse_str(text)
+}
+
 pub fn parse_error_message(error: ParseError): string {
 return error.message
+}
+
+pub fn field(value: Value, key: string): Option<Value> {
+match value {
+Object(fields) {
+return get<string, Value>(fields, key)
+}
+Null {
+return None
+}
+Bool(_value) {
+return None
+}
+Int(_value) {
+return None
+}
+Float(_value) {
+return None
+}
+Text(_value) {
+return None
+}
+Array(_items) {
+return None
+}
+}
+}
+
+pub fn text_field(value: Value, key: string): Option<string> {
+match field(value, key) {
+Some(item) {
+match item {
+Text(text) {
+return Some(text)
+}
+Null {
+return None
+}
+Bool(_value) {
+return None
+}
+Int(_value) {
+return None
+}
+Float(_value) {
+return None
+}
+Array(_items) {
+return None
+}
+Object(_fields) {
+return None
+}
+}
+}
+None {
+return None
+}
+}
+}
+
+pub fn int_field(value: Value, key: string): Option<int> {
+match field(value, key) {
+Some(item) {
+match item {
+Int(number) {
+return Some(number)
+}
+Null {
+return None
+}
+Bool(_value) {
+return None
+}
+Float(_value) {
+return None
+}
+Text(_value) {
+return None
+}
+Array(_items) {
+return None
+}
+Object(_fields) {
+return None
+}
+}
+}
+None {
+return None
+}
+}
+}
+
+pub fn value_item(value: Value, index: int): Option<Value> {
+match value {
+Array(items) {
+if index < 0 || index >= len(items) {
+return None
+}
+return Some(items[index])
+}
+Null {
+return None
+}
+Bool(_value) {
+return None
+}
+Int(_value) {
+return None
+}
+Float(_value) {
+return None
+}
+Text(_value) {
+return None
+}
+Object(_fields) {
+return None
+}
+}
 }

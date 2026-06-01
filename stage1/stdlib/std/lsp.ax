@@ -1,0 +1,384 @@
+import "std/serdes.ax"
+
+pub type Position = (int, int)
+pub type Range = (Position, Position)
+pub type Diagnostic = (Range, int, string, string, string)
+
+pub enum RequestId {
+NumberId(int)
+TextId(string)
+}
+
+pub fn method_initialize(): string {
+return "initialize"
+}
+
+pub fn method_initialized(): string {
+return "initialized"
+}
+
+pub fn method_shutdown(): string {
+return "shutdown"
+}
+
+pub fn method_exit(): string {
+return "exit"
+}
+
+pub fn method_did_open(): string {
+return "textDocument/didOpen"
+}
+
+pub fn method_did_change(): string {
+return "textDocument/didChange"
+}
+
+pub fn method_publish_diagnostics(): string {
+return "textDocument/publishDiagnostics"
+}
+
+pub fn method_completion(): string {
+return "textDocument/completion"
+}
+
+pub fn supports_method(method: string): bool {
+return method == method_initialize() || method == method_initialized() || method == method_shutdown() || method == method_exit() || method == method_did_open() || method == method_did_change() || method == method_completion()
+}
+
+pub fn position(line: int, character: int): Position {
+return (line, character)
+}
+
+pub fn range(start: Position, end: Position): Range {
+return (start, end)
+}
+
+pub fn diagnostic(range: Range, severity: int, source: string, code: string, message: string): Diagnostic {
+return (range, severity, source, code, message)
+}
+
+pub fn request_id_value(id: RequestId): Value {
+match id {
+NumberId(number) {
+return Int(number)
+}
+TextId(text) {
+return Text(text)
+}
+}
+}
+
+pub fn request_with_id(id: RequestId, method: string, params: {string: Value}): string {
+return stringify(Object({"jsonrpc": Text("2.0"), "id": request_id_value(id), "method": Text(method), "params": Object(params)}))
+}
+
+pub fn request(id: int, method: string, params: {string: Value}): string {
+return request_with_id(NumberId(id), method, params)
+}
+
+pub fn request_with_text_id(id: string, method: string, params: {string: Value}): string {
+return request_with_id(TextId(id), method, params)
+}
+
+pub fn notification(method: string, params: {string: Value}): string {
+return stringify(Object({"jsonrpc": Text("2.0"), "method": Text(method), "params": Object(params)}))
+}
+
+pub fn initialize_response(id: int): string {
+return initialize_response_id(NumberId(id))
+}
+
+pub fn initialize_response_id(id: RequestId): string {
+let text_sync: {string: Value} = {"openClose": Bool(true), "change": Int(1)}
+let completion: {string: Value} = {"triggerCharacters": Array([Text(".")])}
+let capabilities: {string: Value} = {"completionProvider": Object(completion), "textDocumentSync": Object(text_sync)}
+let server_info: {string: Value} = {"name": Text("axiom-analyzer")}
+let result: {string: Value} = {"capabilities": Object(capabilities), "serverInfo": Object(server_info)}
+return stringify(Object({"jsonrpc": Text("2.0"), "id": request_id_value(id), "result": Object(result)}))
+}
+
+pub fn shutdown_response(id: int): string {
+return shutdown_response_id(NumberId(id))
+}
+
+pub fn shutdown_response_id(id: RequestId): string {
+return stringify(Object({"jsonrpc": Text("2.0"), "id": request_id_value(id), "result": Null}))
+}
+
+pub fn completion_response(id: int): string {
+return completion_response_id(NumberId(id))
+}
+
+pub fn completion_response_id(id: RequestId): string {
+let item: {string: Value} = {"kind": Int(3), "label": Text("fn")}
+let result: {string: Value} = {"isIncomplete": Bool(false), "items": Array([Object(item)])}
+return stringify(Object({"jsonrpc": Text("2.0"), "id": request_id_value(id), "result": Object(result)}))
+}
+
+pub fn did_open(uri: string, language_id: string, version: int, text: string): string {
+let text_document: {string: Value} = {"languageId": Text(language_id), "text": Text(text), "uri": Text(uri), "version": Int(version)}
+return notification(method_did_open(), {"textDocument": Object(text_document)})
+}
+
+pub fn did_change(uri: string, version: int, text: string): string {
+let text_document: {string: Value} = {"uri": Text(uri), "version": Int(version)}
+let change: {string: Value} = {"text": Text(text)}
+return notification(method_did_change(), {"contentChanges": Array([Object(change)]), "textDocument": Object(text_document)})
+}
+
+pub fn publish_diagnostic(uri: string, diagnostic: Diagnostic): string {
+let params: {string: Value} = {"diagnostics": Array([diagnostic_value(diagnostic)]), "uri": Text(uri)}
+return notification(method_publish_diagnostics(), params)
+}
+
+pub fn parse_message(payload: &str): Result<Value, ParseError> {
+return from_json_str(payload)
+}
+
+pub fn message_method(payload: &str): Option<string> {
+match parse_message(payload) {
+Ok(value) {
+return text_field(value, "method")
+}
+Err(_error) {
+return None
+}
+}
+}
+
+pub fn message_id(payload: &str): Option<RequestId> {
+match parse_message(payload) {
+Ok(value) {
+return request_id_field(value)
+}
+Err(_error) {
+return None
+}
+}
+}
+
+pub fn message_number_id(payload: &str): Option<int> {
+match message_id(payload) {
+Some(id) {
+match id {
+NumberId(number) {
+return Some(number)
+}
+TextId(_text) {
+return None
+}
+}
+}
+None {
+return None
+}
+}
+}
+
+pub fn message_text_id(payload: &str): Option<string> {
+match message_id(payload) {
+Some(id) {
+match id {
+NumberId(_number) {
+return None
+}
+TextId(text) {
+return Some(text)
+}
+}
+}
+None {
+return None
+}
+}
+}
+
+pub fn message_supported(payload: &str): bool {
+match message_method(payload) {
+Some(method) {
+return supports_method(method)
+}
+None {
+return false
+}
+}
+}
+
+pub fn response_for_request(payload: &str): Option<string> {
+match message_method(payload) {
+Some(method) {
+match message_id(payload) {
+Some(id) {
+if method == method_initialize() {
+return Some(initialize_response_id(id))
+}
+if method == method_shutdown() {
+return Some(shutdown_response_id(id))
+}
+if method == method_completion() {
+return Some(completion_response_id(id))
+}
+return None
+}
+None {
+return None
+}
+}
+}
+None {
+return None
+}
+}
+}
+
+pub fn did_open_uri(payload: &str): Option<string> {
+match text_document_value(payload) {
+Some(text_document) {
+return text_field(text_document, "uri")
+}
+None {
+return None
+}
+}
+}
+
+pub fn did_open_language_id(payload: &str): Option<string> {
+match text_document_value(payload) {
+Some(text_document) {
+return text_field(text_document, "languageId")
+}
+None {
+return None
+}
+}
+}
+
+pub fn did_open_version(payload: &str): Option<int> {
+match text_document_value(payload) {
+Some(text_document) {
+return int_field(text_document, "version")
+}
+None {
+return None
+}
+}
+}
+
+pub fn did_open_text(payload: &str): Option<string> {
+match text_document_value(payload) {
+Some(text_document) {
+return text_field(text_document, "text")
+}
+None {
+return None
+}
+}
+}
+
+pub fn did_change_uri(payload: &str): Option<string> {
+return did_open_uri(payload)
+}
+
+pub fn did_change_version(payload: &str): Option<int> {
+return did_open_version(payload)
+}
+
+pub fn did_change_text(payload: &str): Option<string> {
+match first_content_change_value(payload) {
+Some(change) {
+return text_field(change, "text")
+}
+None {
+return None
+}
+}
+}
+
+fn request_id_field(value: Value): Option<RequestId> {
+match field(value, "id") {
+Some(id) {
+return request_id_from_value(id)
+}
+None {
+return None
+}
+}
+}
+
+fn request_id_from_value(value: Value): Option<RequestId> {
+match value {
+Int(number) {
+return Some(NumberId(number))
+}
+Text(text) {
+return Some(TextId(text))
+}
+Null {
+return None
+}
+Bool(_value) {
+return None
+}
+Float(_value) {
+return None
+}
+Array(_items) {
+return None
+}
+Object(_fields) {
+return None
+}
+}
+}
+
+fn message_params_value(payload: &str): Option<Value> {
+match parse_message(payload) {
+Ok(value) {
+return field(value, "params")
+}
+Err(_error) {
+return None
+}
+}
+}
+
+fn text_document_value(payload: &str): Option<Value> {
+match message_params_value(payload) {
+Some(params) {
+return field(params, "textDocument")
+}
+None {
+return None
+}
+}
+}
+
+fn first_content_change_value(payload: &str): Option<Value> {
+match message_params_value(payload) {
+Some(params) {
+match field(params, "contentChanges") {
+Some(changes) {
+return value_item(changes, 0)
+}
+None {
+return None
+}
+}
+}
+None {
+return None
+}
+}
+}
+
+fn position_value(position: Position): Value {
+return Object({"character": Int(position.1), "line": Int(position.0)})
+}
+
+fn range_value(range: Range): Value {
+return Object({"end": position_value(range.1), "start": position_value(range.0)})
+}
+
+fn diagnostic_value(diagnostic: Diagnostic): Value {
+return Object({"code": Text(diagnostic.3), "message": Text(diagnostic.4), "range": range_value(diagnostic.0), "severity": Int(diagnostic.1), "source": Text(diagnostic.2)})
+}

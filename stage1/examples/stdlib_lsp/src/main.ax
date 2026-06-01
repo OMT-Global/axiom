@@ -1,0 +1,3 @@
+import "std/lsp.ax"
+
+print supports_method(method_initialize())

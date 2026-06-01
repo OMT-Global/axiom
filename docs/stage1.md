@@ -83,6 +83,10 @@ shared `axiom.stage1.v1` envelope.
 `std/doc.ax` now defines the AxiOM-side doc item contract and Markdown renderer;
 source extraction and `axiomc doc` driver integration remain bootstrap-hosted
 until Phase-K.1 can follow Phase-J.3.
+`std/lsp.ax` defines the AxiOM-side JSON-RPC/LSP message contract for
+initialize, document-change, diagnostic, completion, shutdown, and exit flows;
+the Stage1 Rust stdio loop still owns process I/O until the Phase-L self-hosting
+dependencies are satisfied.
 
 `axiomc new` defaults to the `cli` starter and also accepts `--template worker`
 and `--template service`. Each starter writes `axiom.toml`, `axiom.lock`,

@@ -37,6 +37,7 @@ stdlib_projects=(
   stage1/examples/stdlib_io
   stage1/examples/stdlib_json
   stage1/examples/stdlib_json_value
+  stage1/examples/stdlib_lsp
   stage1/examples/stdlib_log
   stage1/examples/stdlib_net
   stage1/examples/stdlib_outcome
