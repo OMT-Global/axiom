@@ -194,6 +194,9 @@ fn eval_call(
     functions: &HashMap<&str, &Function>,
     env: &SpikeEnv,
 ) -> Result<SpikeValue, Diagnostic> {
+    if name == "len" {
+        return eval_len_call(args, functions, env);
+    }
     let function = functions
         .get(name)
         .ok_or_else(|| unsupported(&format!("unsupported cranelift spike call {name:?}")))?;
@@ -212,6 +215,23 @@ fn eval_call(
         ));
     }
     returned.ok_or_else(|| unsupported("cranelift spike functions must return a value"))
+}
+
+fn eval_len_call(
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+) -> Result<SpikeValue, Diagnostic> {
+    let [arg] = args else {
+        return Err(unsupported("len expects exactly one argument"));
+    };
+    let value = eval_expr(arg, functions, env)?;
+    let len = match value {
+        SpikeValue::Text(value) => value.chars().count(),
+        SpikeValue::Tuple(values) | SpikeValue::Array(values) => values.len(),
+        _ => return Err(unsupported("len supports strings, tuples, and arrays")),
+    };
+    Ok(SpikeValue::Int(len as i64))
 }
 
 fn eval_arithmetic(

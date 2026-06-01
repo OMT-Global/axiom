@@ -105,6 +105,49 @@ fn cranelift_backend_builds_scalar_aggregate_binary() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "native\n7\n12\n10\n");
 }
 
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_builds_const_sized_array_conformance_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("const-sized-array");
+    copy_conformance_fixture("const_sized_arrays", &project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift const-sized-array build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift const-sized-array binary");
+    assert!(
+        run.status.success(),
+        "cranelift const-sized-array binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n6\n");
+}
+
 fn copy_fixture(relative: &str, destination: &Path) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/hello")
@@ -116,6 +159,24 @@ fn copy_fixture(relative: &str, destination: &Path) {
             destination.display()
         )
     });
+}
+
+fn copy_conformance_fixture(fixture_name: &str, destination: &Path) {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/pass")
+        .join(fixture_name);
+    fs::create_dir_all(destination.join("src")).expect("create conformance project src");
+    for relative in ["axiom.toml", "axiom.lock", "src/main_test.ax"] {
+        let source = fixture.join(relative);
+        let target = destination.join(relative);
+        fs::copy(&source, &target).unwrap_or_else(|err| {
+            panic!(
+                "copy fixture {} to {}: {err}",
+                source.display(),
+                target.display()
+            )
+        });
+    }
 }
 
 fn write_scalar_project(project: &Path) {
