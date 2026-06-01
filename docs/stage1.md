@@ -77,7 +77,9 @@ cargo run --manifest-path stage1/Cargo.toml -p axiomc -- lsp
 `axiomc doc --json` emits the same API extraction pass as a versioned machine
 contract, including generated Markdown/HTML paths, documented symbols, comments,
 signatures, simple example notes, declaration kind/visibility, and package
-capability descriptors when the input path is a package root.
+capability descriptors when the input path is a package root. The output
+validates against `stage1/schemas/axiom-doc-v0.schema.json` as well as the
+shared `axiom.stage1.v1` envelope.
 `std/doc.ax` now defines the AxiOM-side doc item contract and Markdown renderer;
 source extraction and `axiomc doc` driver integration remain bootstrap-hosted
 until Phase-K.1 can follow Phase-J.3.
@@ -114,9 +116,16 @@ fixtures once so benchmark code participates in functional gates. The command
 also accepts `--filter <pattern>` to run a subset of discovered tests by test
 name or entry path. `axiomc test --properties` narrows discovery to property
 fixtures and prints an explicit `N/N properties passed` summary for Phase-H
-property gates. The `std/testing.ax` helper surface is backed by
+property gates. `axiomc check --properties` first performs the normal type,
+ownership, capability, and manifest checks, then runs the same property-only
+fixture gate so property failures block a check command before build artifacts
+are accepted. The `std/testing.ax` helper surface is backed by
 `stage1/stdlib/std/testing.ax` and embedded into the virtual stdlib at compiler
-build time. The default CLI summary prints `passed` / `failed` / `skipped`
+build time. The checked-in stdlib testing package now carries a 12-property
+suite across the deterministic stdlib surfaces and is exercised by
+`scripts/ci/run-stdlib-property-checks.sh`; that script also runs the checked-in
+`stage1/examples/stdlib_*` AxiOM tests so CI covers stdlib behavior through
+`axiomc test`. The default CLI summary prints `passed` / `failed` / `skipped`
 counts. `axiomc test --list` exposes the same discovery pass without building or
 running the tests; text output emits package, test name, and entry path columns,
 while `--json` adds stable package membership plus golden-output and compile-fail
@@ -284,8 +293,16 @@ still far from the stated 1.0 target for service and agent workloads.
 
 ### Backend and tooling gaps
 
-- Native builds still work by generating Rust and invoking `rustc`; there is no Cranelift backend yet.
-- The backend-selection surface is only preparatory backend plumbing for later native-backend expansion; today `generated-rust` is the only implemented backend, so this branch is part of #105 rather than closure for it.
+- Native builds still default to generating Rust and invoking `rustc`.
+  `axiomc build stage1/examples/hello --backend cranelift` is an opt-in
+  direct-object spike for #691: it folds the supported hello-world MIR subset
+  into print lines, emits a Cranelift object, links it with the host linker, and
+  leaves generated Rust as the production backend.
+- The backend-selection surface remains preparatory backend plumbing for later
+  native-backend expansion. `generated-rust` is still the default and only broad
+  backend; `cranelift` is intentionally limited to the #691 hello-world spike,
+  so this is not closure for #105 or the later full-surface native backend
+  slices.
 - Generated-Rust builds now use a persistent per-artifact cache keyed by
   compiler version, target, debug mode, manifest/lockfile hash, rendered Rust,
   module source hashes, and dependency imports. Cache hits skip `rustc`, cache
