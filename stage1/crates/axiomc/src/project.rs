@@ -1985,22 +1985,8 @@ fn build_artifacts(
 ) -> Result<BuildArtifactReport, Diagnostic> {
     ensure_output_path_stays_inside_package(package_root, generated_rust, "generated Rust output")?;
     ensure_output_path_stays_inside_package(package_root, binary, "binary output")?;
-    if let Some(parent) = generated_rust.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            Diagnostic::new(
-                "build",
-                format!("failed to create {}: {err}", parent.display()),
-            )
-        })?;
-    }
-    if let Some(parent) = binary.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            Diagnostic::new(
-                "build",
-                format!("failed to create {}: {err}", parent.display()),
-            )
-        })?;
-    }
+    ensure_writable_output_parent(generated_rust, "generated Rust output")?;
+    ensure_writable_output_parent(binary, "binary output")?;
     let fs_root = fs_root_path_for_package(package_root, &analyzed.manifest)?;
     let rust_source = try_render_generated_rust(
         &GeneratedRustBackendInput::from_mir(analyzed.mir.clone())
@@ -2176,14 +2162,7 @@ fn write_provenance_artifact(
     binary: &Path,
 ) -> Result<(), Diagnostic> {
     let path = provenance_path(package_root, &analyzed.manifest);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            Diagnostic::new(
-                "build",
-                format!("failed to create {}: {err}", parent.display()),
-            )
-        })?;
-    }
+    ensure_writable_output_parent(&path, "provenance output")?;
     let report = provenance_report(package_root, analyzed, generated_rust, binary)?;
     let content = serde_json::to_string_pretty(&report)
         .map_err(|err| Diagnostic::new("build", format!("failed to render provenance: {err}")))?;
@@ -2193,6 +2172,79 @@ fn write_provenance_artifact(
             format!("failed to write {}: {err}", path.display()),
         )
     })
+}
+
+fn ensure_writable_output_parent(path: &Path, description: &str) -> Result<(), Diagnostic> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(parent).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to create {}: {err}", parent.display()),
+        )
+    })?;
+    ensure_owner_writable_dir(parent, description)
+}
+
+#[cfg(unix)]
+fn ensure_owner_writable_dir(path: &Path, description: &str) -> Result<(), Diagnostic> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = fs::metadata(path).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to inspect {}: {err}", path.display()),
+        )
+    })?;
+    if !metadata.is_dir() {
+        return Err(Diagnostic::new(
+            "build",
+            format!(
+                "{} parent is not a directory: {}",
+                description,
+                path.display()
+            ),
+        ));
+    }
+    let mode = metadata.permissions().mode();
+    if mode & 0o700 == 0o700 {
+        return Ok(());
+    }
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(mode | 0o700);
+    fs::set_permissions(path, permissions).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!(
+                "failed to make {} writable at {}: {err}",
+                description,
+                path.display()
+            ),
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn ensure_owner_writable_dir(path: &Path, description: &str) -> Result<(), Diagnostic> {
+    let metadata = fs::metadata(path).map_err(|err| {
+        Diagnostic::new(
+            "build",
+            format!("failed to inspect {}: {err}", path.display()),
+        )
+    })?;
+    if metadata.is_dir() {
+        Ok(())
+    } else {
+        Err(Diagnostic::new(
+            "build",
+            format!(
+                "{} parent is not a directory: {}",
+                description,
+                path.display()
+            ),
+        ))
+    }
 }
 
 fn provenance_path(package_root: &Path, manifest: &Manifest) -> PathBuf {
@@ -7318,6 +7370,8 @@ fn stmt_column(stmt: &syntax::Stmt) -> usize {
 mod tests {
     use super::*;
     use std::collections::{BTreeMap, HashMap};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
     fn workspace_only_manifest() -> Manifest {
@@ -7399,6 +7453,56 @@ mod tests {
                 && relationship.from == "axiom://package/demo/function/src/main.ax/main"
                 && relationship.to == "axiom://package/demo/artifact/generated-rust"
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn property_tests_recover_read_only_artifact_directory() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let project = dir.path().join("property-output-perms");
+        fs::create_dir_all(project.join("src")).expect("create src");
+        fs::write(
+            project.join("axiom.toml"),
+            "[package]\nname = \"property-output-perms\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("axiom.lock"),
+            "version = 1\n\n[[package]]\nname = \"property-output-perms\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+        )
+        .expect("write lockfile");
+        fs::write(project.join("src/main.ax"), "print \"main\"\n").expect("write main source");
+        fs::write(
+            project.join("src/addition_property.ax"),
+            "import \"std/testing.ax\"\nlet ok: int = property(\"addition identity\", 40 + 2 == 42)\nprint ok\n",
+        )
+        .expect("write property source");
+        fs::write(project.join("src/addition_property.stdout"), "0\n")
+            .expect("write property golden");
+
+        let artifact_dir = project.join("dist/tests");
+        fs::create_dir_all(&artifact_dir).expect("create artifact dir");
+        fs::set_permissions(&artifact_dir, fs::Permissions::from_mode(0o555))
+            .expect("make artifact dir read-only");
+
+        let output = run_project_tests_with_options(
+            &project,
+            &TestOptions {
+                filter: None,
+                package: None,
+                include_benchmarks: false,
+                properties_only: true,
+                conformance: false,
+            },
+        )
+        .expect("run property-only tests with stale artifact permissions");
+
+        fs::set_permissions(&artifact_dir, fs::Permissions::from_mode(0o755))
+            .expect("restore artifact dir permissions");
+        assert_eq!(output.failed, 0);
+        assert_eq!(output.cases.len(), 1);
+        assert_eq!(output.cases[0].kind, TestKind::Property);
+        assert!(output.cases[0].generated_rust.is_some());
     }
 
     #[test]
