@@ -11,6 +11,10 @@ enum SpikeValue {
     Float(f64),
     Bool(bool),
     Text(String),
+    Struct {
+        name: String,
+        fields: Vec<(String, SpikeValue)>,
+    },
     Tuple(Vec<SpikeValue>),
     Array(Vec<SpikeValue>),
 }
@@ -41,9 +45,9 @@ pub fn compile_cranelift_hello_spike(
 }
 
 fn collect_print_lines(program: &Program) -> Result<Vec<String>, Diagnostic> {
-    if !program.structs.is_empty() || !program.enums.is_empty() || !program.statics.is_empty() {
+    if !program.enums.is_empty() || !program.statics.is_empty() {
         return Err(unsupported(
-            "structs, enums, and statics are not part of the cranelift hello spike",
+            "enums and statics are not part of the cranelift hello spike",
         ));
     }
     let functions = program
@@ -155,6 +159,25 @@ fn eval_expr(
             }
         }
         Expr::Cast { expr, ty } => cast_spike_value(eval_expr(expr, functions, env)?, ty),
+        Expr::StructLiteral { name, fields, .. } => fields
+            .iter()
+            .map(|field| Ok((field.name.clone(), eval_expr(&field.expr, functions, env)?)))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|fields| SpikeValue::Struct {
+                name: name.clone(),
+                fields,
+            }),
+        Expr::FieldAccess { base, field, .. } => match eval_expr(base, functions, env)? {
+            SpikeValue::Struct { name, fields } => fields
+                .into_iter()
+                .find_map(|(candidate, value)| (candidate == *field).then_some(value))
+                .ok_or_else(|| {
+                    unsupported(&format!(
+                        "struct {name:?} has no field {field:?} in the cranelift spike"
+                    ))
+                }),
+            _ => Err(unsupported("field access requires a struct value")),
+        },
         Expr::TupleLiteral { elements, .. } => elements
             .iter()
             .map(|element| eval_expr(element, functions, env))
@@ -567,9 +590,24 @@ fn render_value(value: &SpikeValue) -> String {
         SpikeValue::Bool(true) => String::from("true"),
         SpikeValue::Bool(false) => String::from("false"),
         SpikeValue::Text(value) => value.clone(),
+        SpikeValue::Struct { name, fields } => render_struct(name, fields),
         SpikeValue::Tuple(values) => render_sequence("(", ")", values),
         SpikeValue::Array(values) => render_sequence("[", "]", values),
     }
+}
+
+fn render_struct(name: &str, fields: &[(String, SpikeValue)]) -> String {
+    let mut rendered = format!("{name} {{ ");
+    for (index, (field, value)) in fields.iter().enumerate() {
+        if index > 0 {
+            rendered.push_str(", ");
+        }
+        rendered.push_str(field);
+        rendered.push_str(": ");
+        rendered.push_str(&render_value(value));
+    }
+    rendered.push_str(" }");
+    rendered
 }
 
 fn render_sequence(open: &str, close: &str, values: &[SpikeValue]) -> String {
