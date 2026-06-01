@@ -35,16 +35,11 @@ pub fn compile_cranelift_hello_spike(
     object_path: &Path,
     binary_path: &Path,
     target: Option<&str>,
-    debug: bool,
+    _debug: bool,
 ) -> Result<(), Diagnostic> {
     if target.is_some() {
         return Err(unsupported(
             "the cranelift backend spike currently supports only the host target",
-        ));
-    }
-    if debug {
-        return Err(unsupported(
-            "the cranelift backend spike does not emit debug sidecars yet",
         ));
     }
     let lines = collect_print_lines(program)?;

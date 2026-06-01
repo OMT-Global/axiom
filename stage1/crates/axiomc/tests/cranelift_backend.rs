@@ -375,6 +375,125 @@ fn cranelift_backend_builds_array_helpers_binary() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n10\n30\n40\n");
 }
 
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("hello-debug");
+    fs::create_dir_all(project.join("src")).expect("create project src");
+    copy_fixture("axiom.toml", &project.join("axiom.toml"));
+    copy_fixture("axiom.lock", &project.join("axiom.lock"));
+    copy_fixture("src/main.ax", &project.join("src/main.ax"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--debug",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift --debug");
+    assert!(
+        output.status.success(),
+        "cranelift debug build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["debug"], true);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let generated_rust = payload["generated_rust"]
+        .as_str()
+        .expect("generated Rust path");
+    let debug_map = payload["debug_map"].as_str().expect("debug map path");
+    let debug_manifest = payload["debug_manifest"]
+        .as_str()
+        .expect("debug manifest path");
+    assert!(Path::new(binary).exists(), "cranelift binary exists");
+    assert!(
+        Path::new(generated_rust)
+            .with_extension("cranelift.o")
+            .exists(),
+        "cranelift object exists"
+    );
+    assert!(Path::new(debug_map).exists(), "debug map exists");
+    assert!(Path::new(debug_manifest).exists(), "debug manifest exists");
+
+    let source = project
+        .join("src/main.ax")
+        .canonicalize()
+        .expect("canonical source path")
+        .display()
+        .to_string();
+    let map: Value =
+        serde_json::from_str(&fs::read_to_string(debug_map).expect("read cranelift debug map"))
+            .expect("parse cranelift debug map");
+    assert!(
+        map["mappings"]
+            .as_array()
+            .expect("debug mappings")
+            .iter()
+            .any(|mapping| mapping["source"] == source),
+        "debug map should retain Axiom source spans for cranelift builds"
+    );
+
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(debug_manifest).expect("read cranelift debug manifest"),
+    )
+    .expect("parse cranelift debug manifest");
+    assert_eq!(manifest["schema_version"], "axiom.stage1.debug_manifest.v1");
+    assert_eq!(manifest["backend"], "cranelift");
+    assert_eq!(manifest["binary"], binary);
+    assert_eq!(manifest["generated_rust"], generated_rust);
+    assert_eq!(manifest["debug_map"], debug_map);
+    assert_eq!(manifest["native_debug"]["producer"], "cranelift");
+    assert_eq!(manifest["native_debug"]["debuginfo"], 0);
+    assert_eq!(manifest["native_debug"]["opt_level"], 0);
+    assert_eq!(manifest["native_debug"]["axiom_dwarf"], false);
+    assert!(
+        manifest["native_debug"]["native_debug_info"]
+            .as_str()
+            .expect("native debug info")
+            .contains("does not emit native Axiom DWARF yet")
+    );
+    assert!(
+        manifest.get("rustc").is_none(),
+        "cranelift debug manifests should not claim rustc debug settings"
+    );
+    assert!(
+        manifest["source_files"]
+            .as_array()
+            .expect("source files")
+            .iter()
+            .any(|source_file| source_file["path"] == source
+                && source_file["mapping_count"].as_u64().unwrap_or(0) > 0),
+        "debug manifest should count Axiom source mappings for cranelift builds"
+    );
+
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift debug binary");
+    assert!(
+        run.status.success(),
+        "cranelift debug binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "hello from stage1\n42\ntrue\n"
+    );
+}
+
 fn copy_fixture(relative: &str, destination: &Path) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/hello")
