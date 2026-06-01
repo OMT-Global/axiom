@@ -6133,6 +6133,13 @@ fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOut
                 format!("failed to write {}: {err}", html_path.display()),
             )
         })?;
+    } else if html_path.exists() {
+        fs::remove_file(&html_path).map_err(|err| {
+            Diagnostic::new(
+                "doc",
+                format!("failed to remove {}: {err}", html_path.display()),
+            )
+        })?;
     }
     let capabilities = project_capabilities(path).unwrap_or_default();
     let functions = items
@@ -7607,6 +7614,8 @@ return "ok"
 "#,
         )
         .expect("write source");
+
+        fs::write(project.join("dist/docs/index.html"), "stale html").expect("write stale html");
 
         let output = generate_docs(&project, &project.join("dist/docs"), false)
             .expect("generate markdown docs");
