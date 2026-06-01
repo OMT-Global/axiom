@@ -7581,6 +7581,43 @@ mod tests {
     }
 
     #[test]
+    fn doc_markdown_mode_skips_html_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("doc-md-only");
+        fs::create_dir_all(project.join("src")).expect("mkdir");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "doc-md-only"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+"#,
+        )
+        .expect("write manifest");
+        fs::write(project.join("axiom.lock"), "version = 1\n").expect("write lock");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"/// Handles a request.
+pub fn route(path: string): string {
+return "ok"
+}
+"#,
+        )
+        .expect("write source");
+
+        let output = generate_docs(&project, &project.join("dist/docs"), false)
+            .expect("generate markdown docs");
+
+        assert!(output.markdown.ends_with("index.md"));
+        assert!(output.markdown.exists());
+        assert!(!output.html.exists());
+        assert!(!project.join("dist/docs/index.html").exists());
+    }
+
+    #[test]
     fn registry_validate_cli_parses_integrity_options() {
         let cli = Cli::parse_from([
             "axiomc",
