@@ -9,8 +9,9 @@ project_dir="stage1/examples/compiler_properties"
 keep_outputs_writable() {
   local dir="$1"
   while true; do
-    chmod -R u+w "$dir" 2>/dev/null || true
-    sleep 0.1
+    chmod -R u+rwX "$dir" 2>/dev/null || true
+    # Keep generated test artifacts writable while rustc is creating sidecar outputs.
+    sleep 0.01
   done
 }
 
