@@ -25,6 +25,7 @@ enum SpikeValue {
         payloads: Vec<SpikeValue>,
     },
     Tuple(Vec<SpikeValue>),
+    Map(Vec<(SpikeValue, SpikeValue)>),
     Array(Vec<SpikeValue>),
 }
 
@@ -209,21 +210,41 @@ fn eval_expr(
                 .ok_or_else(|| unsupported("tuple index is outside the tuple width")),
             _ => Err(unsupported("tuple indexing requires a tuple value")),
         },
+        Expr::MapLiteral { entries, .. } => {
+            let mut values = Vec::new();
+            for entry in entries {
+                let key = eval_expr(&entry.key, functions, env)?;
+                validate_map_key(&key)?;
+                let value = eval_expr(&entry.value, functions, env)?;
+                insert_map_entry(&mut values, key, value)?;
+            }
+            Ok(SpikeValue::Map(values))
+        }
         Expr::ArrayLiteral { elements, .. } => elements
             .iter()
             .map(|element| eval_expr(element, functions, env))
             .collect::<Result<Vec<_>, _>>()
             .map(SpikeValue::Array),
-        Expr::Index { base, index, .. } => {
-            let index = expect_non_negative_index(eval_expr(index, functions, env)?)?;
-            match eval_expr(base, functions, env)? {
-                SpikeValue::Array(elements) => elements
+        Expr::Index { base, index, .. } => match eval_expr(base, functions, env)? {
+            SpikeValue::Array(elements) => {
+                let index = expect_non_negative_index(eval_expr(index, functions, env)?)?;
+                elements
                     .get(index)
                     .cloned()
-                    .ok_or_else(|| unsupported("array index is outside the array length")),
-                _ => Err(unsupported("array indexing requires an array value")),
+                    .ok_or_else(|| unsupported("array index is outside the array length"))
             }
-        }
+            SpikeValue::Map(entries) => {
+                let key = eval_expr(index, functions, env)?;
+                validate_map_key(&key)?;
+                for (candidate, value) in entries {
+                    if map_keys_equal(&candidate, &key)? {
+                        return Ok(value);
+                    }
+                }
+                Err(unsupported("map key not found"))
+            }
+            _ => Err(unsupported("indexing requires an array or map value")),
+        },
         _ => Err(unsupported(
             "this expression is outside the cranelift hello spike subset",
         )),
@@ -460,6 +481,9 @@ fn eval_call(
     if name == "first" || name == "last" {
         return eval_first_last_call(name, args, functions, env);
     }
+    if name == "contains" || name == "map_contains_key" {
+        return eval_map_contains_call(args, functions, env);
+    }
     let function = functions
         .get(name)
         .ok_or_else(|| unsupported(&format!("unsupported cranelift spike call {name:?}")))?;
@@ -528,6 +552,26 @@ fn eval_first_last_call(
     selected
         .cloned()
         .ok_or_else(|| unsupported(&format!("{name} on an empty array")))
+}
+
+fn eval_map_contains_call(
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+) -> Result<SpikeValue, Diagnostic> {
+    let [map, key] = args else {
+        return Err(unsupported("map contains expects exactly two arguments"));
+    };
+    let entries = match eval_expr(map, functions, env)? {
+        SpikeValue::Map(entries) => entries,
+        _ => return Err(unsupported("map contains expects a map value")),
+    };
+    let key = eval_expr(key, functions, env)?;
+    validate_map_key(&key)?;
+    let contains = entries.iter().try_fold(false, |found, (candidate, _)| {
+        Ok::<_, Diagnostic>(found || map_keys_equal(candidate, &key)?)
+    })?;
+    Ok(SpikeValue::Bool(contains))
 }
 
 fn eval_arithmetic(
@@ -735,6 +779,55 @@ fn expect_non_negative_index(value: SpikeValue) -> Result<usize, Diagnostic> {
     }
 }
 
+fn insert_map_entry(
+    entries: &mut Vec<(SpikeValue, SpikeValue)>,
+    key: SpikeValue,
+    value: SpikeValue,
+) -> Result<(), Diagnostic> {
+    for (candidate, existing) in entries.iter_mut() {
+        if map_keys_equal(candidate, &key)? {
+            *existing = value;
+            return Ok(());
+        }
+    }
+    entries.push((key, value));
+    Ok(())
+}
+
+fn validate_map_key(value: &SpikeValue) -> Result<(), Diagnostic> {
+    match value {
+        SpikeValue::Int(_) | SpikeValue::UInt(_) | SpikeValue::Bool(_) | SpikeValue::Text(_) => {
+            Ok(())
+        }
+        SpikeValue::Tuple(values) => values.iter().try_for_each(validate_map_key),
+        SpikeValue::Float(_) => Err(unsupported(
+            "map float keys are not supported by the cranelift spike",
+        )),
+        SpikeValue::Enum { .. } | SpikeValue::Struct { .. } | SpikeValue::Map(_) | SpikeValue::Array(_) => Err(unsupported(
+            "map keys must be scalar values or scalar tuples in the cranelift spike",
+        )),
+    }
+}
+
+fn map_keys_equal(left: &SpikeValue, right: &SpikeValue) -> Result<bool, Diagnostic> {
+    match (left, right) {
+        (SpikeValue::Int(left), SpikeValue::Int(right)) => Ok(left == right),
+        (SpikeValue::UInt(left), SpikeValue::UInt(right)) => Ok(left == right),
+        (SpikeValue::Bool(left), SpikeValue::Bool(right)) => Ok(left == right),
+        (SpikeValue::Text(left), SpikeValue::Text(right)) => Ok(left == right),
+        (SpikeValue::Tuple(left), SpikeValue::Tuple(right)) if left.len() == right.len() => left
+            .iter()
+            .zip(right.iter())
+            .try_fold(true, |matches, (left, right)| {
+                Ok::<_, Diagnostic>(matches && map_keys_equal(left, right)?)
+            }),
+        (SpikeValue::Tuple(_), SpikeValue::Tuple(_)) => Ok(false),
+        _ => Err(unsupported(
+            "map key types must match in the cranelift spike",
+        )),
+    }
+}
+
 fn render_value(value: &SpikeValue) -> String {
     match value {
         SpikeValue::Int(value) => value.to_string(),
@@ -748,6 +841,7 @@ fn render_value(value: &SpikeValue) -> String {
             variant, payloads, ..
         } => render_enum(variant, payloads),
         SpikeValue::Tuple(values) => render_sequence("(", ")", values),
+        SpikeValue::Map(entries) => render_map(entries),
         SpikeValue::Array(values) => render_sequence("[", "]", values),
     }
 }
@@ -782,6 +876,20 @@ fn render_sequence(open: &str, close: &str, values: &[SpikeValue]) -> String {
         rendered.push_str(&render_value(value));
     }
     rendered.push_str(close);
+    rendered
+}
+
+fn render_map(entries: &[(SpikeValue, SpikeValue)]) -> String {
+    let mut rendered = String::from("{");
+    for (index, (key, value)) in entries.iter().enumerate() {
+        if index > 0 {
+            rendered.push_str(", ");
+        }
+        rendered.push_str(&render_value(key));
+        rendered.push_str(": ");
+        rendered.push_str(&render_value(value));
+    }
+    rendered.push('}');
     rendered
 }
 

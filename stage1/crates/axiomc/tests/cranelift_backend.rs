@@ -490,7 +490,95 @@ fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
     );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
-        "hello from stage1\n42\ntrue\n"
+        "hello from stage1
+42
+true
+"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_builds_map_index_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("map-index");
+    write_map_index_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift map build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift map binary");
+    assert!(
+        run.status.success(),
+        "cranelift map binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "11
+true
+false
+high
+"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_rejects_float_map_keys() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("float-map-key");
+    write_float_map_key_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift float-keyed map build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("map float keys are not supported by the cranelift spike"),
+        "expected float map key diagnostic, got: {combined}"
     );
 }
 
@@ -637,4 +725,42 @@ fn write_array_helpers_project(project: &Path) {
         "let values: [int; 3] = [10, 20, 30]\nprint len(values)\nprint first(values)\nprint last(values)\nprint first(values) + last(values)\n",
     )
     .expect("write array-helpers source");
+}
+
+fn write_map_index_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create map project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-map-index\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write map manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-map-index\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write map lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "let scores: {string: int} = {\"build\": 7, \"deploy\": 9, \"deploy\": 11}\nprint scores[\"deploy\"]\n\nlet available: {string: int} = {\"build\": 7, \"deploy\": 9}\nprint map_contains_key<string, int>(available, \"build\")\n\nlet missing: {string: int} = {\"build\": 7, \"deploy\": 9}\nprint map_contains_key<string, int>(missing, \"test\")\n\nlet labels: {int: string} = {1: \"low\", 2: \"high\"}\nprint labels[2]\n",
+    )
+    .expect("write map source");
+}
+
+fn write_float_map_key_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create float map project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-float-map-key\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write float map manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-float-map-key\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write float map lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "let scores: {f64: int} = {1.5f64: 7}\nprint scores[1.5f64]\n",
+    )
+    .expect("write float map source");
 }
