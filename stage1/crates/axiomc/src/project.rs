@@ -2010,7 +2010,7 @@ fn build_artifacts(
         .is_some_and(|stored| cache_matches(stored, &cache, generated_rust, binary))
     {
         if options.debug {
-            write_debug_artifacts(generated_rust, binary, analyzed)?;
+            write_debug_artifacts(generated_rust, binary, analyzed, options.backend)?;
         }
         write_provenance_artifact(package_root, analyzed, generated_rust, binary)?;
         return Ok(BuildArtifactReport {
@@ -2053,7 +2053,7 @@ fn build_artifacts(
     }
     let compile_ms = started.elapsed().as_millis() as u64;
     if options.debug {
-        write_debug_artifacts(generated_rust, binary, analyzed)?;
+        write_debug_artifacts(generated_rust, binary, analyzed, options.backend)?;
     }
     let mut cache = cache;
     cache.binary_hash = Some(hash_file_bytes(binary)?);
@@ -2478,13 +2478,25 @@ struct DebugSourceMapping {
 #[derive(Debug, Serialize)]
 struct DebugManifest<'a> {
     schema_version: &'static str,
+    backend: NativeBackendKind,
     binary: &'a str,
     binary_hash: String,
     generated_rust: &'a str,
     generated_rust_hash: String,
     debug_map: &'a str,
-    rustc: DebugRustcInfo,
+    native_debug: DebugNativeInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rustc: Option<DebugRustcInfo>,
     source_files: Vec<DebugSourceFile>,
+}
+
+#[derive(Debug, Serialize)]
+struct DebugNativeInfo {
+    producer: &'static str,
+    debuginfo: u8,
+    opt_level: u8,
+    native_debug_info: &'static str,
+    axiom_dwarf: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2507,6 +2519,7 @@ fn write_debug_artifacts(
     generated_rust: &Path,
     binary: &Path,
     analyzed: &AnalyzedProject,
+    backend: NativeBackendKind,
 ) -> Result<(), Diagnostic> {
     let debug_map = debug_source_map_path(generated_rust);
     write_debug_source_map(generated_rust, &debug_map)?;
@@ -2515,6 +2528,7 @@ fn write_debug_artifacts(
         binary,
         &debug_map,
         &debug_manifest_path(generated_rust),
+        backend,
         analyzed,
     )
 }
@@ -2548,6 +2562,7 @@ fn write_debug_manifest(
     binary: &Path,
     debug_map: &Path,
     debug_manifest: &Path,
+    backend: NativeBackendKind,
     analyzed: &AnalyzedProject,
 ) -> Result<(), Diagnostic> {
     let generated_source = fs::read_to_string(generated_rust).map_err(|err| {
@@ -2561,17 +2576,14 @@ fn write_debug_manifest(
     let debug_map_path = debug_map.display().to_string();
     let manifest = DebugManifest {
         schema_version: "axiom.stage1.debug_manifest.v1",
+        backend,
         binary: &binary_path,
         binary_hash: hash_file_bytes(binary)?,
         generated_rust: &generated_rust_path,
         generated_rust_hash: hash_file(generated_rust)?,
         debug_map: &debug_map_path,
-        rustc: DebugRustcInfo {
-            debuginfo: 2,
-            opt_level: 0,
-            native_debug_info: "rustc DWARF points at generated Rust",
-            axiom_dwarf: false,
-        },
+        native_debug: debug_native_info(backend),
+        rustc: rustc_debug_info(backend),
         source_files: debug_source_files(analyzed, &generated_source)?,
     };
     let content = serde_json::to_string_pretty(&manifest).map_err(|err| {
@@ -2583,6 +2595,37 @@ fn write_debug_manifest(
             format!("failed to write {}: {err}", debug_manifest.display()),
         )
     })
+}
+
+fn debug_native_info(backend: NativeBackendKind) -> DebugNativeInfo {
+    match backend {
+        NativeBackendKind::GeneratedRust => DebugNativeInfo {
+            producer: "rustc",
+            debuginfo: 2,
+            opt_level: 0,
+            native_debug_info: "rustc DWARF points at generated Rust",
+            axiom_dwarf: false,
+        },
+        NativeBackendKind::Cranelift => DebugNativeInfo {
+            producer: "cranelift",
+            debuginfo: 0,
+            opt_level: 0,
+            native_debug_info: "cranelift object does not emit native Axiom DWARF yet; sidecar debug map carries Axiom source spans",
+            axiom_dwarf: false,
+        },
+    }
+}
+
+fn rustc_debug_info(backend: NativeBackendKind) -> Option<DebugRustcInfo> {
+    match backend {
+        NativeBackendKind::GeneratedRust => Some(DebugRustcInfo {
+            debuginfo: 2,
+            opt_level: 0,
+            native_debug_info: "rustc DWARF points at generated Rust",
+            axiom_dwarf: false,
+        }),
+        NativeBackendKind::Cranelift => None,
+    }
 }
 
 fn debug_source_files(

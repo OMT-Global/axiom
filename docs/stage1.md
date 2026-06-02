@@ -179,8 +179,8 @@ requested/resolved target, debug mode, package lockfile, lockfile hash, and
 aggregate source hash inspection. Debug builds report `debug_map`, a JSON
 sidecar that maps generated Rust statement lines back to Axiom file/line/column
 positions, plus `debug_manifest`, a JSON sidecar that binds the native binary
-hash, generated Rust hash, rustc debug-mode settings, source file hashes, and
-mapping counts for debugger/tooling consumers. See
+hash, generated Rust hash, backend-native debug settings, source file hashes,
+and mapping counts for debugger/tooling consumers. See
 `docs/stage1-debug-map.md` for the LLDB/GDB sidecar translation workflow.
 `axiomc build --timings` prints total build time, cache hit/miss counts, and
 per-package compile timing/cache status for the incremental generated-Rust
@@ -323,6 +323,8 @@ still far from the stated 1.0 target for service and agent workloads.
   generated-Rust backend) and arrays plus
   `first(...)`/`last(...)` over in-memory arrays, and scalar branching, so this
   is not closure for #105 or the later full-surface native backend slices.
+  Cranelift debug builds emit the shared debug map and manifest sidecars, but
+  the manifest explicitly reports that native Axiom DWARF is not emitted yet.
 - Generated-Rust builds now use a persistent per-artifact cache keyed by
   compiler version, target, debug mode, manifest/lockfile hash, rendered Rust,
   module source hashes, and dependency imports. Cache hits skip `rustc`, cache

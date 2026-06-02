@@ -12664,9 +12664,14 @@ print takes_two(three)
         )
         .expect("parse debug manifest");
         assert_eq!(manifest["schema_version"], "axiom.stage1.debug_manifest.v1");
+        assert_eq!(manifest["backend"], "generated-rust");
         assert_eq!(manifest["binary"], debug.binary);
         assert_eq!(manifest["generated_rust"], debug.generated_rust);
         assert_eq!(manifest["debug_map"], debug_map.display().to_string());
+        assert_eq!(manifest["native_debug"]["producer"], "rustc");
+        assert_eq!(manifest["native_debug"]["debuginfo"], 2);
+        assert_eq!(manifest["native_debug"]["opt_level"], 0);
+        assert_eq!(manifest["native_debug"]["axiom_dwarf"], false);
         assert_eq!(manifest["rustc"]["debuginfo"], 2);
         assert_eq!(manifest["rustc"]["opt_level"], 0);
         assert_eq!(manifest["rustc"]["axiom_dwarf"], false);
