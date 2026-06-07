@@ -41,4 +41,5 @@ capabilities, effects, evidence, artifacts, or backend contracts:
 ## Related Docs
 
 - [Axiom Vision](vision.md)
+- [Compiler Package Graph Boundary](compiler-package-graph.md)
 - [Implementation Language Positioning](positioning/implementation-languages.md)
