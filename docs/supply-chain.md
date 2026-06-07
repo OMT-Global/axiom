@@ -6,6 +6,14 @@ surface for lockfile integrity, signed package verification when applicable,
 offline dependency verification, reproducible release build inputs, and SBOM
 emission.
 
+This gate verifies the temporary Rust-hosted toolchain. AxiOM package identity
+is still defined by `axiom.toml` and `axiom.lock`, not Cargo metadata. The
+package graph boundary fixture is checked separately with:
+
+```bash
+make stage1-package-graph-boundary
+```
+
 ## Local Command
 
 ```bash
@@ -32,6 +40,9 @@ The target runs `scripts/ci/run-toolchain-supply-chain.sh`.
 - `scripts/ci/emit-stage1-sbom.py` emits an SPDX JSON document at
   `stage1/target/sbom/stage1.spdx.json`, and CI uploads that file as the
   `stage1-sbom` artifact.
+- `make stage1-package-graph-boundary` proves the self-hosting package graph
+  fixture is derived from `axiom.toml` and `axiom.lock` and rejects
+  Cargo-derived graph outputs.
 
 ## Runner Contract
 

@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omt-global.github.io/axiom/schemas/axiom.compiler.package_graph.v1.schema.json",
+  "title": "Axiom compiler package graph contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract",
+    "inputs",
+    "outputs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "axiom.compiler.package_graph.v1"
+    },
+    "contract": {
+      "const": "compiler.package_graph"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "manifest",
+        "lockfile"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/path"
+        },
+        "manifest": {
+          "$ref": "#/$defs/path"
+        },
+        "lockfile": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "packages",
+        "lockfile_integrity",
+        "hash_inputs"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/path"
+        },
+        "packages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/package"
+          }
+        },
+        "lockfile_integrity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "packages"
+          ],
+          "properties": {
+            "version": {
+              "const": 1
+            },
+            "packages": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/lockedPackage"
+              }
+            }
+          }
+        },
+        "hash_inputs": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "enum": [
+              "manifest_hash",
+              "lockfile_hash",
+              "source_hashes",
+              "compiler_snapshot_hash",
+              "registry_index_hash"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "localDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "lockedPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "source"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "source",
+        "root",
+        "manifest",
+        "lockfile",
+        "entry",
+        "out_dir",
+        "workspace_members",
+        "local_dependencies"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root": {
+          "$ref": "#/$defs/path"
+        },
+        "manifest": {
+          "$ref": "#/$defs/path"
+        },
+        "lockfile": {
+          "$ref": "#/$defs/path"
+        },
+        "entry": {
+          "$ref": "#/$defs/path"
+        },
+        "out_dir": {
+          "$ref": "#/$defs/path"
+        },
+        "workspace_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/path"
+          },
+          "uniqueItems": true
+        },
+        "local_dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/localDependency"
+          }
+        }
+      }
+    }
+  }
+}

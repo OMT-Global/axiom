@@ -3,6 +3,12 @@
 Stage1 packages use `axiom.toml` with a deterministic `axiom.lock` lockfile.
 The `axiom.pkg` manifest format is no longer supported.
 
+Package graph truth is AxiOM-owned: `axiom.toml`, `axiom.lock`, local source
+files, workspace members, and future registry integrity records define package
+identity. Cargo remains the current developer host for running the Rust stage1
+compiler, but Cargo metadata is not part of the package graph contract. See
+[Compiler Package Graph Boundary](compiler-package-graph.md).
+
 ## Common Commands
 
 ```bash
@@ -64,6 +70,10 @@ Checked-in editor and agent metadata lives under `stage1/schemas/`:
 - `stage1/schemas/axiom-intent-ir-v0.schema.json` describes the first
   agent-facing Intent IR / semantic graph contract. See
   [intent-ir-v0.md](intent-ir-v0.md).
+- `stage1/compiler-contracts/schemas/axiom.compiler.package_graph.v1.schema.json`
+  describes the self-hosting package graph contract used by
+  `compiler.package_graph`. See
+  [Compiler Package Graph Boundary](compiler-package-graph.md).
 
 These schemas are intentionally metadata for editor completion, validation, and
 agent contract discovery. The compiler remains the source of truth for semantic

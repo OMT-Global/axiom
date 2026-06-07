@@ -1,0 +1,83 @@
+{
+  "schema_version": "axiom.compiler.package_graph.v1",
+  "contract": "compiler.package_graph",
+  "inputs": {
+    "root": "stage1/examples/workspace",
+    "manifest": "stage1/examples/workspace/axiom.toml",
+    "lockfile": "stage1/examples/workspace/axiom.lock"
+  },
+  "outputs": {
+    "root": "stage1/examples/workspace",
+    "packages": [
+      {
+        "name": "workspace-stage1",
+        "version": "0.1.0",
+        "source": "path",
+        "root": "stage1/examples/workspace",
+        "manifest": "stage1/examples/workspace/axiom.toml",
+        "lockfile": "stage1/examples/workspace/axiom.lock",
+        "entry": "src/main.ax",
+        "out_dir": "dist",
+        "workspace_members": [
+          "members/core",
+          "members/util"
+        ],
+        "local_dependencies": [
+          {
+            "name": "core",
+            "path": "members/core"
+          }
+        ]
+      },
+      {
+        "name": "core-member",
+        "version": "0.1.0",
+        "source": "path:members/core",
+        "root": "stage1/examples/workspace/members/core",
+        "manifest": "stage1/examples/workspace/members/core/axiom.toml",
+        "lockfile": "stage1/examples/workspace/axiom.lock",
+        "entry": "src/main.ax",
+        "out_dir": "dist",
+        "workspace_members": [],
+        "local_dependencies": []
+      },
+      {
+        "name": "util-member",
+        "version": "0.1.0",
+        "source": "path:members/util",
+        "root": "stage1/examples/workspace/members/util",
+        "manifest": "stage1/examples/workspace/members/util/axiom.toml",
+        "lockfile": "stage1/examples/workspace/axiom.lock",
+        "entry": "src/main.ax",
+        "out_dir": "dist",
+        "workspace_members": [],
+        "local_dependencies": []
+      }
+    ],
+    "lockfile_integrity": {
+      "version": 1,
+      "packages": [
+        {
+          "name": "workspace-stage1",
+          "version": "0.1.0",
+          "source": "path"
+        },
+        {
+          "name": "core-member",
+          "version": "0.1.0",
+          "source": "path:members/core"
+        },
+        {
+          "name": "util-member",
+          "version": "0.1.0",
+          "source": "path:members/util"
+        }
+      ]
+    },
+    "hash_inputs": [
+      "manifest_hash",
+      "lockfile_hash",
+      "source_hashes"
+    ]
+  }
+}
