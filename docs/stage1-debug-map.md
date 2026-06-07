@@ -14,6 +14,9 @@ This is an interim sidecar bridge. Generated-Rust DWARF line tables still point
 at generated Rust, and Cranelift debug builds do not emit Axiom DWARF yet, so
 debugger integrations should translate generated Rust frames through the debug
 map instead of assuming the binary contains native `.ax` line records.
+This debug sidecar does not make generated Rust a required direct-native
+provenance artifact; provenance for direct-native builds should follow the
+native artifacts actually emitted by the backend.
 
 ## Build
 
