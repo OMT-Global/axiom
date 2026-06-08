@@ -2008,6 +2008,9 @@ fn build_artifacts(
     }
     ensure_output_path_stays_inside_package(package_root, binary, "binary output")?;
     ensure_writable_output_parent(binary, "binary output")?;
+    let cache_path = build_cache_path(generated_rust);
+    ensure_output_path_stays_inside_package(package_root, &cache_path, "build cache output")?;
+    ensure_writable_output_parent(&cache_path, "build cache output")?;
     let generated_source = generated_rust_source_for_backend(package_root, analyzed, options)?;
     let backend_input_hash = backend_input_hash(analyzed, generated_source.as_deref())?;
     let cache = build_cache_file(
@@ -2019,7 +2022,6 @@ fn build_artifacts(
         resolved_target.map(str::to_string),
         options.debug,
     )?;
-    let cache_path = build_cache_path(generated_rust);
     if read_build_cache(&cache_path)
         .as_ref()
         .is_some_and(|stored| {

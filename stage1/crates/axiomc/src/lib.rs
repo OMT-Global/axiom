@@ -12839,6 +12839,10 @@ print takes_two(three)
             !legacy_generated.exists(),
             "direct-native debug builds must not write generated Rust"
         );
+        assert!(
+            legacy_generated.with_extension("build-cache.toml").exists(),
+            "direct-native builds should still create the cache sidecar"
+        );
         let debug_map = PathBuf::from(output.debug_map.as_ref().expect("debug map path"));
         let debug_manifest =
             PathBuf::from(output.debug_manifest.as_ref().expect("debug manifest path"));
