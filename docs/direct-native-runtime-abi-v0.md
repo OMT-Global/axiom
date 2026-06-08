@@ -176,10 +176,11 @@ stderr streams from the native binary. Stdin reads, `std/log.ax` wrappers, and
 broader streaming/runtime buffering remain tracked by issue #928.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
-`now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus denial evidence
-that a package without the `clock` capability fails before backend lowering.
-Full runtime-time clock/sleep execution, timer scheduling, async clock
-integration, and audit parity remain open under #928.
+`now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a
+package without the `clock` capability fails before backend lowering and that
+nonzero sleep fails fast instead of waiting during compiler-side spike
+evaluation. Full runtime-time clock/sleep execution, timer scheduling, async
+clock integration, and audit parity remain open under #928.
 
 ## Rust Capture Check
 

@@ -820,12 +820,12 @@ fn eval_clock_sleep_ms_call(
     if milliseconds < 0 {
         return Ok(SpikeValue::Int(-1));
     }
-    if milliseconds > 0 {
-        return Err(unsupported(
-            "nonzero clock_sleep_ms is not supported by the cranelift spike",
-        ));
+    if milliseconds == 0 {
+        return Ok(SpikeValue::Int(0));
     }
-    Ok(SpikeValue::Int(0))
+    Err(unsupported(
+        "nonzero clock_sleep_ms is not supported by the cranelift spike",
+    ))
 }
 
 fn current_time_ms() -> Result<i64, Diagnostic> {

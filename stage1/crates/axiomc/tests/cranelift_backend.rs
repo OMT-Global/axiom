@@ -1409,6 +1409,7 @@ fn cranelift_backend_rejects_env_denial_before_backend_lowering() {
     );
 }
 
+
 fn copy_fixture(relative: &str, destination: &Path) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/hello")
