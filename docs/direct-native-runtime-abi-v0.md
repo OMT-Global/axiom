@@ -93,6 +93,11 @@ now has denial evidence: a package that calls `std/net.ax`
 `tcp_listen_loopback_once(...)` without the `net` capability must receive the
 public manifest-policy denial before any backend-specific lowering diagnostic.
 
+The filesystem write row is still blocked for positive direct-native runtime
+execution, but now has denial evidence: a package with `fs = true` and
+`"fs:write" = false` that calls `std/fs.ax` `write_file(...)` must receive the
+public manifest-policy denial before any backend-specific lowering diagnostic.
+
 The DNS resolve row is still blocked for positive direct-native runtime
 execution, but now has denial evidence: a package that calls `std/net.ax`
 `resolve(...)` without the `net` capability must receive the public
@@ -107,6 +112,12 @@ The borrowed-slice row has partial direct-native evidence: the Cranelift spike
 now evaluates array-backed borrowed slices through `len`, `first`, `last`,
 indexing, and function returns. Broader borrowed-slice aliasing and host ABI
 coverage remain tracked by issue #928.
+
+The `env.read` row now has partial Cranelift evidence for `std/env.ax`
+`get_env` on present and missing environment names, plus denial evidence that a
+package without the `env` capability fails before backend lowering. Full
+runtime-time lookup, manifest allowlist parity, and audit parity remain open
+under #928.
 
 The sync-primitives row has partial direct-native evidence: the Cranelift spike
 now evaluates ownership-shaped `std/sync.ax` mutex, once, and channel wrappers
