@@ -193,7 +193,14 @@
           "$ref": "#/$defs/path"
         },
         "generated_rust": {
-          "$ref": "#/$defs/path"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/path"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "debug_map": {
           "type": [
@@ -268,7 +275,14 @@
           "$ref": "#/$defs/path"
         },
         "generated_rust": {
-          "$ref": "#/$defs/path"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/path"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "ok": {
           "type": "boolean"
