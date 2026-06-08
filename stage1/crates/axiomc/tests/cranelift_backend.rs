@@ -577,21 +577,13 @@ fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["debug"], true);
+    assert!(payload["generated_rust"].is_null());
     let binary = payload["binary"].as_str().expect("binary path");
-    let generated_rust = payload["generated_rust"]
-        .as_str()
-        .expect("generated Rust path");
     let debug_map = payload["debug_map"].as_str().expect("debug map path");
     let debug_manifest = payload["debug_manifest"]
         .as_str()
         .expect("debug manifest path");
     assert!(Path::new(binary).exists(), "cranelift binary exists");
-    assert!(
-        Path::new(generated_rust)
-            .with_extension("cranelift.o")
-            .exists(),
-        "cranelift object exists"
-    );
     assert!(Path::new(debug_map).exists(), "debug map exists");
     assert!(Path::new(debug_manifest).exists(), "debug manifest exists");
 
@@ -604,30 +596,43 @@ fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
     let map: Value =
         serde_json::from_str(&fs::read_to_string(debug_map).expect("read cranelift debug map"))
             .expect("parse cranelift debug map");
+    assert_eq!(
+        map["schema_version"],
+        "axiom.stage1.direct_native.debug_map.v1"
+    );
+    assert_eq!(map["backend"], "cranelift");
+    assert_eq!(map["binary"], binary);
     assert!(
-        map["mappings"]
+        map["source_spans"]
             .as_array()
-            .expect("debug mappings")
+            .expect("direct-native debug source spans")
             .iter()
-            .any(|mapping| mapping["source"] == source),
-        "debug map should retain Axiom source spans for cranelift builds"
+            .any(|span| span["source"] == source),
+        "direct-native debug map should retain Axiom source spans for cranelift builds"
     );
 
     let manifest: Value = serde_json::from_str(
         &fs::read_to_string(debug_manifest).expect("read cranelift debug manifest"),
     )
     .expect("parse cranelift debug manifest");
-    assert_eq!(manifest["schema_version"], "axiom.stage1.debug_manifest.v1");
+    assert_eq!(
+        manifest["schema_version"],
+        "axiom.stage1.direct_native.debug_manifest.v1"
+    );
+    assert_eq!(manifest["artifact_class"], "native_binary");
     assert_eq!(manifest["backend"], "cranelift");
     assert_eq!(manifest["binary"], binary);
-    assert_eq!(manifest["generated_rust"], generated_rust);
-    assert!(
-        manifest["generated_rust_hash"]
-            .as_str()
-            .is_some_and(|hash| !hash.is_empty()),
-        "debug manifest v1 should keep generated_rust_hash in the integrity envelope"
-    );
+    assert!(manifest.get("generated_rust").is_none());
+    assert!(manifest.get("generated_rust_hash").is_none());
     assert_eq!(manifest["debug_map"], debug_map);
+    assert!(
+        manifest["source_files"]
+            .as_array()
+            .expect("direct-native manifest source files")
+            .iter()
+            .any(|file| file["path"] == source),
+        "direct-native debug manifest should retain Axiom source files"
+    );
     assert_eq!(manifest["native_debug"]["producer"], "cranelift");
     assert_eq!(manifest["native_debug"]["debuginfo"], 0);
     assert_eq!(manifest["native_debug"]["opt_level"], 0);
