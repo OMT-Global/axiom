@@ -93,6 +93,11 @@ now has denial evidence: a package that calls `std/net.ax`
 `tcp_listen_loopback_once(...)` without the `net` capability must receive the
 public manifest-policy denial before any backend-specific lowering diagnostic.
 
+The filesystem write row is still blocked for positive direct-native runtime
+execution, but now has denial evidence: a package with `fs = true` and
+`"fs:write" = false` that calls `std/fs.ax` `write_file(...)` must receive the
+public manifest-policy denial before any backend-specific lowering diagnostic.
+
 The direct-native crypto hash slice is still marked partial: the Cranelift
 spike can build and run `std/crypto_hash.ax` `sha256(...)` without generated
 Rust, and crypto capability denials still happen before backend lowering. MAC,
