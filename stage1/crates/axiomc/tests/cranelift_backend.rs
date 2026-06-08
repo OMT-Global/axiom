@@ -872,6 +872,44 @@ fn cranelift_backend_rejects_capability_denial_before_backend_lowering() {
 }
 
 #[test]
+fn cranelift_backend_rejects_tcp_denial_before_backend_lowering() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("tcp-denied");
+    write_tcp_denial_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift tcp denied build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].net = true"),
+        "expected net capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
+#[test]
 fn cranelift_backend_rejects_net_resolve_denial_before_backend_lowering() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("net-resolve-denied");
@@ -1168,6 +1206,55 @@ fn write_sync_primitives_project(project: &Path) {
         "import \"std/sync.ax\"\n\nlet counter: Mutex<int> = mutex<int>(1)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 2)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nprint into_inner<int>(final_guard)\n\nlet ready: Once<string> = once_with<string>(\"configured\")\nprint once_is_set<string>(ready)\n\nlet empty: Once<int> = once<int>(None)\nmatch once_take<int>(empty) {\nSome(value) {\nprint value\n}\nNone {\nprint \"empty\"\n}\n}\n\nlet channel: Channel<string> = channel<string>(None)\nlet sent: Channel<string> = send<string>(channel, \"message\")\nmatch try_recv<string>(sent) {\nSome(message) {\nprint message\n}\nNone {\nprint \"missing\"\n}\n}\n",
     )
     .expect("write sync primitives source");
+}
+
+fn write_tcp_denial_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create tcp denied project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]
+name = "cranelift-tcp-denied"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+",
+    )
+    .expect("write tcp denied manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1
+
+[[package]]
+name = "cranelift-tcp-denied"
+version = "0.1.0"
+source = "path"
+",
+    )
+    .expect("write tcp denied lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import "std/net.ax"
+match tcp_listen_loopback_once("pong", 1000) {
+Some(_port) {
+print true
+}
+None {
+print false
+}
+}
+",
+    )
+    .expect("write tcp denied source");
 }
 
 fn write_fs_denial_project(project: &Path) {
