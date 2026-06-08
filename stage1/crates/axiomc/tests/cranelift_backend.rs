@@ -918,7 +918,25 @@ fn write_env_read_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create env project src");
     fs::write(
         project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-env-read\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = true\nclock = false\ncrypto = false\n\n[unsafe_rationale]\nenv = \"Cranelift ABI regression covers direct-native env.read behavior for issue 928.\"\n",
+        r#"[package]
+name = "cranelift-env-read"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = true
+clock = false
+crypto = false
+
+[unsafe_rationale]
+env = "Cranelift ABI regression covers direct-native env.read behavior for issue 928."
+"#,
     )
     .expect("write env manifest");
     fs::write(
@@ -928,7 +946,24 @@ fn write_env_read_project(project: &Path) {
     .expect("write env lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/env.ax\"\nmatch get_env(\"AXIOM_CRANELIFT_ENV_READ\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing value\"\n}\n}\nmatch get_env(\"__AXIOM_CRANELIFT_ENV_MISSING__\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\n",
+        r#"import "std/env.ax"
+match get_env("AXIOM_CRANELIFT_ENV_READ") {
+Some(value) {
+print value
+}
+None {
+print "missing value"
+}
+}
+match get_env("__AXIOM_CRANELIFT_ENV_MISSING__") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+"#,
     )
     .expect("write env source");
 }
@@ -937,7 +972,22 @@ fn write_env_denial_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create env denied project src");
     fs::write(
         project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-env-denied\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        r#"[package]
+name = "cranelift-env-denied"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
     )
     .expect("write env denied manifest");
     fs::write(
@@ -947,7 +997,16 @@ fn write_env_denial_project(project: &Path) {
     .expect("write env denied lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/env.ax\"\nmatch get_env(\"AXIOM_CRANELIFT_ENV_READ\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\n",
+        r#"import "std/env.ax"
+match get_env("AXIOM_CRANELIFT_ENV_READ") {
+Some(value) {
+print value
+}
+None {
+print "missing"
+}
+}
+"#,
     )
     .expect("write env denied source");
 }
