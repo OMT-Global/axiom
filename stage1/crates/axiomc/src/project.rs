@@ -7907,6 +7907,55 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn generated_rust_cache_matches_hashed_source_not_raw_source() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let generated_rust = dir.path().join("dist/main.rs");
+        let binary = dir.path().join("dist/main");
+        fs::create_dir_all(generated_rust.parent().expect("generated parent"))
+            .expect("create dist");
+        let generated_source = "fn main() { println!(\"cache\"); }\n";
+        fs::write(&generated_rust, generated_source).expect("write generated rust");
+        fs::write(&binary, b"binary").expect("write binary");
+
+        let stored = BuildCacheFile {
+            version: BUILD_CACHE_VERSION,
+            backend: NativeBackendKind::GeneratedRust,
+            compiler: String::from("test-generated-rust"),
+            target: None,
+            debug: false,
+            manifest_hash: String::from("manifest"),
+            lockfile_hash: String::from("lockfile"),
+            rust_hash: hash_text(generated_source),
+            binary_hash: Some(hash_file_bytes(&binary).expect("binary hash")),
+            modules: Vec::new(),
+        };
+        let expected = BuildCacheFile {
+            binary_hash: None,
+            ..stored.clone()
+        };
+
+        assert!(cache_matches(
+            &stored,
+            &expected,
+            NativeBackendKind::GeneratedRust,
+            &generated_rust,
+            &binary,
+        ));
+
+        let raw_source_expected = BuildCacheFile {
+            rust_hash: generated_source.to_string(),
+            ..expected
+        };
+        assert!(!cache_matches(
+            &stored,
+            &raw_source_expected,
+            NativeBackendKind::GeneratedRust,
+            &generated_rust,
+            &binary,
+        ));
+    }
+
     #[cfg(not(windows))]
     #[test]
     fn cranelift_build_cache_creates_output_parent_without_generated_rust() {
