@@ -131,6 +131,11 @@ predicates, fallback unwrap helpers, direct match arms over `Result<T, E>`
 values, scalar payloads, string errors, and struct payloads. Broader runtime
 ABI and capability-shim coverage remain tracked by issue #928.
 
+The owned move-state row has partial direct-native evidence: the Cranelift
+spike builds and runs projection-sensitive owned field moves while preserving
+access to disjoint sibling projections. Broader move-state, lifetime, and host
+ABI coverage remain tracked by issue #928.
+
 ## Rust Capture Check
 
 This ABI describes Axiom runtime values and host-service effects. Rust may

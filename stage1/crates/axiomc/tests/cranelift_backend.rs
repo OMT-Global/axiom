@@ -500,6 +500,49 @@ fn cranelift_backend_builds_borrowed_slice_binary() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_builds_owned_move_state_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("owned-move-state");
+    write_owned_move_state_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift owned move-state build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift owned move-state binary");
+    assert!(
+        run.status.success(),
+        "cranelift owned move-state binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\nleft\n");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -960,6 +1003,39 @@ fn cranelift_backend_rejects_tcp_denial_before_backend_lowering() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("tcp-denied");
     write_tcp_denial_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift tcp denied build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].net = true"),
+        "expected net capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
 #[cfg(not(windows))]
 #[test]
 fn cranelift_backend_builds_env_read_binary() {
@@ -1027,7 +1103,6 @@ fn cranelift_backend_rejects_env_denial_before_backend_lowering() {
 
     assert!(
         !output.status.success(),
-        "cranelift tcp denied build unexpectedly succeeded: stdout={} stderr={}",
         "cranelift env-denied build unexpectedly succeeded: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -1038,12 +1113,12 @@ fn cranelift_backend_rejects_env_denial_before_backend_lowering() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        combined.contains("requires [capabilities].net = true"),
-        "expected net capability denial before backend lowering, got: {combined}"
+        combined.contains("requires [capabilities].env"),
+        "expected env capability denial before backend lowering, got: {combined}"
     );
     assert!(
         !combined.contains("unsupported by --backend cranelift spike"),
-        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+        "env capability denial should happen before cranelift unsupported-feature lowering: {combined}"
     );
 }
 
@@ -1082,50 +1157,6 @@ fn cranelift_backend_rejects_fs_write_denial_before_backend_lowering() {
     assert!(
         !combined.contains("unsupported by --backend cranelift spike"),
         "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
-    );
-}
-
-#[test]
-fn cranelift_backend_rejects_process_denial_before_backend_lowering() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("process-denied");
-    write_process_denial_project(&project);
-
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-
-    assert!(
-        !output.status.success(),
-        "cranelift process denied build unexpectedly succeeded: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        combined.contains("requires [capabilities].process = true"),
-        "expected process capability denial before backend lowering, got: {combined}"
-    );
-    assert!(
-        !combined.contains("unsupported by --backend cranelift spike"),
-        "capability denial must happen before backend lowering: {combined}"
-        combined.contains("requires [capabilities].env"),
-        "expected env capability denial before backend lowering, got: {combined}"
-    );
-    assert!(
-        !combined.contains("unsupported by --backend cranelift spike"),
-        "env capability denial should happen before cranelift unsupported-feature lowering: {combined}"
     );
 }
 
@@ -1236,25 +1267,6 @@ fn write_enum_match_project(project: &Path) {
     .expect("write enum match source");
 }
 
-fn write_result_helpers_project(project: &Path) {
-    fs::create_dir_all(project.join("src")).expect("create result helpers project src");
-    fs::write(
-        project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-result-helpers\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
-    )
-    .expect("write result helpers manifest");
-    fs::write(
-        project.join("axiom.lock"),
-        "version = 1\n\n[[package]]\nname = \"cranelift-result-helpers\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
-    )
-    .expect("write result helpers lockfile");
-    fs::write(
-        project.join("src/main.ax"),
-        "import \"std/outcome.ax\"\n\nstruct BuildInfo {\nlabel: string\n}\n\nfn load(ready: bool): Result<BuildInfo, string> {\nif ready {\nreturn Ok(BuildInfo { label: \"built\" })\n}\nreturn Err(\"boom\")\n}\n\nfn render(result: Result<BuildInfo, string>): string {\nmatch result {\nOk(info) {\nreturn info.label\n}\nErr(message) {\nreturn message\n}\n}\n}\n\nlet ok_check: Result<int, string> = Ok(7)\nlet err_check: Result<int, string> = Err(\"missing\")\nlet ok_value: Result<int, string> = Ok(7)\nlet err_value: Result<int, string> = Err(\"missing\")\nprint result_is_ok<int, string>(ok_check)\nprint result_is_err<int, string>(err_check)\nprint result_unwrap_or<int, string>(ok_value, 0)\nprint result_unwrap_or<int, string>(err_value, 9)\nprint render(load(true))\nprint render(load(false))\n",
-    )
-    .expect("write result helpers source");
-}
-
 fn write_struct_field_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create struct project src");
     fs::write(
@@ -1272,6 +1284,25 @@ fn write_struct_field_project(project: &Path) {
         "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\n",
     )
     .expect("write struct source");
+}
+
+fn write_result_helpers_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create result-helpers project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-result-helpers\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write result-helpers manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-result-helpers\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write result-helpers lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/outcome.ax\"\n\nstruct Payload {\nlabel: string\ncount: int\n}\n\nfn choose(flag: bool): Result<int, string> {\nif flag {\nreturn Ok(7)\n}\nreturn Err(\"boom\")\n}\n\nlet ok_predicate: Result<int, string> = choose(true)\nlet err_predicate: Result<int, string> = choose(false)\nlet ok_fallback: Result<int, string> = choose(true)\nlet err_fallback: Result<int, string> = choose(false)\nlet ok_match: Result<int, string> = choose(true)\nlet err_match: Result<int, string> = choose(false)\nprint result_is_ok<int, string>(ok_predicate)\nprint result_is_err<int, string>(err_predicate)\nprint result_unwrap_or<int, string>(ok_fallback, 1)\nprint result_unwrap_or<int, string>(err_fallback, 9)\nmatch ok_match {\nOk(value) {\nprint \"built\"\n}\nErr(message) {\nprint message\n}\n}\nmatch err_match {\nOk(value) {\nprint value\n}\nErr(message) {\nprint message\n}\n}\nlet payload: Result<Payload, string> = Ok(Payload { label: \"package\", count: 2 })\nmatch payload {\nOk(value) {\nlet total: int = value.count + 5\n}\nErr(message) {\nprint message\n}\n}\n",
+    )
+    .expect("write result-helpers source");
 }
 
 fn write_array_helpers_project(project: &Path) {
@@ -1329,6 +1360,25 @@ fn write_process_status_project(project: &Path) {
         "import \"std/process.ax\"\nprint run_status(\"/usr/bin/true\")\nprint run_status(\"/usr/bin/false\")\n",
     )
     .expect("write process-status source");
+}
+
+fn write_owned_move_state_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create owned move project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-owned-move-state\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write owned move manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-owned-move-state\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write owned move lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "struct Pair {\nname: string\nvalues: [int]\n}\n\nlet pair: Pair = Pair { name: \"left\", values: [1, 2, 3] }\nlet moved: [int] = pair.values\nprint len(moved)\nprint pair.name\n",
+    )
+    .expect("write owned move source");
 }
 
 fn write_map_index_project(project: &Path) {
@@ -1447,6 +1497,25 @@ fn write_tcp_denial_project(project: &Path) {
     .expect("write tcp denied source");
 }
 
+fn write_http_client_denial_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create http client denied project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-http-client-denied\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write http client denied manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-http-client-denied\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write http client denied lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/http.ax\"\nmatch get(\"https://example.com\") {\nOk(response) {\nprint response.status\n}\nErr(message) {\nprint message\n}\n}\n",
+    )
+    .expect("write http client denied source");
+}
+
 fn write_process_denial_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create process denied project src");
     fs::write(
@@ -1483,6 +1552,8 @@ fn write_fs_write_denial_project(project: &Path) {
         "import \"std/fs.ax\"\nprint write_file(\"out.txt\", \"content\")\n",
     )
     .expect("write fs write denied source");
+}
+
 fn write_env_read_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create env project src");
     fs::write(
