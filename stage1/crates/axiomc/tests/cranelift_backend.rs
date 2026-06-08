@@ -1695,6 +1695,25 @@ fn write_fs_denial_project(project: &Path) {
     .expect("write fs denied source");
 }
 
+fn write_http_client_denial_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create http client denied project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-http-client-denied\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write http client denied manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-http-client-denied\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write http client denied lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/http.ax\"\nmatch get(\"http://127.0.0.1/\") {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+    )
+    .expect("write http client denied source");
+}
+
 fn write_tcp_denial_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create tcp denied project src");
     fs::write(
@@ -1712,25 +1731,6 @@ fn write_tcp_denial_project(project: &Path) {
         "import \"std/net.ax\"\nmatch tcp_listen_loopback_once(\"pong\", 1000) {\nSome(_port) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
     )
     .expect("write tcp denied source");
-}
-
-fn write_http_client_denial_project(project: &Path) {
-    fs::create_dir_all(project.join("src")).expect("create http client denied project src");
-    fs::write(
-        project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-http-client-denied\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
-    )
-    .expect("write http client denied manifest");
-    fs::write(
-        project.join("axiom.lock"),
-        "version = 1\n\n[[package]]\nname = \"cranelift-http-client-denied\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
-    )
-    .expect("write http client denied lockfile");
-    fs::write(
-        project.join("src/main.ax"),
-        "import \"std/http.ax\"\nmatch get(\"https://example.com\") {\nOk(response) {\nprint response.status\n}\nErr(message) {\nprint message\n}\n}\n",
-    )
-    .expect("write http client denied source");
 }
 
 fn write_udp_denial_project(project: &Path) {
