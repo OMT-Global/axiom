@@ -484,6 +484,9 @@ fn eval_call(
     if name == "contains" || name == "map_contains_key" {
         return eval_map_contains_call(args, functions, env);
     }
+    if name == "env_get" {
+        return eval_env_get_call(args, functions, env);
+    }
     let function = functions
         .get(name)
         .ok_or_else(|| unsupported(&format!("unsupported cranelift spike call {name:?}")))?;
@@ -572,6 +575,39 @@ fn eval_map_contains_call(
         Ok::<_, Diagnostic>(found || map_keys_equal(candidate, &key)?)
     })?;
     Ok(SpikeValue::Bool(contains))
+}
+
+fn eval_env_get_call(
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+) -> Result<SpikeValue, Diagnostic> {
+    let [name] = args else {
+        return Err(unsupported("env_get expects exactly one argument"));
+    };
+    let name = match eval_expr(name, functions, env)? {
+        SpikeValue::Text(value) => value,
+        _ => return Err(unsupported("env_get expects a string argument")),
+    };
+    let value = std::env::var(name).ok();
+    Ok(option_text(value))
+}
+
+fn option_text(value: Option<String>) -> SpikeValue {
+    match value {
+        Some(value) => SpikeValue::Enum {
+            enum_name: String::from("Option"),
+            variant: String::from("Some"),
+            field_names: Vec::new(),
+            payloads: vec![SpikeValue::Text(value)],
+        },
+        None => SpikeValue::Enum {
+            enum_name: String::from("Option"),
+            variant: String::from("None"),
+            field_names: Vec::new(),
+            payloads: Vec::new(),
+        },
+    }
 }
 
 fn eval_arithmetic(
@@ -803,7 +839,10 @@ fn validate_map_key(value: &SpikeValue) -> Result<(), Diagnostic> {
         SpikeValue::Float(_) => Err(unsupported(
             "map float keys are not supported by the cranelift spike",
         )),
-        SpikeValue::Enum { .. } | SpikeValue::Struct { .. } | SpikeValue::Map(_) | SpikeValue::Array(_) => Err(unsupported(
+        SpikeValue::Enum { .. }
+        | SpikeValue::Struct { .. }
+        | SpikeValue::Map(_)
+        | SpikeValue::Array(_) => Err(unsupported(
             "map keys must be scalar values or scalar tuples in the cranelift spike",
         )),
     }
