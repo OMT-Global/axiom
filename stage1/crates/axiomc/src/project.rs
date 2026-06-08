@@ -3077,6 +3077,8 @@ fn build_cache_file(
         debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
         lockfile_hash: hash_file(&crate::manifest::lockfile_path(package_root))?,
+        // Keep the cache metadata keyed to the source hash so cache_matches() can compare the
+        // same representation on read and write.
         rust_hash: hash_text(rust_source),
         binary_hash: None,
         modules: cached_modules(graph, &analyzed.modules)?,
