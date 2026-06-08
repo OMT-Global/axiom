@@ -876,6 +876,77 @@ fn cranelift_backend_rejects_tcp_denial_before_backend_lowering() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("tcp-denied");
     write_tcp_denial_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift tcp denied build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].net = true"),
+        "expected net capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
+#[test]
+fn cranelift_backend_rejects_fs_write_denial_before_backend_lowering() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("fs-write-denied");
+    write_fs_write_denial_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift fs-write denied build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].fs:write = true"),
+        "expected fs:write capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
 #[cfg(not(windows))]
 #[test]
 fn cranelift_backend_builds_env_read_binary() {
@@ -943,7 +1014,6 @@ fn cranelift_backend_rejects_env_denial_before_backend_lowering() {
 
     assert!(
         !output.status.success(),
-        "cranelift tcp denied build unexpectedly succeeded: stdout={} stderr={}",
         "cranelift env-denied build unexpectedly succeeded: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
@@ -954,88 +1024,6 @@ fn cranelift_backend_rejects_env_denial_before_backend_lowering() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        combined.contains("requires [capabilities].net = true"),
-        "expected net capability denial before backend lowering, got: {combined}"
-    );
-    assert!(
-        !combined.contains("unsupported by --backend cranelift spike"),
-        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
-    );
-}
-
-#[test]
-fn cranelift_backend_rejects_fs_write_denial_before_backend_lowering() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("fs-write-denied");
-    write_fs_write_denial_project(&project);
-
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-
-    assert!(
-        !output.status.success(),
-        "cranelift fs-write denied build unexpectedly succeeded: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        combined.contains("requires [capabilities].fs:write = true"),
-        "expected fs:write capability denial before backend lowering, got: {combined}"
-    );
-    assert!(
-        !combined.contains("unsupported by --backend cranelift spike"),
-        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
-    );
-}
-
-#[test]
-fn cranelift_backend_rejects_process_denial_before_backend_lowering() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("process-denied");
-    write_process_denial_project(&project);
-
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-
-    assert!(
-        !output.status.success(),
-        "cranelift process denied build unexpectedly succeeded: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        combined.contains("requires [capabilities].process = true"),
-        "expected process capability denial before backend lowering, got: {combined}"
-    );
-    assert!(
-        !combined.contains("unsupported by --backend cranelift spike"),
-        "capability denial must happen before backend lowering: {combined}"
         combined.contains("requires [capabilities].env"),
         "expected env capability denial before backend lowering, got: {combined}"
     );
@@ -1380,6 +1368,8 @@ fn write_fs_write_denial_project(project: &Path) {
         "import \"std/fs.ax\"\nprint write_file(\"out.txt\", \"content\")\n",
     )
     .expect("write fs write denied source");
+}
+
 fn write_env_read_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create env project src");
     fs::write(
