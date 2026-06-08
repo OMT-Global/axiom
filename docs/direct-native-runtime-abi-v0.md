@@ -93,6 +93,11 @@ spike can build and run `std/crypto_hash.ax` `sha256(...)` without generated
 Rust, and crypto capability denials still happen before backend lowering. MAC,
 random, signature, AEAD, and broader crypto audit parity remain blocked.
 
+The borrowed-slice row has partial direct-native evidence: the Cranelift spike
+now evaluates array-backed borrowed slices through `len`, `first`, `last`,
+indexing, and function returns. Broader borrowed-slice aliasing and host ABI
+coverage remain tracked by issue #928.
+
 ## Rust Capture Check
 
 This ABI describes Axiom runtime values and host-service effects. Rust may

@@ -225,6 +225,30 @@ fn eval_expr(
             .map(|element| eval_expr(element, functions, env))
             .collect::<Result<Vec<_>, _>>()
             .map(SpikeValue::Array),
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            let elements = match eval_expr(base, functions, env)? {
+                SpikeValue::Array(elements) => elements,
+                _ => {
+                    return Err(unsupported(
+                        "slicing supports arrays in the cranelift spike",
+                    ));
+                }
+            };
+            let start = match start {
+                Some(expr) => expect_non_negative_index(eval_expr(expr, functions, env)?)?,
+                None => 0,
+            };
+            let end = match end {
+                Some(expr) => expect_non_negative_index(eval_expr(expr, functions, env)?)?,
+                None => elements.len(),
+            };
+            if start > end || end > elements.len() {
+                return Err(unsupported("slice range is outside the array length"));
+            }
+            Ok(SpikeValue::Array(elements[start..end].to_vec()))
+        }
         Expr::Index { base, index, .. } => match eval_expr(base, functions, env)? {
             SpikeValue::Array(elements) => {
                 let index = expect_non_negative_index(eval_expr(index, functions, env)?)?;
@@ -538,7 +562,7 @@ fn eval_first_last_call(
     };
     // HIR restricts `first`/`last` to arrays and slices and returns the element
     // directly (it panics at runtime on an empty collection). The spike models
-    // owned arrays only; borrowed slices are outside the spike subset.
+    // owned arrays and evaluated array slices with the same value shape.
     let elements = match eval_expr(arg, functions, env)? {
         SpikeValue::Array(elements) => elements,
         _ => {
