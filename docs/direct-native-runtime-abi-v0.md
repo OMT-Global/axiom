@@ -88,6 +88,11 @@ builds a package using `std/fs.ax` without the `fs` capability and verifies the
 public capability denial appears before any Cranelift unsupported-feature
 diagnostic.
 
+The direct-native crypto hash slice is still marked partial: the Cranelift
+spike can build and run `std/crypto_hash.ax` `sha256(...)` without generated
+Rust, and crypto capability denials still happen before backend lowering. MAC,
+random, signature, AEAD, and broader crypto audit parity remain blocked.
+
 ## Rust Capture Check
 
 This ABI describes Axiom runtime values and host-service effects. Rust may
