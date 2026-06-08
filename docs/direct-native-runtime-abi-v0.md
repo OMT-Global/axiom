@@ -127,9 +127,9 @@ under #928.
 
 The `Result<T, E>` row has partial direct-native evidence: the Cranelift spike
 now builds and runs a package importing `std/outcome.ax`, using result
-predicates, fallback unwrap helpers, direct match arms, scalar payloads, string
-errors, and struct payloads. Broader runtime ABI and capability-shim coverage
-remain tracked by issue #928.
+predicates, fallback unwrap helpers, direct match arms over `Result<T, E>`
+values, scalar payloads, string errors, and struct payloads. Broader runtime
+ABI and capability-shim coverage remain tracked by issue #928.
 
 ## Rust Capture Check
 
