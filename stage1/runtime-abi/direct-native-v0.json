@@ -7,120 +7,78 @@
     {
       "id": "numeric.scalars",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ],
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928],
       "notes": "The Cranelift spike covers several scalar widths and casts, but the contract is not yet proven across the full runtime surface."
     },
     {
       "id": "boolean",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "string",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "array.fixed",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "slice.borrowed",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ],
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928],
       "notes": "The Cranelift spike evaluates borrowed array slices for len, first, last, indexing, and function returns. Broader borrowed-slice aliasing and host ABI coverage remain open."
     },
     {
       "id": "map.lookup",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "tuple",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "option",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "result",
-      "status": "blocked",
-      "evidence": [],
-      "blockers": [
-        928
-      ]
+      "status": "partial",
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928],
+      "notes": "The Cranelift spike evaluates Result<T, E> through std/outcome.ax helpers, direct match arms, scalar payloads, string errors, and struct payloads. Broader ABI payload and capability-shim coverage remain open."
     },
     {
       "id": "enum.payload",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "struct.field",
       "status": "partial",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ]
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928]
     },
     {
       "id": "owned.move_state",
-      "status": "blocked",
-      "evidence": [],
-      "blockers": [
-        928
-      ]
+      "status": "partial",
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928],
+      "notes": "The Cranelift spike builds and runs projection-sensitive owned field moves while preserving access to disjoint sibling projections. Broader move-state, lifetime, and host ABI coverage remain open."
     }
   ],
   "capability_shims": [
@@ -128,12 +86,8 @@
       "id": "fs.read",
       "status": "blocked",
       "capability": "fs",
-      "blockers": [
-        928
-      ],
-      "denial_evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
     },
     {
       "id": "fs.write",
@@ -146,63 +100,47 @@
       "id": "network.dns.resolve",
       "status": "blocked",
       "capability": "net",
-      "blockers": [
-        928
-      ],
-      "denial_evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
     },
     {
       "id": "network.tcp",
       "status": "blocked",
       "capability": "net",
-      "blockers": [
-        928
-      ],
-      "denial_evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
     },
     {
       "id": "network.udp",
       "status": "blocked",
       "capability": "net",
-      "blockers": [
-        928
-      ]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
     },
     {
       "id": "network.http.client",
       "status": "blocked",
       "capability": "net",
-      "blockers": [
-        928
-      ]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
     },
     {
       "id": "network.http.server",
       "status": "blocked",
       "capability": "net",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "network.http.async_server",
       "status": "blocked",
       "capability": "async",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "process.status",
       "status": "blocked",
       "capability": "process",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "env.read",
@@ -217,108 +155,78 @@
       "id": "clock.now_sleep",
       "status": "blocked",
       "capability": "clock",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "crypto.hash",
       "status": "partial",
       "capability": "crypto",
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "denial_evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ],
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928],
       "notes": "The Cranelift spike covers std/crypto_hash.ax sha256 over strings without using generated Rust. MAC, random, signature, AEAD, and broader crypto audit parity remain blocked."
     },
     {
       "id": "crypto.mac",
       "status": "blocked",
       "capability": "crypto",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "crypto.random",
       "status": "blocked",
       "capability": "crypto",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "crypto.signature",
       "status": "blocked",
       "capability": "crypto",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "crypto.aead",
       "status": "blocked",
       "capability": "crypto",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "ffi.call",
       "status": "blocked",
       "capability": "ffi",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "async.runtime",
       "status": "blocked",
       "capability": "async",
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "json.serdes",
       "status": "blocked",
       "capability": null,
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "regex.match_replace",
       "status": "blocked",
       "capability": null,
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     },
     {
       "id": "sync.primitives",
       "status": "partial",
       "capability": null,
-      "evidence": [
-        "stage1/crates/axiomc/tests/cranelift_backend.rs"
-      ],
-      "blockers": [
-        928
-      ],
+      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "blockers": [928],
       "notes": "The Cranelift spike now builds and runs ownership-shaped std/sync mutex, once, and channel wrappers. Concurrent execution, blocking behavior, and host runtime synchronization remain open."
     },
     {
       "id": "io.logging_stdio",
       "status": "blocked",
       "capability": null,
-      "blockers": [
-        928
-      ]
+      "blockers": [928]
     }
   ]
 }
