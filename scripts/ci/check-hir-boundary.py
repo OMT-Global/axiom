@@ -163,7 +163,7 @@ def reject_rust_capture_payload(value: Any, path: str = "$") -> None:
         reject_rust_capture_terms([value], path)
 
 
-def validate_package(snapshot: dict[str, Any]) -> None:
+def validate_package_boundary(snapshot: dict[str, Any]) -> None:
     package = snapshot["package"]
     require(package["name"] == CONTRACT, "package name mismatch")
     require(package["owner_lane"] == "Daedalus", "compiler.hir owner lane mismatch")
@@ -172,6 +172,46 @@ def validate_package(snapshot: dict[str, Any]) -> None:
     require("ownership state" in package["owns"], "compiler.hir must own ownership state")
     require("borrow state" in package["owns"], "compiler.hir must own borrow state")
     require("property clause verdicts" in package["owns"], "compiler.hir must own property verdicts")
+    reject_rust_capture_terms(package["owns"], "$.package.owns")
+    reject_rust_capture_terms(package["must_not_own"], "$.package.must_not_own")
+
+
+def validate_api_boundary(snapshot: dict[str, Any]) -> None:
+    apis = {api["name"]: api for api in snapshot["apis"]}
+    require(set(apis) == EXPECTED_APIS, "compiler.hir API set mismatch")
+    for name, api in apis.items():
+        require(name.startswith("compiler.hir."), f"{name} must be package-qualified")
+        reject_rust_capture_terms([name], "$.apis.{}.name".format(name))
+        reject_rust_capture_terms(api["inputs"], "$.apis.{}.inputs".format(name))
+        reject_rust_capture_terms(api["outputs"], "$.apis.{}.outputs".format(name))
+    require(
+        "inferred_capability_use_records" in apis["compiler.hir.infer_capability_use"]["outputs"],
+        "infer_capability_use must expose inferred_capability_use_records",
+    )
+
+
+def validate_contract_boundary(snapshot: dict[str, Any]) -> None:
+    contracts = {contract["name"]: contract for contract in snapshot["contracts"]}
+    require(set(contracts) == EXPECTED_CONTRACTS, "HIR contract set mismatch")
+    for name, contract in contracts.items():
+        require(contract["source_correlated"] is True, f"{name} must be source-correlated")
+        reject_rust_capture_terms([name], "$.contracts[*].name")
+        reject_rust_capture_terms(contract["stable_outputs"], "$.contracts.{}.stable_outputs".format(name))
+        reject_rust_capture_terms(contract["diagnostic_kinds"], "$.contracts.{}.diagnostic_kinds".format(name))
+    require("capability" in contracts["capability_policy_contract"]["diagnostic_kinds"], "capability contract must emit capability diagnostics")
+    require("ownership" in contracts["ownership_state_contract"]["diagnostic_kinds"], "ownership contract must emit ownership diagnostics")
+    require("ownership" in contracts["borrow_state_contract"]["diagnostic_kinds"], "borrow contract must emit ownership diagnostics")
+    require("property" in contracts["property_clause_contract"]["diagnostic_kinds"], "property contract must emit property diagnostics")
+
+
+def validate_diagnostic_boundary(snapshot: dict[str, Any]) -> None:
+    diagnostics = snapshot["diagnostics"]
+    require(REQUIRED_DIAGNOSTIC_KINDS.issubset(set(diagnostics["required_kinds"])), "HIR diagnostic kinds are incomplete")
+    require(REQUIRED_DIAGNOSTIC_CODES.issubset(set(diagnostics["required_codes"])), "HIR diagnostic codes are incomplete")
+    require(SOURCE_FIELDS.issubset(set(diagnostics["source_fields"])), "HIR diagnostics must include source fields")
+    reject_rust_capture_terms(diagnostics["required_kinds"], "$.diagnostics.required_kinds")
+    reject_rust_capture_terms(diagnostics["required_codes"], "$.diagnostics.required_codes")
+    reject_rust_capture_terms(diagnostics["source_fields"], "$.diagnostics.source_fields")
 
 
 def validate_apis(snapshot: dict[str, Any]) -> None:
@@ -283,11 +323,11 @@ def main() -> int:
     require(snapshot["contract"] == CONTRACT, "snapshot contract mismatch")
     require(snapshot["issue"] == 940, "snapshot issue mismatch")
     reject_rust_capture_payload(snapshot)
-    validate_package(snapshot)
-    validate_apis(snapshot)
+    validate_package_boundary(snapshot)
+    validate_api_boundary(snapshot)
     validate_analysis_input(snapshot)
-    validate_contracts(snapshot)
-    validate_diagnostics(snapshot)
+    validate_contract_boundary(snapshot)
+    validate_diagnostic_boundary(snapshot)
     validate_fixtures(snapshot)
 
     result = {

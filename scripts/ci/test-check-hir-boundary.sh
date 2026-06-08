@@ -104,6 +104,26 @@ fi
 
 grep -q "\$.package.must_not_own\\[0\\].*Rust capture term" "$temp_dir/must-not-own-rust-capture.err"
 
+python3 - "$repo_root/stage1/compiler-contracts/snapshots/hir-ownership-capability.json" "$temp_dir/package-owns-rust-capture.json" <<PY
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+payload["package"]["owns"][0] = "Rust typed declarations"
+
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump(payload, handle)
+PY
+
+if python3 "$script" --snapshot "$temp_dir/package-owns-rust-capture.json" >"$temp_dir/package-owns-rust-capture.out" 2>"$temp_dir/package-owns-rust-capture.err"; then
+  echo "expected Rust-captured HIR owns entry to fail" >&2
+  exit 1
+fi
+
+grep -q "\$.package.owns\[0\].*Rust capture term" "$temp_dir/package-owns-rust-capture.err"
+
 python3 - "$repo_root/stage1/compiler-contracts/snapshots/hir-ownership-capability.json" "$temp_dir/top-list-rust-capture.json" <<'PY'
 import json
 import sys
