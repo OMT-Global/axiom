@@ -6,6 +6,7 @@ use crate::mir::{
 use crate::syntax::NumericType;
 use axiomc_backend_cranelift::OutputLine;
 use std::collections::HashMap;
+use std::env;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -574,6 +575,9 @@ fn eval_call(
     if name == "clock_sleep_ms" {
         return eval_clock_sleep_ms_call(args, functions, env, lines);
     }
+    if name == "env_get" {
+        return eval_env_get_call(args, functions, env);
+    }
     if is_regex_call(name) {
         return eval_regex_call(name, args, functions, env);
     }
@@ -1008,6 +1012,18 @@ fn eval_crypto_sha256_call(
         _ => return Err(unsupported("crypto_sha256 expects a string argument")),
     };
     Ok(SpikeValue::Text(sha256_hex(&input)))
+}
+
+fn eval_env_get_call(
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+) -> Result<SpikeValue, Diagnostic> {
+    let [name] = args else {
+        return Err(unsupported("env_get expects exactly one argument"));
+    };
+    let name = expect_text(eval_expr(name, functions, env)?, "env_get")?;
+    Ok(spike_option(env::var(name).ok().map(SpikeValue::Text)))
 }
 
 fn sha256_hex(input: &str) -> String {
