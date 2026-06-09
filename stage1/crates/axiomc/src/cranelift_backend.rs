@@ -1498,8 +1498,18 @@ fn regex_find_span(pattern: &str, text: &str) -> Option<(usize, usize)> {
 }
 
 fn regex_replace_all(pattern: &str, text: &str, replacement: &str) -> String {
-    if regex_parse(pattern).is_none() {
+    let Some(program) = regex_parse(pattern) else {
         return text.to_string();
+    };
+    if program.start_anchor {
+        let Some((start, end)) = regex_find_span(pattern, text) else {
+            return text.to_string();
+        };
+        let mut out = String::new();
+        out.push_str(&text[..start]);
+        out.push_str(replacement);
+        out.push_str(&text[end..]);
+        return out;
     }
     let mut remaining = text;
     let mut out = String::new();
