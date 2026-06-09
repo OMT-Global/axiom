@@ -152,12 +152,6 @@ spike builds and runs projection-sensitive owned field moves while preserving
 access to disjoint sibling projections. Broader move-state, lifetime, and host
 ABI coverage remain tracked by issue #928.
 
-The regex row is partial: direct native builds cover `std/regex.ax` matching,
-finding, and replacement for the stage1-safe NFA subset. The replacement
-coverage includes an anchored `replace_all` regression so `^` patterns only
-replace the original leading match. Full regex syntax and broader conformance
-remain tracked by #928.
-
 The logging/stdio row has partial direct-native evidence: the Cranelift spike
 now evaluates `std/io.ax` stderr writes and emits the resulting stdout and
 stderr streams from the native binary. Stdin reads, `std/log.ax` wrappers, and
@@ -183,6 +177,12 @@ spike can build and run `std/json.ax` scalar parse/stringify helpers, first-clas
 without generated Rust. Full `std/serdes.ax` object graph parsing, schema
 validation, and richer JSON value modeling remain blocked.
 
+The regex row is partial: direct native builds cover `std/regex.ax` matching,
+finding, and replacement for the stage1-safe NFA subset. The replacement
+coverage includes an anchored `replace_all` regression so `^` patterns only
+replace the original leading match. Full regex syntax and broader conformance
+remain tracked by #928.
+
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a
 package without the `clock` capability fails before backend lowering and that
@@ -192,11 +192,12 @@ sleep shape limited to zero-duration calls until the real runtime clock path
 lands. Full runtime-time clock/sleep execution, timer scheduling, async clock
 integration, and audit parity remain open under #928.
 
-The regex row is partial: direct native builds cover `std/regex.ax` matching,
-finding, and replacement for the stage1-safe NFA subset. The replacement
-coverage includes an anchored regression proving `^` patterns only replace the
-original leading match. Full regex syntax and broader conformance remain
-tracked by #928.
+The direct-native JSON/serdes slice is still marked partial: the Cranelift
+spike can build and run `std/json.ax` scalar parse/stringify helpers, first-class
+`JsonValue` string wrapping, object field extraction, and value normalization
+without generated Rust. Full `std/serdes.ax` object graph parsing, schema
+validation, and richer JSON value modeling remain blocked.
+
 
 ## Rust Capture Check
 
