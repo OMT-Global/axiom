@@ -1831,58 +1831,6 @@ print "no int"
     .expect("write json source");
 }
 
-fn write_regex_project(project: &Path) {
-    fs::create_dir_all(project.join("src")).expect("create regex project src");
-    fs::write(
-        project.join("axiom.toml"),
-        r#"[package]
-name = "cranelift-regex-surface"
-version = "0.1.0"
-
-[build]
-entry = "src/main.ax"
-out_dir = "dist"
-
-[capabilities]
-fs = false
-net = false
-process = false
-env = false
-clock = false
-crypto = false
-"#,
-    )
-    .expect("write regex manifest");
-    fs::write(
-        project.join("axiom.lock"),
-        r#"version = 1
-
-[[package]]
-name = "cranelift-regex-surface"
-version = "0.1.0"
-source = "path"
-"#,
-    )
-    .expect("write regex lockfile");
-    fs::write(
-        project.join("src/main.ax"),
-        r#"import "std/regex.ax"
-
-print is_match("^h.llo$", "hello")
-match find("[0-9]+", "issue-238-ready") {
-Some(value) {
-print value
-}
-None {
-print "none"
-}
-}
-print replace_all("[0-9]+", "issue-238-ready", "#")
-print replace_all("^a", "aa", "x")
-"#,
-    )
-    .expect("write regex source");
-}
 fn write_fs_denial_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create fs denied project src");
     fs::write(

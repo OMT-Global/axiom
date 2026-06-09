@@ -1187,23 +1187,6 @@ fn eval_regex_binary_text(
     Ok((pattern, text))
 }
 
-fn spike_option(value: Option<SpikeValue>) -> SpikeValue {
-    match value {
-        Some(value) => SpikeValue::Enum {
-            enum_name: String::from("Option"),
-            variant: String::from("Some"),
-            field_names: Vec::new(),
-            payloads: vec![value],
-        },
-        None => SpikeValue::Enum {
-            enum_name: String::from("Option"),
-            variant: String::from("None"),
-            field_names: Vec::new(),
-            payloads: Vec::new(),
-        },
-    }
-}
-
 fn eval_io_eprintln_call(
     args: &[Expr],
     functions: &HashMap<&str, &Function>,
