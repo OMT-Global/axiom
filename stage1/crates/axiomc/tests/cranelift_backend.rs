@@ -108,13 +108,16 @@ fn cranelift_backend_builds_regex_binary() {
 238
 issue-#-ready
 xa
+xaa
 "
     );
+    let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(
-        String::from_utf8_lossy(&run.stdout).lines().nth(3),
+        stdout.lines().nth(3),
         Some("xa"),
         "anchored replace_all must only rewrite the original leading match"
     );
+    assert_eq!(stdout.lines().nth(4), Some("xaa"));
 }
 
 #[cfg(not(windows))]
@@ -1348,6 +1351,7 @@ print "none"
 }
 print replace_all("[0-9]+", "issue-238-ready", "#")
 print replace_all("^a", "aa", "x")
+print replace_all("^a", "aaa", "x")
 "##,
     )
     .expect("write regex source");
