@@ -172,10 +172,9 @@ def validate_package_boundary(snapshot: dict[str, Any]) -> None:
     require("ownership state" in package["owns"], "compiler.hir must own ownership state")
     require("borrow state" in package["owns"], "compiler.hir must own borrow state")
     require("property clause verdicts" in package["owns"], "compiler.hir must own property verdicts")
-    # Scan the entire package boundary payload so both owned and forbidden
-    # contract surfaces are covered by the same Rust-capture gate.
-    # Keep the explicit must_not_own scan so the package-level contract surface
-    # remains obvious even if the recursive scan is refactored later.
+    # Keep the package-level contract surfaces explicit, then recurse through
+    # the rest of the boundary payload so future package fields are also gated.
+    reject_rust_capture_terms(package["owns"], "$.package.owns")
     reject_rust_capture_terms(package.get("must_not_own", []), "$.package.must_not_own")
     reject_rust_capture_payload(package, "$.package")
 
