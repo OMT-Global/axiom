@@ -152,6 +152,12 @@ spike builds and runs projection-sensitive owned field moves while preserving
 access to disjoint sibling projections. Broader move-state, lifetime, and host
 ABI coverage remain tracked by issue #928.
 
+The regex row is partial: direct native builds cover `std/regex.ax` matching,
+finding, and replacement for the stage1-safe NFA subset. The replacement
+coverage includes an anchored `replace_all` regression so `^` patterns only
+replace the original leading match. Full regex syntax and broader conformance
+remain tracked by #928.
+
 The logging/stdio row has partial direct-native evidence: the Cranelift spike
 now evaluates `std/io.ax` stderr writes and emits the resulting stdout and
 stderr streams from the native binary. Stdin reads, `std/log.ax` wrappers, and

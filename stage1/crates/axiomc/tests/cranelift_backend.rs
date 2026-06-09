@@ -110,6 +110,7 @@ issue-#-ready
 xa
 "
     );
+    // The anchored replacement case must only rewrite the original leading match.
 }
 
 #[cfg(not(windows))]
