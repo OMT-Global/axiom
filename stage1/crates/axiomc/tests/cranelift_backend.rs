@@ -110,7 +110,11 @@ issue-#-ready
 xa
 "
     );
-    // The anchored replacement case must only rewrite the original leading match.
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).lines().nth(3),
+        Some("xa"),
+        "anchored replace_all must only rewrite the original leading match"
+    );
 }
 
 #[cfg(not(windows))]
