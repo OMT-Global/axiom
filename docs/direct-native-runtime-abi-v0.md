@@ -88,6 +88,12 @@ builds a package using `std/fs.ax` without the `fs` capability and verifies the
 public capability denial appears before any Cranelift unsupported-feature
 diagnostic.
 
+The `fs.read` and `env.read` rows now have partial Cranelift evidence for
+`std/fs.ax` `read_file` and `std/env.ax` `get_env` on present and missing
+filesystem or environment names, plus denial evidence that packages without the
+matching capability fail before backend lowering. Full runtime-time lookup,
+manifest allowlist parity, and audit parity remain open under #928.
+
 The UDP row is still blocked for positive direct-native runtime execution, but
 now has denial evidence: a package that calls `std/net.ax`
 `udp_bind_loopback_once(...)` without the `net` capability must receive the
