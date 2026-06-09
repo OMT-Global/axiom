@@ -177,6 +177,12 @@ spike can build and run `std/json.ax` scalar parse/stringify helpers, first-clas
 without generated Rust. Full `std/serdes.ax` object graph parsing, schema
 validation, and richer JSON value modeling remain blocked.
 
+The regex row is partial: direct native builds cover `std/regex.ax` matching,
+finding, and replacement for the stage1-safe NFA subset. The replacement
+coverage includes an anchored `replace_all` regression so `^` patterns only
+replace the original leading match. Full regex syntax and broader conformance
+remain tracked by #928.
+
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a
 package without the `clock` capability fails before backend lowering and that
