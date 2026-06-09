@@ -155,6 +155,7 @@ def reject_rust_capture_terms(values: list[str], path: str) -> None:
 def reject_rust_capture_payload(value: Any, path: str = "$") -> None:
     if isinstance(value, dict):
         for key, nested in value.items():
+            reject_rust_capture_terms([key], f"{path}.{key}#key")
             reject_rust_capture_payload(nested, f"{path}.{key}")
     elif isinstance(value, list):
         for index, nested in enumerate(value):
