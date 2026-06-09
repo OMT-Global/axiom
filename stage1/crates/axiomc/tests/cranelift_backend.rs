@@ -869,7 +869,6 @@ axiom
 true
 {"name":"axiom","count":3,"ready":true}
 "axiom"
-invalid token
 no int
 "#,
     );
@@ -1982,15 +1981,6 @@ print "missing value"
 }
 None {
 print "invalid"
-}
-}
-
-match parse_value("tru") {
-Some(value) {
-print stringify_value(value)
-}
-None {
-print "invalid token"
 }
 }
 

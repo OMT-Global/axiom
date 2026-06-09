@@ -933,9 +933,12 @@ fn json_object_field(text: &str, key: &str) -> Option<String> {
 
 fn json_parse_value(text: &str) -> Option<String> {
     let text = text.trim();
-    serde_json::from_str::<serde_json::Value>(text)
-        .ok()
-        .map(|_| text.to_string())
+    let end = json_scan_value_end(text, 0)?;
+    if json_skip_ws(text, end) == text.len() {
+        Some(text.to_string())
+    } else {
+        None
+    }
 }
 
 fn json_escape_string(value: &str) -> String {

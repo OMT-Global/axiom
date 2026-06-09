@@ -186,6 +186,13 @@ sleep shape limited to zero-duration calls until the real runtime clock path
 lands. Full runtime-time clock/sleep execution, timer scheduling, async clock
 integration, and audit parity remain open under #928.
 
+The direct-native JSON/serdes slice is still marked partial: the Cranelift
+spike can build and run `std/json.ax` scalar parse/stringify helpers, first-class
+`JsonValue` string wrapping, object field extraction, and value normalization
+without generated Rust. Full `std/serdes.ax` object graph parsing, schema
+validation, and richer JSON value modeling remain blocked.
+
+
 ## Rust Capture Check
 
 This ABI describes Axiom runtime values and host-service effects. Rust may
