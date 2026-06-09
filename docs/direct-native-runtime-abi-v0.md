@@ -88,6 +88,11 @@ builds a package using `std/fs.ax` without the `fs` capability and verifies the
 public capability denial appears before any Cranelift unsupported-feature
 diagnostic.
 
+The `fs.read` row now has partial Cranelift evidence for `std/fs.ax`
+`read_file` on a package-scoped filesystem root, plus denial evidence that a
+package without the `fs` capability fails before backend lowering. Remaining
+package-root and broader filesystem parity stay open under #928.
+
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names, plus denial evidence that
 a package without the `env` capability fails before backend lowering. Full

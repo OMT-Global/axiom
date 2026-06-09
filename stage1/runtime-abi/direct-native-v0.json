@@ -81,7 +81,7 @@
   "capability_shims": [
     {
       "id": "fs.read",
-      "status": "blocked",
+      "status": "partial",
       "capability": "fs",
       "blockers": [928],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
