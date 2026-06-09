@@ -913,7 +913,6 @@ fn write_fs_denial_project(project: &Path) {
     )
     .expect("write fs denied source");
 }
-
 fn write_env_read_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create env project src");
     fs::write(
