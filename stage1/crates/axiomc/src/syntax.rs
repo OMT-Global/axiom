@@ -1211,9 +1211,11 @@ fn validate_macro_expansion_byte_budget(
     limit: usize,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut bytes = 0usize;
-    for line in lines {
+    for (index, line) in lines.iter().enumerate() {
         bytes = bytes.saturating_add(line.text.len());
-        bytes = bytes.saturating_add(1);
+        if index + 1 < lines.len() {
+            bytes = bytes.saturating_add(1);
+        }
         if bytes > limit {
             return Err(vec![Diagnostic::new(
                 "parse",

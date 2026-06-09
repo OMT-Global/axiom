@@ -874,6 +874,29 @@ boom!()
     }
 
     #[test]
+    fn parser_allows_declarative_macro_expansion_at_exact_byte_limit() {
+        let source = r#"macro_rules! pair {
+() => {
+print 1
+print 2
+}
+}
+pair!()
+"#;
+        let expanded = "print 1\nprint 2";
+
+        parse_program_with_options(
+            source,
+            Path::new("main.ax"),
+            &ParseOptions {
+                macro_expansion_byte_limit: expanded.len(),
+                ..ParseOptions::default()
+            },
+        )
+        .expect("exact byte limit should be allowed");
+    }
+
+    #[test]
     fn parser_lowers_panic_statement() {
         let source = "fn fail(): int {\npanic(\"boom\")\n}\n\nprint 0\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
