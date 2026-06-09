@@ -838,10 +838,62 @@ spin!()
             Path::new("main.ax"),
             &ParseOptions {
                 macro_recursion_limit: 3,
+                ..ParseOptions::default()
             },
         )
         .expect_err("custom recursion limit should be enforced");
         assert!(error.message.contains("bounded depth of 3"));
+    }
+
+    #[test]
+    fn parser_bounds_total_declarative_macro_expansion_size() {
+        let source = r#"macro_rules! boom {
+() => {
+boom!()
+boom!()
+}
+}
+
+boom!()
+"#;
+        let error = parse_program_with_options(
+            source,
+            Path::new("main.ax"),
+            &ParseOptions {
+                macro_expansion_byte_limit: 96,
+                ..ParseOptions::default()
+            },
+        )
+        .expect_err("macro expansion size should be bounded");
+        assert!(
+            error
+                .message
+                .contains("exceeded expanded source budget of 96 bytes"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn parser_allows_declarative_macro_expansion_at_exact_byte_limit() {
+        let source = r#"macro_rules! pair {
+() => {
+print 1
+print 2
+}
+}
+pair!()
+"#;
+        let expanded = "print 1\nprint 2";
+
+        parse_program_with_options(
+            source,
+            Path::new("main.ax"),
+            &ParseOptions {
+                macro_expansion_byte_limit: expanded.len(),
+                ..ParseOptions::default()
+            },
+        )
+        .expect("exact byte limit should be allowed");
     }
 
     #[test]
