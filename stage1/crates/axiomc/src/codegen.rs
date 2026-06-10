@@ -2873,27 +2873,26 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
             Ok(Self {
                 ssl_handle,
                 crypto_handle,
-                tls_client_method: load_typed_symbol!(ssl_handle, "TLS_client_method", TlsClientMethod),
-                ssl_ctx_new: load_typed_symbol!(ssl_handle, "SSL_CTX_new", SslCtxNew),
-                ssl_ctx_free: load_typed_symbol!(ssl_handle, "SSL_CTX_free", SslCtxFree),
-                ssl_ctx_set_verify: load_typed_symbol!(ssl_handle, "SSL_CTX_set_verify", SslCtxSetVerify),
-                ssl_ctx_set_default_verify_paths: load_typed_symbol!(
+                tls_client_method: load_typed_symbol(ssl_handle, "TLS_client_method")?,
+                ssl_ctx_new: load_typed_symbol(ssl_handle, "SSL_CTX_new")?,
+                ssl_ctx_free: load_typed_symbol(ssl_handle, "SSL_CTX_free")?,
+                ssl_ctx_set_verify: load_typed_symbol(ssl_handle, "SSL_CTX_set_verify")?,
+                ssl_ctx_set_default_verify_paths: load_typed_symbol(
                     ssl_handle,
                     "SSL_CTX_set_default_verify_paths",
-                    SslCtxSetDefaultVerifyPaths
-                ),
-                ssl_new: load_typed_symbol!(ssl_handle, "SSL_new", SslNew),
-                ssl_free: load_typed_symbol!(ssl_handle, "SSL_free", SslFree),
-                ssl_set_fd: load_typed_symbol!(ssl_handle, "SSL_set_fd", SslSetFd),
-                ssl_set1_host: load_typed_symbol!(ssl_handle, "SSL_set1_host", SslSet1Host),
-                ssl_ctrl: load_typed_symbol!(ssl_handle, "SSL_ctrl", SslCtrl),
-                ssl_connect: load_typed_symbol!(ssl_handle, "SSL_connect", SslConnect),
-                ssl_get_verify_result: load_typed_symbol!(ssl_handle, "SSL_get_verify_result", SslGetVerifyResult),
-                ssl_write: load_typed_symbol!(ssl_handle, "SSL_write", SslWrite),
-                ssl_read: load_typed_symbol!(ssl_handle, "SSL_read", SslRead),
-                ssl_shutdown: load_typed_symbol!(ssl_handle, "SSL_shutdown", SslShutdown),
-                err_get_error: load_typed_symbol!(crypto_handle, "ERR_get_error", ErrGetError),
-                err_error_string_n: load_typed_symbol!(crypto_handle, "ERR_error_string_n", ErrErrorStringN),
+                )?,
+                ssl_new: load_typed_symbol(ssl_handle, "SSL_new")?,
+                ssl_free: load_typed_symbol(ssl_handle, "SSL_free")?,
+                ssl_set_fd: load_typed_symbol(ssl_handle, "SSL_set_fd")?,
+                ssl_set1_host: load_typed_symbol(ssl_handle, "SSL_set1_host")?,
+                ssl_ctrl: load_typed_symbol(ssl_handle, "SSL_ctrl")?,
+                ssl_connect: load_typed_symbol(ssl_handle, "SSL_connect")?,
+                ssl_get_verify_result: load_typed_symbol(ssl_handle, "SSL_get_verify_result")?,
+                ssl_write: load_typed_symbol(ssl_handle, "SSL_write")?,
+                ssl_read: load_typed_symbol(ssl_handle, "SSL_read")?,
+                ssl_shutdown: load_typed_symbol(ssl_handle, "SSL_shutdown")?,
+                err_get_error: load_typed_symbol(crypto_handle, "ERR_get_error")?,
+                err_error_string_n: load_typed_symbol(crypto_handle, "ERR_error_string_n")?,
             })
         }
     }
@@ -2945,11 +2944,9 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
         "/lib/libcrypto.so.1.1",
     ];
 
-    macro_rules! load_typed_symbol {
-        ($handle:expr, $symbol:literal, $ty:ty) => {{
-            let value = load_symbol($handle, $symbol)?;
-            unsafe { std::mem::transmute::<*mut c_void, $ty>(value) }
-        }};
+    fn load_typed_symbol<T>(handle: *mut c_void, symbol: &str) -> Result<T, String> {
+        let value = load_symbol(handle, symbol)?;
+        Ok(unsafe { std::mem::transmute_copy(&value) })
     }
 
     fn open_library(candidates: &[&str]) -> Result<*mut c_void, String> {
