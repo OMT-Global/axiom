@@ -2950,7 +2950,7 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
             std::mem::size_of::<T>(),
             std::mem::size_of::<*mut c_void>()
         );
-        Ok(unsafe { std::ptr::read(&value as *const *mut c_void as *const T) })
+        Ok(unsafe { std::mem::transmute::<*mut c_void, T>(value) })
     }
 
     fn open_library(candidates: &[&str]) -> Result<*mut c_void, String> {
