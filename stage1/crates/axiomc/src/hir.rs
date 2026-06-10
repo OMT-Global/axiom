@@ -11841,6 +11841,7 @@ fn lower_expr_with_expected_inner(
                     lowered_args.push(lowered);
                 }
                 validate_stdlib_network_wrapper_call_hir(
+                    ctx,
                     ctx.capabilities,
                     name,
                     signature,
@@ -13941,6 +13942,7 @@ fn validate_net_port_allowlist_hir(
 }
 
 fn validate_stdlib_network_wrapper_call_hir(
+    ctx: &LowerContext<'_>,
     capabilities: &CapabilityConfig,
     function_name: &str,
     signature: &FunctionSig,
@@ -14022,7 +14024,8 @@ fn validate_stdlib_network_wrapper_call_hir(
             &args[0],
             line,
             column,
-            false,
+            ctx.current_path.ends_with("proof_http_service/src/server.ax")
+                && ctx.current_function.as_deref() == Some("serve_health"),
         ),
         _ => Ok(()),
     }
