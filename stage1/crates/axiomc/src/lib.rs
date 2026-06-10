@@ -5246,6 +5246,48 @@ net = true
     }
 
     #[test]
+    fn check_project_rejects_dynamic_stdlib_peer_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir
+            .path()
+            .join("stdlib-net-peer-dynamic-port-unrestricted-denied");
+        create_project(
+            &project,
+            Some("stdlib-net-peer-dynamic-port-unrestricted-denied-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-net-peer-dynamic-port-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net_tcp.ax\"\nlet port: int = 8080\nmatch dial(\"localhost\", port, \"ping\", 1000) {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic stdlib peer port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires an integer literal when [capabilities].net ports are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn check_project_rejects_dynamic_stdlib_network_host_with_unrestricted_net() {
         let dir = tempdir().expect("tempdir");
         let project = dir
