@@ -2944,9 +2944,13 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
         "/lib/libcrypto.so.1.1",
     ];
 
-    fn load_typed_symbol<T>(handle: *mut c_void, symbol: &str) -> Result<T, String> {
+    fn load_typed_symbol<T: Copy>(handle: *mut c_void, symbol: &str) -> Result<T, String> {
         let value = load_symbol(handle, symbol)?;
-        Ok(unsafe { std::mem::transmute(value) })
+        debug_assert_eq!(
+            std::mem::size_of::<T>(),
+            std::mem::size_of::<*mut c_void>()
+        );
+        Ok(unsafe { std::ptr::read(&value as *const *mut c_void as *const T) })
     }
 
     fn open_library(candidates: &[&str]) -> Result<*mut c_void, String> {
