@@ -9904,15 +9904,32 @@ print false
             return;
         };
         fs::write(
-            project.join("src/main.ax"),
+            project.join("src/server.ax"),
             format!(
-                r#"import "std/time.ax"
+                r#"import "std/http.ax"
+import "response.ax"
+
+pub fn health_route(started: bool): HttpRoute {{
+let selected_response: HttpResponse = response(200, body("/health", started), [header("content-type", "application/json")])
+return route_response("/health", selected_response)
+}}
+
+pub fn serve_health(started: bool): bool {{
+let selected_route: HttpRoute = health_route(started)
+return serve("127.0.0.1:{port}", selected_route, 1)
+}}
+"#
+            ),
+        )
+        .expect("write service proof server");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/time.ax"
 import "server.ax"
 
 let started: bool = now_ms() > 0
-print serve_health("127.0.0.1:{port}", 1, started)
-"#
-            ),
+print serve_health(started)
+"#,
         )
         .expect("write service proof entrypoint");
 

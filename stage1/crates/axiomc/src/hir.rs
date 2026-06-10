@@ -14024,8 +14024,7 @@ fn validate_stdlib_network_wrapper_call_hir(
             &args[0],
             line,
             column,
-            ctx.current_path.ends_with("proof_http_service/src/server.ax")
-                && ctx.current_function.as_deref() == Some("serve_health"),
+            false,
         ),
         _ => Ok(()),
     }
