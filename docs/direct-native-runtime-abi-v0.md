@@ -155,6 +155,12 @@ package without the `env` capability fails before backend lowering. Full
 runtime-time lookup, manifest allowlist parity, and audit parity remain open
 under #928.
 
+The FFI call and async runtime rows remain blocked for positive direct-native
+runtime support, but now have denial evidence: a package with an `extern fn`
+declaration and no `ffi` capability, and a package importing `std/async.ax`
+with no `async` capability, must both receive their public manifest-policy
+denials before any Cranelift-specific lowering diagnostic.
+
 The sync-primitives row has partial direct-native evidence: the Cranelift spike
 now evaluates ownership-shaped `std/sync.ax` mutex, once, and channel wrappers
 and emits the expected native output. Concurrent execution, blocking behavior,

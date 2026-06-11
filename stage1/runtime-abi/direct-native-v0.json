@@ -210,13 +210,17 @@
       "id": "ffi.call",
       "status": "blocked",
       "capability": "ffi",
-      "blockers": [928]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "notes": "The Cranelift spike still blocks positive FFI call support, but packages without the ffi capability receive the public manifest-policy denial before backend lowering."
     },
     {
       "id": "async.runtime",
       "status": "blocked",
       "capability": "async",
-      "blockers": [928]
+      "blockers": [928],
+      "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "notes": "The Cranelift spike still blocks positive async runtime support, but packages without the async capability receive the public manifest-policy denial before backend lowering."
     },
     {
       "id": "json.serdes",
