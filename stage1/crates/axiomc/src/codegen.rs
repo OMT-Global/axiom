@@ -2944,12 +2944,20 @@ fn axiom_openssl_tls_get(host: &str, port: u16, request: &str) -> Result<Vec<u8>
         "/lib/libcrypto.so.1.1",
     ];
 
-    unsafe fn cast_typed_symbol<T>(value: *mut c_void) -> T {
+    unsafe fn cast_typed_symbol<T: Copy>(value: *mut c_void) -> T {
         debug_assert_eq!(
             std::mem::size_of::<T>(),
             std::mem::size_of::<*mut c_void>()
         );
-        unsafe { std::mem::transmute(value) }
+        let mut output = std::mem::MaybeUninit::<T>::uninit();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                (&value as *const *mut c_void).cast::<u8>(),
+                output.as_mut_ptr().cast::<u8>(),
+                std::mem::size_of::<T>(),
+            );
+            output.assume_init()
+        }
     }
 
     fn load_typed_symbol<T: Copy>(handle: *mut c_void, symbol: &str) -> Result<T, String> {
@@ -4681,12 +4689,20 @@ macro_rules! axiom_crypto_aead_load_typed_symbol {
     }};
 }
 
-unsafe fn axiom_crypto_aead_cast_typed_symbol<T>(value: *mut std::os::raw::c_void) -> T {
+unsafe fn axiom_crypto_aead_cast_typed_symbol<T: Copy>(value: *mut std::os::raw::c_void) -> T {
     debug_assert_eq!(
         std::mem::size_of::<T>(),
         std::mem::size_of::<*mut std::os::raw::c_void>()
     );
-    unsafe { std::mem::transmute(value) }
+    let mut output = std::mem::MaybeUninit::<T>::uninit();
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            (&value as *const *mut std::os::raw::c_void).cast::<u8>(),
+            output.as_mut_ptr().cast::<u8>(),
+            std::mem::size_of::<T>(),
+        );
+        output.assume_init()
+    }
 }
 
 #[allow(dead_code)]
