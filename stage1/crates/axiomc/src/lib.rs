@@ -1636,7 +1636,7 @@ Variant(
         assert!(rendered.contains("let ssl_handle = open_library(OPENSSL_SSL_CANDIDATES)?;"));
         assert!(rendered.contains("/usr/lib/x86_64-linux-gnu/libssl.so.3"));
         assert!(!rendered.contains("open_library(&[\"libssl.so.3\""));
-        assert!(rendered.contains("std::mem::transmute_copy"));
+        assert!(!rendered.contains("std::mem::transmute_copy"));
         assert!(rendered.contains("(openssl.ssl_ctx_set_verify)(ctx.ctx, SSL_VERIFY_PEER, None);"));
         assert!(rendered.contains("(openssl.ssl_ctx_set_default_verify_paths)(ctx.ctx) != 1"));
         assert!(rendered.contains("(openssl.ssl_set1_host)(ssl.ssl, server_name.as_ptr()) != 1"));
@@ -1663,7 +1663,7 @@ Variant(
         assert!(rendered.contains("/usr/lib/x86_64-linux-gnu/libcrypto.so.3"));
         assert!(rendered.contains("axiom_crypto_aead_load_typed_symbol!"));
         assert!(!rendered.contains("axiom_crypto_aead_open_library(&["));
-        assert!(rendered.contains("std::mem::transmute_copy"));
+        assert!(!rendered.contains("std::mem::transmute_copy"));
     }
 
     #[test]
