@@ -28,8 +28,9 @@ make rust-exit-readiness-github
 ```
 
 The readiness gate is an evidence surface, not permission to remove Rust by
-itself. Closing #721 also requires the governing issues and review gates to be
-satisfied.
+itself. It uses the manifest plus live issue state; this Markdown page is
+descriptive evidence only. Closing #721 also requires the governing issues and
+review gates to be satisfied.
 
 ## Backend Matrix
 
