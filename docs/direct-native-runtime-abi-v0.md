@@ -115,15 +115,16 @@ now has denial evidence: a package that calls `std/net.ax`
 `tcp_listen_loopback_once(...)` without the `net` capability must receive the
 public manifest-policy denial before any backend-specific lowering diagnostic.
 
-The filesystem write row now has partial direct-native evidence: the Cranelift
-spike builds and runs `std/fs.ax` write helpers over package-root-scoped
-literal paths through compiler-side spike evaluation, covering `mkdir_all`,
-`write_file`, `append_file`, readback, `replace_file`, `create_file`,
-`remove_file`, and `remove_dir`. A package with `fs = true` and `"fs:write" =
-false` that calls `std/fs.ax` `write_file(...)` must still receive the public
-manifest-policy denial before any backend-specific lowering diagnostic. Full
-runtime-time filesystem writes, atomic replace parity, manifest root
-configuration, TOCTOU hardening, and audit parity remain open under #928.
+The filesystem write row now has partial compiler-side spike evidence: the
+Cranelift spike builds and runs `std/fs.ax` write helpers over
+package-root-scoped literal paths through compiler-side spike evaluation,
+covering `mkdir_all`, `write_file`, `append_file`, readback, `replace_file`,
+`create_file`, `remove_file`, and `remove_dir`. A package with `fs = true` and
+`"fs:write" = false` that calls `std/fs.ax` `write_file(...)` must still
+receive the public manifest-policy denial before any backend-specific lowering
+diagnostic. Full runtime-time filesystem writes, atomic replace parity,
+manifest root configuration, TOCTOU hardening, and audit parity remain open
+under #928.
 
 The DNS resolve row is still blocked for positive direct-native runtime
 execution, but now has denial evidence: a package that calls `std/net.ax`
@@ -163,8 +164,8 @@ now proves the async gate separately: with `net` present and `async` missing,
 `std/http_async.ax` `async_serve_route(...)` must fail through the public
 `async` capability denial before backend lowering.
 
-The process status row now has partial direct-native evidence: the Cranelift
-spike builds and runs `std/process.ax` `run_status(...)` for literal,
+The process status row now has partial compiler-side spike evidence: the
+Cranelift spike builds and runs `std/process.ax` `run_status(...)` for literal,
 allowlisted deterministic commands through compiler-side spike evaluation and
 emits their exit statuses without generated Rust. Denied `process` capability
 use still fails through the manifest policy before Cranelift lowering or native
