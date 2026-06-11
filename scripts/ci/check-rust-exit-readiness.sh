@@ -93,8 +93,27 @@ for entry in payload.get("blockingIssues", []):
 PY
 }
 
+all_blocking_issues_closed() {
+  local issue_state
+  local issue
+
+  if [[ ! -f docs/rust-exit-readiness.json ]]; then
+    return 1
+  fi
+
+  while IFS= read -r issue; do
+    issue_state=""
+    if ! issue_state="$(read_issue_state "$issue")" || [[ -z "$issue_state" ]]; then
+      return 1
+    fi
+    if [[ "$issue_state" != "CLOSED" ]]; then
+      return 1
+    fi
+  done < <(blocking_issues_from_manifest)
+}
+
 if [[ -f docs/rust-exit-readiness.md ]]; then
-  add_check "readiness_doc_present" "pass" "docs/rust-exit-readiness.md exists as descriptive documentation"
+  add_check "readiness_doc_present" "pass" "docs/rust-exit-readiness.md exists"
 else
   add_check "readiness_doc_present" "fail" "docs/rust-exit-readiness.md is missing"
 fi
@@ -103,6 +122,14 @@ if [[ -f docs/rust-exit-readiness.json ]]; then
   add_check "readiness_manifest_present" "pass" "docs/rust-exit-readiness.json exists"
 else
   add_check "readiness_manifest_present" "fail" "docs/rust-exit-readiness.json is missing"
+fi
+
+if [[ ! -f docs/rust-exit-readiness.json ]]; then
+  add_check "readiness_matrix_unblocked" "fail" "Rust exit readiness manifest is unavailable"
+elif all_blocking_issues_closed; then
+  add_check "readiness_matrix_unblocked" "pass" "All blocking issues listed in docs/rust-exit-readiness.json are CLOSED"
+else
+  add_check "readiness_matrix_unblocked" "fail" "One or more blocking issues listed in docs/rust-exit-readiness.json are not CLOSED"
 fi
 
 if [[ -f docs/rust-exit-readiness.json ]]; then
@@ -163,7 +190,7 @@ if [[ -f docs/rust-exit-readiness.json ]]; then
       else
         add_check "rust_exit_issue_${issue}_closed" "fail" "issue #$issue is $issue_state"
       fi
-    else
+    elif [[ "$require_issue_states" == true ]]; then
       add_check "rust_exit_issue_${issue}_closed" "fail" "issue #$issue state is unavailable"
     fi
   done < <(blocking_issues_from_manifest)
