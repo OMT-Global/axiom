@@ -17,6 +17,17 @@ Validation:
 make stage1-direct-native-runtime-abi
 ```
 
+Focused evidence gate:
+
+```bash
+make stage1-direct-native-runtime-abi-evidence
+```
+
+The evidence gate validates the machine-readable ABI contract and runs the
+Cranelift backend evidence suite that backs the current `partial` and
+denial-evidence rows. It is intentionally not a readiness claim while rows
+remain `partial` or `blocked`.
+
 ## Contract Shape
 
 The v0 contract has two groups:
