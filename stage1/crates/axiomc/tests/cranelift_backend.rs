@@ -39,14 +39,10 @@ fn cranelift_backend_builds_hello_binary() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["packages"][0]["backend"], "cranelift");
     let binary = payload["binary"].as_str().expect("binary path");
-    let generated_rust = payload["generated_rust"]
-        .as_str()
-        .expect("generated Rust path");
+    assert_eq!(payload["generated_rust"], Value::Null);
     assert!(Path::new(binary).exists(), "cranelift binary exists");
     assert!(
-        Path::new(generated_rust)
-            .with_extension("cranelift.o")
-            .exists(),
+        Path::new(binary).with_extension("cranelift.o").exists(),
         "cranelift object exists"
     );
 
@@ -592,18 +588,14 @@ fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["debug"], true);
     let binary = payload["binary"].as_str().expect("binary path");
-    let generated_rust = payload["generated_rust"]
-        .as_str()
-        .expect("generated Rust path");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let debug_map = payload["debug_map"].as_str().expect("debug map path");
     let debug_manifest = payload["debug_manifest"]
         .as_str()
         .expect("debug manifest path");
     assert!(Path::new(binary).exists(), "cranelift binary exists");
     assert!(
-        Path::new(generated_rust)
-            .with_extension("cranelift.o")
-            .exists(),
+        Path::new(binary).with_extension("cranelift.o").exists(),
         "cranelift object exists"
     );
     assert!(Path::new(debug_map).exists(), "debug map exists");
@@ -618,12 +610,18 @@ fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
     let map: Value =
         serde_json::from_str(&fs::read_to_string(debug_map).expect("read cranelift debug map"))
             .expect("parse cranelift debug map");
+    assert_eq!(
+        map["schema_version"],
+        "axiom.stage1.direct_native.debug_map.v1"
+    );
+    assert_eq!(map["backend"], "cranelift");
+    assert_eq!(map["binary"], binary);
     assert!(
-        map["mappings"]
+        map["source_spans"]
             .as_array()
-            .expect("debug mappings")
+            .expect("debug source spans")
             .iter()
-            .any(|mapping| mapping["source"] == source),
+            .any(|span| span["source"] == source),
         "debug map should retain Axiom source spans for cranelift builds"
     );
 
@@ -631,15 +629,18 @@ fn cranelift_backend_debug_build_emits_sidecars_without_axiom_dwarf() {
         &fs::read_to_string(debug_manifest).expect("read cranelift debug manifest"),
     )
     .expect("parse cranelift debug manifest");
-    assert_eq!(manifest["schema_version"], "axiom.stage1.debug_manifest.v1");
+    assert_eq!(
+        manifest["schema_version"],
+        "axiom.stage1.direct_native.debug_manifest.v1"
+    );
     assert_eq!(manifest["backend"], "cranelift");
+    assert_eq!(manifest["artifact_class"], "native_binary");
     assert_eq!(manifest["binary"], binary);
-    assert_eq!(manifest["generated_rust"], generated_rust);
     assert!(
-        manifest["generated_rust_hash"]
+        manifest["binary_hash"]
             .as_str()
             .is_some_and(|hash| !hash.is_empty()),
-        "debug manifest v1 should keep generated_rust_hash in the integrity envelope"
+        "direct-native debug manifest should keep the binary hash in the integrity envelope"
     );
     assert_eq!(manifest["debug_map"], debug_map);
     assert_eq!(manifest["native_debug"]["producer"], "cranelift");
@@ -776,6 +777,60 @@ fn cranelift_backend_builds_crypto_hash_binary() {
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_builds_crypto_mac_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("crypto-mac");
+    write_crypto_mac_project(&project, true);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift crypto mac build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift crypto mac binary");
+    assert!(
+        run.status.success(),
+        "cranelift crypto mac binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737
+true
+true
+false
+false
+true
+false
+"
     );
 }
 
@@ -942,6 +997,44 @@ fn cranelift_backend_rejects_crypto_hash_denial_before_backend_lowering() {
     assert!(
         !output.status.success(),
         "cranelift crypto hash denial build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].crypto = true"),
+        "expected crypto capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
+#[test]
+fn cranelift_backend_rejects_crypto_mac_denial_before_backend_lowering() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("crypto-mac-denied");
+    write_crypto_mac_project(&project, false);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift crypto mac denial build unexpectedly succeeded: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1643,6 +1736,27 @@ fn write_crypto_hash_project(project: &Path, crypto: bool) {
         "import \"std/crypto_hash.ax\"\nprint sha256(\"abc\")\n",
     )
     .expect("write crypto hash source");
+}
+
+fn write_crypto_mac_project(project: &Path, crypto: bool) {
+    fs::create_dir_all(project.join("src")).expect("create crypto mac project src");
+    fs::write(
+        project.join("axiom.toml"),
+        format!(
+            "[package]\nname = \"cranelift-crypto-mac\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = {crypto}\n"
+        ),
+    )
+    .expect("write crypto mac manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-crypto-mac\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write crypto mac lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/crypto_mac.ax\"\nlet left: [u8] = [1u8, 2u8, 3u8]\nlet same: [u8] = [1u8, 2u8, 3u8]\nlet different: [u8] = [1u8, 2u8, 4u8]\nprint hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\")\nprint hmac_sha512(\"Jefe\", \"what do ya want for nothing?\")\nprint verify_sha256(\"f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8\", \"key\", \"The quick brown fox jumps over the lazy dog\")\nprint verify_sha512(\"164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737\", \"Jefe\", \"what do ya want for nothing?\")\nprint constant_time_eq(hmac_sha256(\"key\", \"The quick brown fox jumps over the lazy dog\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nprint constant_time_eq(\"short\", \"shorter\")\nprint constant_time_eq_u8(left[:], same[:])\nprint constant_time_eq_u8(left[:], different[:])\n",
+    )
+    .expect("write crypto mac source");
 }
 
 fn write_sync_primitives_project(project: &Path) {

@@ -116,8 +116,15 @@ manifest-policy denial before any backend-specific lowering diagnostic.
 
 The direct-native crypto hash slice is still marked partial: the Cranelift
 spike can build and run `std/crypto_hash.ax` `sha256(...)` without generated
-Rust, and crypto capability denials still happen before backend lowering. MAC,
-random, signature, AEAD, and broader crypto audit parity remain blocked.
+Rust, and crypto capability denials still happen before backend lowering.
+Random, signature, AEAD, and broader crypto audit parity remain blocked.
+
+The direct-native crypto MAC slice is now marked partial: the Cranelift spike
+can build and run `std/crypto_mac.ax` HMAC-SHA256, HMAC-SHA512, verification
+helpers, string constant-time equality, and byte-slice constant-time equality
+without generated Rust. A package without the `crypto` capability fails before
+backend lowering. Runtime audit parity and broader crypto host-service coverage
+remain blocked under #928.
 
 The HTTP client row remains blocked for positive direct-native runtime support:
 the Cranelift spike does not yet lower `std/http.ax` `get(...)` into a native
