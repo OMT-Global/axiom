@@ -91,11 +91,11 @@ native backend attempts lowering or native execution.
 
 ## Current Status
 
-The checked-in contract is intentionally not ready. It records the current
-Cranelift/direct-native spike as partial and points the blocked runtime rows at
-the Rust-exit implementation issues. This lets future backend slices update the
-contract as runtime shims land without editing the generated-Rust target
-contract.
+The checked-in contract is intentionally not ready. It records compiler-side
+Cranelift/direct-native spike evidence and keeps the affected runtime rows
+blocked until real runtime shims land. This lets future backend slices update
+the contract as runtime support lands without pretending the spike already
+proves direct-native runtime coverage.
 
 The first executable guard for this boundary is a Cranelift regression that
 builds a package using `std/fs.ax` without the `fs` capability and verifies the
