@@ -80,3 +80,25 @@ make stage1-hir-boundary
 make stage1-hir-boundary-test
 make stage1-compiler-property-test
 ```
+
+## Issue Closure Evidence
+
+#940 is complete when the `compiler.hir` package boundary is documented against
+`docs/axiom-compiler-source-layout.md`, the boundary fixture preserves typed
+declarations, capability policy, ownership state, borrow state, and property
+clause verdicts, and the existing compiler property gate remains green.
+
+The current closure evidence is:
+
+- `docs/axiom-compiler-source-layout.md` assigns typed declarations, name
+  resolution, imports, capability checks, ownership and borrow validation, and
+  property clauses to `compiler.hir`.
+- `stage1/compiler-contracts/snapshots/hir-ownership-capability.json` records
+  the package APIs, source-correlated diagnostics, analysis input contract, and
+  fixtures for issue #940.
+- `scripts/ci/check-hir-boundary.py` validates the snapshot against
+  `stage1/compiler-contracts/schemas/axiom.compiler.hir_ownership_capability.v1.schema.json`,
+  rejects Rust-captured semantic wording, and checks ownership, capability, and
+  property fixtures.
+- `make stage1-compiler-property-test` preserves the current compiler property
+  corpus as the migration fixture before replacing Rust-hosted analysis.
