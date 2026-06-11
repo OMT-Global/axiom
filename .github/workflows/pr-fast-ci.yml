@@ -185,6 +185,9 @@ jobs:
       - validate-pr-description
       - validate-secrets
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 pinned 2026-05-30
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Check required PR jobs
         env:
           RESULTS: >-
