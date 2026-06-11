@@ -14,24 +14,43 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOL = REPO_ROOT / "scripts" / "debug" / "check-axiom-dwarf.py"
+FNV_OFFSET_BASIS = 0xCBF29CE484222325
+FNV_PRIME = 0x100000001B3
 
 
-def write_manifest(path: Path, binary: Path, axiom_dwarf: bool) -> None:
+def hash_bytes(value: bytes) -> str:
+    hash_value = FNV_OFFSET_BASIS
+    for byte in value:
+        hash_value ^= byte
+        hash_value = (hash_value * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF
+    return f"{hash_value:016x}"
+
+
+def write_manifest(
+    path: Path,
+    binary: Path,
+    axiom_dwarf: bool,
+    binary_hash: str | None = None,
+    include_binary_hash: bool = True,
+) -> None:
+    payload = {
+        "schema_version": "axiom.stage1.direct_native.debug_manifest.v1",
+        "backend": "cranelift",
+        "binary": str(binary),
+        "native_debug": {
+            "producer": "cranelift",
+            "debuginfo": 2,
+            "opt_level": 0,
+            "native_debug_info": "native Axiom DWARF line tables",
+            "axiom_dwarf": axiom_dwarf,
+        },
+    }
+    if include_binary_hash:
+        payload["binary_hash"] = (
+            binary_hash if binary_hash is not None else hash_bytes(binary.read_bytes())
+        )
     path.write_text(
-        json.dumps(
-            {
-                "schema_version": "axiom.stage1.direct_native.debug_manifest.v1",
-                "backend": "cranelift",
-                "binary": str(binary),
-                "native_debug": {
-                    "producer": "cranelift",
-                    "debuginfo": 2,
-                    "opt_level": 0,
-                    "native_debug_info": "native Axiom DWARF line tables",
-                    "axiom_dwarf": axiom_dwarf,
-                },
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -96,6 +115,36 @@ class CheckAxiomDwarfTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("native_debug.axiom_dwarf is false", result.stderr)
+
+    def test_missing_binary_hash_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "app"
+            manifest = Path(tmp) / "app.debug-manifest.json"
+            binary.write_bytes(b"native binary")
+            write_manifest(manifest, binary, True, include_binary_hash=False)
+
+            result = run_tool(manifest)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("manifest binary_hash is missing or invalid", result.stderr)
+
+    def test_mismatched_binary_hash_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "app"
+            manifest = Path(tmp) / "app.debug-manifest.json"
+            fake_dwarfdump = Path(tmp) / "dwarfdump"
+            binary.write_bytes(b"native binary")
+            write_manifest(manifest, binary, True, binary_hash="0000000000000000")
+            write_fake_dwarfdump(
+                fake_dwarfdump,
+                ".debug_info  128\n.debug_line  64\n",
+                "/workspace/src/main.ax\n",
+            )
+
+            result = run_tool(manifest, fake_dwarfdump)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("manifest binary_hash mismatch", result.stderr)
 
     def test_true_manifest_claim_requires_dwarf_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

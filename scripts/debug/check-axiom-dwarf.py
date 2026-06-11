@@ -25,6 +25,8 @@ DWARF_INFO_SECTIONS = (
     "__debug_info",
 )
 SECTION_LINE = re.compile(r"^\s*(?P<section>[._A-Za-z0-9]+)\s+(?P<size>\d+)\b")
+FNV_OFFSET_BASIS = 0xCBF29CE484222325
+FNV_PRIME = 0x100000001B3
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -60,9 +62,33 @@ def native_debug_claims_axiom_dwarf(manifest: dict[str, Any]) -> bool:
     return value
 
 
-def require_binary(path: Path) -> None:
+def read_binary_bytes(path: Path) -> bytes:
     if not path.is_file():
         raise SystemExit(f"binary not found: {path}")
+    return path.read_bytes()
+
+
+def hash_bytes(value: bytes) -> str:
+    hash_value = FNV_OFFSET_BASIS
+    for byte in value:
+        hash_value ^= byte
+        hash_value = (hash_value * FNV_PRIME) & 0xFFFFFFFFFFFFFFFF
+    return f"{hash_value:016x}"
+
+
+def verify_manifest_binary_hash(manifest: dict[str, Any], binary_bytes: bytes) -> bool:
+    expected = manifest.get("binary_hash")
+    if not isinstance(expected, str) or not expected:
+        print("manifest binary_hash is missing or invalid", file=sys.stderr)
+        return False
+    actual = hash_bytes(binary_bytes)
+    if expected != actual:
+        print(
+            f"manifest binary_hash mismatch: expected {expected}, actual {actual}",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def dwarf_tool() -> str:
@@ -125,6 +151,10 @@ def command_verify(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     manifest = load_json(manifest_path)
     binary_path = manifest_binary_path(manifest_path, manifest)
+    binary_bytes = read_binary_bytes(binary_path)
+    if not verify_manifest_binary_hash(manifest, binary_bytes):
+        return 1
+
     claims_axiom_dwarf = native_debug_claims_axiom_dwarf(manifest)
     if not claims_axiom_dwarf:
         print(
@@ -133,7 +163,6 @@ def command_verify(args: argparse.Namespace) -> int:
         )
         return 1
 
-    require_binary(binary_path)
     sections = dwarf_section_sizes(binary_path)
     sources = dwarf_sources(binary_path)
     missing: list[str] = []
