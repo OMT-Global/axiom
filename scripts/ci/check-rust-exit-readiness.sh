@@ -94,7 +94,7 @@ PY
 }
 
 if [[ -f docs/rust-exit-readiness.md ]]; then
-  add_check "readiness_doc_present" "pass" "docs/rust-exit-readiness.md exists"
+  add_check "readiness_doc_present" "pass" "docs/rust-exit-readiness.md exists as descriptive documentation"
 else
   add_check "readiness_doc_present" "fail" "docs/rust-exit-readiness.md is missing"
 fi

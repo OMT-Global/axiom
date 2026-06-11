@@ -92,4 +92,57 @@ assert statuses["rust_exit_issue_564_closed"] == "pass"
 PY
 )
 
+doc_blocked_dir="$temp_dir/doc-blocked-repo"
+cp -R "$case_dir" "$doc_blocked_dir"
+cat >>"$doc_blocked_dir/docs/rust-exit-readiness.md" <<'DOC'
+
+| Documentation-only sentinel | This row must not affect the gate. | `blocked` | n/a |
+DOC
+
+(
+  cd "$doc_blocked_dir"
+  bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/issues.txt" >"$temp_dir/doc-blocked-ready.json"
+  python3 - "$temp_dir/doc-blocked-ready.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+assert payload["ready"] is True
+statuses = {check["name"]: check["status"] for check in payload["checks"]}
+assert "readiness_matrix_unblocked" not in statuses
+PY
+)
+
+doc_complete_dir="$temp_dir/doc-complete-repo"
+cp -R "$case_dir" "$doc_complete_dir"
+python3 - "$doc_complete_dir/docs/rust-exit-readiness.md" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.write_text(path.read_text(encoding="utf-8").replace("`blocked`", "`complete`"), encoding="utf-8")
+PY
+
+(
+  cd "$doc_complete_dir"
+  if bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/blocked-issues.txt" >"$temp_dir/doc-complete-blocked.json"; then
+    echo "expected readiness check to fail when a manifest blocker is open even if markdown rows say complete" >&2
+    exit 1
+  fi
+  python3 - "$temp_dir/doc-complete-blocked.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+assert payload["ready"] is False
+statuses = {check["name"]: check["status"] for check in payload["checks"]}
+assert "readiness_matrix_unblocked" not in statuses
+assert statuses["rust_exit_issue_928_closed"] == "fail"
+PY
+)
+
 echo "check-rust-exit-readiness regression cases passed"
