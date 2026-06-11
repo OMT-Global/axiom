@@ -19,16 +19,18 @@ Final Rust bootstrap issue: [#721](https://github.com/OMT-Global/axiom/issues/72
 make rust-exit-readiness
 ```
 
-It emits `axiom.rust_exit.readiness.v1` JSON and fails while required rows are
-blocked. Deletion or release-chain PRs can require live GitHub state:
+It emits `axiom.rust_exit.readiness.v1` JSON and fails while blocker issues in
+`docs/rust-exit-readiness.json` are open or unavailable. Deletion or
+release-chain PRs can require live GitHub state:
 
 ```bash
 make rust-exit-readiness-github
 ```
 
 The readiness gate is an evidence surface, not permission to remove Rust by
-itself. Closing #721 also requires the governing issues and review gates to be
-satisfied.
+itself. It uses the manifest plus live issue state; this Markdown page is
+descriptive evidence only. Closing #721 also requires the governing issues and
+review gates to be satisfied.
 
 ## Backend Matrix
 
@@ -46,7 +48,7 @@ satisfied.
 | --- | --- | --- | --- |
 | AxiOM compiler source layout | Parser, checker, lowering, MIR, backend selection, diagnostics, packages, manifests, lockfiles, and command dispatch have AxiOM package boundaries. | `blocked` | [#930](https://github.com/OMT-Global/axiom/issues/930) |
 | Snapshot bootstrap | A previously shipped `axiomc` snapshot builds the next working `axiomc` binary without invoking Cargo. | `blocked` | [#931](https://github.com/OMT-Global/axiom/issues/931) |
-| Final readiness gate | The Rust-exit command proves supported workflows, release builds, tests, docs, and LSP no longer require Rust-only infrastructure. | `blocked` | [#932](https://github.com/OMT-Global/axiom/issues/932) |
+| Final readiness gate | The Rust-exit command proves supported workflows, release builds, tests, docs, and LSP no longer require Rust-only infrastructure. | Implemented as `make rust-exit-readiness`; the gate still fails until the rows above and below are complete. | [#932](https://github.com/OMT-Global/axiom/issues/932) |
 | Compiler verification | Compiler-internal coverage is expressed in AxiOM property form instead of Rust-only tests. | `blocked` | [#562](https://github.com/OMT-Global/axiom/issues/562) |
 | Documentation generator | `axiomc doc` and structured/Markdown output are produced by AxiOM-owned code. | `blocked` | [#563](https://github.com/OMT-Global/axiom/issues/563) |
 | LSP server | `axiomc lsp` runs an AxiOM-owned LSP server and protocol stack. | `blocked` | [#564](https://github.com/OMT-Global/axiom/issues/564) |
@@ -62,6 +64,9 @@ satisfied.
 - Cargo may remain as a developer convenience while #931 is being proven, but it
   may not be required by the official release-chain path.
 - Any new blocked row must name a GitHub issue in
+  `docs/rust-exit-readiness.json`.
+- #932 tracks creation of this gate. After #932 closes, the gate must keep
+  failing only on the remaining Rust-exit blockers listed in
   `docs/rust-exit-readiness.json`.
 
 ## Rust Capture Check
