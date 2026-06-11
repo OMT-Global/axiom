@@ -5372,6 +5372,43 @@ net = true
     }
 
     #[test]
+    fn check_project_rejects_dynamic_udp_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-dynamic-udp-port-unrestricted-denied");
+        create_project(&project, Some("net-dynamic-udp-port-unrestricted-denied-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-dynamic-udp-port-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "let port: int = 8080\nprint net_udp_send_recv(\"example.com\", port, \"ping\", 1000)\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic UDP port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires an integer literal when [capabilities].net ports are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn check_project_rejects_udp_network_host_missing_from_manifest_allowlist() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("udp-host-not-allowlisted");
