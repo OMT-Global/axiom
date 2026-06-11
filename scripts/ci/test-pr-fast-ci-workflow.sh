@@ -31,6 +31,13 @@ ci_gate_needs_validate=$(awk '
   in_job && /validate-pr-description/ { found=1 }
   END { if (found) print "yes" }
 ' "$workflow")
+ci_gate_section="$({
+  awk '
+    /^  ci-gate:$/ { in_job=1; print; next }
+    in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+    in_job { print }
+  ' "$workflow"
+})"
 benchmark_gate_reference=$(grep -nE 'check-stage1-benchmarks\.py|stage1-comparison-report\.json' "$workflow" || true)
 
 if [[ -z "$checkout_line" ]]; then
@@ -55,6 +62,27 @@ fi
 
 if [[ "$ci_gate_needs_validate" != "yes" ]]; then
   echo "ci-gate must depend on validate-pr-description so PR body failures block the workflow" >&2
+  exit 1
+fi
+
+if ! grep -q 'IS_FORK_PR:' <<<"$ci_gate_section"; then
+  echo "ci-gate must expose IS_FORK_PR to fail skipped fork validation jobs" >&2
+  exit 1
+fi
+
+if ! grep -q 'bash scripts/ci/check-pr-fast-ci-gate.sh' <<<"$ci_gate_section"; then
+  echo "ci-gate must delegate result policy to scripts/ci/check-pr-fast-ci-gate.sh" >&2
+  exit 1
+fi
+
+RESULTS='changes=success fast-checks=skipped validate-pr-description=skipped validate-secrets=skipped' \
+  IS_FORK_PR=false \
+  bash "$repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null
+
+if RESULTS='changes=success fast-checks=skipped validate-pr-description=skipped validate-secrets=skipped' \
+  IS_FORK_PR=true \
+  bash "$repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null 2>&1; then
+  echo "ci-gate must fail fork PRs when branch validation jobs are skipped" >&2
   exit 1
 fi
 
