@@ -173,6 +173,33 @@ SECTION  SIZE (b)
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_true_manifest_claim_accepts_quoted_ax_source_path_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "app"
+            manifest = Path(tmp) / "app.debug-manifest.json"
+            fake_dwarfdump = Path(tmp) / "dwarfdump"
+            binary.write_bytes(b"native binary")
+            write_manifest(manifest, binary, True)
+            write_fake_dwarfdump(
+                fake_dwarfdump,
+                """----------------------------------------------------
+file: app
+----------------------------------------------------
+SECTION  SIZE (b)
+-------  --------
+.debug_info  128
+.debug_line  64
+
+ Total Size: 192
+ Total File Size: 512
+""",
+                '"/workspace/src/native module/main.ax"\n',
+            )
+
+            result = run_tool(manifest, fake_dwarfdump)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_true_manifest_claim_requires_dwarf_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "app"
