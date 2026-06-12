@@ -124,7 +124,7 @@ The checker first requires the manifest `binary_hash` to match the bytes at the
 manifest `binary` path, then requires both a manifest claim
 (`native_debug.axiom_dwarf = true`) and object debug metadata showing non-empty
 DWARF line/info sections plus an `.ax` source path reported by
-`dwarfdump --show-sources`. Current generated-Rust and Cranelift spike builds
+`llvm-dwarfdump --show-sources`. Current generated-Rust and Cranelift spike builds
 are expected to fail this check honestly. Passing this check is not the whole
 debugger acceptance bar by itself, but it is the minimum artifact-level
 evidence a future #230 closure PR must satisfy before claiming native Axiom
