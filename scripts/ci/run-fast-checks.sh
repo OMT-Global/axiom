@@ -27,16 +27,31 @@ if [[ "${AXIOM_FAST_CI_PROOF_WORKLOADS:-1}" != "1" ]]; then
 fi
 
 rust_linker="${AXIOM_FAST_CI_RUST_LINKER:-}"
-if [[ -z "$rust_linker" ]]; then
+smoke_linker() {
+  local linker="$1"
+  local smoke_rs smoke_bin
+  smoke_rs="${RUNNER_TEMP:-/tmp}/axiom-fast-ci-linker-smoke.rs"
+  smoke_bin="${RUNNER_TEMP:-/tmp}/axiom-fast-ci-linker-smoke"
+  printf '%s\n' 'fn main() {}' > "$smoke_rs"
+  rustc -C "linker=$linker" "$smoke_rs" -o "$smoke_bin" >/dev/null 2>&1
+}
+
+if [[ -n "$rust_linker" ]]; then
+  if [[ ! -x "$rust_linker" ]] || ! smoke_linker "$rust_linker"; then
+    echo "error: AXIOM_FAST_CI_RUST_LINKER must point to a usable Rust linker for PR fast checks." >&2
+    exit 1
+  fi
+else
   for candidate in cc gcc clang; do
-    if rust_linker="$(command -v "$candidate" 2>/dev/null)" && [[ -n "$rust_linker" ]]; then
+    if rust_linker="$(command -v "$candidate" 2>/dev/null)" && [[ -n "$rust_linker" ]] && smoke_linker "$rust_linker"; then
+      export AXIOM_FAST_CI_RUST_LINKER="$rust_linker"
       break
     fi
   done
 fi
 
-if [[ -z "$rust_linker" || ! -x "$rust_linker" ]]; then
-  echo "error: cc, gcc, clang, or AXIOM_FAST_CI_RUST_LINKER is required to run proof workloads in PR fast checks." >&2
+if [[ -z "$rust_linker" ]]; then
+  echo "error: no usable cc, gcc, clang, or AXIOM_FAST_CI_RUST_LINKER was found for PR fast checks." >&2
   exit 1
 fi
 

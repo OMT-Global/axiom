@@ -78,8 +78,18 @@ jobs:
 
       - name: Ensure Rust linker availability
         run: |
+          smoke_linker() {
+            local linker="$1"
+            local smoke_rs smoke_bin
+            smoke_rs="${RUNNER_TEMP:-/tmp}/axiom-fast-ci-linker-smoke.rs"
+            smoke_bin="${RUNNER_TEMP:-/tmp}/axiom-fast-ci-linker-smoke"
+            printf '%s\n' 'fn main() {}' > "$smoke_rs"
+            rustc -C "linker=$linker" "$smoke_rs" -o "$smoke_bin" >/dev/null 2>&1
+          }
+
           for candidate in cc gcc clang; do
-            if command -v "$candidate" >/dev/null 2>&1; then
+            if rust_linker="$(command -v "$candidate" 2>/dev/null)" && [[ -n "$rust_linker" ]] && smoke_linker "$rust_linker"; then
+              echo "AXIOM_FAST_CI_RUST_LINKER=$rust_linker" >> "$GITHUB_ENV"
               echo "AXIOM_FAST_CI_PROOF_WORKLOADS=1" >> "$GITHUB_ENV"
               exit 0
             fi
