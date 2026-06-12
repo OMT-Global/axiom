@@ -27,6 +27,8 @@ DWARF_INFO_SECTIONS = (
 SECTION_LINE = re.compile(r"^\s*(?P<section>[._A-Za-z0-9]+)\s+(?P<size>\d+)\b")
 FNV_OFFSET_BASIS = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
+TOOL_KIND_LLVM = "llvm"
+TOOL_KIND_GENERIC = "generic"
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -102,8 +104,12 @@ def dwarf_tool() -> str:
     raise SystemExit("dwarfdump tool not found; install llvm-dwarfdump or dwarfdump")
 
 
-def run_dwarfdump(binary_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    command = [dwarf_tool(), *args, str(binary_path)]
+def dwarf_tool_kind(tool_path: str) -> str:
+    return TOOL_KIND_LLVM if Path(tool_path).name == "llvm-dwarfdump" else TOOL_KIND_GENERIC
+
+
+def run_dwarfdump(tool_path: str, binary_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    command = [tool_path, *args, str(binary_path)]
     return subprocess.run(
         command,
         check=False,
@@ -113,46 +119,43 @@ def run_dwarfdump(binary_path: Path, *args: str) -> subprocess.CompletedProcess[
     )
 
 
-def dwarf_section_sizes(binary_path: Path) -> dict[str, int]:
-    result = run_dwarfdump(binary_path, "--show-section-sizes")
-    if result.returncode != 0:
+def tool_section_args(tool_kind: str) -> tuple[str, str]:
+    if tool_kind == TOOL_KIND_LLVM:
+        return ("--show-section-sizes", "--show-sources")
+    return ("--debug-line", "--debug-info")
+
+
+def dwarf_section_output(tool_path: str, binary_path: Path) -> tuple[str, str]:
+    tool_kind = dwarf_tool_kind(tool_path)
+    section_arg, source_arg = tool_section_args(tool_kind)
+    section_result = run_dwarfdump(tool_path, binary_path, section_arg)
+    if section_result.returncode != 0:
         raise SystemExit(
             "failed to inspect DWARF section sizes: "
-            + (result.stderr.strip() or result.stdout.strip())
+            + (section_result.stderr.strip() or section_result.stdout.strip())
         )
-    sections: dict[str, int] = {}
-    for line in result.stdout.splitlines():
-        match = SECTION_LINE.match(line)
-        if not match:
-            continue
-        sections[match.group("section")] = int(match.group("size"))
-    return sections
-
-
-def has_nonempty_section(sections: dict[str, int], names: tuple[str, ...]) -> bool:
-    return any(sections.get(name, 0) > 0 for name in names)
-
-
-def dwarf_sources(binary_path: Path) -> str:
-    result = run_dwarfdump(binary_path, "--show-sources")
-    if result.returncode != 0:
+    source_result = run_dwarfdump(tool_path, binary_path, source_arg)
+    if source_result.returncode != 0:
         raise SystemExit(
             "failed to inspect DWARF source paths: "
-            + (result.stderr.strip() or result.stdout.strip())
+            + (source_result.stderr.strip() or source_result.stdout.strip())
         )
-    return result.stdout
+    return section_result.stdout, source_result.stdout
 
 
 def dwarf_sources_include_axiom_path(sources: str) -> bool:
-    return bool(
-        re.search(
-            r"(?:"
-            r"\"[^\"]+\.ax\""
-            r"|"
-            r"(?:^|[\s\"'(<\[])(?:[^\s\"'()<>\[\]]+/)*[^\s\"'()<>\[\]]+\.ax(?:$|[:\s\"'(),;\]>])"
-            r")",
-            sources,
+    return ".ax" in sources
+
+
+def section_present(output: str, section_names: tuple[str, ...], tool_kind: str) -> bool:
+    if tool_kind == TOOL_KIND_LLVM:
+        return any(
+            re.search(rf"^\s*{re.escape(section)}\s+\d+\b", output, re.MULTILINE)
+            for section in section_names
         )
+    return any(
+        re.search(rf"^\s*{re.escape(section)}(?:\b|[:\[])", output, re.MULTILINE)
+        for section in section_names
     )
 
 
@@ -172,14 +175,16 @@ def command_verify(args: argparse.Namespace) -> int:
         )
         return 1
 
-    sections = dwarf_section_sizes(binary_path)
-    sources = dwarf_sources(binary_path)
+    tool_path = dwarf_tool()
+    tool_kind = dwarf_tool_kind(tool_path)
+    section_output, source_output = dwarf_section_output(tool_path, binary_path)
+    source_text = source_output if tool_kind == TOOL_KIND_LLVM else section_output + "\n" + source_output
     missing: list[str] = []
-    if not has_nonempty_section(sections, DWARF_LINE_SECTIONS):
+    if not section_present(section_output, DWARF_LINE_SECTIONS, tool_kind):
         missing.append("non-empty DWARF line section")
-    if not has_nonempty_section(sections, DWARF_INFO_SECTIONS):
+    if not section_present(section_output, DWARF_INFO_SECTIONS, tool_kind):
         missing.append("non-empty DWARF info section")
-    if not dwarf_sources_include_axiom_path(sources):
+    if not dwarf_sources_include_axiom_path(source_text):
         missing.append(".ax source path in DWARF sources")
 
     if missing:

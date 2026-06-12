@@ -63,9 +63,9 @@ def write_fake_dwarfdump(path: Path, section_output: str, source_output: str) ->
                 "import sys",
                 f"section_output = {section_output!r}",
                 f"source_output = {source_output!r}",
-                "if '--show-section-sizes' in sys.argv:",
+                "if '--show-section-sizes' in sys.argv or '--debug-line' in sys.argv:",
                 "    print(section_output, end='')",
-                "elif '--show-sources' in sys.argv:",
+                "elif '--show-sources' in sys.argv or '--debug-info' in sys.argv:",
                 "    print(source_output, end='')",
                 "else:",
                 "    sys.exit(2)",
@@ -226,6 +226,85 @@ SECTION  SIZE (b)
             env = os.environ.copy()
             env.pop("AXIOM_DWARFDUMP", None)
             env["PATH"] = f"{tmp}:{env['PATH']}"
+            command = [
+                sys.executable,
+                str(TOOL),
+                "verify",
+                "--manifest",
+                str(manifest),
+            ]
+            result = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_true_manifest_claim_uses_llvm_dwarfdump_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "app"
+            manifest = Path(tmp) / "app.debug-manifest.json"
+            fake_dwarfdump = Path(tmp) / "llvm-dwarfdump"
+            binary.write_bytes(b"native binary")
+            write_manifest(manifest, binary, True)
+            write_fake_dwarfdump(
+                fake_dwarfdump,
+                """----------------------------------------------------
+file: app
+----------------------------------------------------
+SECTION  SIZE (b)
+-------  --------
+.debug_info  128
+.debug_line  64
+
+ Total Size: 192
+ Total File Size: 512
+""",
+                "/workspace/src/main.ax\n",
+            )
+
+            env = os.environ.copy()
+            env["AXIOM_DWARFDUMP"] = str(fake_dwarfdump)
+            command = [
+                sys.executable,
+                str(TOOL),
+                "verify",
+                "--manifest",
+                str(manifest),
+            ]
+            result = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_true_manifest_claim_uses_generic_dwarfdump_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "app"
+            manifest = Path(tmp) / "app.debug-manifest.json"
+            fake_dwarfdump = Path(tmp) / "dwarfdump"
+            binary.write_bytes(b"native binary")
+            write_manifest(manifest, binary, True)
+            write_fake_dwarfdump(
+                fake_dwarfdump,
+                """.debug_info[0x00000000]
+  Compilation Unit @ offset 0x0:
+   Source File: /workspace/src/main.ax
+.debug_line contents:
+  file_names[ 1]: /workspace/src/main.ax
+""",
+                "",
+            )
+
+            env = os.environ.copy()
+            env["AXIOM_DWARFDUMP"] = str(fake_dwarfdump)
             command = [
                 sys.executable,
                 str(TOOL),
