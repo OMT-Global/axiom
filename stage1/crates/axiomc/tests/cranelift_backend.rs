@@ -1406,6 +1406,82 @@ fn cranelift_backend_rejects_http_client_denial_before_backend_lowering() {
 }
 
 #[test]
+fn cranelift_backend_rejects_ffi_denial_before_backend_lowering() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("ffi-denied");
+    write_ffi_denial_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift ffi denial build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].ffi = true"),
+        "expected ffi capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
+#[test]
+fn cranelift_backend_rejects_async_runtime_denial_before_backend_lowering() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("async-runtime-denied");
+    write_async_runtime_denial_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+
+    assert!(
+        !output.status.success(),
+        "cranelift async runtime denial build unexpectedly succeeded: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("requires [capabilities].async = true"),
+        "expected async capability denial before backend lowering, got: {combined}"
+    );
+    assert!(
+        !combined.contains("unsupported by --backend cranelift spike"),
+        "capability denial should happen before cranelift unsupported-feature lowering: {combined}"
+    );
+}
+
+#[test]
 fn cranelift_backend_rejects_capability_denial_before_backend_lowering() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("fs-denied");
@@ -2499,6 +2575,93 @@ print get("https://example.com")
 "#,
     )
     .expect("write http client denied source");
+}
+
+fn write_ffi_denial_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create ffi denied project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-ffi-denied"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+ffi = false
+"#,
+    )
+    .expect("write ffi denied manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-ffi-denied"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write ffi denied lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"extern fn strlen(value: string): int from "c"
+print strlen("hello")
+"#,
+    )
+    .expect("write ffi denied source");
+}
+
+fn write_async_runtime_denial_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create async runtime denied project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-async-runtime-denied"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+async = false
+"#,
+    )
+    .expect("write async runtime denied manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-async-runtime-denied"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write async runtime denied lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/async.ax"
+let task: Task<int> = ready<int>(1)
+print await task
+"#,
+    )
+    .expect("write async runtime denied source");
 }
 
 fn write_env_denial_project(project: &Path) {
