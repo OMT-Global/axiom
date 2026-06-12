@@ -95,11 +95,11 @@ def dwarf_tool() -> str:
     override = os.environ.get("AXIOM_DWARFDUMP")
     if override:
         return override
-    for candidate in ("llvm-dwarfdump",):
+    for candidate in ("llvm-dwarfdump", "dwarfdump"):
         found = shutil.which(candidate)
         if found:
             return found
-    raise SystemExit("llvm-dwarfdump tool not found; install llvm-dwarfdump")
+    raise SystemExit("dwarfdump tool not found; install llvm-dwarfdump or dwarfdump")
 
 
 def run_dwarfdump(binary_path: Path, *args: str) -> subprocess.CompletedProcess[str]:

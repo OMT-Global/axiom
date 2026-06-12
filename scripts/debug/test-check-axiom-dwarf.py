@@ -200,6 +200,49 @@ SECTION  SIZE (b)
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_true_manifest_claim_uses_dwarfdump_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "app"
+            manifest = Path(tmp) / "app.debug-manifest.json"
+            fake_dwarfdump = Path(tmp) / "dwarfdump"
+            binary.write_bytes(b"native binary")
+            write_manifest(manifest, binary, True)
+            write_fake_dwarfdump(
+                fake_dwarfdump,
+                """----------------------------------------------------
+file: app
+----------------------------------------------------
+SECTION  SIZE (b)
+-------  --------
+.debug_info  128
+.debug_line  64
+
+ Total Size: 192
+ Total File Size: 512
+""",
+                "/workspace/src/main.ax\n",
+            )
+
+            env = os.environ.copy()
+            env.pop("AXIOM_DWARFDUMP", None)
+            env["PATH"] = f"{tmp}:{env['PATH']}"
+            command = [
+                sys.executable,
+                str(TOOL),
+                "verify",
+                "--manifest",
+                str(manifest),
+            ]
+            result = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_true_manifest_claim_requires_dwarf_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "app"
