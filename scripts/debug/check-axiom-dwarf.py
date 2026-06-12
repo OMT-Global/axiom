@@ -144,7 +144,15 @@ def dwarf_sources(binary_path: Path) -> str:
 
 
 def dwarf_sources_include_axiom_path(sources: str) -> bool:
-    return any(token.endswith(".ax") or ".ax:" in token for token in re.split(r"\s+", sources))
+    return bool(
+        re.search(
+            r"(?:^|[\s\"'(<\[])"
+            r"(?:[^\s\"'()<>\[\]]+/)*"
+            r"[^\s\"'()<>\[\]]+\.ax"
+            r"(?:$|[:\s\"'(),;\]>)])",
+            sources,
+        )
+    )
 
 
 def command_verify(args: argparse.Namespace) -> int:
