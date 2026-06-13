@@ -5172,6 +5172,389 @@ net = { hosts = ["localhost"], ports = [8080] }
     }
 
     #[test]
+    fn check_project_rejects_dynamic_network_host_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-dynamic-host-unrestricted-denied");
+        create_project(&project, Some("net-dynamic-host-unrestricted-denied-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-dynamic-host-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "let host: string = \"example.com\"\nprint net_resolve(host)\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic unrestricted host should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires a string literal when [capabilities].net hosts are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_network_host_with_network_allowlist() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-dynamic-host-allowlisted-denied");
+        create_project(&project, Some("net-dynamic-host-allowlisted-denied-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-dynamic-host-allowlisted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = { hosts = ["example.com"] }
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"let host: string = "example.com"
+print net_resolve(host)
+"#,
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic allowlisted host should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains("requires a string literal listed in [capabilities].net.hosts"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-dynamic-port-unrestricted-denied");
+        create_project(&project, Some("net-dynamic-port-unrestricted-denied-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-dynamic-port-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "let port: int = 8080\nprint net_tcp_dial(\"example.com\", port, \"ping\", 1000)\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic unrestricted port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires an integer literal when [capabilities].net ports are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_network_port_with_network_allowlist() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-dynamic-port-allowlisted-denied");
+        create_project(&project, Some("net-dynamic-port-allowlisted-denied-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-dynamic-port-allowlisted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = { ports = [8080] }
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"let port: int = 8080
+print net_tcp_dial("example.com", port, "ping", 1000)
+"#,
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic allowlisted port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains("requires an integer literal listed in [capabilities].net.ports"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_accepts_literal_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-literal-port-unrestricted-allowed");
+        create_project(&project, Some("net-literal-port-unrestricted-allowed-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-literal-port-unrestricted-allowed-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "match net_tcp_dial(\"example.com\", 8080, \"ping\", 1000) {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        check_project(&project).expect("literal unrestricted port should check");
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_stdlib_peer_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir
+            .path()
+            .join("stdlib-net-peer-dynamic-port-unrestricted-denied");
+        create_project(
+            &project,
+            Some("stdlib-net-peer-dynamic-port-unrestricted-denied-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-net-peer-dynamic-port-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net_tcp.ax\"\nlet port: int = 8080\nmatch dial(\"localhost\", port, \"ping\", 1000) {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic stdlib peer port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires an integer literal when [capabilities].net ports are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_accepts_literal_stdlib_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir
+            .path()
+            .join("stdlib-net-literal-port-unrestricted-allowed");
+        create_project(
+            &project,
+            Some("stdlib-net-literal-port-unrestricted-allowed-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-net-literal-port-unrestricted-allowed-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net.ax\"\nmatch tcp_dial(\"localhost\", 8080, \"ping\", 1000) {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        check_project(&project).expect("literal stdlib unrestricted port should check");
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_stdlib_network_host_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir
+            .path()
+            .join("stdlib-net-dynamic-host-unrestricted-denied");
+        create_project(
+            &project,
+            Some("stdlib-net-dynamic-host-unrestricted-denied-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-net-dynamic-host-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net.ax\"\nlet host: string = \"localhost\"\nmatch resolve(host) {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic stdlib host should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires a string literal when [capabilities].net hosts are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_stdlib_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir
+            .path()
+            .join("stdlib-net-dynamic-port-unrestricted-denied");
+        create_project(
+            &project,
+            Some("stdlib-net-dynamic-port-unrestricted-denied-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-net-dynamic-port-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "import \"std/net.ax\"\nlet port: int = 8080\nmatch tcp_dial(\"localhost\", port, \"ping\", 1000) {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic stdlib port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires an integer literal when [capabilities].net ports are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_udp_network_port_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("net-dynamic-udp-port-unrestricted-denied");
+        create_project(
+            &project,
+            Some("net-dynamic-udp-port-unrestricted-denied-app"),
+        )
+        .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "net-dynamic-udp-port-unrestricted-denied-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "let port: int = 8080\nprint net_udp_send_recv(\"example.com\", port, \"ping\", 1000)\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic UDP port should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains(
+                "requires an integer literal when [capabilities].net ports are unrestricted"
+            ),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn check_project_rejects_udp_network_host_missing_from_manifest_allowlist() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("udp-host-not-allowlisted");
@@ -5273,6 +5656,43 @@ net = { hosts = ["example.com"], ports = [443] }
     }
 
     #[test]
+    fn check_project_rejects_dynamic_http_url_with_unrestricted_net() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("http-url-dynamic-unrestricted");
+        create_project(&project, Some("http-url-dynamic-unrestricted-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "http-url-dynamic-unrestricted-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "let url: string = \"https://example.com/\"\nmatch http_get(url) {\nSome(_body) {\nprint true\n}\nNone {\nprint false\n}\n}\n",
+        )
+        .expect("write source");
+
+        let error = check_project(&project).expect_err("dynamic unrestricted HTTP URL should fail");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error
+                .message
+                .contains("requires a static URL literal when [capabilities].net is unrestricted"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
     fn check_project_rejects_dynamic_http_url_with_network_allowlist() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("http-url-dynamic-allowlist");
@@ -5304,6 +5724,84 @@ net = { hosts = ["example.com"], ports = [443] }
             error.message.contains("requires a static URL literal"),
             "unexpected diagnostic: {error:?}",
         );
+    }
+
+    #[test]
+    fn check_project_rejects_dynamic_stdlib_http_url_with_network_allowlist() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("stdlib-http-url-dynamic-allowlist");
+        create_project(&project, Some("stdlib-http-url-dynamic-allowlist-app"))
+            .expect("create project");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "stdlib-http-url-dynamic-allowlist-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = { hosts = ["example.com"], ports = [443] }
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/http.ax"
+let url: string = "https://example.com/"
+match get(url) {
+Some(_body) {
+print true
+}
+None {
+print false
+}
+}
+"#,
+        )
+        .expect("write source");
+
+        let error =
+            check_project(&project).expect_err("dynamic stdlib HTTP URL should fail closed");
+        assert_eq!(error.kind, "capability");
+        assert!(
+            error.message.contains("requires a static URL literal"),
+            "unexpected diagnostic: {error:?}",
+        );
+    }
+
+    #[test]
+    fn check_project_does_not_gate_fs_read_on_network_allowlist() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("fs-read-net-allowlist-independent");
+        create_project(&project, Some("fs-read-net-allowlist-independent-app"))
+            .expect("create project");
+        fs::write(project.join("src/fixture.txt"), "fixture").expect("write fixture");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "fs-read-net-allowlist-independent-app"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = true
+net = { hosts = ["example.com"] }
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            project.join("src/main.ax"),
+            "match fs_read(\"src/fixture.txt\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing\"\n}\n}\n",
+        )
+        .expect("write source");
+
+        check_project(&project).expect("fs_read should not use net host allowlists");
     }
 
     #[test]
@@ -6391,7 +6889,7 @@ print "missing"
             render_lockfile_for_project(&project, &manifest).expect("lockfile"),
         )
         .expect("write lockfile");
-        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\nmatch tcp_listen_loopback_once(\"tcp pong\", 1000) {\nSome(port) {\nmatch tcp_dial(\"127.0.0.1\", port, \"tcp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"tcp none\"\n}\n}\n}\nNone {\nprint \"tcp listen none\"\n}\n}\nmatch udp_bind_loopback_once(\"udp pong\", 1000) {\nSome(port) {\nmatch udp_send_recv(\"127.0.0.1\", port, \"udp ping\", 1000) {\nSome(reply) {\nprint reply\n}\nNone {\nprint \"udp none\"\n}\n}\n}\nNone {\nprint \"udp bind none\"\n}\n}\n";
+        let source = "import \"std/net.ax\"\nmatch resolve(\"localhost\") {\nSome(_address) {\nprint true\n}\nNone {\nprint false\n}\n}\nmatch tcp_listen_loopback_once(\"tcp pong\", 1000) {\nSome(_port) {\nprint \"tcp listen ok\"\n}\nNone {\nprint \"tcp listen none\"\n}\n}\nmatch udp_bind_loopback_once(\"udp pong\", 1000) {\nSome(_port) {\nprint \"udp bind ok\"\n}\nNone {\nprint \"udp bind none\"\n}\n}\n";
         fs::write(project.join("src/main.ax"), source).expect("write source");
 
         let built = build_project(&project).expect("build project");
@@ -6399,7 +6897,7 @@ print "missing"
             .output()
             .expect("run compiled binary");
         let expected = if loopback_socket_bind_available() {
-            "false\ntcp pong\nudp pong\n"
+            "false\ntcp listen ok\nudp bind ok\n"
         } else {
             "false\ntcp listen none\nudp bind none\n"
         };
@@ -8965,10 +9463,14 @@ print serve_once("127.0.0.1:18080", "hello")
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("service-runner");
         create_project(&project, Some("service-runner-app")).expect("create project");
+        let Some(port) = find_free_loopback_port() else {
+            return;
+        };
+        let bind = format!("127.0.0.1:{port}");
         fs::write(
             project.join("axiom.toml"),
             format!(
-                "{}\n[[tests]]\nname = \"service-smoke\"\nentry = \"src/service_test.ax\"\nstdout = \"true\\n\"\nhttp = {{ path = \"/health\", expected_body = \"ok\" }}\n",
+                "{}\n[[tests]]\nname = \"service-smoke\"\nentry = \"src/service_test.ax\"\nstdout = \"true\\n\"\nhttp = {{ bind = {:?}, path = \"/health\", expected_body = \"ok\" }}\n",
                 render_manifest_with_capabilities(
                     "service-runner-app",
                     false,
@@ -8977,24 +9479,19 @@ print serve_once("127.0.0.1:18080", "hello")
                     true,
                     false,
                     false,
-                )
+                ),
+                bind,
             ),
         )
         .expect("write manifest");
         fs::write(
             project.join("src/service_test.ax"),
-            r#"import "std/env.ax"
-import "std/http.ax"
+            format!(
+                r#"import "std/http.ax"
 
-match get_env("AXIOM_TEST_BIND") {
-Some(bind) {
-print serve_once(bind, "ok")
-}
-None {
-print false
-}
-}
-"#,
+print serve_once("{bind}", "ok")
+"#
+            ),
         )
         .expect("write service test");
 
@@ -9587,15 +10084,32 @@ print false
             return;
         };
         fs::write(
-            project.join("src/main.ax"),
+            project.join("src/server.ax"),
             format!(
-                r#"import "std/time.ax"
+                r#"import "std/http.ax"
+import "response.ax"
+
+pub fn health_route(started: bool): HttpRoute {{
+let selected_response: HttpResponse = response(200, body("/health", started), [header("content-type", "application/json")])
+return route_response("/health", selected_response)
+}}
+
+pub fn serve_health(started: bool): bool {{
+let selected_route: HttpRoute = health_route(started)
+return serve("127.0.0.1:{port}", selected_route, 1)
+}}
+"#
+            ),
+        )
+        .expect("write service proof server");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"import "std/time.ax"
 import "server.ax"
 
 let started: bool = now_ms() > 0
-print serve_health("127.0.0.1:{port}", 1, started)
-"#
-            ),
+print serve_health(started)
+"#,
         )
         .expect("write service proof entrypoint");
 
@@ -9656,7 +10170,7 @@ print serve_health("127.0.0.1:{port}", 1, started)
 import "server.ax"
 
 let started: bool = now_ms() > 0
-print serve_health("127.0.0.1:18080", 1, started)
+print serve_health(started)
 "#,
         )
         .expect("write denied service entrypoint");

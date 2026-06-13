@@ -82,7 +82,9 @@ pub struct TestTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct HttpTestFixture {
+    pub bind: Option<String>,
     pub path: String,
     pub expected_body: String,
 }
@@ -284,6 +286,7 @@ struct RawDependencyDetail {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTestTarget {
     name: Option<String>,
     entry: Option<String>,
