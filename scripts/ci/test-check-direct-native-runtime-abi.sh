@@ -28,6 +28,60 @@ assert report["blocker_issues"] == [928]
 assert report["errors"] == []
 PY
 
+python3 - "$contract" "$temp_dir/missing-evidence.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    contract = json.load(handle)
+
+contract["value_features"][0].pop("evidence", None)
+
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump(contract, handle)
+PY
+
+if python3 "$script" --contract "$temp_dir/missing-evidence.json" --json >"$temp_dir/missing-evidence-report.json"; then
+  echo "expected partial rows without evidence to fail" >&2
+  exit 1
+fi
+python3 - "$temp_dir/missing-evidence-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+
+assert any("must name evidence" in error for error in report["errors"])
+PY
+
+python3 - "$contract" "$temp_dir/stale-evidence-path.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    contract = json.load(handle)
+
+contract["value_features"][0]["evidence"] = ["stage1/runtime-abi/missing-evidence.rs"]
+
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump(contract, handle)
+PY
+
+if python3 "$script" --contract "$temp_dir/stale-evidence-path.json" --json >"$temp_dir/stale-evidence-path-report.json"; then
+  echo "expected stale evidence paths to fail" >&2
+  exit 1
+fi
+python3 - "$temp_dir/stale-evidence-path-report.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+
+assert any("does not exist" in error for error in report["errors"])
+PY
+
 if python3 "$script" --contract "$contract" --enforce-ready >/dev/null; then
   echo "expected --enforce-ready to fail while direct native runtime ABI rows are blocked" >&2
   exit 1
