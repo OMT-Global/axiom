@@ -84,6 +84,8 @@ pub struct TestTarget {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct HttpTestFixture {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bind: Option<String>,
     pub path: String,
     pub expected_body: String,
 }
