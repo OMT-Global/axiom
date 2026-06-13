@@ -62,7 +62,11 @@ def load_contract(path: Path) -> dict[str, Any]:
 
 
 def validate_rows(
-    rows: object, required_ids: set[str], group_name: str, errors: list[str]
+    rows: object,
+    required_ids: set[str],
+    group_name: str,
+    errors: list[str],
+    contract_root: Path,
 ) -> tuple[set[str], list[str], dict[str, int], set[int]]:
     if not isinstance(rows, list):
         errors.append(f"{group_name} must be an array")
@@ -93,6 +97,15 @@ def validate_rows(
             continue
         status_counts[status] += 1
 
+        validate_evidence_paths(row, row_id, group_name, "evidence", errors, contract_root)
+        validate_evidence_paths(
+            row, row_id, group_name, "denial_evidence", errors, contract_root
+        )
+        if status in {"implemented", "partial"} and "evidence" not in row:
+            errors.append(
+                f"{group_name} row {row_id!r} must name evidence for status {status!r}"
+            )
+
         row_blockers = row.get("blockers", [])
         if status != "implemented":
             blockers.append(row_id)
@@ -114,7 +127,46 @@ def validate_rows(
     return seen, blockers, status_counts, blocker_issues
 
 
-def build_report(contract: dict[str, Any]) -> tuple[dict[str, Any], int]:
+def validate_evidence_paths(
+    row: dict[str, Any],
+    row_id: str,
+    group_name: str,
+    field_name: str,
+    errors: list[str],
+    contract_root: Path,
+) -> None:
+    if field_name not in row:
+        return
+
+    evidence = row[field_name]
+    if not isinstance(evidence, list) or not evidence:
+        errors.append(f"{group_name} row {row_id!r} {field_name} must be a non-empty array")
+        return
+
+    for index, evidence_path in enumerate(evidence):
+        if not isinstance(evidence_path, str) or not evidence_path:
+            errors.append(
+                f"{group_name} row {row_id!r} {field_name}[{index}] "
+                "must be a non-empty string"
+            )
+            continue
+        path = Path(evidence_path)
+        if path.is_absolute() or ".." in path.parts:
+            errors.append(
+                f"{group_name} row {row_id!r} {field_name}[{index}] "
+                "must be a repository-relative path"
+            )
+            continue
+        if not (contract_root / path).is_file():
+            errors.append(
+                f"{group_name} row {row_id!r} {field_name}[{index}] "
+                f"does not exist: {evidence_path}"
+            )
+
+
+def build_report(
+    contract: dict[str, Any], contract_root: Path = REPO_ROOT
+) -> tuple[dict[str, Any], int]:
     errors: list[str] = []
 
     if contract.get("schema_version") != "axiom.direct_native.runtime_abi.v0":
@@ -129,6 +181,7 @@ def build_report(contract: dict[str, Any]) -> tuple[dict[str, Any], int]:
         REQUIRED_VALUE_FEATURES,
         "value_features",
         errors,
+        contract_root,
     )
     (
         _,
@@ -140,6 +193,7 @@ def build_report(contract: dict[str, Any]) -> tuple[dict[str, Any], int]:
         REQUIRED_CAPABILITY_SHIMS,
         "capability_shims",
         errors,
+        contract_root,
     )
 
     blocked_rows = sorted(value_blockers + capability_blockers)
@@ -204,7 +258,7 @@ def main() -> int:
             print(f"direct native runtime ABI: invalid ({error})", file=sys.stderr)
         return 1
 
-    report, validation_status = build_report(contract)
+    report, validation_status = build_report(contract, REPO_ROOT)
     if args.json:
         print(json.dumps(report, indent=2))
     elif report["ready"]:
