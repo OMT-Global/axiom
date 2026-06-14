@@ -8612,12 +8612,13 @@ fn i64_map_keys_expr(expr: &Expr, static_bindings: &I64StaticBindings) -> Option
 fn i64_map_unique_keys(map: &Expr, static_bindings: &I64StaticBindings) -> Option<Vec<I64MapKey>> {
     let entries = i64_map_literal_entries(map, static_bindings)?;
     let mut keys = Vec::new();
-    for entry in entries {
+    for entry in entries.iter().rev() {
         let key = lower_i64_map_key_expr(&entry.key, static_bindings)?;
         if !keys.iter().any(|candidate| candidate == &key) {
             keys.push(key);
         }
     }
+    keys.reverse();
     Some(keys)
 }
 
@@ -15980,8 +15981,42 @@ mod tests {
             Some(CraneliftI64Condition::Literal(true))
         );
         assert_eq!(
-            lower_i64_map_contains_key_condition("contains", &[map, missing_key], &static_bindings),
+            lower_i64_map_contains_key_condition("contains", &[map.clone(), missing_key], &static_bindings),
             Some(CraneliftI64Condition::Literal(false))
         );
     }
+
+    #[test]
+    fn static_map_keys_respect_last_duplicate_key_position() {
+        let map = Expr::MapLiteral {
+            entries: vec![
+                MapEntry {
+                    key: Expr::Literal(LiteralValue::Int(1)),
+                    value: Expr::Literal(LiteralValue::Int(10)),
+                },
+                MapEntry {
+                    key: Expr::Literal(LiteralValue::Int(2)),
+                    value: Expr::Literal(LiteralValue::Int(20)),
+                },
+                MapEntry {
+                    key: Expr::Literal(LiteralValue::Int(1)),
+                    value: Expr::Literal(LiteralValue::Int(30)),
+                },
+            ],
+            ty: Type::Map(Box::new(Type::Int), Box::new(Type::Int)),
+        };
+
+        assert_eq!(
+            i64_map_keys_expr(
+                &Expr::Call {
+                    name: String::from("keys"),
+                    args: vec![map],
+                    ty: Type::Array(Box::new(Type::Int), None),
+                },
+                &I64StaticBindings::default()
+            ),
+            Some(vec![I64MapKey::Int(2), I64MapKey::Int(1)])
+        );
+    }
 }
+
