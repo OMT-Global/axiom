@@ -18,11 +18,17 @@ examples=(
   tuples
   structs
   enums
+  borrowed_shapes
+  generic_aggregates
+  modules
+  outcomes
+  packages
   stdlib_async
   stdlib_collection_lookup
   stdlib_collections
   stdlib_crypto_hash
   stdlib_crypto_mac
+  stdlib_doc
   stdlib_encoding
   stdlib_env
   stdlib_fs
@@ -30,12 +36,16 @@ examples=(
   stdlib_http
   stdlib_io
   stdlib_json
+  stdlib_json_value
   stdlib_log
+  stdlib_lsp
+  stdlib_outcome
   stdlib_process
   stdlib_regex
   stdlib_sync
   stdlib_string_builder
   stdlib_time
+  workspace
 )
 
 validate_payload() {
