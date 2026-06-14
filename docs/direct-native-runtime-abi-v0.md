@@ -640,7 +640,11 @@ ABI coverage remain tracked by issue #928.
 The logging/stdio row has partial direct-native evidence: the Cranelift spike
 now evaluates `std/io.ax` stderr writes and `std/log.ax` structured event
 formatting plus `info_attrs` stderr emission, then emits the resulting stdout
-and stderr streams from the native binary. Stdin reads and broader
+and stderr streams from the native binary. The direct-native i64 path now also
+lowers deterministic public `std/log.ax` formatting wrappers for field
+construction, field-list joining, and event rendering into known string facts
+that can feed comparisons, length projections, and native process exit status
+without generated Rust. Stdin reads, runtime stderr emission, and broader
 streaming/runtime buffering remain tracked by issue #928.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`

@@ -1570,6 +1570,46 @@ fn cranelift_backend_lowers_std_json_wrappers_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_std_log_format_wrappers_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-log-format-wrapper-main-exit");
+    write_std_log_format_wrapper_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std log format wrapper main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std log format wrapper main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_struct_literal_field_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -5742,6 +5782,25 @@ fn write_std_json_wrapper_main_exit_project(project: &Path) {
         "import \"std/json.ax\"\n\nstatic DOC: string = \"{\\\"name\\\":\\\"axiom\\\",\\\"count\\\":3,\\\"ready\\\":true}\"\nstatic STATIC_COUNT: int = 321\nstatic STATIC_READY: bool = true\n\nfn main(): int {\nlet int_len: int = len(stringify_int(42))\nlet static_int_len: int = len(stringify_int(STATIC_COUNT))\nlet bool_len: int = len(stringify_bool(false))\nlet static_bool_len: int = len(stringify_bool(STATIC_READY))\nlet string_len: int = len(stringify_string(\"axiom\"))\nlet parsed_int: int = match parse_int(\" 42 \") { Some(value) => value, None => 1 }\nlet parsed_bool: bool = match parse_bool(\"true\") { Some(value) => value, None => false }\nlet parsed_string_len: int = match parse_string(\"\\\"hello\\\"\") { Some(value) => len(value), None => 1 }\nlet missing_string_len: int = match parse_string(\"42\") { Some(value) => len(value), None => 4 }\nlet count_value: int = match parse_field_int(DOC, \"count\") { Some(value) => value, None => 1 }\nlet ready_value: bool = match parse_field_bool(DOC, \"ready\") { Some(value) => value, None => false }\nlet name_len: int = match parse_field_string(DOC, \"name\") { Some(value) => len(value), None => 1 }\nlet missing_int: int = match parse_field_int(DOC, \"missing\") { Some(value) => value, None => 4 }\nlet dynamic_int: int = match parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_bool: bool = match parse_bool(\"false\") { Some(value) => value, None => true }\nlet dynamic_int_len: int = len(stringify_int(dynamic_int))\nlet dynamic_bool_len: int = len(stringify_bool(dynamic_bool))\nlet dynamic_string_text: string = stringify_int(dynamic_int)\nlet dynamic_string_len: int = len(stringify_string(dynamic_string_text))\nif parsed_bool && ready_value && int_len == 2 && static_int_len == 3 && bool_len == 5 && static_bool_len == 4 && string_len == 7 && parsed_int == 42 && parsed_string_len == 5 && missing_string_len == 4 && count_value == 3 && name_len == 5 && missing_int == 4 && dynamic_int_len == 5 && dynamic_bool_len == 5 && dynamic_string_len == 7 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write std json wrapper source");
+}
+
+fn write_std_log_format_wrapper_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create std log format wrapper project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-std-log-format-wrapper-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write std log format wrapper manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-std-log-format-wrapper-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write std log format wrapper lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/log.ax\"\n\nfn main(): int {\nlet component_gate: bool = field_string(\"component\", \"worker\") == \"\\\"component\\\":\\\"worker\\\"\"\nlet attempt_gate: bool = field_int(\"attempt\", 2) == \"\\\"attempt\\\":2\"\nlet ready_gate: bool = field_bool(\"ready\", true) == \"\\\"ready\\\":true\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nlet subset: string = fields2(field_string(\"component\", \"worker\"), field_bool(\"ready\", true))\nlet record: string = event(\"info\", \"started\", fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true)))\nlet escaped: string = event(\"warn\", \"quote \\\"ok\\\"\", fields2(field_string(\"path\", \"a/b\"), field_bool(\"ready\", false)))\nlet expected: string = \"{\\\"level\\\":\\\"info\\\",\\\"message\\\":\\\"started\\\",\\\"attributes\\\":{\\\"component\\\":\\\"worker\\\",\\\"attempt\\\":2,\\\"ready\\\":true}}\"\nlet expected_escaped: string = \"{\\\"level\\\":\\\"warn\\\",\\\"message\\\":\\\"quote \\\\\\\"ok\\\\\\\"\\\",\\\"attributes\\\":{\\\"path\\\":\\\"a/b\\\",\\\"ready\\\":false}}\"\nif component_gate && attempt_gate && ready_gate && attrs == \"\\\"component\\\":\\\"worker\\\",\\\"attempt\\\":2,\\\"ready\\\":true\" && subset == \"\\\"component\\\":\\\"worker\\\",\\\"ready\\\":true\" && record == expected && escaped == expected_escaped && len(record) == 97 && len(escaped) == 83 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write std log format wrapper source");
 }
 
 fn write_struct_literal_field_main_exit_project(project: &Path) {

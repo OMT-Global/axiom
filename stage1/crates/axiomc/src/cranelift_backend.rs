@@ -63,6 +63,13 @@ struct I64StaticBindings {
     json_stringify_int_wrappers: HashSet<String>,
     json_stringify_bool_wrappers: HashSet<String>,
     json_stringify_string_wrappers: HashSet<String>,
+    log_wrappers: HashSet<String>,
+    log_field_string_wrappers: HashSet<String>,
+    log_field_int_wrappers: HashSet<String>,
+    log_field_bool_wrappers: HashSet<String>,
+    log_fields2_wrappers: HashSet<String>,
+    log_fields3_wrappers: HashSet<String>,
+    log_event_wrappers: HashSet<String>,
     crypto_wrappers: HashSet<String>,
     crypto_sha256_wrappers: HashSet<String>,
     crypto_hmac_sha256_wrappers: HashSet<String>,
@@ -436,6 +443,48 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_json_wrapper(function, "stringify_string"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
+    static_bindings.log_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| function.path == "<stdlib>/log.ax")
+        .map(|function| function.name.clone())
+        .collect();
+    static_bindings.log_field_string_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "field_string"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.log_field_int_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "field_int"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.log_field_bool_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "field_bool"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.log_fields2_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "fields2"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.log_fields3_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "fields3"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.log_event_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "event"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
     static_bindings.crypto_wrappers = program
         .functions
         .iter()
@@ -516,6 +565,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
     let regex_wrappers = static_bindings.regex_wrappers.clone();
     let encoding_wrappers = static_bindings.encoding_wrappers.clone();
     let json_wrappers = static_bindings.json_wrappers.clone();
+    let log_wrappers = static_bindings.log_wrappers.clone();
     let crypto_wrappers = static_bindings.crypto_wrappers.clone();
     let ffi_strlen_symbols = static_bindings.ffi_strlen_symbols.clone();
     let helper_functions = program
@@ -531,6 +581,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
                 && !regex_wrappers.contains(&function.name)
                 && !encoding_wrappers.contains(&function.name)
                 && !json_wrappers.contains(&function.name)
+                && !log_wrappers.contains(&function.name)
                 && !crypto_wrappers.contains(&function.name)
                 && !ffi_strlen_symbols.contains(&function.name)
         })
@@ -6075,6 +6126,16 @@ fn i64_string_text(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<S
             name,
             ty: Type::String | Type::Str,
         } => static_bindings.strings.get(name).cloned(),
+        Expr::BinaryAdd {
+            op: ArithmeticOp::Add,
+            lhs,
+            rhs,
+            ty: Type::String | Type::Str,
+        } => Some(format!(
+            "{}{}",
+            i64_string_text(lhs, static_bindings)?,
+            i64_string_text(rhs, static_bindings)?
+        )),
         Expr::Call {
             name,
             args,
@@ -6222,6 +6283,68 @@ fn i64_string_call_text(
                 return None;
             };
             Some(i64_static_bool_value(value, static_bindings)?.to_string())
+        }
+        name if is_i64_log_field_string_name(name, static_bindings) => {
+            let [key, value] = args else {
+                return None;
+            };
+            Some(format!(
+                "{}:{}",
+                json_escape_string(&i64_string_text(key, static_bindings)?),
+                json_escape_string(&i64_string_text(value, static_bindings)?)
+            ))
+        }
+        name if is_i64_log_field_int_name(name, static_bindings) => {
+            let [key, value] = args else {
+                return None;
+            };
+            Some(format!(
+                "{}:{}",
+                json_escape_string(&i64_string_text(key, static_bindings)?),
+                i64_static_scalar_value(value, static_bindings)?
+            ))
+        }
+        name if is_i64_log_field_bool_name(name, static_bindings) => {
+            let [key, value] = args else {
+                return None;
+            };
+            Some(format!(
+                "{}:{}",
+                json_escape_string(&i64_string_text(key, static_bindings)?),
+                i64_static_bool_value(value, static_bindings)?
+            ))
+        }
+        name if is_i64_log_fields2_name(name, static_bindings) => {
+            let [first, second] = args else {
+                return None;
+            };
+            Some(format!(
+                "{},{}",
+                i64_string_text(first, static_bindings)?,
+                i64_string_text(second, static_bindings)?
+            ))
+        }
+        name if is_i64_log_fields3_name(name, static_bindings) => {
+            let [first, second, third] = args else {
+                return None;
+            };
+            Some(format!(
+                "{},{},{}",
+                i64_string_text(first, static_bindings)?,
+                i64_string_text(second, static_bindings)?,
+                i64_string_text(third, static_bindings)?
+            ))
+        }
+        name if is_i64_log_event_name(name, static_bindings) => {
+            let [level, message, attributes] = args else {
+                return None;
+            };
+            Some(format!(
+                "{{\"level\":{},\"message\":{},\"attributes\":{{{}}}}}",
+                json_escape_string(&i64_string_text(level, static_bindings)?),
+                json_escape_string(&i64_string_text(message, static_bindings)?),
+                i64_string_text(attributes, static_bindings)?
+            ))
         }
         _ => None,
     }
@@ -8458,6 +8581,34 @@ fn is_i64_json_stringify_string_name(name: &str, static_bindings: &I64StaticBind
         || static_bindings
             .json_stringify_string_wrappers
             .contains(name)
+}
+
+fn is_i64_std_log_wrapper(function: &Function, source_name: &str) -> bool {
+    function.path == "<stdlib>/log.ax" && function.source_name == source_name
+}
+
+fn is_i64_log_field_string_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_field_string_wrappers.contains(name)
+}
+
+fn is_i64_log_field_int_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_field_int_wrappers.contains(name)
+}
+
+fn is_i64_log_field_bool_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_field_bool_wrappers.contains(name)
+}
+
+fn is_i64_log_fields2_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_fields2_wrappers.contains(name)
+}
+
+fn is_i64_log_fields3_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_fields3_wrappers.contains(name)
+}
+
+fn is_i64_log_event_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_event_wrappers.contains(name)
 }
 
 fn is_i64_std_crypto_wrapper(function: &Function, source_name: &str) -> bool {

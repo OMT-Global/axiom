@@ -287,7 +287,7 @@
       "capability": null,
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [928],
-      "notes": "The Cranelift spike now builds and runs std/io eprintln with stdout and stderr output from the native binary, and std/log.ax event formatting plus info_attrs stderr emission without generated Rust. Stdin reads and broader streaming/runtime buffering remain open."
+      "notes": "The Cranelift spike now builds and runs std/io eprintln with stdout and stderr output from the native binary, and std/log.ax event formatting plus info_attrs stderr emission without generated Rust. The direct-native i64 path now also lowers deterministic public std/log.ax formatting wrappers for field construction, field-list joining, and event rendering into known string facts that can feed comparisons, length projections, and native process exit status without generated Rust. Stdin reads, runtime stderr emission, and broader streaming/runtime buffering remain open."
     }
   ]
 }
