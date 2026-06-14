@@ -32,6 +32,8 @@ struct I64StaticBindings {
     strings: HashMap<String, String>,
     string_options: HashMap<String, Option<String>>,
     string_builders: HashMap<String, String>,
+    i64_channels: HashMap<String, Option<i64>>,
+    bool_channels: HashMap<String, Option<bool>>,
     map_literals: HashMap<String, Vec<MapEntry>>,
     map_key_arrays: HashMap<String, Vec<I64MapKey>>,
     process_status_wrappers: HashSet<String>,
@@ -1194,6 +1196,11 @@ fn lower_i64_aggregate_return_body(
                 } else {
                     return None;
                 }
+            }
+            Stmt::Let { name, expr, .. }
+                if is_i64_known_channel_call_let(expr, static_bindings) && !seen_runtime_stmt =>
+            {
+                lower_i64_known_channel_call_let(name, expr, &mut *static_bindings)?;
             }
             Stmt::Let {
                 name,
@@ -2375,6 +2382,11 @@ fn lower_i64_body(
                 } else {
                     return None;
                 }
+            }
+            Stmt::Let { name, expr, .. }
+                if is_i64_known_channel_call_let(expr, static_bindings) && !seen_runtime_stmt =>
+            {
+                lower_i64_known_channel_call_let(name, expr, &mut *static_bindings)?;
             }
             Stmt::Let {
                 name,
@@ -3627,6 +3639,28 @@ fn lower_i64_known_scalar_option_call_let_stmts(
         },
     ));
     Some(assigns)
+}
+
+fn is_i64_known_channel_call_let(expr: &Expr, static_bindings: &I64StaticBindings) -> bool {
+    matches!(expr, Expr::Call { name, .. } if is_i64_sync_channel_name(name, static_bindings) || is_i64_sync_send_name(name, static_bindings))
+}
+
+fn lower_i64_known_channel_call_let(
+    name: &str,
+    expr: &Expr,
+    static_bindings: &mut I64StaticBindings,
+) -> Option<()> {
+    if let Some(value) = i64_i64_channel_cell_value(expr, static_bindings) {
+        static_bindings.i64_channels.insert(name.to_string(), value);
+        return Some(());
+    }
+    if let Some(value) = i64_bool_channel_cell_value(expr, static_bindings) {
+        static_bindings
+            .bool_channels
+            .insert(name.to_string(), value);
+        return Some(());
+    }
+    None
 }
 
 fn is_i64_known_string_option_call_let_type(inner: &Type) -> bool {
@@ -7022,6 +7056,9 @@ fn i64_i64_channel_cell_value(
     expr: &Expr,
     static_bindings: &I64StaticBindings,
 ) -> Option<Option<i64>> {
+    if let Expr::VarRef { name, .. } = expr {
+        return static_bindings.i64_channels.get(name).copied();
+    }
     let Expr::Call { name, args, .. } = expr else {
         return None;
     };
@@ -7044,6 +7081,9 @@ fn i64_bool_channel_cell_value(
     expr: &Expr,
     static_bindings: &I64StaticBindings,
 ) -> Option<Option<bool>> {
+    if let Expr::VarRef { name, .. } = expr {
+        return static_bindings.bool_channels.get(name).copied();
+    }
     let Expr::Call { name, args, .. } = expr else {
         return None;
     };

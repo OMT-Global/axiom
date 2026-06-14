@@ -7909,7 +7909,7 @@ fn write_sync_channel_main_exit_project(project: &Path) {
     .expect("write sync channel main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn main(): int {\nlet present: Option<int> = try_recv<int>(send<int>(channel<int>(None), 31))\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = try_recv<int>(channel<int>(None))\nlet missing_score: int = match missing { Some(value) => value, None => 17 }\nlet ready: Option<bool> = try_recv<bool>(send<bool>(channel<bool>(None), true))\nlet ready_present: bool = match ready { Some(value) => value, None => false }\nif ready_present {\nreturn present_score + missing_score + 2\n} else {\nreturn 5\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn main(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 31)\nlet empty: Channel<int> = channel<int>(None)\nlet bool_channel: Channel<bool> = channel<bool>(None)\nlet bool_sent: Channel<bool> = send<bool>(bool_channel, true)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 17 }\nlet ready: Option<bool> = try_recv<bool>(bool_sent)\nlet ready_present: bool = match ready { Some(value) => value, None => false }\nif ready_present {\nreturn present_score + missing_score + 2\n} else {\nreturn 5\n}\n}\n",
     )
     .expect("write sync channel main source");
 }
