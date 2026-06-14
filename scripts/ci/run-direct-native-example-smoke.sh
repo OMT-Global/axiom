@@ -45,6 +45,7 @@ examples=(
   stdlib_doc
   stdlib_encoding
   stdlib_env
+  stdlib_env_unrestricted
   stdlib_fs
   stdlib_fs_write
   stdlib_http
