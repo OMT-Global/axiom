@@ -13,8 +13,14 @@ axiomc_bin="$target_dir/debug/axiomc"
 
 examples=(
   hello
+  agent_native_authorize
   arrays
+  benchmarks
+  capabilities
+  compiler_properties
+  decision_records
   maps
+  openapi_service
   tuples
   structs
   enums
@@ -23,6 +29,13 @@ examples=(
   modules
   outcomes
   packages
+  policy_bundle_service
+  proof_cli
+  property_smoke
+  runbook_service
+  semantic_verifier
+  slices
+  sql_migration_service
   stdlib_async
   stdlib_cli
   stdlib_collection_lookup
@@ -48,6 +61,7 @@ examples=(
   stdlib_testing
   stdlib_string_builder
   stdlib_time
+  terraform_runtime_service
   workspace
 )
 
