@@ -552,8 +552,10 @@ materializing a runtime key array. Imported public `std/collections.ax`
 `contains`, `get`, `get_or_default`, and `keys` map wrappers now alias the same
 direct-native i64 lowering for static string/int map-local cases. Literal
 indexes into static string key arrays can also feed known string length
-lowering. Broader map ownership, runtime map storage, general payload lookup
-bindings, runtime key array projection, and host-boundary representation remain
+lowering, and dynamic scalar indexes into those static string key arrays can
+select among known key byte lengths for direct-native process exit status.
+Broader map ownership, runtime map storage, general payload lookup bindings,
+runtime key array value projection, and host-boundary representation remain
 tracked by issue #928.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`

@@ -9706,6 +9706,18 @@ fn lower_i64_string_len_expr(
                     .get(name)
                     .map(|value| CraneliftI64Expr::Literal(value.len() as i64))
             }),
+        Expr::Index {
+            base,
+            index,
+            ty: Type::String | Type::Str,
+        } => lower_i64_map_key_array_string_index_len_expr(
+            base,
+            index,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ),
         Expr::StringBorrow { expr, .. } => lower_i64_string_len_expr(
             expr,
             local_indexes,
@@ -9715,6 +9727,64 @@ fn lower_i64_string_len_expr(
         ),
         _ => None,
     }
+}
+
+fn lower_i64_map_key_array_string_index_len_expr(
+    base: &Expr,
+    index: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::VarRef {
+        name,
+        ty: Type::Array(element, None),
+    } = base
+    else {
+        return None;
+    };
+    if !matches!(element.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let keys = static_bindings.map_key_arrays.get(name)?;
+    if keys.is_empty() {
+        return None;
+    }
+    if let Some(index) = lower_i64_literal_index(index) {
+        return match keys.get(index)? {
+            I64MapKey::Text(value) => Some(CraneliftI64Expr::Literal(value.len() as i64)),
+            _ => None,
+        };
+    }
+    let index = lower_i64_expr(
+        index,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let last = keys.len() - 1;
+    let mut result = match keys.get(last)? {
+        I64MapKey::Text(value) => CraneliftI64Expr::Literal(value.len() as i64),
+        _ => return None,
+    };
+    for candidate in (0..last).rev() {
+        let length = match keys.get(candidate)? {
+            I64MapKey::Text(value) => value.len() as i64,
+            _ => return None,
+        };
+        result = CraneliftI64Expr::Select {
+            cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+                op: CraneliftI64CompareOp::Eq,
+                lhs: index.clone(),
+                rhs: CraneliftI64Expr::Literal(candidate as i64),
+            })),
+            then_result: Box::new(CraneliftI64Expr::Literal(length)),
+            else_result: Box::new(result),
+        };
+    }
+    Some(result)
 }
 
 fn lower_i64_json_safe_string_len_expr(

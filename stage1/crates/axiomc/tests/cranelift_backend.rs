@@ -7002,6 +7002,14 @@ fn write_std_collection_wrapper_main_exit_project(project: &Path) {
         project.join("src/main.ax"),
         r#"import "std/collections.ax"
 
+fn choose_key_index(flag: bool): int {
+if flag {
+return 1
+} else {
+return 0
+}
+}
+
 fn main(): int {
 let contains_hit_scores: {string: int} = {"build": 7, "deploy": 9}
 let contains_hit: bool = contains<string, int>(contains_hit_scores, "deploy")
@@ -7022,7 +7030,11 @@ let first_key_len: int = len(first_key_names[0])
 let second_key_scores: {string: int} = {"build": 7, "deploy": 9}
 let second_key_names: [string] = keys<string, int>(second_key_scores)
 let second_key_len: int = len(second_key_names[1])
-if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 {
+let dynamic_key_scores: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_key_names: [string] = keys<string, int>(dynamic_key_scores)
+let dynamic_key_index: int = choose_key_index(true)
+let dynamic_key_len: int = len(dynamic_key_names[dynamic_key_index])
+if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 {
 return 48
 } else {
 return 1
