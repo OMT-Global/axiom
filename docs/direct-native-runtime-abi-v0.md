@@ -345,16 +345,6 @@ without the `net` capability still fail before backend lowering. Paired
 dynamic-port send/recv coverage, full UDP socket lifecycle APIs, non-loopback
 policy coverage, timeout parity, and audit parity remain open under #928.
 
-The HTTP client row now has partial Cranelift evidence: the spike builds
-`std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL and
-fetches a local one-shot HTTP response without generated Rust. The direct-native
-i64 path now also lowers known-url `http_get(...)` and public `std/http.ax`
-`get(...)` calls into native process exit status by selecting `Option<string>`
-match arms at compile time for local HTTP responses. Packages without the `net`
-capability still fail before backend lowering. HTTPS, nonlocal HTTP policy
-coverage, redirects, richer response handling, timeout parity, and audit parity
-remain open under #928.
-
 The filesystem write row now has partial Cranelift evidence: the spike
 evaluates `std/fs.ax` write helpers over configured `fs_root`-scoped literal
 paths during compilation and emits the resulting output, covering `mkdir_all`,
@@ -429,7 +419,10 @@ hooks, audit parity, and non-Unix support remain open under #928.
 
 The HTTP client row now has partial Cranelift evidence: the spike builds
 `std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL
-and fetches a local one-shot HTTP response without generated Rust. Packages
+and fetches a local one-shot HTTP response without generated Rust. The
+direct-native i64 path now also lowers known-url `http_get(...)` and public
+`std/http.ax` `get(...)` calls into native process exit status by selecting
+`Option<string>` match arms at compile time for local HTTP responses. Packages
 without the `net` capability still fail before backend lowering. HTTPS,
 nonlocal HTTP policy coverage, redirects, richer response handling, timeout
 parity, and audit parity remain open under #928.
@@ -439,10 +432,13 @@ runs loopback HTTP server entrypoints without generated Rust, covering
 `http_server_listen`, `http_server_local_port`, `http_server_accept`,
 `http_request_method`, `http_request_path`, `http_request_body`,
 `http_response_write`, and `http_server_close` over a one-request HTTP/1.0
-fixture. Packages without the `net` capability still fail before backend
-lowering. Route helpers, multi-request serving, non-loopback policy coverage,
-richer response metadata, timeout parity, and audit parity remain open under
-#928.
+fixture. The direct-native i64 path now also lowers known-bind
+`http_serve_once(...)` and public `std/http.ax` `serve_once(...)` calls into
+native process exit status by selecting bool branches at compile time for a
+local one-request HTTP response. Packages without the `net` capability still
+fail before backend lowering. Multi-request serving, non-loopback policy
+coverage, richer response metadata, timeout parity, and audit parity remain
+open under #928.
 
 The async HTTP server row now has partial Cranelift evidence: the spike builds
 and runs `http_async_serve_route` over a loopback server handle without

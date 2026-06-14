@@ -3281,6 +3281,59 @@ fn cranelift_backend_builds_http_server_binary() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_http_server_once_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("http-server-once-main-exit");
+    let Some(port) = reserve_loopback_port() else {
+        return;
+    };
+    write_http_server_once_main_exit_project(&project, port);
+    let client = start_http_route_probe_client(port, "/once");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift http server once main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response = client.join().expect("join http server once probe client");
+    assert!(
+        response.starts_with("HTTP/1.0 200 OK\r\n"),
+        "unexpected http server once response: {response:?}"
+    );
+    assert!(
+        response.ends_with("server-once-ok"),
+        "unexpected http server once response body: {response:?}"
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift http server once main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_builds_http_async_server_binary() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -7162,6 +7215,62 @@ print http_server_close(server)
         ),
     )
     .expect("write http server source");
+}
+
+fn write_http_server_once_main_exit_project(project: &Path, port: u16) {
+    fs::create_dir_all(project.join("src")).expect("create http server once main project src");
+    fs::write(
+        project.join("axiom.toml"),
+        format!(
+            r#"[package]
+name = "cranelift-http-server-once-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = {{ hosts = ["127.0.0.1"], ports = [{port}] }}
+process = false
+env = false
+clock = false
+crypto = false
+
+[unsafe_rationale]
+net = "Direct-native HTTP server regression covers std/http.ax serve_once for issue 928."
+"#
+        ),
+    )
+    .expect("write http server once main manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-http-server-once-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write http server once main lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        format!(
+            r#"import "std/http.ax"
+
+fn main(): int {{
+if serve_once("127.0.0.1:{port}", "server-once-ok") {{
+return 48
+}} else {{
+return 1
+}}
+}}
+"#
+        ),
+    )
+    .expect("write http server once main source");
 }
 
 fn write_http_async_server_project(project: &Path, port: u16) {

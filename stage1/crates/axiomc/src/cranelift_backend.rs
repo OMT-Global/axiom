@@ -45,6 +45,7 @@ struct I64StaticBindings {
     net_shim_wrappers: HashSet<String>,
     http_shim_wrappers: HashSet<String>,
     http_get_wrappers: HashSet<String>,
+    http_serve_once_wrappers: HashSet<String>,
     collection_wrappers: HashSet<String>,
     collection_contains_wrappers: HashSet<String>,
     collection_get_wrappers: HashSet<String>,
@@ -347,6 +348,14 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .functions
         .iter()
         .filter(|function| function.path == "<stdlib>/http.ax" && function.source_name == "get")
+        .map(|function| function.name.clone())
+        .collect();
+    static_bindings.http_serve_once_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| {
+            function.path == "<stdlib>/http.ax" && function.source_name == "serve_once"
+        })
         .map(|function| function.name.clone())
         .collect();
     static_bindings.collection_wrappers = program
@@ -6131,6 +6140,15 @@ fn lower_i64_known_bool_intrinsic_condition(
                 .is_some(),
             ))
         }
+        name if is_i64_http_serve_once_name(name, static_bindings) => {
+            let [bind, body] = args else {
+                return None;
+            };
+            Some(CraneliftI64Condition::Literal(http_serve_once(
+                &i64_string_text(bind, static_bindings)?,
+                &i64_string_text(body, static_bindings)?,
+            )))
+        }
         name if is_i64_crypto_constant_time_eq_name(name, static_bindings) => {
             let [left, right] = args else {
                 return None;
@@ -8777,6 +8795,13 @@ fn is_i64_net_udp_loopback_once_name(name: &str) -> bool {
 fn is_i64_http_get_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     matches!(name, "http_get" | "get" | "std_http_get")
         || static_bindings.http_get_wrappers.contains(name)
+}
+
+fn is_i64_http_serve_once_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    matches!(
+        name,
+        "http_serve_once" | "serve_once" | "std_http_serve_once"
+    ) || static_bindings.http_serve_once_wrappers.contains(name)
 }
 
 fn is_i64_std_collection_wrapper(function: &Function, source_name: &str) -> bool {
