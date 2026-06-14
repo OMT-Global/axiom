@@ -344,9 +344,14 @@ paths during compilation and emits the resulting output, covering `mkdir_all`,
 `write_file`, `append_file`, readback, `replace_file`, `create_file`,
 `remove_file`, and `remove_dir`. It also covers `fs_root` scoping and preserves
 the public manifest-policy denial for a package with `fs = true` and
-`"fs:write" = false` that calls `std/fs.ax` `write_file(...)`. Full
-runtime-time filesystem writes, atomic replace parity, TOCTOU hardening, and
-audit parity remain open under #928.
+`"fs:write" = false` that calls `std/fs.ax` `write_file(...)`. The
+direct-native i64 path now also lowers literal-path `mkdir_all`, `write_file`,
+`append_file`, `replace_file`, `create_file`, `remove_file`, and `remove_dir`
+calls, including public `std/fs.ax` wrappers, into native process exit status
+without generated Rust by executing the same `fs_root`-scoped candidate checks
+and status-code convention used by the spike. Full runtime-time filesystem
+writes, atomic replace parity, TOCTOU hardening, and audit parity remain open
+under #928.
 
 The direct-native crypto hash slice is still marked partial: the Cranelift
 spike can build and run `std/crypto_hash.ax` `sha256(...)` without generated

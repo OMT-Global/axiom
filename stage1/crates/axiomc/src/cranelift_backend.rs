@@ -40,6 +40,7 @@ struct I64StaticBindings {
     time_duration_ms_wrappers: HashSet<String>,
     time_sleep_wrappers: HashSet<String>,
     fs_read_wrappers: HashSet<String>,
+    fs_write_wrappers: HashMap<String, String>,
     fs_shim_wrappers: HashSet<String>,
     net_shim_wrappers: HashSet<String>,
     collection_wrappers: HashSet<String>,
@@ -308,6 +309,19 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .iter()
         .filter(|function| is_i64_std_fs_read_wrapper(function))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.fs_write_wrappers = program
+        .functions
+        .iter()
+        .filter_map(|function| {
+            i64_std_fs_write_intrinsic(function).map(|intrinsic| {
+                [
+                    (function.name.clone(), intrinsic.to_string()),
+                    (function.source_name.clone(), intrinsic.to_string()),
+                ]
+            })
+        })
+        .flatten()
         .collect();
     static_bindings.fs_shim_wrappers = program
         .functions
@@ -6888,6 +6902,7 @@ fn lower_i64_expr(
         Expr::Call { name, args, ty } if is_i64_compatible_type(ty) => {
             lower_i64_clock_intrinsic_expr(name, args, static_bindings)
                 .or_else(|| lower_i64_process_intrinsic_expr(name, args, static_bindings))
+                .or_else(|| lower_i64_fs_write_intrinsic_expr(name, args, static_bindings))
                 .or_else(|| {
                     lower_i64_ffi_intrinsic_expr(
                         name,
@@ -8418,6 +8433,19 @@ fn lower_i64_process_intrinsic_expr(
     }
 }
 
+fn lower_i64_fs_write_intrinsic_expr(
+    name: &str,
+    args: &[Expr],
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let name = i64_fs_write_intrinsic_name(name, static_bindings)?;
+    Some(CraneliftI64Expr::Literal(i64_fs_write_result(
+        name,
+        args,
+        static_bindings,
+    )?))
+}
+
 fn lower_i64_ffi_intrinsic_expr(
     name: &str,
     args: &[Expr],
@@ -8606,6 +8634,45 @@ fn i64_map_literal_entries<'a>(
 
 fn is_i64_std_fs_read_wrapper(function: &Function) -> bool {
     function.path == "<stdlib>/fs.ax" && function.source_name == "read_file"
+}
+
+fn i64_std_fs_write_intrinsic(function: &Function) -> Option<&'static str> {
+    if function.path != "<stdlib>/fs.ax" {
+        return None;
+    }
+    match function.source_name.as_str() {
+        "write_file" => Some("fs_write"),
+        "create_file" => Some("fs_create"),
+        "append_file" => Some("fs_append"),
+        "mkdir" => Some("fs_mkdir"),
+        "mkdir_all" => Some("fs_mkdir_all"),
+        "remove_file" => Some("fs_remove_file"),
+        "remove_dir" => Some("fs_remove_dir"),
+        "replace_file" => Some("fs_replace"),
+        _ => None,
+    }
+}
+
+fn i64_fs_write_intrinsic_name<'a>(
+    name: &'a str,
+    static_bindings: &'a I64StaticBindings,
+) -> Option<&'a str> {
+    match name {
+        "fs_write" | "fs_create" | "fs_append" | "fs_mkdir" | "fs_mkdir_all" | "fs_remove_file"
+        | "fs_remove_dir" | "fs_replace" => Some(name),
+        "write_file" | "std_fs_write_file" => Some("fs_write"),
+        "create_file" | "std_fs_create_file" => Some("fs_create"),
+        "append_file" | "std_fs_append_file" => Some("fs_append"),
+        "mkdir" | "std_fs_mkdir" => Some("fs_mkdir"),
+        "mkdir_all" | "std_fs_mkdir_all" => Some("fs_mkdir_all"),
+        "remove_file" | "std_fs_remove_file" => Some("fs_remove_file"),
+        "remove_dir" | "std_fs_remove_dir" => Some("fs_remove_dir"),
+        "replace_file" | "std_fs_replace_file" => Some("fs_replace"),
+        _ => static_bindings
+            .fs_write_wrappers
+            .get(name)
+            .map(String::as_str),
+    }
 }
 
 fn is_i64_std_time_wrapper(function: &Function, source_name: &str) -> bool {
@@ -14173,6 +14240,141 @@ fn spike_fs_read_text_for_root(fs_root: &Path, path: &str) -> Option<String> {
     Some(content)
 }
 
+fn i64_fs_write_result(
+    name: &str,
+    args: &[Expr],
+    static_bindings: &I64StaticBindings,
+) -> Option<i64> {
+    let fs_root = static_bindings.fs_root.as_deref()?;
+    match name {
+        "fs_write" => {
+            let (path, content) = i64_fs_path_content(args, static_bindings)?;
+            if content.len() > SPIKE_MAX_FS_WRITE_BYTES {
+                return Some(-1);
+            }
+            Some(
+                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                    .and_then(|candidate| std::fs::write(candidate, content).ok())
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_create" => {
+            let path = i64_fs_path(args, static_bindings)?;
+            Some(
+                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                    .and_then(|candidate| {
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(candidate)
+                            .ok()
+                    })
+                    .map(|_| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_append" => {
+            let (path, content) = i64_fs_path_content(args, static_bindings)?;
+            if content.len() > SPIKE_MAX_FS_WRITE_BYTES {
+                return Some(-1);
+            }
+            Some(
+                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                    .and_then(|candidate| {
+                        let mut file = std::fs::OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(candidate)
+                            .ok()?;
+                        std::io::Write::write_all(&mut file, content.as_bytes()).ok()
+                    })
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_mkdir" => {
+            let path = i64_fs_path(args, static_bindings)?;
+            Some(
+                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                    .and_then(|candidate| std::fs::create_dir(candidate).ok())
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_mkdir_all" => {
+            let path = i64_fs_path(args, static_bindings)?;
+            Some(
+                spike_fs_write_candidate_for_root(fs_root, &path, true)
+                    .and_then(|candidate| std::fs::create_dir_all(candidate).ok())
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_remove_file" => {
+            let path = i64_fs_path(args, static_bindings)?;
+            Some(
+                spike_fs_existing_candidate_for_root(fs_root, &path)
+                    .and_then(|candidate| {
+                        std::fs::metadata(&candidate)
+                            .ok()
+                            .filter(|metadata| metadata.is_file())?;
+                        std::fs::remove_file(candidate).ok()
+                    })
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_remove_dir" => {
+            let path = i64_fs_path(args, static_bindings)?;
+            Some(
+                spike_fs_existing_candidate_for_root(fs_root, &path)
+                    .and_then(|candidate| {
+                        std::fs::metadata(&candidate)
+                            .ok()
+                            .filter(|metadata| metadata.is_dir())?;
+                        std::fs::remove_dir(candidate).ok()
+                    })
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        "fs_replace" => {
+            let (path, content) = i64_fs_path_content(args, static_bindings)?;
+            if content.len() > SPIKE_MAX_FS_WRITE_BYTES {
+                return Some(-1);
+            }
+            Some(
+                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                    .and_then(|candidate| std::fs::write(candidate, content).ok())
+                    .map(|()| 0)
+                    .unwrap_or(-1),
+            )
+        }
+        _ => None,
+    }
+}
+
+fn i64_fs_path(args: &[Expr], static_bindings: &I64StaticBindings) -> Option<String> {
+    let [path] = args else {
+        return None;
+    };
+    i64_string_text(path, static_bindings)
+}
+
+fn i64_fs_path_content(
+    args: &[Expr],
+    static_bindings: &I64StaticBindings,
+) -> Option<(String, String)> {
+    let [path, content] = args else {
+        return None;
+    };
+    Some((
+        i64_string_text(path, static_bindings)?,
+        i64_string_text(content, static_bindings)?,
+    ))
+}
+
 fn i64_net_resolve_text(host: &str) -> Option<String> {
     (host, 0)
         .to_socket_addrs()
@@ -14348,45 +14550,49 @@ fn spike_fs_write_candidate(
     allow_missing_ancestors: bool,
 ) -> Result<Option<PathBuf>, Diagnostic> {
     let fs_root = spike_fs_root(env)?;
-    let Some(candidate) = spike_fs_join_candidate(&fs_root, path) else {
-        return Ok(None);
-    };
-    let Ok(canonical_root) = std::fs::canonicalize(&fs_root) else {
-        return Ok(None);
+    Ok(spike_fs_write_candidate_for_root(
+        &fs_root,
+        path,
+        allow_missing_ancestors,
+    ))
+}
+
+fn spike_fs_write_candidate_for_root(
+    fs_root: &Path,
+    path: &str,
+    allow_missing_ancestors: bool,
+) -> Option<PathBuf> {
+    let candidate = spike_fs_join_candidate(fs_root, path)?;
+    let Ok(canonical_root) = std::fs::canonicalize(fs_root) else {
+        return None;
     };
     if let Ok(canonical_candidate) = std::fs::canonicalize(&candidate) {
-        return Ok(canonical_candidate
+        return canonical_candidate
             .starts_with(canonical_root)
-            .then_some(canonical_candidate));
+            .then_some(canonical_candidate);
     }
-    let Some(parent) = candidate.parent() else {
-        return Ok(None);
-    };
+    let parent = candidate.parent()?;
     if !allow_missing_ancestors {
         let Ok(canonical_parent) = std::fs::canonicalize(parent) else {
-            return Ok(None);
+            return None;
         };
         if !canonical_parent.starts_with(&canonical_root) {
-            return Ok(None);
+            return None;
         }
-        let Some(file_name) = candidate.file_name() else {
-            return Ok(None);
-        };
-        return Ok(Some(canonical_parent.join(file_name)));
+        let file_name = candidate.file_name()?;
+        return Some(canonical_parent.join(file_name));
     }
     let mut ancestor = parent;
     while !ancestor.exists() {
-        let Some(parent) = ancestor.parent() else {
-            return Ok(None);
-        };
+        let parent = ancestor.parent()?;
         ancestor = parent;
     }
     let Ok(canonical_ancestor) = std::fs::canonicalize(ancestor) else {
-        return Ok(None);
+        return None;
     };
-    Ok(canonical_ancestor
+    canonical_ancestor
         .starts_with(canonical_root)
-        .then_some(candidate))
+        .then_some(candidate)
 }
 
 fn spike_fs_join_candidate(package_root: &Path, path: &str) -> Option<PathBuf> {
