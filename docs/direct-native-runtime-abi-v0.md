@@ -592,9 +592,13 @@ now evaluates ownership-shaped `std/sync.ax` mutex, once, and channel wrappers
 and emits the expected native output. The direct-native i64 path now also lowers
 public `std/sync.ax` `mutex(...)`, `lock(...)`, `replace(...)`, and
 `into_inner(...)` wrappers over a scalar `int` payload into native process exit
-status without generated Rust. Once and channel runtime-exit lowering,
-concurrent execution, blocking behavior, and host runtime synchronization
-remain tracked by issue #928.
+status without generated Rust. It also lowers public `std/sync.ax`
+`once_with(...)`, `once(...)`, `once_is_set(...)`, and `once_take(...)` wrappers
+over scalar `int`/`bool` payloads when the one-shot cell value is compile-time
+known, letting present and missing once cells feed direct-native process exit
+status without generated Rust. Channel runtime-exit lowering, concurrent
+execution, blocking behavior, and host runtime synchronization remain tracked
+by issue #928.
 
 The `Result<T, E>` row has partial direct-native evidence: the Cranelift spike
 now builds and runs a package importing `std/outcome.ax`, using result
