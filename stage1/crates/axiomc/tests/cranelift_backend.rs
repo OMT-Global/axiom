@@ -1370,6 +1370,46 @@ fn cranelift_backend_lowers_known_regex_text_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_std_regex_wrappers_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-regex-wrapper-main-exit");
+    write_std_regex_wrapper_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std regex wrapper main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std regex wrapper main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_known_json_text_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -5487,6 +5527,25 @@ fn write_known_regex_text_main_exit_project(project: &Path) {
         "static ISSUE_TEXT: string = \"issue-238-ready\"\n\nfn main(): int {\nlet replaced: string = regex_replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = regex_replace_all(\"^a\", \"aaa\", \"x\")\nlet match_gate: bool = regex_is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match regex_find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match regex_find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(regex_replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nif match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write known regex text source");
+}
+
+fn write_std_regex_wrapper_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create std regex wrapper project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-std-regex-wrapper-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write std regex wrapper manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-std-regex-wrapper-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write std regex wrapper lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/regex.ax\"\n\nstatic ISSUE_TEXT: string = \"issue-238-ready\"\n\nfn main(): int {\nlet replaced: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = replace_all(\"^a\", \"aaa\", \"x\")\nlet match_gate: bool = is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nif match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write std regex wrapper source");
 }
 
 fn write_known_json_text_main_exit_project(project: &Path) {

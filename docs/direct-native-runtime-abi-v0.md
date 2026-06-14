@@ -440,9 +440,11 @@ subset without generated Rust, including anchored replacement behavior. The
 direct-native i64 path now also lowers known-input `regex_is_match(...)`
 conditions, known-input `regex_replace_all(...)` string results, and known-input
 `regex_find(...)` direct `Option<string>` matches into native process exit status
-without generated Rust. Broader regex syntax, dynamic runtime regex execution,
-capture groups, replacement expansion semantics, and conformance coverage remain
-open under #928.
+without generated Rust. Imported public `std/regex.ax` `is_match`, `find`, and
+`replace_all` wrappers now alias that same direct-native known-input lowering.
+Broader regex syntax, dynamic runtime regex execution, capture groups,
+replacement expansion semantics, and conformance coverage remain open under
+#928.
 
 The string row has partial direct-native evidence: the Cranelift spike now
 builds and runs pure string intrinsics including `string_clone`,

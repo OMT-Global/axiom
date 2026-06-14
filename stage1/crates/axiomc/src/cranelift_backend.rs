@@ -43,6 +43,10 @@ struct I64StaticBindings {
     collection_get_wrappers: HashSet<String>,
     collection_get_or_default_wrappers: HashSet<String>,
     collection_keys_wrappers: HashSet<String>,
+    regex_wrappers: HashSet<String>,
+    regex_is_match_wrappers: HashSet<String>,
+    regex_find_wrappers: HashSet<String>,
+    regex_replace_all_wrappers: HashSet<String>,
     ffi_strlen_symbols: HashSet<String>,
     fs_root: Option<PathBuf>,
     structs: HashMap<String, StructDef>,
@@ -288,6 +292,30 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_collection_wrapper(function, "keys"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
+    static_bindings.regex_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| function.path == "<stdlib>/regex.ax")
+        .map(|function| function.name.clone())
+        .collect();
+    static_bindings.regex_is_match_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_regex_wrapper(function, "is_match"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.regex_find_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_regex_wrapper(function, "find"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.regex_replace_all_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_regex_wrapper(function, "replace_all"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
     static_bindings.ffi_strlen_symbols = program
         .functions
         .iter()
@@ -309,6 +337,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
     let fs_shim_wrappers = static_bindings.fs_shim_wrappers.clone();
     let net_shim_wrappers = static_bindings.net_shim_wrappers.clone();
     let collection_wrappers = static_bindings.collection_wrappers.clone();
+    let regex_wrappers = static_bindings.regex_wrappers.clone();
     let ffi_strlen_symbols = static_bindings.ffi_strlen_symbols.clone();
     let helper_functions = program
         .functions
@@ -320,6 +349,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
                 && !fs_shim_wrappers.contains(&function.name)
                 && !net_shim_wrappers.contains(&function.name)
                 && !collection_wrappers.contains(&function.name)
+                && !regex_wrappers.contains(&function.name)
                 && !ffi_strlen_symbols.contains(&function.name)
         })
         .collect::<Vec<_>>();
@@ -5732,7 +5762,7 @@ fn lower_i64_known_bool_intrinsic_condition(
                     .starts_with(i64_string_text(prefix, static_bindings)?.as_str()),
             ))
         }
-        "regex_is_match" => {
+        name if is_i64_regex_is_match_name(name, static_bindings) => {
             let [pattern, text] = args else {
                 return None;
             };
@@ -5946,7 +5976,7 @@ fn i64_string_call_text(
                 hmac_hex(key.as_bytes(), message.as_bytes(), 128, sha512_bytes)
             })
         }
-        "regex_replace_all" => {
+        name if is_i64_regex_replace_all_name(name, static_bindings) => {
             let [pattern, text, replacement] = args else {
                 return None;
             };
@@ -6080,7 +6110,7 @@ fn i64_string_option_text(
             };
             Some(percent_decode(&i64_string_text(text, static_bindings)?))
         }
-        "regex_find" => {
+        name if is_i64_regex_find_name(name, static_bindings) => {
             let [pattern, text] = args.as_slice() else {
                 return None;
             };
@@ -8108,6 +8138,22 @@ fn is_i64_std_net_shim_wrapper(function: &Function) -> bool {
 
 fn is_i64_std_collection_wrapper(function: &Function, source_name: &str) -> bool {
     function.path == "<stdlib>/collections.ax" && function.source_name == source_name
+}
+
+fn is_i64_std_regex_wrapper(function: &Function, source_name: &str) -> bool {
+    function.path == "<stdlib>/regex.ax" && function.source_name == source_name
+}
+
+fn is_i64_regex_is_match_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "regex_is_match" || static_bindings.regex_is_match_wrappers.contains(name)
+}
+
+fn is_i64_regex_find_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "regex_find" || static_bindings.regex_find_wrappers.contains(name)
+}
+
+fn is_i64_regex_replace_all_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "regex_replace_all" || static_bindings.regex_replace_all_wrappers.contains(name)
 }
 
 fn is_i64_supported_strlen_extern(function: &Function) -> bool {
