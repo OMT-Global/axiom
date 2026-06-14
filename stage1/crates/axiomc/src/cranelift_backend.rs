@@ -30,6 +30,7 @@ struct I64StaticBindings {
     values: HashMap<String, CraneliftI64Expr>,
     conditions: HashMap<String, CraneliftI64Condition>,
     strings: HashMap<String, String>,
+    string_options: HashMap<String, Option<String>>,
     process_status_wrappers: HashSet<String>,
     env_get_wrappers: HashSet<String>,
     fs_read_wrappers: HashSet<String>,
@@ -827,10 +828,20 @@ fn lower_i64_aggregate_return_body(
                         ..
                     },
                 ..
-            } if is_i64_option_local_payload_type_static(inner, static_bindings)
+            } if (is_i64_option_local_payload_type_static(inner, static_bindings)
+                || is_i64_known_string_option_call_let_type(inner.as_ref()))
                 && !seen_runtime_stmt =>
             {
-                if let Some(assigns) = lower_i64_known_scalar_option_call_let_stmts(
+                if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut *static_bindings,
+                ) {
+                    let has_runtime_stmts = !assigns.is_empty();
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = has_runtime_stmts;
+                } else if let Some(assigns) = lower_i64_known_scalar_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -839,6 +850,7 @@ fn lower_i64_aggregate_return_body(
                     static_bindings,
                 ) {
                     lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
                 } else {
                     lowered_stmts.extend(lower_i64_option_call_let_stmts(
                         name,
@@ -851,8 +863,8 @@ fn lower_i64_aggregate_return_body(
                         helper_signatures,
                         static_bindings,
                     )?);
+                    seen_runtime_stmt = true;
                 }
-                seen_runtime_stmt = true;
             }
             Stmt::Let {
                 name,
@@ -1962,10 +1974,20 @@ fn lower_i64_body(
                         ..
                     },
                 ..
-            } if is_i64_option_local_payload_type_static(inner, static_bindings)
+            } if (is_i64_option_local_payload_type_static(inner, static_bindings)
+                || is_i64_known_string_option_call_let_type(inner.as_ref()))
                 && !seen_runtime_stmt =>
             {
-                if let Some(assigns) = lower_i64_known_scalar_option_call_let_stmts(
+                if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut *static_bindings,
+                ) {
+                    let has_runtime_stmts = !assigns.is_empty();
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = has_runtime_stmts;
+                } else if let Some(assigns) = lower_i64_known_scalar_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -1974,6 +1996,7 @@ fn lower_i64_body(
                     static_bindings,
                 ) {
                     lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
                 } else {
                     lowered_stmts.extend(lower_i64_option_call_let_stmts(
                         name,
@@ -1986,8 +2009,8 @@ fn lower_i64_body(
                         helper_signatures,
                         static_bindings,
                     )?);
+                    seen_runtime_stmt = true;
                 }
-                seen_runtime_stmt = true;
             }
             Stmt::Let {
                 name,
@@ -3041,6 +3064,26 @@ fn lower_i64_known_scalar_option_call_let_stmts(
         },
     ));
     Some(assigns)
+}
+
+fn is_i64_known_string_option_call_let_type(inner: &Type) -> bool {
+    matches!(inner, Type::String | Type::Str)
+}
+
+fn lower_i64_known_string_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    static_bindings: &mut I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !is_i64_known_string_option_call_let_type(inner) {
+        return None;
+    }
+    let value = i64_string_option_text(expr, static_bindings)?;
+    static_bindings
+        .string_options
+        .insert(name.to_string(), value);
+    Some(Vec::new())
 }
 
 fn lower_i64_result_literal_let_stmts(
@@ -5866,6 +5909,14 @@ fn i64_string_option_text(
     expr: &Expr,
     static_bindings: &I64StaticBindings,
 ) -> Option<Option<String>> {
+    if let Expr::VarRef {
+        name,
+        ty: Type::Option(inner),
+    } = expr
+        && is_i64_known_string_option_call_let_type(inner)
+    {
+        return static_bindings.string_options.get(name).cloned();
+    }
     let Expr::Call { name, args, .. } = expr else {
         return None;
     };

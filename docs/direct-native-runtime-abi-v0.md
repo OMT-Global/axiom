@@ -483,10 +483,11 @@ boolean, or known string values can now feed direct
 `Option<int>`/`Option<bool>`/`Option<string>` match expressions into native
 process exit status. Integer and boolean lookup results can also feed local
 `Option<int>`/`Option<bool>` tag/payload bindings that are matched later in the
-same direct-native body. Broader map ownership, stored-map locals, local
-`Option<string>`/general payload lookup bindings, full public `std/collections.ax`
-wrapper coverage in the i64 path, and host-boundary representation remain
-tracked by issue #928.
+same direct-native body, and known string lookup results can feed pre-runtime
+local `Option<string>` facts that are matched later in the same body. Broader
+map ownership, stored-map locals, general payload lookup bindings, full public
+`std/collections.ax` wrapper coverage in the i64 path, and host-boundary
+representation remain tracked by issue #928.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names without generated Rust, plus
