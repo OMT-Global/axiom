@@ -18,10 +18,23 @@ examples=(
   tuples
   structs
   enums
+  stdlib_async
+  stdlib_collection_lookup
+  stdlib_collections
+  stdlib_crypto_hash
+  stdlib_crypto_mac
   stdlib_encoding
+  stdlib_env
+  stdlib_fs
+  stdlib_fs_write
+  stdlib_http
+  stdlib_io
   stdlib_json
+  stdlib_log
   stdlib_regex
+  stdlib_sync
   stdlib_string_builder
+  stdlib_time
 )
 
 validate_payload() {
