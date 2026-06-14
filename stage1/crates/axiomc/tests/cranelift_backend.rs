@@ -7890,7 +7890,7 @@ fn write_sync_once_main_exit_project(project: &Path) {
     .expect("write sync once main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn main(): int {\nlet present: Option<int> = once_take<int>(once_with<int>(21))\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = once_take<int>(once<int>(None))\nlet missing_score: int = match missing { Some(value) => value, None => 19 }\nlet ready: bool = once_is_set<int>(once_with<int>(0))\nlet empty: bool = once_is_set<int>(once<int>(None))\nif ready && (empty == false) {\nreturn present_score + missing_score\n} else {\nreturn 2\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn main(): int {\nlet present_cell: Once<int> = once_with<int>(21)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<int> = once_with<int>(0)\nlet empty_cell: Once<int> = once<int>(None)\nlet bool_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 19 }\nlet ready: bool = once_is_set<int>(ready_cell)\nlet empty: bool = once_is_set<int>(empty_cell)\nlet bool_ready: Option<bool> = once_take<bool>(bool_cell)\nlet bool_present: bool = match bool_ready { Some(value) => value, None => false }\nif ready && (empty == false) && bool_present {\nreturn present_score + missing_score\n} else {\nreturn 2\n}\n}\n",
     )
     .expect("write sync once main source");
 }
