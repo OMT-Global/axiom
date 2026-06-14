@@ -484,8 +484,10 @@ boolean, or known string values can now feed direct
 process exit status. Integer and boolean lookup results can also feed local
 `Option<int>`/`Option<bool>` tag/payload bindings that are matched later in the
 same direct-native body, and known string lookup results can feed pre-runtime
-local `Option<string>` facts that are matched later in the same body. Broader
-map ownership, stored-map locals, general payload lookup bindings, full public
+local `Option<string>` facts that are matched later in the same body.
+Pre-runtime local map bindings initialized from inline map literals can feed the
+same `get_or_default`, `map_contains_key`, and `get` lowering. Broader map
+ownership, runtime map storage, general payload lookup bindings, full public
 `std/collections.ax` wrapper coverage in the i64 path, and host-boundary
 representation remain tracked by issue #928.
 

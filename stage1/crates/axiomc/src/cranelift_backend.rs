@@ -1,7 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::mir::{
     ArithmeticOp, CompareOp, EnumDef, EnumVariantDef, Expr, Function, LiteralValue, LogicOp,
-    MatchArm, MatchExprArm, Program, StaticDef, Stmt, StructDef, Type,
+    MapEntry, MatchArm, MatchExprArm, Program, StaticDef, Stmt, StructDef, Type,
 };
 use crate::syntax::NumericType;
 use axiomc_backend_cranelift::{
@@ -31,6 +31,7 @@ struct I64StaticBindings {
     conditions: HashMap<String, CraneliftI64Condition>,
     strings: HashMap<String, String>,
     string_options: HashMap<String, Option<String>>,
+    map_literals: HashMap<String, Vec<MapEntry>>,
     process_status_wrappers: HashSet<String>,
     env_get_wrappers: HashSet<String>,
     fs_read_wrappers: HashSet<String>,
@@ -679,6 +680,16 @@ fn lower_i64_aggregate_return_body(
                     helper_signatures,
                     &mut *static_bindings,
                 )?;
+            }
+            Stmt::Let {
+                name,
+                ty: Type::Map(_, _),
+                expr: Expr::MapLiteral { entries, .. },
+                ..
+            } if !seen_runtime_stmt => {
+                static_bindings
+                    .map_literals
+                    .insert(name.clone(), entries.clone());
             }
             Stmt::Let {
                 name,
@@ -1825,6 +1836,16 @@ fn lower_i64_body(
                     helper_signatures,
                     &mut *static_bindings,
                 )?;
+            }
+            Stmt::Let {
+                name,
+                ty: Type::Map(_, _),
+                expr: Expr::MapLiteral { entries, .. },
+                ..
+            } if !seen_runtime_stmt => {
+                static_bindings
+                    .map_literals
+                    .insert(name.clone(), entries.clone());
             }
             Stmt::Let {
                 name,
@@ -7813,9 +7834,7 @@ fn lower_i64_map_get_or_default_expr(
     let [map, key, default] = args else {
         return None;
     };
-    let Expr::MapLiteral { entries, .. } = map else {
-        return None;
-    };
+    let entries = i64_map_literal_entries(map, static_bindings)?;
     let key = lower_i64_map_key_expr(key, static_bindings)?;
     let mut selected = None;
     for entry in entries {
@@ -7835,7 +7854,7 @@ fn lower_i64_map_get_or_default_expr(
 fn i64_map_get_value_expr<'a>(
     name: &str,
     args: &'a [Expr],
-    static_bindings: &I64StaticBindings,
+    static_bindings: &'a I64StaticBindings,
 ) -> Option<Option<&'a Expr>> {
     if name != "map_get" && name != "get" {
         return None;
@@ -7843,9 +7862,7 @@ fn i64_map_get_value_expr<'a>(
     let [map, key] = args else {
         return None;
     };
-    let Expr::MapLiteral { entries, .. } = map else {
-        return None;
-    };
+    let entries = i64_map_literal_entries(map, static_bindings)?;
     let key = lower_i64_map_key_expr(key, static_bindings)?;
     for entry in entries {
         if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
@@ -7866,9 +7883,7 @@ fn lower_i64_map_contains_key_condition(
     let [map, key] = args else {
         return None;
     };
-    let Expr::MapLiteral { entries, .. } = map else {
-        return None;
-    };
+    let entries = i64_map_literal_entries(map, static_bindings)?;
     let key = lower_i64_map_key_expr(key, static_bindings)?;
     for entry in entries {
         if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
@@ -7885,6 +7900,23 @@ fn lower_i64_map_key_expr(expr: &Expr, static_bindings: &I64StaticBindings) -> O
     match expr {
         Expr::Literal(LiteralValue::Bool(value)) => Some(I64MapKey::Bool(*value)),
         _ => lower_i64_literal_value(expr).map(I64MapKey::Int),
+    }
+}
+
+fn i64_map_literal_entries<'a>(
+    map: &'a Expr,
+    static_bindings: &'a I64StaticBindings,
+) -> Option<&'a [MapEntry]> {
+    match map {
+        Expr::MapLiteral { entries, .. } => Some(entries.as_slice()),
+        Expr::VarRef {
+            name,
+            ty: Type::Map(_, _),
+        } => static_bindings
+            .map_literals
+            .get(name)
+            .map(std::vec::Vec::as_slice),
+        _ => None,
     }
 }
 
