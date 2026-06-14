@@ -596,7 +596,10 @@ status without generated Rust. It also lowers public `std/sync.ax`
 `once_with(...)`, `once(...)`, `once_is_set(...)`, and `once_take(...)` wrappers
 over scalar `int`/`bool` payloads when the one-shot cell value is compile-time
 known, letting present and missing once cells feed direct-native process exit
-status without generated Rust. Channel runtime-exit lowering, concurrent
+status without generated Rust. It also lowers public `std/sync.ax`
+`channel(...)`, `send(...)`, and `try_recv(...)` wrappers for compile-time-known
+single-slot `int`/`bool` payloads, so present and missing channel receives can
+feed direct-native process exit status without generated Rust. Concurrent
 execution, blocking behavior, and host runtime synchronization remain tracked
 by issue #928.
 

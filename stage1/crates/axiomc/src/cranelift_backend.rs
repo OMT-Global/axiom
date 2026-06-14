@@ -98,6 +98,9 @@ struct I64StaticBindings {
     sync_once_with_wrappers: HashSet<String>,
     sync_once_is_set_wrappers: HashSet<String>,
     sync_once_take_wrappers: HashSet<String>,
+    sync_channel_wrappers: HashSet<String>,
+    sync_send_wrappers: HashSet<String>,
+    sync_try_recv_wrappers: HashSet<String>,
     fs_root: Option<PathBuf>,
     structs: HashMap<String, StructDef>,
     enums: HashMap<String, EnumDef>,
@@ -697,6 +700,24 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_sync_wrapper(function, "once_take"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
+    static_bindings.sync_channel_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_sync_wrapper(function, "channel"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.sync_send_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_sync_wrapper(function, "send"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.sync_try_recv_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_sync_wrapper(function, "try_recv"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
     static_bindings.structs = program
         .structs
         .iter()
@@ -725,6 +746,9 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
     let sync_once_with_wrappers = static_bindings.sync_once_with_wrappers.clone();
     let sync_once_is_set_wrappers = static_bindings.sync_once_is_set_wrappers.clone();
     let sync_once_take_wrappers = static_bindings.sync_once_take_wrappers.clone();
+    let sync_channel_wrappers = static_bindings.sync_channel_wrappers.clone();
+    let sync_send_wrappers = static_bindings.sync_send_wrappers.clone();
+    let sync_try_recv_wrappers = static_bindings.sync_try_recv_wrappers.clone();
     let helper_functions = program
         .functions
         .iter()
@@ -748,6 +772,9 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
                 && !sync_once_with_wrappers.contains(&function.name)
                 && !sync_once_is_set_wrappers.contains(&function.name)
                 && !sync_once_take_wrappers.contains(&function.name)
+                && !sync_channel_wrappers.contains(&function.name)
+                && !sync_send_wrappers.contains(&function.name)
+                && !sync_try_recv_wrappers.contains(&function.name)
         })
         .collect::<Vec<_>>();
     let helper_signatures = helper_functions
@@ -6811,6 +6838,12 @@ fn i64_i64_option_value(expr: &Expr, static_bindings: &I64StaticBindings) -> Opt
         };
         return i64_i64_once_cell_value(cell, static_bindings);
     }
+    if is_i64_sync_try_recv_name(name, static_bindings) {
+        let [channel] = args.as_slice() else {
+            return None;
+        };
+        return i64_i64_channel_cell_value(channel, static_bindings);
+    }
     if let Some(value) = i64_map_get_value_expr(name, args, static_bindings) {
         return match value {
             Some(value) => Some(Some(i64_static_scalar_value(value, static_bindings)?)),
@@ -6861,6 +6894,12 @@ fn i64_bool_option_value(expr: &Expr, static_bindings: &I64StaticBindings) -> Op
             return None;
         };
         return i64_bool_once_cell_value(cell, static_bindings);
+    }
+    if is_i64_sync_try_recv_name(name, static_bindings) {
+        let [channel] = args.as_slice() else {
+            return None;
+        };
+        return i64_bool_channel_cell_value(channel, static_bindings);
     }
     if let Some(value) = i64_map_get_value_expr(name, args, static_bindings) {
         return match value {
@@ -6977,6 +7016,50 @@ fn i64_bool_option_expr_value(
         Expr::Call { .. } => i64_bool_option_value(expr, static_bindings),
         _ => None,
     }
+}
+
+fn i64_i64_channel_cell_value(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<Option<i64>> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if is_i64_sync_channel_name(name, static_bindings) {
+        let [slot] = args.as_slice() else {
+            return None;
+        };
+        return i64_i64_option_expr_value(slot, static_bindings);
+    }
+    if is_i64_sync_send_name(name, static_bindings) {
+        let [_channel, value] = args.as_slice() else {
+            return None;
+        };
+        return Some(Some(i64_static_scalar_value(value, static_bindings)?));
+    }
+    None
+}
+
+fn i64_bool_channel_cell_value(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<Option<bool>> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if is_i64_sync_channel_name(name, static_bindings) {
+        let [slot] = args.as_slice() else {
+            return None;
+        };
+        return i64_bool_option_expr_value(slot, static_bindings);
+    }
+    if is_i64_sync_send_name(name, static_bindings) {
+        let [_channel, value] = args.as_slice() else {
+            return None;
+        };
+        return Some(Some(i64_static_bool_value(value, static_bindings)?));
+    }
+    None
 }
 
 fn lower_i64_bool_literal_compare(
@@ -9260,6 +9343,18 @@ fn is_i64_sync_once_is_set_name(name: &str, static_bindings: &I64StaticBindings)
 
 fn is_i64_sync_once_take_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.sync_once_take_wrappers.contains(name)
+}
+
+fn is_i64_sync_channel_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.sync_channel_wrappers.contains(name)
+}
+
+fn is_i64_sync_send_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.sync_send_wrappers.contains(name)
+}
+
+fn is_i64_sync_try_recv_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.sync_try_recv_wrappers.contains(name)
 }
 
 fn lower_i64_literal_value(expr: &Expr) -> Option<i64> {
