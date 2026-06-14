@@ -31,6 +31,7 @@ examples=(
   stdlib_io
   stdlib_json
   stdlib_log
+  stdlib_process
   stdlib_regex
   stdlib_sync
   stdlib_string_builder

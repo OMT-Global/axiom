@@ -38,10 +38,11 @@ not a readiness claim while rows remain `partial` or `blocked`.
 The example smoke runs a bounded subset of checked-in value and stdlib examples
 through `check`, `build --backend cranelift`, and `run --backend cranelift`, and
 asserts the build/run JSON reports `generated_rust: null`. The current set
-covers 23 deterministic examples across scalar/aggregate values plus async,
+covers 24 deterministic examples across scalar/aggregate values plus async,
 collections, crypto hash/MAC, encoding, env, fs read/write, HTTP's closed-port
-client path, io, JSON, logging, regex, sync, string builder, and time. It is
-direct-native example evidence for #928, not a replacement for full
+client path, io, JSON, logging, process-status missing-binary handling, regex,
+sync, string builder, and time. It is direct-native example evidence for #928,
+not a replacement for full
 `stage1-smoke` parity; examples that still require broader capability policy or
 runtime parity remain outside this smoke target.
 
@@ -469,15 +470,16 @@ non-loopback policy coverage, and audit parity remain open under #928.
 
 The process status row now has partial direct-native evidence: the Cranelift
 spike builds and runs `std/process.ax` `run_status(...)` for literal,
-allowlisted deterministic commands through compiler-side spike evaluation and
-emits their exit statuses without generated Rust. The direct-native i64 path
-also lowers literal `process_status(...)` calls and the `std/process.ax`
-`run_status(...)` wrapper for the deterministic `/usr/bin/true` and
-`/usr/bin/false` commands into native process exit status without generated
-Rust. Denied `process` capability use still fails through the manifest policy
-before Cranelift lowering or native execution. Full runtime-time process
-execution, argument handling, audit parity, and host-process policy coverage
-remain open under #928.
+allowlisted deterministic commands and the checked-in missing-binary sentinel
+through compiler-side spike evaluation and emits their exit statuses without
+generated Rust. The direct-native i64 path also lowers literal
+`process_status(...)` calls and the `std/process.ax` `run_status(...)` wrapper
+for deterministic `/usr/bin/true`, `/usr/bin/false`, and
+`__axiom_stage1_missing_binary__` commands into native process exit status
+without generated Rust. Denied `process` capability use still fails through the
+manifest policy before Cranelift lowering or native execution. Full
+runtime-time process execution, argument handling, audit parity, and
+host-process policy coverage remain open under #928.
 
 The regex row now has partial direct-native evidence: the Cranelift spike covers
 `std/regex.ax` `is_match`, `find`, and `replace_all` for the stage1-safe NFA

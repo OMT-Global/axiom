@@ -8509,6 +8509,7 @@ fn lower_i64_process_intrinsic_expr(
     match i64_string_text(command, static_bindings)?.as_str() {
         "/usr/bin/true" => Some(CraneliftI64Expr::Literal(0)),
         "/usr/bin/false" => Some(CraneliftI64Expr::Literal(1)),
+        "__axiom_stage1_missing_binary__" => Some(CraneliftI64Expr::Literal(-1)),
         _ => None,
     }
 }
@@ -14756,6 +14757,7 @@ fn eval_process_status_call(
     let status = match command.as_str() {
         "/usr/bin/true" => 0,
         "/usr/bin/false" => 1,
+        "__axiom_stage1_missing_binary__" => -1,
         _ => {
             return Err(unsupported(
                 "process_status spike only permits allowlisted deterministic commands",

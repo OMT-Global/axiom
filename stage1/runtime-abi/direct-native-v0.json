@@ -171,10 +171,13 @@
       "id": "process.status",
       "status": "partial",
       "capability": "process",
-      "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
+      "evidence": [
+        "stage1/crates/axiomc/tests/cranelift_backend.rs",
+        "scripts/ci/run-direct-native-example-smoke.sh"
+      ],
       "blockers": [928],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
-      "notes": "The Cranelift spike records positive compiler-side evidence for std/process.ax run_status over literal, allowlisted deterministic commands, rejects unapproved commands, and rejects missing process capability before backend lowering. The direct-native i64 path also lowers literal process_status calls and the std/process.ax run_status wrapper for the deterministic /usr/bin/true and /usr/bin/false commands into native process exit status without generated Rust. Full runtime-time process execution, argument handling, audit parity, and host-process policy coverage remain open."
+      "notes": "The Cranelift spike records positive compiler-side evidence for std/process.ax run_status over literal, allowlisted deterministic commands and the checked-in missing-binary sentinel, rejects unapproved commands, and rejects missing process capability before backend lowering. The direct-native i64 path also lowers literal process_status calls and the std/process.ax run_status wrapper for the deterministic /usr/bin/true, /usr/bin/false, and __axiom_stage1_missing_binary__ commands into native process exit status without generated Rust. Full runtime-time process execution, argument handling, audit parity, and host-process policy coverage remain open."
     },
     {
       "id": "env.read",

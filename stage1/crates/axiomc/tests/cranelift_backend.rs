@@ -2295,7 +2295,7 @@ fn cranelift_backend_builds_process_status_binary() {
         "cranelift process-status binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "0\n1\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "0\n1\n-1\n");
 }
 
 #[cfg(not(windows))]
@@ -6521,6 +6521,7 @@ source = "path"
         r#"import "std/process.ax"
 print run_status("/usr/bin/true")
 print run_status("/usr/bin/false")
+print run_status("__axiom_stage1_missing_binary__")
 "#,
     )
     .expect("write process-status source");
@@ -6567,7 +6568,8 @@ source = "path"
 fn main(): int {
 let ok: int = process_status("/usr/bin/true")
 let fail: int = run_status("/usr/bin/false")
-if ok == 0 && fail == 1 {
+let missing: int = run_status("__axiom_stage1_missing_binary__")
+if ok == 0 && fail == 1 && missing == -1 {
 return 48
 } else {
 return 1
