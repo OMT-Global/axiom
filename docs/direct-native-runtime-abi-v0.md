@@ -179,7 +179,8 @@ supported runtime string length projection locals. Pure helper calls with known
 string arguments can now fold string helper parameters and returns into the same
 direct-native length, comparison, and `string_starts_with(...)` condition paths
 without generated Rust when the helper body is a direct return, pure local
-`let` bindings followed by a return, or a pure final `if` whose branches return.
+`let` bindings followed by a return, a pure final `if` whose branches return,
+or a pure match-return expression over known enum values such as `Option<string>`.
 String length is represented as a byte-length projection local, matching the
 generated-Rust backend and Cranelift spike `.len()` semantics, and can feed
 direct-native integer locals, comparisons, helper calls, runtime branch-local
@@ -519,9 +520,9 @@ helpers now also feed narrow direct-native string length/comparison lowering,
 known-input `string_line_at(...)` also accepts static scalar indexes, and
 known-input percent decode can feed direct `Option<string>` matches without
 generated Rust. Pure known-text helper calls can now fold direct-return,
-local-let-return, and final-if-return string helper arguments and returns into
-direct-native length, comparison, and `string_starts_with(...)` conditions
-without generated Rust.
+local-let-return, final-if-return, and match-return string helper arguments and
+returns into direct-native length, comparison, and `string_starts_with(...)`
+conditions without generated Rust.
 Imported public `std/string_builder.ax` builder, seed, push,
 line-push, and finish wrappers now alias known text facts that can feed
 direct-native string comparisons, length projections, and process exit status
