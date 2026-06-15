@@ -773,7 +773,8 @@ stdout/stderr output, and `eprintln` byte counts without generated Rust. It
 also lowers public `std/log.ax` `event(...)` wrappers with known level/message
 strings and runtime field-list attributes to direct-native byte-length
 projections, stdout/stderr output, and `eprintln` byte counts without generated
-Rust. It also lowers known-string public `std/io.ax`
+Rust, including runtime scalar-formatted message expressions paired with
+runtime field-list attributes. It also lowers known-string public `std/io.ax`
 `eprintln` calls inside direct-native i64 `main` functions into native stderr
 writes while preserving the newline-inclusive byte-count return value and
 `generated_rust` null. Public `std/io.ax` `eprintln` calls over runtime
@@ -784,10 +785,12 @@ byte-count return value without generated Rust. Known public `std/log.ax`
 `main` functions for known message and attributes strings, and for known
 messages with runtime `fields2(...)`/`fields3(...)` attribute fragments,
 preserving the structured JSON line and byte-count return value without
-generated Rust. Public `std/log.ax` `debug(...)`, `info(...)`, `warn(...)`,
-and `error(...)` emit wrappers also lower runtime scalar-formatted messages
-into native structured stderr writes while preserving byte-count return values
-without generated Rust. Known pure `print` expressions for string, integer, and
+generated Rust, including runtime scalar-formatted message expressions paired
+with runtime field-list attributes. Public `std/log.ax` `debug(...)`,
+`info(...)`, `warn(...)`, and `error(...)` emit wrappers also lower runtime
+scalar-formatted messages into native structured stderr writes while preserving
+byte-count return values without generated Rust. Known pure `print` expressions
+for string, integer, and
 boolean values now lower from direct-native i64 `main` functions into native
 stdout writes without generated Rust. Public `std/json.ax` `stringify_int` and
 `stringify_bool` results can

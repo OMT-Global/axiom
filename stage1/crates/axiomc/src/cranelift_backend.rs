@@ -156,6 +156,12 @@ enum I64FormattedString {
         message: Box<I64FormattedString>,
         suffix: String,
     },
+    LogEventFormatted {
+        prefix: String,
+        message: Box<I64FormattedString>,
+        attributes: Vec<I64FormattedString>,
+        suffix: String,
+    },
 }
 
 struct I64HelperSignature {
@@ -3433,6 +3439,34 @@ fn i64_formatted_string_write_stmts(
             stmts.push(i64_static_write_stmt(stream, &suffix, append_newline));
             stmts
         }
+        I64FormattedString::LogEventFormatted {
+            prefix,
+            message,
+            attributes,
+            suffix,
+        } => {
+            let mut stmts = vec![CraneliftI64Stmt::WriteText {
+                stream,
+                text: prefix,
+            }];
+            stmts.extend(i64_formatted_string_write_stmts(stream, *message, false));
+            stmts.push(CraneliftI64Stmt::WriteText {
+                stream,
+                text: ",\"attributes\":{".to_string(),
+            });
+            let last = attributes.len().saturating_sub(1);
+            for (index, field) in attributes.into_iter().enumerate() {
+                stmts.extend(i64_formatted_string_write_stmts(stream, field, false));
+                if index != last {
+                    stmts.push(CraneliftI64Stmt::WriteText {
+                        stream,
+                        text: ",".to_string(),
+                    });
+                }
+            }
+            stmts.push(i64_static_write_stmt(stream, &suffix, append_newline));
+            stmts
+        }
     }
 }
 
@@ -3512,7 +3546,8 @@ fn lower_i64_formatted_string_expr(
                 | I64FormattedString::JsonFieldStringifiedBool { .. }
                 | I64FormattedString::JsonFieldBool { .. }
                 | I64FormattedString::LogEvent { .. }
-                | I64FormattedString::LogEmit { .. } => None,
+                | I64FormattedString::LogEmit { .. }
+                | I64FormattedString::LogEventFormatted { .. } => None,
             }
         }
         Expr::Call { name, args, .. }
@@ -3541,7 +3576,8 @@ fn lower_i64_formatted_string_expr(
                 | I64FormattedString::JsonFieldInt { .. }
                 | I64FormattedString::JsonFieldBool { .. }
                 | I64FormattedString::LogEvent { .. }
-                | I64FormattedString::LogEmit { .. } => None,
+                | I64FormattedString::LogEmit { .. }
+                | I64FormattedString::LogEventFormatted { .. } => None,
             }
         }
         Expr::Call { name, args, .. } if is_i64_json_stringify_int_name(name, static_bindings) => {
@@ -3599,7 +3635,8 @@ fn lower_i64_formatted_string_expr(
                 | I64FormattedString::JsonFieldStringifiedBool { .. }
                 | I64FormattedString::JsonFieldBool { .. }
                 | I64FormattedString::LogEvent { .. }
-                | I64FormattedString::LogEmit { .. } => None,
+                | I64FormattedString::LogEmit { .. }
+                | I64FormattedString::LogEventFormatted { .. } => None,
             }
         }
         Expr::Call { name, args, .. }
@@ -3650,6 +3687,29 @@ fn lower_i64_formatted_string_expr(
             let [level, message, attributes] = args.as_slice() else {
                 return None;
             };
+            if let Some(formatted_message) = lower_i64_log_message_formatted_string_expr(
+                message,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
+                return Some(I64FormattedString::LogEventFormatted {
+                    prefix: format!(
+                        "{{\"level\":{},\"message\":",
+                        json_escape_string(&i64_string_text(level, static_bindings)?)
+                    ),
+                    message: Box::new(formatted_message),
+                    attributes: lower_i64_log_field_list_fields(
+                        attributes,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?,
+                    suffix: "}}".to_string(),
+                });
+            }
             Some(I64FormattedString::LogEvent {
                 prefix: format!(
                     "{{\"level\":{},\"message\":{},\"attributes\":{{",
@@ -3742,7 +3802,8 @@ fn lower_i64_json_value_formatted_string_expr(
                 | I64FormattedString::JsonFieldInt { .. }
                 | I64FormattedString::JsonFieldBool { .. }
                 | I64FormattedString::LogEvent { .. }
-                | I64FormattedString::LogEmit { .. } => None,
+                | I64FormattedString::LogEmit { .. }
+                | I64FormattedString::LogEventFormatted { .. } => None,
             }
         }
         _ => {
@@ -3836,6 +3897,27 @@ fn i64_formatted_string_written_len(formatted: I64FormattedString) -> CraneliftI
             ),
             CraneliftI64Expr::Literal(1),
         ),
+        I64FormattedString::LogEventFormatted {
+            prefix,
+            message,
+            attributes,
+            suffix,
+        } => i64_add_expr(
+            i64_add_expr(
+                i64_add_expr(
+                    i64_add_expr(
+                        i64_add_expr(
+                            CraneliftI64Expr::Literal(prefix.len() as i64),
+                            i64_formatted_string_len_expr(*message),
+                        ),
+                        CraneliftI64Expr::Literal(",\"attributes\":{".len() as i64),
+                    ),
+                    i64_formatted_fields_len_expr(&attributes),
+                ),
+                CraneliftI64Expr::Literal(suffix.len() as i64),
+            ),
+            CraneliftI64Expr::Literal(1),
+        ),
     }
 }
 
@@ -3900,6 +3982,24 @@ fn i64_formatted_string_len_expr(formatted: I64FormattedString) -> CraneliftI64E
             i64_add_expr(
                 CraneliftI64Expr::Literal(prefix.len() as i64),
                 i64_formatted_string_len_expr(*message),
+            ),
+            CraneliftI64Expr::Literal(suffix.len() as i64),
+        ),
+        I64FormattedString::LogEventFormatted {
+            prefix,
+            message,
+            attributes,
+            suffix,
+        } => i64_add_expr(
+            i64_add_expr(
+                i64_add_expr(
+                    i64_add_expr(
+                        CraneliftI64Expr::Literal(prefix.len() as i64),
+                        i64_formatted_string_len_expr(*message),
+                    ),
+                    CraneliftI64Expr::Literal(",\"attributes\":{".len() as i64),
+                ),
+                i64_formatted_fields_len_expr(&attributes),
             ),
             CraneliftI64Expr::Literal(suffix.len() as i64),
         ),
@@ -4651,7 +4751,8 @@ fn lower_i64_log_message_formatted_string_expr(
         | I64FormattedString::JsonFieldStringifiedBool { .. }
         | I64FormattedString::JsonFieldBool { .. }
         | I64FormattedString::LogEvent { .. }
-        | I64FormattedString::LogEmit { .. } => None,
+        | I64FormattedString::LogEmit { .. }
+        | I64FormattedString::LogEventFormatted { .. } => None,
     }
 }
 
@@ -4663,6 +4764,30 @@ fn lower_i64_log_info_attrs_len_and_write_stmts(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<(CraneliftI64Expr, Vec<CraneliftI64Stmt>)> {
+    if let Some(formatted_message) = lower_i64_log_message_formatted_string_expr(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        let event = I64FormattedString::LogEventFormatted {
+            prefix: format!("{{\"level\":{},\"message\":", json_escape_string("info")),
+            message: Box::new(formatted_message),
+            attributes: lower_i64_log_field_list_fields(
+                attributes,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?,
+            suffix: "}}".to_string(),
+        };
+        return Some((
+            i64_formatted_string_written_len(event.clone()),
+            i64_formatted_string_write_stmts(OutputStream::Stderr, event, true),
+        ));
+    }
     let message = i64_string_text(message, static_bindings)?;
     let prefix = format!(
         "{{\"level\":{},\"message\":{},\"attributes\":{{",
