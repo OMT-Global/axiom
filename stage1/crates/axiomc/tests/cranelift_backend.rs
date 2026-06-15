@@ -5357,6 +5357,9 @@ true
 7
 false
 "7"
+{"score":7,"ready":false}
+{"score":7,"ready":false}
+[7,false,"7"]
 {"name":"axiom","count":3,"ready":true}
 "axiom"
 no int
@@ -10989,13 +10992,20 @@ print false
 
 let dynamic_count: int = match parse_int("7") { Some(value) => value, None => 1 }
 let dynamic_ready: bool = match parse_bool("false") { Some(value) => value, None => true }
-let dynamic_count_value: JsonValue = value_int(dynamic_count)
-let dynamic_ready_value: JsonValue = value_bool(dynamic_ready)
-let dynamic_count_text: string = stringify_int(dynamic_count)
-let dynamic_count_string_value: JsonValue = value_string(dynamic_count_text)
-print stringify_value(dynamic_count_value)
-print stringify_value(dynamic_ready_value)
-print stringify_value(dynamic_count_string_value)
+let dynamic_count_text_for_value: string = stringify_int(dynamic_count)
+print stringify_value(value_int(dynamic_count))
+print stringify_value(value_bool(dynamic_ready))
+print stringify_value(value_string(dynamic_count_text_for_value))
+let dynamic_count_field_for_object: string = field_value("score", value_int(dynamic_count))
+let dynamic_ready_field_for_object: string = field_value("ready", value_bool(dynamic_ready))
+let dynamic_count_field_for_value: string = field_value("score", value_int(dynamic_count))
+let dynamic_ready_field_for_value: string = field_value("ready", value_bool(dynamic_ready))
+let dynamic_count_text_for_array: string = stringify_int(dynamic_count)
+let dynamic_object_value: JsonValue = value_object2(dynamic_count_field_for_value, dynamic_ready_field_for_value)
+let dynamic_array_value: JsonValue = array3(value_int(dynamic_count), value_bool(dynamic_ready), value_string(dynamic_count_text_for_array))
+print object2(dynamic_count_field_for_object, dynamic_ready_field_for_object)
+print stringify_value(dynamic_object_value)
+print stringify_value(dynamic_array_value)
 
 match parse_value(doc()) {
 Some(value) {

@@ -733,7 +733,10 @@ runtime string value, and `stringify_string(...)` over those supported
 projection locals can now feed quoted native stdout lines directly. Public
 `value_int(...)`, `value_bool(...)`, and `value_string(...)` `JsonValue`
 wrappers over supported dynamic scalar/bool string projections can also feed
-`stringify_value(...)` and native stdout output without generated Rust. Imported
+`stringify_value(...)` and native stdout output without generated Rust. Public
+`field_value(...)`, `object2(...)`, `value_object2(...)`, and `array3(...)`
+composition over those supported dynamic `JsonValue` wrappers can also feed
+native stdout and `stringify_value(...)` without generated Rust. Imported
 public `std/serdes.ax` known-input `to_json(...)`,
 `stringify(...)`,
 `from_json_str(...)`, `as_text(...)`, and `parse_error_message(...)` wrapper
@@ -741,8 +744,8 @@ paths now also feed direct-native known string comparisons, length projections,
 `Result` matches, `Option` matches, and process exit status without generated
 Rust for literal `Value`/object-map and literal JSON inputs. Broader dynamic
 runtime JSON parsing, broad `std/serdes` `Value` storage, `JsonValue` wrapper
-construction beyond the evidenced scalar/string source wrappers, and schema
-helper coverage remain tracked by issue #1001.
+construction beyond the evidenced scalar/string/object/array source wrappers,
+and schema helper coverage remain tracked by issue #1001.
 
 The owned move-state row has partial direct-native evidence: the Cranelift
 spike builds and runs projection-sensitive owned field moves while preserving
