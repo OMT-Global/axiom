@@ -9104,7 +9104,7 @@ fn lower_i64_clock_intrinsic_expr(
             let [milliseconds] = args else {
                 return None;
             };
-            lower_i64_literal_value(milliseconds)?
+            i64_static_scalar_value(milliseconds, static_bindings)?
         }
         name if is_i64_time_sleep_name(name, static_bindings) => {
             let [duration] = args else {
@@ -9127,12 +9127,12 @@ fn lower_i64_duration_ms_value(expr: &Expr, static_bindings: &I64StaticBindings)
             let [milliseconds] = args.as_slice() else {
                 return None;
             };
-            lower_i64_literal_value(milliseconds)
+            i64_static_scalar_value(milliseconds, static_bindings)
         }
         Expr::StructLiteral { fields, .. } => fields
             .iter()
             .find(|field| field.name == "ms")
-            .and_then(|field| lower_i64_literal_value(&field.expr)),
+            .and_then(|field| i64_static_scalar_value(&field.expr, static_bindings)),
         _ => None,
     }
 }
