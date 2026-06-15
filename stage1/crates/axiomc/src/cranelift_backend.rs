@@ -97,6 +97,7 @@ struct I64StaticBindings {
     crypto_constant_time_eq_u8_wrappers: HashSet<String>,
     crypto_verify_sha256_wrappers: HashSet<String>,
     crypto_verify_sha512_wrappers: HashSet<String>,
+    crypto_random_bytes_wrappers: HashSet<String>,
     crypto_random_u64_wrappers: HashSet<String>,
     ffi_strlen_symbols: HashSet<String>,
     sync_once_wrappers: HashSet<String>,
@@ -109,6 +110,7 @@ struct I64StaticBindings {
     fs_root: Option<PathBuf>,
     structs: HashMap<String, StructDef>,
     enums: HashMap<String, EnumDef>,
+    functions: HashMap<String, Function>,
 }
 
 struct I64HelperSignature {
@@ -286,6 +288,16 @@ pub fn compile_cranelift_hello_spike(
         .map_err(|err| {
             Diagnostic::new("build", err.to_string()).with_path(object_path.display().to_string())
         });
+    }
+    if program.stmts.is_empty()
+        && program
+            .functions
+            .iter()
+            .any(|function| function.source_name == "main" && function.params.is_empty())
+    {
+        return Err(unsupported(
+            "main function is outside the direct-native i64 ABI subset",
+        ));
     }
     let lines = collect_output_lines(program, package_root, fs_root)?;
     axiomc_backend_cranelift::compile_output_lines(&lines, object_path, binary_path).map_err(
@@ -636,6 +648,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
                 || is_i64_std_crypto_wrapper(function, "constant_time_eq_u8")
                 || is_i64_std_crypto_wrapper(function, "verify_sha256")
                 || is_i64_std_crypto_wrapper(function, "verify_sha512")
+                || is_i64_std_crypto_wrapper(function, "random_bytes")
                 || is_i64_std_crypto_wrapper(function, "random_u64")
                 || function.path == "<stdlib>/crypto_rand.ax"
         })
@@ -681,6 +694,12 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .functions
         .iter()
         .filter(|function| is_i64_std_crypto_wrapper(function, "verify_sha512"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.crypto_random_bytes_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_crypto_wrapper(function, "random_bytes"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
     static_bindings.crypto_random_u64_wrappers = program
@@ -747,6 +766,12 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .iter()
         .map(|enum_def| (enum_def.name.clone(), enum_def.clone()))
         .collect();
+    static_bindings.functions = program
+        .functions
+        .iter()
+        .filter(|function| function.name != main.name)
+        .map(|function| (function.name.clone(), function.clone()))
+        .collect();
     let process_status_wrappers = static_bindings.process_status_wrappers.clone();
     let env_get_wrappers = static_bindings.env_get_wrappers.clone();
     let time_wrappers = static_bindings.time_wrappers.clone();
@@ -794,6 +819,11 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
                 && !sync_channel_wrappers.contains(&function.name)
                 && !sync_send_wrappers.contains(&function.name)
                 && !sync_try_recv_wrappers.contains(&function.name)
+                && is_i64_function_return_type(&function.return_ty, &struct_defs, &static_bindings)
+                && function
+                    .params
+                    .iter()
+                    .all(|param| is_i64_param_type(&param.ty, &struct_defs, &static_bindings))
         })
         .collect::<Vec<_>>();
     let helper_signatures = helper_functions
@@ -1347,6 +1377,7 @@ fn lower_i64_aggregate_return_body(
                     &mut locals,
                     &mut local_indexes,
                     &mut local_conditions,
+                    static_bindings,
                     false,
                 )?;
             }
@@ -2538,6 +2569,7 @@ fn lower_i64_body(
                     &mut locals,
                     &mut local_indexes,
                     &mut local_conditions,
+                    static_bindings,
                     false,
                 )?;
             }
@@ -3234,6 +3266,7 @@ fn lower_i64_runtime_let_stmts(
             locals,
             local_indexes,
             local_conditions,
+            static_bindings,
             true,
         );
     }
@@ -6057,6 +6090,9 @@ fn lower_i64_condition(
             ) {
                 return Some(condition);
             }
+            if let Some(condition) = i64_known_helper_call_condition(name, args, static_bindings) {
+                return Some(condition);
+            }
             let call = lower_i64_fixed_array_bool_intrinsic_expr(
                 name,
                 args,
@@ -6690,10 +6726,10 @@ fn lower_i64_byte_slice_eq_condition(
         return None;
     };
     if !matches!(
-        i64_fixed_array_or_slice_element(left)?,
+        i64_fixed_array_or_slice_element(left, static_bindings)?,
         Type::Numeric(NumericType::U8)
     ) || !matches!(
-        i64_fixed_array_or_slice_element(right)?,
+        i64_fixed_array_or_slice_element(right, static_bindings)?,
         Type::Numeric(NumericType::U8)
     ) {
         return None;
@@ -7018,8 +7054,237 @@ fn i64_string_call_text(
             };
             i64_string_builder_text(builder, static_bindings)
         }
+        _ => match i64_known_helper_call_value(name, args, static_bindings)? {
+            SpikeValue::Text(value) => Some(value),
+            _ => None,
+        },
+    }
+}
+
+fn i64_known_helper_call_i64_expr(
+    name: &str,
+    args: &[Expr],
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match i64_known_helper_call_value(name, args, static_bindings)? {
+        SpikeValue::Int(value) => Some(CraneliftI64Expr::Literal(value)),
+        SpikeValue::UInt(value) => i64::try_from(value).ok().map(CraneliftI64Expr::Literal),
+        SpikeValue::Bool(value) => Some(CraneliftI64Expr::Literal(i64::from(value))),
         _ => None,
     }
+}
+
+fn i64_known_helper_call_condition(
+    name: &str,
+    args: &[Expr],
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Condition> {
+    match i64_known_helper_call_value(name, args, static_bindings)? {
+        SpikeValue::Bool(value) => Some(CraneliftI64Condition::Literal(value)),
+        _ => None,
+    }
+}
+
+fn i64_known_helper_call_value(
+    name: &str,
+    args: &[Expr],
+    static_bindings: &I64StaticBindings,
+) -> Option<SpikeValue> {
+    let function = static_bindings.functions.get(name)?;
+    if function.params.len() != args.len()
+        || !i64_known_helper_function_is_pure(function, static_bindings, 0)
+    {
+        return None;
+    }
+    let functions = static_bindings
+        .functions
+        .iter()
+        .map(|(name, function)| (name.as_str(), function))
+        .collect::<HashMap<_, _>>();
+    let mut lines = Vec::new();
+    let base_env = i64_known_static_env(static_bindings)?;
+    let mut env = base_env.clone();
+    for (param, arg) in function.params.iter().zip(args) {
+        if !i64_known_expr_is_pure(arg, static_bindings, 0) {
+            return None;
+        }
+        let value = eval_expr(arg, &functions, &base_env, &mut lines).ok()?;
+        env.insert(param.name.clone(), value);
+    }
+    let value = eval_block(&function.body, &functions, &mut env, &mut lines)
+        .ok()
+        .flatten()?;
+    lines.is_empty().then_some(value)
+}
+
+fn i64_known_static_env(static_bindings: &I64StaticBindings) -> Option<SpikeEnv> {
+    let mut env = SpikeEnv::new();
+    if let Some(root) = &static_bindings.fs_root {
+        env.insert(
+            SPIKE_FS_ROOT_BINDING.to_string(),
+            SpikeValue::Text(root.display().to_string()),
+        );
+    }
+    for (name, value) in &static_bindings.values {
+        let value = match value {
+            CraneliftI64Expr::Literal(value) => SpikeValue::Int(*value),
+            _ => return None,
+        };
+        env.insert(name.clone(), value);
+    }
+    for (name, condition) in &static_bindings.conditions {
+        let value = match condition {
+            CraneliftI64Condition::Literal(value) => SpikeValue::Bool(*value),
+            _ => return None,
+        };
+        env.insert(name.clone(), value);
+    }
+    for (name, value) in &static_bindings.strings {
+        env.insert(name.clone(), SpikeValue::Text(value.clone()));
+    }
+    Some(env)
+}
+
+fn i64_known_helper_function_is_pure(
+    function: &Function,
+    static_bindings: &I64StaticBindings,
+    depth: usize,
+) -> bool {
+    if depth > 8 || function.is_property || function.is_async || function.is_extern {
+        return false;
+    }
+    i64_known_helper_body_is_pure(&function.body, static_bindings, depth + 1)
+}
+
+fn i64_known_helper_body_is_pure(
+    body: &[Stmt],
+    static_bindings: &I64StaticBindings,
+    depth: usize,
+) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    if body.is_empty() {
+        return false;
+    }
+    body.iter().enumerate().all(|(index, stmt)| match stmt {
+        Stmt::Let { expr, .. } => {
+            index + 1 < body.len() && i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+        }
+        Stmt::Return { expr, .. } => {
+            index + 1 == body.len() && i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+        }
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            index + 1 == body.len()
+                && i64_known_expr_is_pure(cond, static_bindings, depth + 1)
+                && i64_known_helper_body_is_pure(then_block, static_bindings, depth + 1)
+                && else_block.as_ref().is_some_and(|else_block| {
+                    i64_known_helper_body_is_pure(else_block, static_bindings, depth + 1)
+                })
+        }
+        Stmt::Match { expr, arms, .. } => {
+            index + 1 == body.len()
+                && i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+                && arms
+                    .iter()
+                    .all(|arm| i64_known_helper_body_is_pure(&arm.body, static_bindings, depth + 1))
+        }
+        _ => false,
+    })
+}
+
+fn i64_known_expr_is_pure(expr: &Expr, static_bindings: &I64StaticBindings, depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    match expr {
+        Expr::Literal(_) | Expr::VarRef { .. } => true,
+        Expr::StringBorrow { expr, .. } | Expr::Cast { expr, .. } => {
+            i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+        }
+        Expr::BinaryAdd { lhs, rhs, .. }
+        | Expr::BinaryCompare { lhs, rhs, .. }
+        | Expr::BinaryLogic { lhs, rhs, .. } => {
+            i64_known_expr_is_pure(lhs, static_bindings, depth + 1)
+                && i64_known_expr_is_pure(rhs, static_bindings, depth + 1)
+        }
+        Expr::Call { name, args, .. } => {
+            args.iter()
+                .all(|arg| i64_known_expr_is_pure(arg, static_bindings, depth + 1))
+                && (i64_known_pure_intrinsic_call(name, static_bindings)
+                    || static_bindings.functions.get(name).is_some_and(|function| {
+                        i64_known_helper_function_is_pure(function, static_bindings, depth + 1)
+                    }))
+        }
+        Expr::Index { base, index, .. } => {
+            i64_known_expr_is_pure(base, static_bindings, depth + 1)
+                && i64_known_expr_is_pure(index, static_bindings, depth + 1)
+        }
+        Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
+            i64_known_expr_is_pure(base, static_bindings, depth + 1)
+        }
+        Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => elements
+            .iter()
+            .all(|element| i64_known_expr_is_pure(element, static_bindings, depth + 1)),
+        Expr::MapLiteral { entries, .. } => entries.iter().all(|entry| {
+            i64_known_expr_is_pure(&entry.key, static_bindings, depth + 1)
+                && i64_known_expr_is_pure(&entry.value, static_bindings, depth + 1)
+        }),
+        Expr::EnumVariant { payloads, .. } => payloads
+            .iter()
+            .all(|payload| i64_known_expr_is_pure(payload, static_bindings, depth + 1)),
+        Expr::StructLiteral { fields, .. } => fields
+            .iter()
+            .all(|field| i64_known_expr_is_pure(&field.expr, static_bindings, depth + 1)),
+        Expr::Match { expr, arms, .. } => {
+            i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+                && arms
+                    .iter()
+                    .all(|arm| i64_known_expr_is_pure(&arm.expr, static_bindings, depth + 1))
+        }
+        _ => false,
+    }
+}
+
+fn i64_known_pure_intrinsic_call(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    matches!(
+        name,
+        "len"
+            | "first"
+            | "last"
+            | "string_clone"
+            | "string_starts_with"
+            | "string_strip_prefix"
+            | "string_strip_suffix"
+            | "string_trim"
+            | "string_trim_start"
+            | "string_line_at"
+            | "encoding_url_component_encode"
+            | "encoding_url_component_decode"
+            | "encoding_path_segment_encode"
+            | "encoding_url_query_pair_encode"
+            | "encoding_path_join_segment"
+            | "json_parse_int"
+            | "json_parse_bool"
+            | "json_parse_string"
+            | "json_stringify_int"
+            | "json_stringify_bool"
+            | "json_stringify_string"
+            | "json_serdes_parse"
+            | "json_serdes_parse_str"
+            | "json_serdes_value_to_json"
+            | "json_serdes_to_json"
+    ) || is_i64_encoding_percent_encode_name(name, static_bindings)
+        || is_i64_encoding_url_query_pair_encode_name(name, static_bindings)
+        || is_i64_encoding_path_join_segment_name(name, static_bindings)
+        || is_i64_json_stringify_int_name(name, static_bindings)
+        || is_i64_json_stringify_bool_name(name, static_bindings)
+        || is_i64_json_stringify_string_name(name, static_bindings)
 }
 
 fn i64_static_scalar_value(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<i64> {
@@ -7101,7 +7366,7 @@ fn i64_string_option_text(
                 return None;
             };
             let text = i64_string_text(text, static_bindings)?;
-            let index = lower_i64_literal_value(index)?;
+            let index = i64_static_scalar_value(index, static_bindings)?;
             if index < 0 {
                 return Some(None);
             }
@@ -7648,6 +7913,7 @@ fn lower_i64_expr(
                         static_bindings,
                     )
                 })
+                .or_else(|| i64_known_helper_call_i64_expr(name, args, static_bindings))
                 .or_else(|| {
                     lower_i64_call_expr(
                         name,
@@ -7846,6 +8112,7 @@ fn lower_i64_slice_projection_aliases(
     locals: &mut Vec<CraneliftI64Expr>,
     local_indexes: &mut HashMap<String, usize>,
     local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    static_bindings: &I64StaticBindings,
     runtime: bool,
 ) -> Option<Vec<CraneliftI64Stmt>> {
     let Expr::Slice {
@@ -7861,7 +8128,12 @@ fn lower_i64_slice_projection_aliases(
     else {
         return None;
     };
-    let (start, end) = i64_static_slice_range(*base_size, start.as_deref(), end.as_deref())?;
+    let (start, end) = i64_static_slice_range(
+        *base_size,
+        start.as_deref(),
+        end.as_deref(),
+        static_bindings,
+    )?;
     let mut assigns = Vec::new();
     for (slice_index, base_index) in (start..end).enumerate() {
         let base_key = i64_array_projection_key(base_name, base_index);
@@ -8956,7 +9228,7 @@ fn lower_i64_slice_projection_index_expr(
         }
         return Some(result);
     }
-    let (name, start, size) = i64_static_slice_base_range(base)?;
+    let (name, start, size) = i64_static_slice_base_range(base, static_bindings)?;
     if size == 0 {
         return None;
     }
@@ -9096,7 +9368,7 @@ fn lower_i64_clock_intrinsic_expr(
             let [milliseconds] = args else {
                 return None;
             };
-            lower_i64_literal_value(milliseconds)?
+            i64_static_scalar_value(milliseconds, static_bindings)?
         }
         name if is_i64_time_sleep_name(name, static_bindings) => {
             let [duration] = args else {
@@ -9119,12 +9391,12 @@ fn lower_i64_duration_ms_value(expr: &Expr, static_bindings: &I64StaticBindings)
             let [milliseconds] = args.as_slice() else {
                 return None;
             };
-            lower_i64_literal_value(milliseconds)
+            i64_static_scalar_value(milliseconds, static_bindings)
         }
         Expr::StructLiteral { fields, .. } => fields
             .iter()
             .find(|field| field.name == "ms")
-            .and_then(|field| lower_i64_literal_value(&field.expr)),
+            .and_then(|field| i64_static_scalar_value(&field.expr, static_bindings)),
         _ => None,
     }
 }
@@ -9171,6 +9443,26 @@ fn lower_i64_crypto_random_intrinsic_expr(
     }
     let bytes: [u8; 8] = crypto_random_bytes(8).ok()?.try_into().ok()?;
     Some(CraneliftI64Expr::Literal(i64::from_ne_bytes(bytes)))
+}
+
+fn lower_i64_crypto_random_bytes_len_expr(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if !is_i64_crypto_random_bytes_name(name, static_bindings) {
+        return None;
+    }
+    let [length] = args.as_slice() else {
+        return None;
+    };
+    let length = i64_static_scalar_value(length, static_bindings)?;
+    if !(0..=65_536).contains(&length) {
+        return None;
+    }
+    Some(CraneliftI64Expr::Literal(length))
 }
 
 fn lower_i64_ffi_intrinsic_expr(
@@ -9337,10 +9629,10 @@ fn lower_i64_map_key_expr(expr: &Expr, static_bindings: &I64StaticBindings) -> O
     if let Some(text) = i64_string_text(expr, static_bindings) {
         return Some(I64MapKey::Text(text));
     }
-    match expr {
-        Expr::Literal(LiteralValue::Bool(value)) => Some(I64MapKey::Bool(*value)),
-        _ => lower_i64_literal_value(expr).map(I64MapKey::Int),
+    if let Some(value) = i64_static_bool_value(expr, static_bindings) {
+        return Some(I64MapKey::Bool(value));
     }
+    i64_static_scalar_value(expr, static_bindings).map(I64MapKey::Int)
 }
 
 fn i64_map_literal_entries<'a>(
@@ -9702,6 +9994,10 @@ fn is_i64_crypto_verify_sha512_name(name: &str, static_bindings: &I64StaticBindi
     static_bindings.crypto_verify_sha512_wrappers.contains(name)
 }
 
+fn is_i64_crypto_random_bytes_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "crypto_rand_bytes" || static_bindings.crypto_random_bytes_wrappers.contains(name)
+}
+
 fn is_i64_crypto_random_u64_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     name == "crypto_rand_u64" || static_bindings.crypto_random_u64_wrappers.contains(name)
 }
@@ -9775,11 +10071,14 @@ fn lower_i64_fixed_array_intrinsic_expr(
         ) {
             return Some(length);
         }
+        if let Some(length) = lower_i64_crypto_random_bytes_len_expr(arg, static_bindings) {
+            return Some(length);
+        }
         if let Some(length) = lower_i64_map_keys_len_expr(arg, static_bindings) {
             return Some(length);
         }
     }
-    let element = i64_fixed_array_or_slice_element(arg)?;
+    let element = i64_fixed_array_or_slice_element(arg, static_bindings)?;
     if !is_i64_array_param_element_type(&element) {
         return None;
     }
@@ -10291,7 +10590,7 @@ fn lower_i64_fixed_array_bool_intrinsic_expr(
     let [arg] = args else {
         return None;
     };
-    let element = i64_fixed_array_or_slice_element(arg)?;
+    let element = i64_fixed_array_or_slice_element(arg, static_bindings)?;
     if !matches!(element, Type::Bool) {
         return None;
     }
@@ -10313,10 +10612,13 @@ fn lower_i64_fixed_array_bool_intrinsic_expr(
     elements.get(index).cloned()
 }
 
-fn i64_fixed_array_or_slice_element(arg: &Expr) -> Option<Type> {
+fn i64_fixed_array_or_slice_element(
+    arg: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<Type> {
     match arg {
         Expr::Slice { base, .. } => {
-            let (_, _, _) = i64_static_slice_base_range(arg)?;
+            let (_, _, _) = i64_static_slice_base_range(arg, static_bindings)?;
             let Expr::VarRef {
                 ty: Type::Array(element, Some(_)),
                 ..
@@ -10346,7 +10648,10 @@ fn i64_fixed_array_or_slice_element(arg: &Expr) -> Option<Type> {
     }
 }
 
-fn i64_static_slice_base_range(arg: &Expr) -> Option<(&str, usize, usize)> {
+fn i64_static_slice_base_range<'a>(
+    arg: &'a Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<(&'a str, usize, usize)> {
     let Expr::Slice {
         base, start, end, ..
     } = arg
@@ -10360,7 +10665,12 @@ fn i64_static_slice_base_range(arg: &Expr) -> Option<(&str, usize, usize)> {
     else {
         return None;
     };
-    let (start, end) = i64_static_slice_range(*base_size, start.as_deref(), end.as_deref())?;
+    let (start, end) = i64_static_slice_range(
+        *base_size,
+        start.as_deref(),
+        end.as_deref(),
+        static_bindings,
+    )?;
     Some((name.as_str(), start, end - start))
 }
 
@@ -10368,16 +10678,22 @@ fn i64_static_slice_range(
     base_size: usize,
     start: Option<&Expr>,
     end: Option<&Expr>,
+    static_bindings: &I64StaticBindings,
 ) -> Option<(usize, usize)> {
     let start = match start {
-        Some(expr) => lower_i64_literal_index(expr)?,
+        Some(expr) => lower_i64_static_index(expr, static_bindings)?,
         None => 0,
     };
     let end = match end {
-        Some(expr) => lower_i64_literal_index(expr)?,
+        Some(expr) => lower_i64_static_index(expr, static_bindings)?,
         None => base_size,
     };
     (start <= end && end <= base_size).then_some((start, end))
+}
+
+fn lower_i64_static_index(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<usize> {
+    let value = i64_static_scalar_value(expr, static_bindings)?;
+    usize::try_from(value).ok()
 }
 
 fn lower_i64_literal_index(expr: &Expr) -> Option<usize> {
@@ -10875,7 +11191,12 @@ fn lower_i64_array_or_slice_call_arg_exprs(
     if !is_i64_array_param_element_type(element) {
         return None;
     }
-    let (start, end) = i64_static_slice_range(*base_size, start.as_deref(), end.as_deref())?;
+    let (start, end) = i64_static_slice_range(
+        *base_size,
+        start.as_deref(),
+        end.as_deref(),
+        static_bindings,
+    )?;
     (start..end)
         .map(|index| {
             local_indexes
