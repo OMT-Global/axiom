@@ -11573,9 +11573,15 @@ fn lower_i64_clock_intrinsic_expr(
         }
         _ => return None,
     };
-    Some(CraneliftI64Expr::SleepMs {
-        milliseconds: Box::new(milliseconds),
-    })
+    i64_audited_clock_expr(
+        "clock_sleep_ms",
+        "milliseconds",
+        CraneliftI64Expr::SleepMs {
+            milliseconds: Box::new(milliseconds),
+        },
+        static_bindings,
+        CraneliftI64AuditSuccess::ExitZero,
+    )
 }
 
 fn lower_i64_duration_ms_expr(
@@ -11998,6 +12004,23 @@ fn i64_audited_process_expr(
         intrinsic: intrinsic.to_string(),
         package: package.display().to_string(),
         command_len,
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_clock_expr(
+    intrinsic: &str,
+    arg_name: &str,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditClock {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        arg_name: arg_name.to_string(),
         success,
         result: Box::new(result),
     })

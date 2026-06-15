@@ -918,9 +918,12 @@ bounded nonnegative durations call the native object backend's `usleep` import,
 and durations above the current 1000 ms direct-native cap return `-1` without
 sleeping. Imported public `std/time.ax` `sleep(duration_ms(...))` wrappers now
 alias that same deterministic path for literal, static scalar, and runtime
-scalar durations in runtime-exit programs. Full clock values across the native
-ABI, timer scheduling, async clock integration, broader positive-duration sleep
-policy, and audit parity remain open under #1001.
+scalar durations in runtime-exit programs. Those sleep paths now append host
+audit JSONL entries when `AXIOM_HOST_AUDIT_LOG` is set, recording only the
+integer argument type and the `ok`/`denied` outcome without recording duration
+values. Full clock values across the native ABI, timer scheduling, async clock
+integration, and broader positive-duration sleep policy remain open under
+#1001.
 
 
 

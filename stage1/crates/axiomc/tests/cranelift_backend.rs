@@ -5489,11 +5489,32 @@ fn cranelift_backend_lowers_std_time_sleep_wrappers_to_runtime_exit_code() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("clock-audit.jsonl");
     let run = Command::new(binary)
+        .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .output()
         .expect("run cranelift std time sleep wrapper main binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    let audit = fs::read_to_string(&audit_log).expect("read clock audit log");
+    assert!(
+        audit.contains("\"intrinsic\":\"clock_sleep_ms\""),
+        "{audit}"
+    );
+    assert!(
+        audit.contains("\"args\":{\"milliseconds\":\"int\"}"),
+        "{audit}"
+    );
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 4, "{audit}");
+    assert_eq!(
+        audit.matches("\"outcome\":\"denied\"").count(),
+        2,
+        "{audit}"
+    );
+    assert!(
+        !audit.contains("1001") && !audit.contains("-1"),
+        "audit log should not contain clock duration values: {audit}"
+    );
 }
 
 #[test]

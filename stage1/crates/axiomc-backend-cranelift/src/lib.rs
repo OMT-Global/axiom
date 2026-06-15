@@ -124,6 +124,13 @@ pub enum I64Expr {
         success: I64AuditSuccess,
         result: Box<I64Expr>,
     },
+    AuditClock {
+        intrinsic: String,
+        package: String,
+        arg_name: String,
+        success: I64AuditSuccess,
+        result: Box<I64Expr>,
+    },
     FileLen {
         path: String,
         max_bytes: u64,
@@ -2003,6 +2010,23 @@ fn emit_i64_expr(
             *success,
             result,
         ),
+        I64Expr::AuditClock {
+            intrinsic,
+            package,
+            arg_name,
+            success,
+            result,
+        } => emit_i64_audit_clock_expr(
+            builder,
+            locals,
+            function_refs,
+            runtime_refs,
+            intrinsic,
+            package,
+            arg_name,
+            *success,
+            result,
+        ),
         I64Expr::FileLen { path, max_bytes } => {
             emit_i64_file_len_expr(builder, runtime_refs, path, *max_bytes)
         }
@@ -2368,6 +2392,16 @@ fn i64_process_audit_line(
     )
 }
 
+fn i64_clock_audit_line(intrinsic: &str, package: &str, arg_name: &str, outcome: &str) -> String {
+    format!(
+        "{{\"package\":\"{}\",\"intrinsic\":\"{}\",\"args\":{{\"{}\":\"int\"}},\"outcome\":\"{}\"}}\n",
+        i64_json_escape(package),
+        i64_json_escape(intrinsic),
+        i64_json_escape(arg_name),
+        i64_json_escape(outcome)
+    )
+}
+
 fn emit_i64_host_audit_line(
     builder: &mut FunctionBuilder<'_>,
     runtime_refs: I64RuntimeRefs,
@@ -2537,6 +2571,51 @@ fn emit_i64_audit_process_expr(
     let status = emit_i64_expr(builder, locals, function_refs, runtime_refs, result)?;
     let ok_line = i64_process_audit_line(intrinsic, package, command_len, "ok");
     let denied_line = i64_process_audit_line(intrinsic, package, command_len, "denied");
+
+    let ok_block = builder.create_block();
+    let denied_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let ok = match success {
+        I64AuditSuccess::ExitZero => builder.ins().icmp_imm(IntCC::Equal, status, 0),
+        I64AuditSuccess::NonNegative => {
+            builder
+                .ins()
+                .icmp_imm(IntCC::SignedGreaterThanOrEqual, status, 0)
+        }
+    };
+    builder.ins().brif(ok, ok_block, &[], denied_block, &[]);
+
+    builder.switch_to_block(ok_block);
+    builder.seal_block(ok_block);
+    emit_i64_host_audit_line(builder, runtime_refs, &ok_line)?;
+    builder.ins().jump(merge_block, &[BlockArg::Value(status)]);
+
+    builder.switch_to_block(denied_block);
+    builder.seal_block(denied_block);
+    emit_i64_host_audit_line(builder, runtime_refs, &denied_line)?;
+    builder.ins().jump(merge_block, &[BlockArg::Value(status)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_audit_clock_expr(
+    builder: &mut FunctionBuilder<'_>,
+    locals: &[Variable],
+    function_refs: &[FuncRef],
+    runtime_refs: I64RuntimeRefs,
+    intrinsic: &str,
+    package: &str,
+    arg_name: &str,
+    success: I64AuditSuccess,
+    result: &I64Expr,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let status = emit_i64_expr(builder, locals, function_refs, runtime_refs, result)?;
+    let ok_line = i64_clock_audit_line(intrinsic, package, arg_name, "ok");
+    let denied_line = i64_clock_audit_line(intrinsic, package, arg_name, "denied");
 
     let ok_block = builder.create_block();
     let denied_block = builder.create_block();
