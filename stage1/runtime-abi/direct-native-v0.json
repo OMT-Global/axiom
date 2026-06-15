@@ -204,7 +204,7 @@
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [1001],
-      "notes": "The Cranelift spike covers std/crypto_hash.ax sha256 over strings without using generated Rust. Crypto capability denials still happen before backend lowering. The direct-native i64 path now also lowers known-input crypto_sha256 string results and imported public std/crypto_hash.ax sha256 wrapper results into length and comparison conditions that can feed a native process exit status without generated Rust. Supported runtime string-projection inputs can also feed fixed SHA-256 hex length projections directly or through string_clone over a projection local without materializing a general runtime string value. Random, signature, AEAD, dynamic runtime hash execution, and broader crypto audit parity remain open."
+      "notes": "The Cranelift spike covers std/crypto_hash.ax sha256 over strings while the public smoke asserts generated_rust is null. Crypto capability denials still happen before backend lowering. The direct-native i64 path now also lowers known-input crypto_sha256 string results and imported public std/crypto_hash.ax sha256 wrapper results into length and comparison conditions that can feed a native process exit status without generated Rust. Supported runtime string-projection inputs can also feed fixed SHA-256 hex length projections directly or through string_clone over a projection local without materializing a general runtime string value. Random, signature, AEAD, dynamic runtime hash execution, and broader crypto audit parity remain open."
     },
     {
       "id": "crypto.mac",
@@ -213,7 +213,7 @@
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [1001],
-      "notes": "The Cranelift spike covers std/crypto_mac.ax HMAC-SHA256, HMAC-SHA512, verification helpers, string constant-time equality, and byte-slice constant-time equality without generated Rust. Crypto capability denials still happen before backend lowering. The direct-native i64 path now also lowers known-input crypto_hmac_sha256 and crypto_hmac_sha512 string results into length and comparison conditions that can feed a native process exit status without generated Rust. Supported runtime string-projection inputs can also feed fixed HMAC hex length projections directly or through string_clone over a projection local without materializing a general runtime string value. Known-input crypto_constant_time_eq over known string values lowers into native boolean conditions, and crypto_constant_time_eq_u8 over narrow fixed-array/static-slice u8 inputs lowers into native boolean conditions. Imported public std/crypto_mac.ax wrappers for hmac_sha256, hmac_sha512, constant_time_eq, constant_time_eq_u8, verify_sha256, and verify_sha512 now alias those same known-input direct-native paths in a runtime-exit program without generated Rust. Runtime audit parity, dynamic runtime MAC execution, general byte-slice runtime equality, and broader crypto host-service coverage remain blocked."
+      "notes": "The Cranelift spike covers std/crypto_mac.ax HMAC-SHA256, HMAC-SHA512, verification helpers, string constant-time equality, and byte-slice constant-time equality while the public smoke asserts generated_rust is null. Crypto capability denials still happen before backend lowering. The direct-native i64 path now also lowers known-input crypto_hmac_sha256 and crypto_hmac_sha512 string results into length and comparison conditions that can feed a native process exit status without generated Rust. Supported runtime string-projection inputs can also feed fixed HMAC hex length projections directly or through string_clone over a projection local without materializing a general runtime string value. Known-input crypto_constant_time_eq over known string values lowers into native boolean conditions, and crypto_constant_time_eq_u8 over narrow fixed-array/static-slice u8 inputs lowers into native boolean conditions. Imported public std/crypto_mac.ax wrappers for hmac_sha256, hmac_sha512, constant_time_eq, constant_time_eq_u8, verify_sha256, and verify_sha512 now alias those same known-input direct-native paths in a runtime-exit program without generated Rust. Runtime audit parity, dynamic runtime MAC execution, general byte-slice runtime equality, and broader crypto host-service coverage remain blocked."
     },
     {
       "id": "crypto.random",
@@ -222,7 +222,7 @@
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [1001],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
-      "notes": "The Cranelift spike builds and runs std/crypto_rand.ax random_bytes and random_u64 through a Unix OS-random source without generated Rust, preserving the existing 0..=65536 byte length cap. The direct-native i64 path now also lowers public std/crypto_rand.ax random_u64 into native process exit status through the same Unix OS-random source, and lowers len(random_bytes(n)) for literal and static scalar nonnegative lengths up to that cap into native process exit status without materializing a general byte-array value. Packages without the crypto capability receive the public manifest-policy denial before backend lowering. Direct-native random_bytes byte storage and contents, portable entropy source parity, deterministic test hooks, and runtime audit parity remain blocked."
+      "notes": "The Cranelift spike builds and runs std/crypto_rand.ax random_bytes and random_u64 through a Unix OS-random source while the public smoke asserts generated_rust is null, preserving the existing 0..=65536 byte length cap. The direct-native i64 path now also lowers public std/crypto_rand.ax random_u64 into native process exit status through the same Unix OS-random source, and lowers len(random_bytes(n)) for literal and static scalar nonnegative lengths up to that cap into native process exit status without materializing a general byte-array value. Packages without the crypto capability receive the public manifest-policy denial before backend lowering. Direct-native random_bytes byte storage and contents, portable entropy source parity, deterministic test hooks, and runtime audit parity remain blocked."
     },
     {
       "id": "crypto.signature",
@@ -231,7 +231,7 @@
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [1001],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
-      "notes": "The Cranelift spike builds and runs std/crypto_sign.ax Ed25519 key generation, signing, and verification without generated Rust by dynamically loading the host libcrypto EVP provider for real cryptographic operations. Packages without the crypto capability receive the public manifest-policy denial before backend lowering. Runtime-integrated crypto provider selection, deterministic test hooks, audit parity, and non-Unix support remain blocked."
+      "notes": "The Cranelift spike builds and runs std/crypto_sign.ax Ed25519 key generation, signing, and verification while the public smoke asserts generated_rust is null by dynamically loading the host libcrypto EVP provider for real cryptographic operations. Packages without the crypto capability receive the public manifest-policy denial before backend lowering. Runtime-integrated crypto provider selection, deterministic test hooks, audit parity, and non-Unix support remain blocked."
     },
     {
       "id": "crypto.aead",
@@ -240,7 +240,7 @@
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [1001],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
-      "notes": "The Cranelift spike builds and runs std/crypto_aead.ax AES-256-GCM seal/open without generated Rust through a dynamically loaded host OpenSSL EVP provider. Packages without the crypto capability receive the public manifest-policy denial before backend lowering. Runtime-integrated crypto provider selection, broader algorithm coverage, deterministic test hooks, audit parity, and non-Unix support remain blocked."
+      "notes": "The Cranelift spike builds and runs std/crypto_aead.ax AES-256-GCM seal/open while the public smoke asserts generated_rust is null through a dynamically loaded host OpenSSL EVP provider. Packages without the crypto capability receive the public manifest-policy denial before backend lowering. Runtime-integrated crypto provider selection, broader algorithm coverage, deterministic test hooks, audit parity, and non-Unix support remain blocked."
     },
     {
       "id": "ffi.call",
@@ -249,7 +249,7 @@
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "blockers": [1001],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
-      "notes": "The Cranelift spike builds and runs a narrow C ABI extern strlen fixture without generated Rust, using the source-level extern declaration and preserving missing ffi capability denial before backend lowering. The direct-native i64 path also lowers that same narrow strlen declaration for supported literal and string-projection inputs into native process exit status without generated Rust. Broad dynamic symbol loading, pointer/mutptr ABI shapes, non-string arguments, ownership safety, platform library resolution, and audit parity remain blocked."
+      "notes": "The Cranelift spike builds and runs a narrow C ABI extern strlen fixture while the public smoke asserts generated_rust is null, using the source-level extern declaration and preserving missing ffi capability denial before backend lowering. The direct-native i64 path also lowers that same narrow strlen declaration for supported literal and string-projection inputs into native process exit status without generated Rust. Broad dynamic symbol loading, pointer/mutptr ABI shapes, non-string arguments, ownership safety, platform library resolution, and audit parity remain blocked."
     },
     {
       "id": "async.runtime",

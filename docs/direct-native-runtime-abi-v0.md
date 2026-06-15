@@ -394,9 +394,10 @@ writes, atomic replace parity, TOCTOU hardening, and audit parity remain open
 under #1001.
 
 The direct-native crypto hash slice is still marked partial: the Cranelift
-spike can build and run `std/crypto_hash.ax` `sha256(...)` without generated
-Rust, and crypto capability denials still happen before backend lowering. The
-direct-native i64 path now also lowers known-input `crypto_sha256(...)` string
+spike can build and run `std/crypto_hash.ax` `sha256(...)` while the public
+smoke asserts `generated_rust` is null, and crypto capability denials still
+happen before backend lowering. The direct-native i64 path now also lowers
+known-input `crypto_sha256(...)` string
 results and imported public `std/crypto_hash.ax` `sha256(...)` wrapper results
 into length and comparison conditions that can feed a native process exit
 status without generated Rust. Supported runtime string-projection inputs can
@@ -409,14 +410,15 @@ audit parity remain open.
 The direct-native crypto MAC slice is now marked partial: the Cranelift spike
 can build and run `std/crypto_mac.ax` HMAC-SHA256, HMAC-SHA512, verification
 helpers, string constant-time equality, and byte-slice constant-time equality
-without generated Rust. A package without the `crypto` capability fails before
-backend lowering. The direct-native i64 path now also lowers known-input
+while the public smoke asserts `generated_rust` is null. A package without the
+`crypto` capability fails before backend lowering. The direct-native i64 path
+now also lowers known-input
 `crypto_hmac_sha256(...)` and `crypto_hmac_sha512(...)` string results into
 length and comparison conditions that can feed a native process exit status
 without generated Rust. Supported runtime string-projection inputs can also feed
 fixed HMAC hex length projections directly or through `string_clone(...)` over
-a projection local without materializing a general runtime string value. Known-input
-`crypto_constant_time_eq(...)` over known string values lowers into native
+a projection local without materializing a general runtime string value.
+Known-input `crypto_constant_time_eq(...)` over known string values lowers into native
 boolean conditions. It also lowers
 `crypto_constant_time_eq_u8(...)` over narrow fixed-array/static-slice `u8`
 inputs into native boolean conditions. Imported public `std/crypto_mac.ax`
@@ -429,10 +431,10 @@ host-service coverage remain blocked under #1001.
 
 The direct-native crypto random slice is now marked partial: the Cranelift
 spike can build and run `std/crypto_rand.ax` `random_bytes(...)` and
-`random_u64()` through a Unix OS-random source without generated Rust, while
-preserving the generated-Rust helper's `0..=65536` byte length cap. The
-direct-native i64 path now also lowers public `std/crypto_rand.ax`
-`random_u64()` into native process exit status through the same Unix OS-random
+`random_u64()` through a Unix OS-random source while the public smoke asserts
+`generated_rust` is null, preserving the generated-Rust helper's `0..=65536`
+byte length cap. The direct-native i64 path now also lowers public
+`std/crypto_rand.ax` `random_u64()` into native process exit status through the same Unix OS-random
 source. It also lowers `len(random_bytes(n))` for literal and static scalar
 nonnegative lengths up to the stage1 65,536 byte cap into native process exit
 status without materializing a general byte-array value. A package without the
@@ -442,24 +444,25 @@ deterministic test hooks, and runtime audit parity remain open under #1001.
 
 The direct-native crypto signature slice is now marked partial: the Cranelift
 spike builds and runs `std/crypto_sign.ax` Ed25519 key generation, signing, and
-verification without generated Rust by dynamically loading the host libcrypto
-EVP provider for real cryptographic operations. Packages without the `crypto`
-capability still fail before backend lowering. Runtime-integrated crypto
-provider selection, deterministic test hooks, audit parity, and non-Unix support
-remain open under #1001.
+verification while the public smoke asserts `generated_rust` is null by
+dynamically loading the host libcrypto EVP provider for real cryptographic
+operations. Packages without the `crypto` capability still fail before backend
+lowering. Runtime-integrated crypto provider selection, deterministic test
+hooks, audit parity, and non-Unix support remain open under #1001.
 
 The direct-native crypto AEAD slice is now marked partial: the Cranelift spike
-builds and runs `std/crypto_aead.ax` AES-256-GCM seal/open without generated
-Rust through a dynamically loaded host OpenSSL EVP provider. Packages without
-the `crypto` capability still fail before backend lowering. Runtime-integrated
-crypto provider selection, broader algorithm coverage, deterministic test
-hooks, audit parity, and non-Unix support remain open under #1001.
+builds and runs `std/crypto_aead.ax` AES-256-GCM seal/open while the public
+smoke asserts `generated_rust` is null through a dynamically loaded host OpenSSL
+EVP provider. Packages without the `crypto` capability still fail before
+backend lowering. Runtime-integrated crypto provider selection, broader
+algorithm coverage, deterministic test hooks, audit parity, and non-Unix
+support remain open under #1001.
 
 The HTTP client row now has partial Cranelift evidence: the spike builds
 `std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL
 and fetches a local one-shot HTTP response while the public smoke asserts
-`generated_rust` is null. The
-direct-native i64 path now also lowers known-url `http_get(...)` and public
+`generated_rust` is null. The direct-native i64 path now also lowers known-url
+`http_get(...)` and public
 `std/http.ax` `get(...)` calls into native process exit status by selecting
 `Option<string>` match arms at compile time for local HTTP responses. Packages
 without the `net` capability still fail before backend lowering. HTTPS,
@@ -606,7 +609,8 @@ open under #1001.
 
 The FFI call row now has partial direct-native evidence: the spike builds and
 runs a narrow C ABI `extern fn strlen(value: string): int from "c"` fixture
-without generated Rust, using the source-level extern declaration. The
+while the public smoke asserts `generated_rust` is null, using the source-level
+extern declaration. The
 direct-native i64 path also lowers that same narrow `strlen` declaration for
 supported literal and string-projection inputs into native process exit status
 without generated Rust. A package with an `extern fn` declaration and no `ffi`
