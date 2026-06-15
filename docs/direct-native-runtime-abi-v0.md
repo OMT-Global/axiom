@@ -739,8 +739,12 @@ composition over those supported dynamic `JsonValue` wrappers can also feed
 native stdout and `stringify_value(...)` without generated Rust. Public schema
 helpers such as `schema_field_*` and `schema_object3(...)`, plus
 `parse_field_value(...)` over the evidenced dynamic object wrappers, can also
-feed native stdout without generated Rust. Imported
-public `std/serdes.ax` known-input `to_json(...)`,
+feed native stdout without generated Rust. The public `std/serdes.ax` binary
+smoke now also asserts `generated_rust: null` while exercising `to_json(...)`,
+deep `Value` equality, typed text/int/bool field access, object field access,
+array field access, `value_item(...)` over text and int elements,
+`as_text(...)`, `as_int(...)`, `stringify(...)`, and parse-error output.
+Imported public `std/serdes.ax` known-input `to_json(...)`,
 `stringify(...)`,
 `from_json_str(...)`, `as_text(...)`, and `parse_error_message(...)` wrapper
 paths now also feed direct-native known string comparisons, length projections,

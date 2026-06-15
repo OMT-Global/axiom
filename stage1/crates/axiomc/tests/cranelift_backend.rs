@@ -5400,6 +5400,7 @@ fn cranelift_backend_builds_std_serdes_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -5418,6 +5419,7 @@ axiom
 3
 false
 one
+2
 parse error
 "#,
     );
@@ -11193,6 +11195,36 @@ print "missing item"
 }
 None {
 print "missing array"
+}
+}
+}
+Err(error) {
+print parse_error_message(error)
+}
+}
+
+match from_json_str("{\"name\":\"axiom\",\"count\":3,\"ready\":true,\"items\":[\"one\",2],\"nested\":{\"ok\":false}}") {
+Ok(value) {
+match array_field(value, "items") {
+Some(items) {
+match value_item(Array(items), 1) {
+Some(item) {
+match as_int(item) {
+Some(count) {
+print count
+}
+None {
+print -1
+}
+}
+}
+None {
+print -1
+}
+}
+}
+None {
+print -1
 }
 }
 }
