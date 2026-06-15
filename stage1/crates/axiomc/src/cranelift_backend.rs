@@ -7153,10 +7153,27 @@ fn i64_known_helper_function_is_pure(
     if depth > 8 || function.is_property || function.is_async || function.is_extern {
         return false;
     }
-    let [Stmt::Return { expr, .. }] = function.body.as_slice() else {
+    i64_known_helper_body_is_pure(&function.body, static_bindings, depth + 1)
+}
+
+fn i64_known_helper_body_is_pure(
+    body: &[Stmt],
+    static_bindings: &I64StaticBindings,
+    depth: usize,
+) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    let Some((last, leading)) = body.split_last() else {
         return false;
     };
-    i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+    leading.iter().all(|stmt| match stmt {
+        Stmt::Let { expr, .. } => i64_known_expr_is_pure(expr, static_bindings, depth + 1),
+        _ => false,
+    }) && match last {
+        Stmt::Return { expr, .. } => i64_known_expr_is_pure(expr, static_bindings, depth + 1),
+        _ => false,
+    }
 }
 
 fn i64_known_expr_is_pure(expr: &Expr, static_bindings: &I64StaticBindings, depth: usize) -> bool {

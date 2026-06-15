@@ -6516,8 +6516,11 @@ source = "path"
     fs::write(
         project.join("src/main.ax"),
         r#"fn make_banner(): string {
-let text: string = "direct-native"
-return text
+if true {
+return "direct-native"
+} else {
+return "fallback"
+}
 }
 
 fn main(): int {
@@ -6577,8 +6580,24 @@ fn forward_text(text: string): string {
 return text
 }
 
+fn local_banner(): string {
+let text: string = "direct-native"
+let copy: string = forward_text(text)
+return copy
+}
+
+fn local_score(text: string): int {
+let copy: string = forward_text(text)
+return len(copy)
+}
+
 fn has_native_prefix(text: string): bool {
 return string_starts_with(text, "direct")
+}
+
+fn has_local_native_prefix(text: string): bool {
+let copy: string = forward_text(text)
+return string_starts_with(copy, "direct")
 }
 
 fn main(): int {
@@ -6586,13 +6605,17 @@ let direct: int = score("direct-native")
 let static_score: int = score(BANNER)
 let forwarded_score: int = score(forward_text(BANNER))
 let returned_text: string = make_banner()
+let local_text: string = local_banner()
 let forwarded_len_text: string = forward_text(BANNER)
 let forwarded_compare_text: string = forward_text(BANNER)
 let returned_len: int = len(returned_text)
+let local_len: int = len(local_text)
 let forwarded_len: int = len(forwarded_len_text)
+let local_score_value: int = local_score(BANNER)
 let prefix_gate: bool = has_native_prefix("direct-native")
+let local_prefix_gate: bool = has_local_native_prefix(BANNER)
 let forwarded_gate: bool = forwarded_compare_text == "direct-native"
-if direct == 13 && static_score == 13 && forwarded_score == 13 && returned_len == 13 && forwarded_len == 13 && prefix_gate && forwarded_gate {
+if direct == 13 && static_score == 13 && forwarded_score == 13 && returned_len == 13 && local_len == 13 && forwarded_len == 13 && local_score_value == 13 && prefix_gate && local_prefix_gate && forwarded_gate {
 return 48
 } else {
 return 1
