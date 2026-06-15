@@ -9963,7 +9963,8 @@ source = "path"
             r#"import "std/http.ax"
 
 fn main(): int {{
-if serve_once("127.0.0.1:{port}", "server-once-ok") {{
+let served: bool = serve_once("127.0.0.1:{port}", "server-once-ok")
+if served {{
 return 48
 }} else {{
 return 1
@@ -10017,7 +10018,8 @@ source = "path"
         project.join("src/main.ax"),
         format!(
             r#"fn main(): int {{
-if http_serve_route("127.0.0.1:{port}", "/route", "route-ok", 2) {{
+let routed: bool = http_serve_route("127.0.0.1:{port}", "/route", "route-ok", 2)
+if routed {{
 return 48
 }} else {{
 return 1

@@ -539,9 +539,11 @@ fixture. The direct-native i64 path now also lowers known-bind
 `http_serve_once(...)`, `http_serve_route(...)`, and public `std/http.ax`
 `serve_once(...)` calls into native process exit status by selecting bool
 branches at compile time for local HTTP responses, including a two-request
-routed fixture. Packages without the `net` capability still fail before backend
-lowering. Non-loopback policy coverage, richer response metadata, timeout
-parity, and audit parity remain open under #1001.
+routed fixture; public `serve_once(...)` and primitive `http_serve_route(...)`
+results can also be stored in local bool values and used by later branch
+conditions without generated Rust. Packages without the `net` capability still
+fail before backend lowering. Non-loopback policy coverage, richer response
+metadata, timeout parity, and audit parity remain open under #1001.
 
 The async HTTP server row now has partial Cranelift evidence: the spike builds
 and runs `http_async_serve_route` over a loopback server handle while the public
