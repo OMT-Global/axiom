@@ -3734,6 +3734,16 @@ fn lower_i64_eprintln_message_stmts(
             )?;
             return Some(lower_i64_eprintln_bool_message_stmts(cond));
         }
+        if is_i64_json_stringify_string_name(name, static_bindings) {
+            return lower_i64_json_stringify_string_line_stmts_with_written(
+                message,
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
     }
     None
 }
@@ -4190,6 +4200,16 @@ fn lower_i64_print_stmt_stmts(
                 static_bindings,
             );
         }
+        if is_i64_json_stringify_string_name(name, static_bindings) {
+            return lower_i64_json_stringify_string_line_stmts(
+                expr,
+                OutputStream::Stdout,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
     }
     if matches!(expr.ty(), Type::Bool) {
         return lower_i64_print_bool_line_stmts(
@@ -4256,6 +4276,70 @@ fn lower_i64_print_bool_line_stmts(
             text: String::from("false"),
         }],
     }])
+}
+
+fn lower_i64_json_stringify_string_line_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    lower_i64_json_stringify_string_line_stmts_with_written(
+        expr,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+    .map(|(stmts, _)| stmts)
+}
+
+fn lower_i64_json_stringify_string_line_stmts_with_written(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<(Vec<CraneliftI64Stmt>, CraneliftI64Expr)> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if !is_i64_json_stringify_string_name(name, static_bindings) {
+        return None;
+    }
+    let [value] = args.as_slice() else {
+        return None;
+    };
+    let mut stmts = lower_i64_log_json_string_value_stmts(
+        value,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    stmts.push(CraneliftI64Stmt::WriteLine {
+        stream,
+        text: String::new(),
+    });
+    Some((
+        stmts,
+        CraneliftI64Expr::Binary {
+            op: CraneliftI64BinaryOp::Add,
+            lhs: Box::new(lower_i64_json_escaped_string_len_expr(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?),
+            rhs: Box::new(CraneliftI64Expr::Literal(1)),
+        },
+    ))
 }
 
 fn lower_i64_dynamic_known_string_line_stmts(

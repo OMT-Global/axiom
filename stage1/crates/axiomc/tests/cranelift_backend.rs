@@ -4644,7 +4644,7 @@ fn cranelift_backend_lowers_known_eprintln_runtime_stderr_in_direct_native_main(
         .expect("run cranelift logging stdio main binary");
     assert_eq!(
         run.status.code(),
-        Some(60),
+        Some(72),
         "stdout={} stderr={}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
@@ -4652,7 +4652,7 @@ fn cranelift_backend_lowers_known_eprintln_runtime_stderr_in_direct_native_main(
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
     assert_eq!(
         String::from_utf8_lossy(&run.stderr),
-        "after assign\nbranch stderr local\ntail stderr\ntrue\n25\ndeploy\n"
+        "after assign\nbranch stderr local\ntail stderr\ntrue\n25\n\"true\"\n\"25\"\ndeploy\n"
     );
 }
 
@@ -4819,7 +4819,10 @@ fn cranelift_backend_lowers_json_scalar_stringify_print_to_native_stdout() {
         .output()
         .expect("run cranelift json stringify print binary");
     assert_eq!(run.status.code(), Some(42));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\ntrue\nfalse\n");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "42\n\"42\"\ntrue\nfalse\n\"false\"\n"
+    );
     assert_eq!(String::from_utf8_lossy(&run.stderr), "");
 }
 
@@ -10053,10 +10056,14 @@ status = 1
 }
 let tail: int = eprintln("tail stderr")
 let bool_line: string = stringify_bool(status == 20)
+let quoted_bool_line: string = stringify_bool(status == 20)
 let bool_written: int = eprintln(bool_line)
 let number_written: int = eprintln(stringify_int(status + bool_written))
+let quoted_bool_written: int = eprintln(stringify_string(quoted_bool_line))
+let quoted_number_text: string = stringify_int(status + bool_written)
+let quoted_number_written: int = eprintln(stringify_string(quoted_number_text))
 let selected_written: int = eprintln(selected_line)
-return first + status + tail + bool_written + number_written + selected_written
+return first + status + tail + bool_written + number_written + quoted_bool_written + quoted_number_written + selected_written
 }
 "#,
     )
@@ -10294,9 +10301,11 @@ fn main(): int {
 let value: int = score()
 let text: string = stringify_int(value)
 print text
+print stringify_string(text)
 print stringify_bool(value == 42)
 let disabled: string = stringify_bool(false)
 print disabled
+print stringify_string(disabled)
 return value
 }
 "#,
