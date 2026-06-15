@@ -7221,9 +7221,18 @@ fn i64_known_expr_is_pure(expr: &Expr, static_bindings: &I64StaticBindings, dept
         Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => elements
             .iter()
             .all(|element| i64_known_expr_is_pure(element, static_bindings, depth + 1)),
+        Expr::EnumVariant { payloads, .. } => payloads
+            .iter()
+            .all(|payload| i64_known_expr_is_pure(payload, static_bindings, depth + 1)),
         Expr::StructLiteral { fields, .. } => fields
             .iter()
             .all(|field| i64_known_expr_is_pure(&field.expr, static_bindings, depth + 1)),
+        Expr::Match { expr, arms, .. } => {
+            i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+                && arms
+                    .iter()
+                    .all(|arm| i64_known_expr_is_pure(&arm.expr, static_bindings, depth + 1))
+        }
         _ => false,
     }
 }
