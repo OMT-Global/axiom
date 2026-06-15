@@ -12000,8 +12000,24 @@ fn main(): int {
 let direct_len: int = match fs_read("src/fixture.txt") { Some(value) => len(value), None => 1 }
 let wrapper_len: int = match read_file("src/fixture.txt") { Some(value) => len(value), None => 1 }
 let missing_len: int = match read_file("src/missing.txt") { Some(value) => len(value), None => 28 }
-if direct_len == 13 && wrapper_len == 13 && missing_len == 28 {
-return 48
+let stored_direct: Option<string> = fs_read("src/fixture.txt")
+let stored_wrapper: Option<string> = read_file("src/fixture.txt")
+let stored_missing: Option<string> = read_file("src/missing.txt")
+let stored_statement: Option<string> = read_file("src/fixture.txt")
+let stored_direct_len: int = match stored_direct { Some(value) => len(value), None => 1 }
+let stored_wrapper_len: int = match stored_wrapper { Some(value) => len(value), None => 1 }
+let stored_missing_len: int = match stored_missing { Some(value) => len(value), None => 28 }
+let statement_len: int = 0
+match stored_statement {
+Some(value) {
+statement_len = len(value)
+}
+None {
+statement_len = 1
+}
+}
+if direct_len == 13 && wrapper_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_missing_len == 28 && statement_len == 13 {
+return statement_len + 35
 } else {
 return 1
 }
