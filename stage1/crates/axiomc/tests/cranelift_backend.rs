@@ -6390,7 +6390,7 @@ fn cranelift_backend_lowers_env_read_to_runtime_exit_code() {
     write_env_read_main_exit_project(&project);
 
     let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .env("AXIOM_CRANELIFT_ENV_READ", "native-env")
+        .env_remove("AXIOM_CRANELIFT_ENV_READ")
         .env_remove("__AXIOM_CRANELIFT_ENV_MISSING__")
         .args([
             "build",
@@ -6413,6 +6413,8 @@ fn cranelift_backend_lowers_env_read_to_runtime_exit_code() {
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
+        .env("AXIOM_CRANELIFT_ENV_READ", "runtime-env")
+        .env_remove("__AXIOM_CRANELIFT_ENV_MISSING__")
         .output()
         .expect("run cranelift env main binary");
     assert_eq!(run.status.code(), Some(48));
@@ -11884,7 +11886,7 @@ source = "path"
 fn main(): int {
 let present: int = match env_get("AXIOM_CRANELIFT_ENV_READ") { Some(value) => len(value), None => 0 }
 let missing: int = match get_env("__AXIOM_CRANELIFT_ENV_MISSING__") { Some(value) => len(value), None => 38 }
-if present == 10 && missing == 38 {
+if present == 11 && missing == 38 {
 return 48
 } else {
 return 1

@@ -602,11 +602,12 @@ The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names while the public smoke
 asserts `generated_rust` is null, plus denial evidence that a package without the
 `env` capability fails before backend lowering. The direct-native i64 path now
-also lowers literal-key `env_get(...)` calls and the public `std/env.ax` `get_env(...)` wrapper into
-native process exit status by selecting `Option<string>` match arms at compile
-time for present and missing test environment names. Full runtime-time lookup,
-manifest allowlist parity, runtime environment binding, and audit parity remain
-open under #1001.
+also lowers literal-key `env_get(...)` calls and the public `std/env.ax`
+`get_env(...)` wrapper into native runtime environment lookups through the
+object backend for direct `Option<string>` matches that use `len(value)`,
+returning the runtime string length or the `None` arm when absent. Broader
+runtime environment binding, manifest allowlist parity, stored option values,
+and audit parity remain open under #1001.
 
 The FFI call row now has partial direct-native evidence: the spike builds and
 runs a narrow C ABI `extern fn strlen(value: string): int from "c"` fixture

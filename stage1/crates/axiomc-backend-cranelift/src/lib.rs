@@ -74,6 +74,9 @@ pub enum I64Expr {
     SleepMs {
         milliseconds: Box<I64Expr>,
     },
+    EnvLen {
+        key: String,
+    },
     ConditionValue(Box<I64Condition>),
     Cast {
         cast: I64Cast,
@@ -416,6 +419,22 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare usleep import: {message}"))
         })?;
+    let mut getenv_sig = module.make_signature();
+    getenv_sig.params.push(AbiParam::new(pointer_type));
+    getenv_sig.returns.push(AbiParam::new(pointer_type));
+    let getenv_id = module
+        .declare_function("getenv", Linkage::Import, &getenv_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare getenv import: {message}"))
+        })?;
+    let mut strlen_sig = module.make_signature();
+    strlen_sig.params.push(AbiParam::new(pointer_type));
+    strlen_sig.returns.push(AbiParam::new(pointer_type));
+    let strlen_id = module
+        .declare_function("strlen", Linkage::Import, &strlen_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare strlen import: {message}"))
+        })?;
     let output_data_ids = declare_i64_output_data(&mut module, &program)?;
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
@@ -425,6 +444,8 @@ fn emit_i64_exit_object(
             &function_ids,
             write_id,
             sleep_id,
+            getenv_id,
+            strlen_id,
             &output_data_ids,
             index,
             function,
@@ -449,10 +470,20 @@ fn emit_i64_exit_object(
         let function_refs = i64_function_refs(&mut module, &mut builder, &function_ids);
         let write_ref = module.declare_func_in_func(write_id, builder.func);
         let sleep_ref = module.declare_func_in_func(sleep_id, builder.func);
+        let getenv_ref = module.declare_func_in_func(getenv_id, builder.func);
+        let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
         let mut locals = Vec::new();
         for local_expr in &program.locals {
             let local = builder.declare_var(types::I64);
-            let value = emit_i64_expr(&mut builder, &locals, &function_refs, sleep_ref, local_expr)?;
+            let value = emit_i64_expr(
+                &mut builder,
+                &locals,
+                &function_refs,
+                sleep_ref,
+                getenv_ref,
+                strlen_ref,
+                local_expr,
+            )?;
             builder.def_var(local, value);
             locals.push(local);
         }
@@ -462,6 +493,8 @@ fn emit_i64_exit_object(
             &locals,
             &function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             &output_data_ids,
             &program.stmts,
@@ -472,6 +505,8 @@ fn emit_i64_exit_object(
             &locals,
             &function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             &output_data_ids,
             &program.body,
@@ -628,6 +663,8 @@ fn define_i64_function(
     function_ids: &[FuncId],
     write_id: FuncId,
     sleep_id: FuncId,
+    getenv_id: FuncId,
+    strlen_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -660,6 +697,8 @@ fn define_i64_function(
         let function_refs = i64_function_refs(module, &mut builder, function_ids);
         let write_ref = module.declare_func_in_func(write_id, builder.func);
         let sleep_ref = module.declare_func_in_func(sleep_id, builder.func);
+        let getenv_ref = module.declare_func_in_func(getenv_id, builder.func);
+        let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
             let local = builder.declare_var(types::I64);
@@ -668,7 +707,15 @@ fn define_i64_function(
         }
         for local_expr in &function.locals {
             let local = builder.declare_var(types::I64);
-            let value = emit_i64_expr(&mut builder, &locals, &function_refs, sleep_ref, local_expr)?;
+            let value = emit_i64_expr(
+                &mut builder,
+                &locals,
+                &function_refs,
+                sleep_ref,
+                getenv_ref,
+                strlen_ref,
+                local_expr,
+            )?;
             builder.def_var(local, value);
             locals.push(local);
         }
@@ -678,6 +725,8 @@ fn define_i64_function(
             &locals,
             &function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             output_data_ids,
             &function.stmts,
@@ -688,6 +737,8 @@ fn define_i64_function(
             &locals,
             &function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             output_data_ids,
             function.returns,
@@ -719,6 +770,8 @@ fn emit_i64_stmts(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     stmts: &[I64Stmt],
@@ -730,6 +783,8 @@ fn emit_i64_stmts(
             locals,
             function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             output_data_ids,
             stmt,
@@ -744,12 +799,14 @@ fn emit_i64_stmt(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     stmt: &I64Stmt,
 ) -> Result<(), CraneliftBackendError> {
     match stmt {
-        I64Stmt::Assign(assign) => emit_i64_assign(builder, locals, function_refs, sleep_ref, assign),
+        I64Stmt::Assign(assign) => emit_i64_assign(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, assign),
         I64Stmt::WriteText { stream, text } => {
             emit_i64_write_text(module, builder, write_ref, output_data_ids, *stream, text)
         }
@@ -761,6 +818,8 @@ fn emit_i64_stmt(
             locals,
             function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             module.target_config().pointer_type(),
             *stream,
@@ -771,6 +830,8 @@ fn emit_i64_stmt(
             locals,
             function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             write_ref,
             module.target_config().pointer_type(),
             *stream,
@@ -785,6 +846,8 @@ fn emit_i64_stmt(
             locals,
             function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             assign_locals,
             *function,
             args,
@@ -797,7 +860,7 @@ fn emit_i64_stmt(
             let then_block = builder.create_block();
             let else_block = builder.create_block();
             let after_if = builder.create_block();
-            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             builder
                 .ins()
                 .brif(condition, then_block, &[], else_block, &[]);
@@ -810,6 +873,8 @@ fn emit_i64_stmt(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 then_body,
@@ -824,6 +889,8 @@ fn emit_i64_stmt(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 else_body,
@@ -841,7 +908,7 @@ fn emit_i64_stmt(
 
             builder.ins().jump(loop_header, &[]);
             builder.switch_to_block(loop_header);
-            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             builder
                 .ins()
                 .brif(condition, loop_body, &[], after_loop, &[]);
@@ -854,6 +921,8 @@ fn emit_i64_stmt(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 body,
@@ -939,6 +1008,8 @@ fn emit_i64_write_i64_line(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     pointer_type: cranelift_codegen::ir::Type,
     stream: OutputStream,
@@ -949,6 +1020,8 @@ fn emit_i64_write_i64_line(
         locals,
         function_refs,
         sleep_ref,
+        getenv_ref,
+        strlen_ref,
         write_ref,
         pointer_type,
         stream,
@@ -962,6 +1035,8 @@ fn emit_i64_write_i64_text(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     pointer_type: cranelift_codegen::ir::Type,
     stream: OutputStream,
@@ -972,6 +1047,8 @@ fn emit_i64_write_i64_text(
         locals,
         function_refs,
         sleep_ref,
+        getenv_ref,
+        strlen_ref,
         write_ref,
         pointer_type,
         stream,
@@ -985,13 +1062,15 @@ fn emit_i64_write_i64(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     pointer_type: cranelift_codegen::ir::Type,
     stream: OutputStream,
     value: &I64Expr,
     append_newline: bool,
 ) -> Result<(), CraneliftBackendError> {
-    let value = emit_i64_expr(builder, locals, function_refs, sleep_ref, value)?;
+    let value = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, value)?;
     let buffer =
         builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 32, 0));
     let base = builder.ins().stack_addr(pointer_type, buffer, 0);
@@ -1113,6 +1192,8 @@ fn emit_i64_assign(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     assign: &I64Assign,
 ) -> Result<(), CraneliftBackendError> {
     let local = locals.get(assign.local).copied().ok_or_else(|| {
@@ -1121,7 +1202,7 @@ fn emit_i64_assign(
             assign.local
         ))
     })?;
-    let value = emit_i64_expr(builder, locals, function_refs, sleep_ref, &assign.value)?;
+    let value = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, &assign.value)?;
     builder.def_var(local, value);
     Ok(())
 }
@@ -1131,6 +1212,8 @@ fn emit_i64_call_assign(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     assign_locals: &[usize],
     function: usize,
     args: &[I64Expr],
@@ -1140,7 +1223,7 @@ fn emit_i64_call_assign(
     })?;
     let args = args
         .iter()
-        .map(|arg| emit_i64_expr(builder, locals, function_refs, sleep_ref, arg))
+        .map(|arg| emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, arg))
         .collect::<Result<Vec<_>, _>>()?;
     let call = builder.ins().call(function_ref, &args);
     let results = builder.inst_results(call).to_vec();
@@ -1168,12 +1251,14 @@ fn emit_i64_exit_body(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     body: &I64ExitBody,
 ) -> Result<(), CraneliftBackendError> {
     match body {
-        I64ExitBody::Return(result) => emit_i64_return(builder, locals, function_refs, sleep_ref, result),
+        I64ExitBody::Return(result) => emit_i64_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, result),
         I64ExitBody::BlockReturn(block) => {
             emit_i64_stmts(
                 module,
@@ -1181,11 +1266,13 @@ fn emit_i64_exit_body(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 &block.stmts,
             )?;
-            emit_i64_return(builder, locals, function_refs, sleep_ref, &block.result)
+            emit_i64_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, &block.result)
         }
         I64ExitBody::IfReturn {
             cond,
@@ -1194,18 +1281,18 @@ fn emit_i64_exit_body(
         } => {
             let then_block = builder.create_block();
             let else_block = builder.create_block();
-            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             builder
                 .ins()
                 .brif(condition, then_block, &[], else_block, &[]);
 
             builder.switch_to_block(then_block);
             builder.seal_block(then_block);
-            emit_i64_return(builder, locals, function_refs, sleep_ref, then_result)?;
+            emit_i64_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, then_result)?;
 
             builder.switch_to_block(else_block);
             builder.seal_block(else_block);
-            emit_i64_return(builder, locals, function_refs, sleep_ref, else_result)
+            emit_i64_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, else_result)
         }
         I64ExitBody::IfBlockReturn {
             cond,
@@ -1214,7 +1301,7 @@ fn emit_i64_exit_body(
         } => {
             let then_cranelift_block = builder.create_block();
             let else_cranelift_block = builder.create_block();
-            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             builder.ins().brif(
                 condition,
                 then_cranelift_block,
@@ -1231,11 +1318,13 @@ fn emit_i64_exit_body(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 &then_block.stmts,
             )?;
-            emit_i64_return(builder, locals, function_refs, sleep_ref, &then_block.result)?;
+            emit_i64_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, &then_block.result)?;
 
             builder.switch_to_block(else_cranelift_block);
             builder.seal_block(else_cranelift_block);
@@ -1245,11 +1334,13 @@ fn emit_i64_exit_body(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 &else_block.stmts,
             )?;
-            emit_i64_return(builder, locals, function_refs, sleep_ref, &else_block.result)
+            emit_i64_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, &else_block.result)
         }
     }
 }
@@ -1260,6 +1351,8 @@ fn emit_i64_value_body(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     returns: usize,
@@ -1267,7 +1360,7 @@ fn emit_i64_value_body(
 ) -> Result<(), CraneliftBackendError> {
     match body {
         I64ValueBody::Return(results) => {
-            emit_i64_value_return(builder, locals, function_refs, sleep_ref, returns, results)
+            emit_i64_value_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, returns, results)
         }
         I64ValueBody::BlockReturn(block) => {
             emit_i64_stmts(
@@ -1276,11 +1369,13 @@ fn emit_i64_value_body(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 &block.stmts,
             )?;
-            emit_i64_value_return(builder, locals, function_refs, sleep_ref, returns, &block.results)
+            emit_i64_value_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, returns, &block.results)
         }
         I64ValueBody::IfReturn {
             cond,
@@ -1289,18 +1384,18 @@ fn emit_i64_value_body(
         } => {
             let then_block = builder.create_block();
             let else_block = builder.create_block();
-            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             builder
                 .ins()
                 .brif(condition, then_block, &[], else_block, &[]);
 
             builder.switch_to_block(then_block);
             builder.seal_block(then_block);
-            emit_i64_value_return(builder, locals, function_refs, sleep_ref, returns, then_results)?;
+            emit_i64_value_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, returns, then_results)?;
 
             builder.switch_to_block(else_block);
             builder.seal_block(else_block);
-            emit_i64_value_return(builder, locals, function_refs, sleep_ref, returns, else_results)
+            emit_i64_value_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, returns, else_results)
         }
         I64ValueBody::IfBlockReturn {
             cond,
@@ -1309,7 +1404,7 @@ fn emit_i64_value_body(
         } => {
             let then_cranelift_block = builder.create_block();
             let else_cranelift_block = builder.create_block();
-            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let condition = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             builder.ins().brif(
                 condition,
                 then_cranelift_block,
@@ -1326,11 +1421,13 @@ fn emit_i64_value_body(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 &then_block.stmts,
             )?;
-            emit_i64_value_return(builder, locals, function_refs, sleep_ref, returns, &then_block.results)?;
+            emit_i64_value_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, returns, &then_block.results)?;
 
             builder.switch_to_block(else_cranelift_block);
             builder.seal_block(else_cranelift_block);
@@ -1340,11 +1437,13 @@ fn emit_i64_value_body(
                 locals,
                 function_refs,
                 sleep_ref,
+                getenv_ref,
+                strlen_ref,
                 write_ref,
                 output_data_ids,
                 &else_block.stmts,
             )?;
-            emit_i64_value_return(builder, locals, function_refs, sleep_ref, returns, &else_block.results)
+            emit_i64_value_return(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, returns, &else_block.results)
         }
     }
 }
@@ -1354,9 +1453,11 @@ fn emit_i64_return(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     result: &I64Expr,
 ) -> Result<(), CraneliftBackendError> {
-    let result = emit_i64_expr(builder, locals, function_refs, sleep_ref, result)?;
+    let result = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, result)?;
     let exit_code = builder.ins().ireduce(types::I32, result);
     builder.ins().return_(&[exit_code]);
     Ok(())
@@ -1367,6 +1468,8 @@ fn emit_i64_value_return(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     returns: usize,
     results: &[I64Expr],
 ) -> Result<(), CraneliftBackendError> {
@@ -1378,7 +1481,7 @@ fn emit_i64_value_return(
     }
     let results = results
         .iter()
-        .map(|result| emit_i64_expr(builder, locals, function_refs, sleep_ref, result))
+        .map(|result| emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, result))
         .collect::<Result<Vec<_>, _>>()?;
     builder.ins().return_(&results);
     Ok(())
@@ -1389,10 +1492,12 @@ fn emit_i64_compare(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     cond: &I64Compare,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
-    let lhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, &cond.lhs)?;
-    let rhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, &cond.rhs)?;
+    let lhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, &cond.lhs)?;
+    let rhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, &cond.rhs)?;
     Ok(builder.ins().icmp(i64_compare_op(cond.op), lhs, rhs))
 }
 
@@ -1401,6 +1506,8 @@ fn emit_i64_condition(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     cond: &I64Condition,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
     match cond {
@@ -1408,12 +1515,12 @@ fn emit_i64_condition(
             let value = builder.ins().iconst(types::I8, i64::from(*value));
             Ok(builder.ins().icmp_imm(IntCC::NotEqual, value, 0))
         }
-        I64Condition::Compare(compare) => emit_i64_compare(builder, locals, function_refs, sleep_ref, compare),
+        I64Condition::Compare(compare) => emit_i64_compare(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, compare),
         I64Condition::And { lhs, rhs } => {
-            emit_i64_short_circuit_condition(builder, locals, function_refs, sleep_ref, lhs, rhs, false)
+            emit_i64_short_circuit_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, lhs, rhs, false)
         }
         I64Condition::Or { lhs, rhs } => {
-            emit_i64_short_circuit_condition(builder, locals, function_refs, sleep_ref, lhs, rhs, true)
+            emit_i64_short_circuit_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, lhs, rhs, true)
         }
     }
 }
@@ -1423,11 +1530,13 @@ fn emit_i64_short_circuit_condition(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     lhs: &I64Condition,
     rhs: &I64Condition,
     short_circuit_value: bool,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
-    let lhs = emit_i64_condition(builder, locals, function_refs, sleep_ref, lhs)?;
+    let lhs = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, lhs)?;
     let rhs_block = builder.create_block();
     let short_circuit_block = builder.create_block();
     let merge_block = builder.create_block();
@@ -1450,7 +1559,7 @@ fn emit_i64_short_circuit_condition(
 
     builder.switch_to_block(rhs_block);
     builder.seal_block(rhs_block);
-    let rhs = emit_i64_condition(builder, locals, function_refs, sleep_ref, rhs)?;
+    let rhs = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, rhs)?;
     let rhs = emit_i64_bool_value(builder, rhs);
     let rhs_args = [BlockArg::Value(rhs)];
     builder.ins().jump(merge_block, &rhs_args);
@@ -1486,6 +1595,8 @@ fn emit_i64_expr(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     expr: &I64Expr,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
     match expr {
@@ -1497,14 +1608,15 @@ fn emit_i64_expr(
             Ok(builder.use_var(local))
         }
         I64Expr::SleepMs { milliseconds } => {
-            emit_i64_sleep_ms_expr(builder, locals, function_refs, sleep_ref, milliseconds)
+            emit_i64_sleep_ms_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, milliseconds)
         }
+        I64Expr::EnvLen { key } => emit_i64_env_len_expr(builder, getenv_ref, strlen_ref, key),
         I64Expr::ConditionValue(cond) => {
-            let cond = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+            let cond = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
             Ok(emit_i64_bool_value(builder, cond))
         }
         I64Expr::Cast { cast, expr } => {
-            let value = emit_i64_expr(builder, locals, function_refs, sleep_ref, expr)?;
+            let value = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, expr)?;
             Ok(emit_i64_cast(builder, value, *cast))
         }
         I64Expr::Call { function, args } => {
@@ -1513,15 +1625,15 @@ fn emit_i64_expr(
             })?;
             let args = args
                 .iter()
-                .map(|arg| emit_i64_expr(builder, locals, function_refs, sleep_ref, arg))
+                .map(|arg| emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, arg))
                 .collect::<Result<Vec<_>, _>>()?;
             let call = builder.ins().call(function_ref, &args);
             let results = builder.inst_results(call);
             Ok(results[0])
         }
         I64Expr::Binary { op, lhs, rhs } => {
-            let lhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, lhs)?;
-            let rhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, rhs)?;
+            let lhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, lhs)?;
+            let rhs = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, rhs)?;
             Ok(match op {
                 I64BinaryOp::Add => builder.ins().iadd(lhs, rhs),
                 I64BinaryOp::Sub => builder.ins().isub(lhs, rhs),
@@ -1538,6 +1650,8 @@ fn emit_i64_expr(
             locals,
             function_refs,
             sleep_ref,
+            getenv_ref,
+            strlen_ref,
             cond,
             then_result,
             else_result,
@@ -1550,11 +1664,13 @@ fn emit_i64_select_expr(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     cond: &I64Condition,
     then_result: &I64Expr,
     else_result: &I64Expr,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
-    let cond = emit_i64_condition(builder, locals, function_refs, sleep_ref, cond)?;
+    let cond = emit_i64_condition(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, cond)?;
     let then_block = builder.create_block();
     let else_block = builder.create_block();
     let merge_block = builder.create_block();
@@ -1563,15 +1679,61 @@ fn emit_i64_select_expr(
 
     builder.switch_to_block(then_block);
     builder.seal_block(then_block);
-    let then_result = emit_i64_expr(builder, locals, function_refs, sleep_ref, then_result)?;
+    let then_result = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, then_result)?;
     let then_args = [BlockArg::Value(then_result)];
     builder.ins().jump(merge_block, &then_args);
 
     builder.switch_to_block(else_block);
     builder.seal_block(else_block);
-    let else_result = emit_i64_expr(builder, locals, function_refs, sleep_ref, else_result)?;
+    let else_result = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, else_result)?;
     let else_args = [BlockArg::Value(else_result)];
     builder.ins().jump(merge_block, &else_args);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_env_len_expr(
+    builder: &mut FunctionBuilder<'_>,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
+    key: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let key_len = u32::try_from(key.len() + 1)
+        .map_err(|_| CraneliftBackendError::new("environment key is too large"))?;
+    let key_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, key_len, 0));
+    for (offset, byte) in key.bytes().chain(std::iter::once(0)).enumerate() {
+        let byte_value = builder.ins().iconst(types::I8, i64::from(byte));
+        builder.ins().stack_store(byte_value, key_slot, offset as i32);
+    }
+    let key_ptr = builder.ins().stack_addr(types::I64, key_slot, 0);
+    let call = builder.ins().call(getenv_ref, &[key_ptr]);
+    let value_ptr = builder.inst_results(call)[0];
+
+    let missing_block = builder.create_block();
+    let present_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let missing = builder.ins().icmp_imm(IntCC::Equal, value_ptr, 0);
+    builder
+        .ins()
+        .brif(missing, missing_block, &[], present_block, &[]);
+
+    builder.switch_to_block(missing_block);
+    builder.seal_block(missing_block);
+    let missing_result = builder.ins().iconst(types::I64, -1);
+    builder
+        .ins()
+        .jump(merge_block, &[BlockArg::Value(missing_result)]);
+
+    builder.switch_to_block(present_block);
+    builder.seal_block(present_block);
+    let call = builder.ins().call(strlen_ref, &[value_ptr]);
+    let length = builder.inst_results(call)[0];
+    builder.ins().jump(merge_block, &[BlockArg::Value(length)]);
 
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
@@ -1583,9 +1745,11 @@ fn emit_i64_sleep_ms_expr(
     locals: &[Variable],
     function_refs: &[FuncRef],
     sleep_ref: FuncRef,
+    getenv_ref: FuncRef,
+    strlen_ref: FuncRef,
     milliseconds: &I64Expr,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
-    let milliseconds = emit_i64_expr(builder, locals, function_refs, sleep_ref, milliseconds)?;
+    let milliseconds = emit_i64_expr(builder, locals, function_refs, sleep_ref, getenv_ref, strlen_ref, milliseconds)?;
     let negative_block = builder.create_block();
     let too_large_block = builder.create_block();
     let sleep_block = builder.create_block();
@@ -1866,6 +2030,43 @@ mod tests {
         let output = Command::new(&capped_binary)
             .output()
             .expect("run capped sleep binary");
+        assert_eq!(output.status.code(), Some(255));
+    }
+
+    #[test]
+    fn links_i64_exit_program_with_env_len() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-env-len.o");
+        let binary = temp.path().join("i64-exit-env-len");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::EnvLen {
+                    key: String::from("AXIOM_CRANELIFT_BACKEND_ENV_LEN"),
+                }),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 env len exit program");
+        let output = Command::new(&binary)
+            .env("AXIOM_CRANELIFT_BACKEND_ENV_LEN", "backend-env")
+            .output()
+            .expect("run env len binary");
+        assert_eq!(output.status.code(), Some(11));
+        let output = Command::new(&binary)
+            .env_remove("AXIOM_CRANELIFT_BACKEND_ENV_LEN")
+            .output()
+            .expect("run missing env len binary");
         assert_eq!(output.status.code(), Some(255));
     }
 

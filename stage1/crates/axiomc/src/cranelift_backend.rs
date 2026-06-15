@@ -6524,6 +6524,15 @@ fn lower_i64_option_match_exit_return(
     ) {
         return Some(I64ExitBody::Return(value));
     }
+    if let Some(value) = lower_i64_env_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(I64ExitBody::Return(value));
+    }
     if let Some(value) = lower_i64_known_string_option_match_value_expr(
         expr,
         local_indexes,
@@ -6578,6 +6587,15 @@ fn lower_i64_option_match_value_expr(
         return None;
     }
     if let Some(value) = lower_i64_known_scalar_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(value);
+    }
+    if let Some(value) = lower_i64_env_option_match_value_expr(
         expr,
         local_indexes,
         local_conditions,
@@ -6698,6 +6716,105 @@ fn lower_i64_known_scalar_option_match_value_expr(
         },
         _ => None,
     }
+}
+
+fn lower_i64_env_option_match_value_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Match {
+        expr: matched,
+        arms,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    if !is_i64_exit_type(ty) {
+        return None;
+    }
+    let Type::Option(inner) = matched.ty() else {
+        return None;
+    };
+    if !matches!(inner.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let key = i64_env_get_key(matched, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_match_arms(arms)?;
+    let binding = some_arm
+        .bindings
+        .first()
+        .filter(|binding| binding.as_str() != "_");
+    let env_len = CraneliftI64Expr::EnvLen { key: key.clone() };
+    let then_result = lower_i64_env_some_arm_expr(
+        &some_arm.expr,
+        binding.map(String::as_str),
+        &key,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let else_result = lower_i64_return_value_expr(
+        &none_arm.expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: env_len,
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(then_result),
+        else_result: Box::new(else_result),
+    })
+}
+
+fn lower_i64_env_some_arm_expr(
+    expr: &Expr,
+    binding: Option<&str>,
+    key: &str,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if let Some(binding) = binding
+        && let Expr::Call { name, args, .. } = expr
+        && name == "len"
+        && let [Expr::VarRef { name, .. }] = args.as_slice()
+        && name == binding
+    {
+        return Some(CraneliftI64Expr::EnvLen {
+            key: key.to_string(),
+        });
+    }
+    lower_i64_return_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+}
+
+fn i64_env_get_key(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<String> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if name != "env_get" && !static_bindings.env_get_wrappers.contains(name) {
+        return None;
+    }
+    let [key] = args.as_slice() else {
+        return None;
+    };
+    i64_string_text(key, static_bindings)
 }
 
 fn lower_i64_known_string_option_match_value_expr(
