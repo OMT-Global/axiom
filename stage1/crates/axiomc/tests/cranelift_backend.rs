@@ -4140,7 +4140,7 @@ fn cranelift_backend_lowers_http_client_to_runtime_exit_code() {
 
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("http-client-main-exit");
-    let (port, server) = start_http_fixture_server("axiom-http-ok");
+    let (port, server) = start_http_fixture_server_requests("axiom-http-ok", 2);
     write_http_client_main_exit_project(&project, port);
 
     let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
@@ -9602,6 +9602,13 @@ return 1
 }
 
 fn start_http_fixture_server(body: &'static str) -> (u16, std::thread::JoinHandle<()>) {
+    start_http_fixture_server_requests(body, 1)
+}
+
+fn start_http_fixture_server_requests(
+    body: &'static str,
+    requests: usize,
+) -> (u16, std::thread::JoinHandle<()>) {
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind http fixture");
     listener
         .set_nonblocking(true)
@@ -9609,7 +9616,8 @@ fn start_http_fixture_server(body: &'static str) -> (u16, std::thread::JoinHandl
     let port = listener.local_addr().expect("http fixture addr").port();
     let handle = std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
+        let mut accepted = 0;
+        while accepted < requests {
             match listener.accept() {
                 Ok((mut stream, _peer)) => {
                     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
@@ -9623,7 +9631,7 @@ fn start_http_fixture_server(body: &'static str) -> (u16, std::thread::JoinHandl
                     std::io::Write::write_all(&mut stream, response.as_bytes())
                         .expect("write http fixture response");
                     let _ = std::io::Write::flush(&mut stream);
-                    break;
+                    accepted += 1;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     if std::time::Instant::now() >= deadline {
@@ -9809,8 +9817,19 @@ source = "path"
             r#"import "std/http.ax"
 
 fn main(): int {{
-let body_len: int = match get("http://127.0.0.1:{port}/health") {{ Some(body) => len(body), None => 0 }}
-if body_len == 13 {{
+let stored_expr: Option<string> = get("http://127.0.0.1:{port}/health")
+let stored_statement: Option<string> = get("http://127.0.0.1:{port}/health")
+let body_len: int = match stored_expr {{ Some(body) => len(body), None => 0 }}
+let statement_len: int = 0
+match stored_statement {{
+Some(body) {{
+statement_len = len(body)
+}}
+None {{
+statement_len = 0
+}}
+}}
+if body_len == 13 && statement_len == 13 {{
 return 48
 }} else {{
 return 1

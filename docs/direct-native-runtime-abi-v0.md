@@ -517,10 +517,12 @@ and fetches a local one-shot HTTP response while the public smoke asserts
 `generated_rust` is null. The direct-native i64 path now also lowers known-url
 `http_get(...)` and public
 `std/http.ax` `get(...)` calls into native process exit status by selecting
-`Option<string>` match arms at compile time for local HTTP responses. Packages
-without the `net` capability still fail before backend lowering. HTTPS,
-nonlocal HTTP policy coverage, redirects, richer response handling, timeout
-parity, and audit parity remain open under #1001.
+`Option<string>` match arms at compile time for local HTTP responses; public
+`get(...)` results can also be stored in local `Option<string>` values and
+matched later in supported length-projection expression and statement contexts
+without generated Rust. Packages without the `net` capability still fail before
+backend lowering. HTTPS, nonlocal HTTP policy coverage, redirects, richer
+response handling, timeout parity, and audit parity remain open under #1001.
 
 The HTTP server row now has partial Cranelift evidence: the spike builds and
 runs loopback HTTP server entrypoints while the public smoke asserts
