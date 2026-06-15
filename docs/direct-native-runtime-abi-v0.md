@@ -507,11 +507,14 @@ public smoke asserts `generated_rust` is null. The direct-native i64 path also
 lowers literal `process_status(...)` calls and the `std/process.ax`
 `run_status(...)` wrapper
 for deterministic `/usr/bin/true`, `/usr/bin/false`, and
-`__axiom_stage1_missing_binary__` commands into native process exit status
-without generated Rust. Denied `process` capability use still fails through the
-manifest policy before Cranelift lowering or native execution. Full
-runtime-time process execution, argument handling, audit parity, and
-host-process policy coverage remain open under #1001.
+`__axiom_stage1_missing_binary__` commands into native runtime executable checks
+and process-status execution through the object backend without generated Rust.
+The missing sentinel maps to `-1` through the native executable check, while the
+existing true/false helpers run and normalize their process status at runtime.
+Denied `process` capability use still fails through the manifest policy before
+Cranelift lowering or native execution. Arguments, broader command policy,
+environment control, audit parity, and host-process policy coverage remain open
+under #1001.
 
 The regex row now has partial direct-native evidence: the Cranelift spike covers
 `std/regex.ax` `is_match`, `find`, and `replace_all` for the stage1-safe NFA

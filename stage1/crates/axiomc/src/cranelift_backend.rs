@@ -11578,10 +11578,11 @@ fn lower_i64_process_intrinsic_expr(
     let [command] = args else {
         return None;
     };
-    match i64_string_text(command, static_bindings)?.as_str() {
-        "/usr/bin/true" => Some(CraneliftI64Expr::Literal(0)),
-        "/usr/bin/false" => Some(CraneliftI64Expr::Literal(1)),
-        "__axiom_stage1_missing_binary__" => Some(CraneliftI64Expr::Literal(-1)),
+    let command = i64_string_text(command, static_bindings)?;
+    match command.as_str() {
+        "/usr/bin/true" | "/usr/bin/false" | "__axiom_stage1_missing_binary__" => {
+            Some(CraneliftI64Expr::ProcessStatus { command })
+        }
         _ => None,
     }
 }

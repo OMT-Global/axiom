@@ -46,6 +46,8 @@ struct I64RuntimeRefs {
     open: FuncRef,
     lseek: FuncRef,
     close: FuncRef,
+    access: FuncRef,
+    system: FuncRef,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +92,9 @@ pub enum I64Expr {
     FileLen {
         path: String,
         max_bytes: u64,
+    },
+    ProcessStatus {
+        command: String,
     },
     ConditionValue(Box<I64Condition>),
     Cast {
@@ -476,6 +481,23 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare close import: {message}"))
         })?;
+    let mut access_sig = module.make_signature();
+    access_sig.params.push(AbiParam::new(pointer_type));
+    access_sig.params.push(AbiParam::new(types::I32));
+    access_sig.returns.push(AbiParam::new(types::I32));
+    let access_id = module
+        .declare_function("access", Linkage::Import, &access_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare access import: {message}"))
+        })?;
+    let mut system_sig = module.make_signature();
+    system_sig.params.push(AbiParam::new(pointer_type));
+    system_sig.returns.push(AbiParam::new(types::I32));
+    let system_id = module
+        .declare_function("system", Linkage::Import, &system_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare system import: {message}"))
+        })?;
     let output_data_ids = declare_i64_output_data(&mut module, &program)?;
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
@@ -490,6 +512,8 @@ fn emit_i64_exit_object(
             open_id,
             lseek_id,
             close_id,
+            access_id,
+            system_id,
             &output_data_ids,
             index,
             function,
@@ -519,6 +543,8 @@ fn emit_i64_exit_object(
         let open_ref = module.declare_func_in_func(open_id, builder.func);
         let lseek_ref = module.declare_func_in_func(lseek_id, builder.func);
         let close_ref = module.declare_func_in_func(close_id, builder.func);
+        let access_ref = module.declare_func_in_func(access_id, builder.func);
+        let system_ref = module.declare_func_in_func(system_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             sleep: sleep_ref,
             getenv: getenv_ref,
@@ -526,6 +552,8 @@ fn emit_i64_exit_object(
             open: open_ref,
             lseek: lseek_ref,
             close: close_ref,
+            access: access_ref,
+            system: system_ref,
         };
         let mut locals = Vec::new();
         for local_expr in &program.locals {
@@ -717,6 +745,8 @@ fn define_i64_function(
     open_id: FuncId,
     lseek_id: FuncId,
     close_id: FuncId,
+    access_id: FuncId,
+    system_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -754,6 +784,8 @@ fn define_i64_function(
         let open_ref = module.declare_func_in_func(open_id, builder.func);
         let lseek_ref = module.declare_func_in_func(lseek_id, builder.func);
         let close_ref = module.declare_func_in_func(close_id, builder.func);
+        let access_ref = module.declare_func_in_func(access_id, builder.func);
+        let system_ref = module.declare_func_in_func(system_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             sleep: sleep_ref,
             getenv: getenv_ref,
@@ -761,6 +793,8 @@ fn define_i64_function(
             open: open_ref,
             lseek: lseek_ref,
             close: close_ref,
+            access: access_ref,
+            system: system_ref,
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
@@ -1611,6 +1645,9 @@ fn emit_i64_expr(
         I64Expr::FileLen { path, max_bytes } => {
             emit_i64_file_len_expr(builder, runtime_refs, path, *max_bytes)
         }
+        I64Expr::ProcessStatus { command } => {
+            emit_i64_process_status_expr(builder, runtime_refs, command)
+        }
         I64Expr::ConditionValue(cond) => {
             let cond = emit_i64_condition(builder, locals, function_refs, runtime_refs, cond)?;
             Ok(emit_i64_bool_value(builder, cond))
@@ -1809,6 +1846,80 @@ fn emit_i64_file_len_expr(
     builder.switch_to_block(present_block);
     builder.seal_block(present_block);
     builder.ins().jump(merge_block, &[BlockArg::Value(length)]);
+
+    builder.switch_to_block(missing_block);
+    builder.seal_block(missing_block);
+    let missing_result = builder.ins().iconst(types::I64, -1);
+    builder
+        .ins()
+        .jump(merge_block, &[BlockArg::Value(missing_result)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_process_status_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    command: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    if command.as_bytes().contains(&0) {
+        return Err(CraneliftBackendError::new(
+            "process command contains an interior null byte",
+        ));
+    }
+    let command_len = u32::try_from(command.len() + 1)
+        .map_err(|_| CraneliftBackendError::new("process command is too large"))?;
+    let command_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        command_len,
+        0,
+    ));
+    for (offset, byte) in command.bytes().chain(std::iter::once(0)).enumerate() {
+        let byte_value = builder.ins().iconst(types::I8, i64::from(byte));
+        builder.ins().stack_store(byte_value, command_slot, offset as i32);
+    }
+
+    let command_ptr = builder.ins().stack_addr(types::I64, command_slot, 0);
+    let executable_flag = builder.ins().iconst(types::I32, 1);
+    let access_call = builder
+        .ins()
+        .call(runtime_refs.access, &[command_ptr, executable_flag]);
+    let access_result = builder.inst_results(access_call)[0];
+
+    let missing_block = builder.create_block();
+    let system_block = builder.create_block();
+    let normalize_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(normalize_block, types::I32);
+    builder.append_block_param(merge_block, types::I64);
+
+    let access_failed = builder.ins().icmp_imm(IntCC::NotEqual, access_result, 0);
+    builder
+        .ins()
+        .brif(access_failed, missing_block, &[], system_block, &[]);
+
+    builder.switch_to_block(system_block);
+    builder.seal_block(system_block);
+    let system_call = builder.ins().call(runtime_refs.system, &[command_ptr]);
+    let status = builder.inst_results(system_call)[0];
+    let system_failed = builder.ins().icmp_imm(IntCC::SignedLessThan, status, 0);
+    builder.ins().brif(
+        system_failed,
+        missing_block,
+        &[],
+        normalize_block,
+        &[BlockArg::Value(status)],
+    );
+
+    builder.switch_to_block(normalize_block);
+    builder.seal_block(normalize_block);
+    let status = builder.block_params(normalize_block)[0];
+    let status = builder.ins().sextend(types::I64, status);
+    let status_shift = builder.ins().iconst(types::I64, 256);
+    let exit_code = builder.ins().sdiv(status, status_shift);
+    builder.ins().jump(merge_block, &[BlockArg::Value(exit_code)]);
 
     builder.switch_to_block(missing_block);
     builder.seal_block(missing_block);
@@ -2188,6 +2299,69 @@ mod tests {
             .output()
             .expect("run missing file len binary");
         assert_eq!(output.status.code(), Some(255));
+    }
+
+    #[test]
+    fn links_i64_exit_program_with_process_status() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        if !Path::new("/usr/bin/true").exists() || !Path::new("/usr/bin/false").exists() {
+            eprintln!(
+                "skipping cranelift process-status link test because /usr/bin/true or /usr/bin/false is unavailable"
+            );
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-process-status.o");
+        let binary = temp.path().join("i64-exit-process-status");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::Binary {
+                    op: I64BinaryOp::Add,
+                    lhs: Box::new(I64Expr::ProcessStatus {
+                        command: String::from("/usr/bin/false"),
+                    }),
+                    rhs: Box::new(I64Expr::ProcessStatus {
+                        command: String::from("__axiom_stage1_missing_binary__"),
+                    }),
+                }),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 process status exit program");
+        let output = Command::new(&binary)
+            .output()
+            .expect("run process status binary");
+        assert_eq!(output.status.code(), Some(0));
+
+        let object = temp.path().join("i64-exit-process-true.o");
+        let binary = temp.path().join("i64-exit-process-true");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::ProcessStatus {
+                    command: String::from("/usr/bin/true"),
+                }),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 true process status exit program");
+        let output = Command::new(&binary)
+            .output()
+            .expect("run true process status binary");
+        assert_eq!(output.status.code(), Some(0));
     }
 
     #[test]
