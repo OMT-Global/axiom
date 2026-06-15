@@ -1729,11 +1729,11 @@ fn cranelift_backend_lowers_std_log_format_wrappers_to_runtime_exit_code() {
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
-        "\"runtime_attempt\":2\n\"runtime_attempt_text\":\"2\"\n\"runtime_attempt\":2,\"runtime_ready\":true\n{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n"
+        "\"runtime_attempt\":2\n\"runtime_attempt_text\":\"2\"\n\"runtime_attempt\":2,\"runtime_ready\":true\n{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"component\":\"worker\",\"ready\":true}}\n"
     );
     assert_eq!(
         String::from_utf8_lossy(&run.stderr),
-        "\"runtime_ready\":true\n\"runtime_ready_text\":\"true\"\n\"runtime_attempt_text\":\"2\",\"runtime_ready\":true,\"runtime_ready_text\":\"true\"\n{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{}}\n{\"level\":\"warn\",\"message\":\"true\",\"attributes\":{}}\n{\"level\":\"error\",\"message\":\"2\",\"attributes\":{}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n"
+        "\"runtime_ready\":true\n\"runtime_ready_text\":\"true\"\n\"runtime_attempt_text\":\"2\",\"runtime_ready\":true,\"runtime_ready_text\":\"true\"\n{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"component\":\"worker\",\"ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{}}\n{\"level\":\"warn\",\"message\":\"true\",\"attributes\":{}}\n{\"level\":\"error\",\"message\":\"2\",\"attributes\":{}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"runtime_attempt\":2,\"runtime_ready\":true}}\n{\"level\":\"info\",\"message\":\"2\",\"attributes\":{\"component\":\"worker\",\"ready\":true}}\n"
     );
 }
 
@@ -7555,6 +7555,10 @@ let attempt_gate: bool = field_int("attempt", 2) == "\"attempt\":2"
 let ready_gate: bool = field_bool("ready", true) == "\"ready\":true"
 let attrs: string = fields3(field_string("component", "worker"), field_int("attempt", 2), field_bool("ready", true))
 let subset: string = fields2(field_string("component", "worker"), field_bool("ready", true))
+let subset_for_event_len: string = fields2(field_string("component", "worker"), field_bool("ready", true))
+let subset_for_event_print: string = fields2(field_string("component", "worker"), field_bool("ready", true))
+let subset_for_event_write: string = fields2(field_string("component", "worker"), field_bool("ready", true))
+let subset_for_info_attrs: string = fields2(field_string("component", "worker"), field_bool("ready", true))
 let record: string = event("info", "started", fields3(field_string("component", "worker"), field_int("attempt", 2), field_bool("ready", true)))
 let escaped: string = event("warn", "quote \"ok\"", fields2(field_string("path", "a/b"), field_bool("ready", false)))
 let expected: string = "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}"
@@ -7575,21 +7579,27 @@ let runtime_fields2_len: int = len(fields2(field_int("runtime_attempt", make_att
 let runtime_fields3_len: int = len(fields3(field_string("runtime_attempt_text", json_stringify_int(make_attempt())), field_bool("runtime_ready", make_ready()), field_string("runtime_ready_text", json_stringify_bool(make_ready()))))
 let runtime_event_len: int = len(event("info", "started", fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready()))))
 let runtime_event_message_len: int = len(event("info", json_stringify_int(make_attempt()), fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready()))))
+let runtime_event_message_known_attrs_len: int = len(event("info", json_stringify_int(make_attempt()), subset_for_event_len))
+let runtime_event_message_empty_attrs_len: int = len(event("info", json_stringify_int(make_attempt()), ""))
 print runtime_attempt_field
 print runtime_attempt_text_field
 print fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready()))
 print event("info", "started", fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready())))
 print event("info", json_stringify_int(make_attempt()), fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready())))
+print event("info", json_stringify_int(make_attempt()), subset_for_event_print)
 let written_ready: int = eprintln(runtime_ready_field)
 let written_ready_text: int = eprintln(runtime_ready_text_field)
 let written_fields3: int = eprintln(fields3(field_string("runtime_attempt_text", json_stringify_int(make_attempt())), field_bool("runtime_ready", make_ready()), field_string("runtime_ready_text", json_stringify_bool(make_ready()))))
 let written_event: int = eprintln(event("info", "started", fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready()))))
 let written_event_message: int = eprintln(event("info", json_stringify_int(make_attempt()), fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready()))))
+let written_event_message_known_attrs: int = eprintln(event("info", json_stringify_int(make_attempt()), subset_for_event_write))
+let written_event_message_empty_attrs: int = eprintln(event("info", json_stringify_int(make_attempt()), ""))
 let written_info_format: int = info(json_stringify_int(make_attempt()))
 let written_warn_format: int = warn(json_stringify_bool(make_ready()))
 let written_error_format: int = error(json_stringify_int(make_attempt()))
 let written_info_attrs_message: int = info_attrs(json_stringify_int(make_attempt()), fields2(field_int("runtime_attempt", make_attempt()), field_bool("runtime_ready", make_ready())))
-if component_gate && attempt_gate && ready_gate && attrs == "\"component\":\"worker\",\"attempt\":2,\"ready\":true" && subset == "\"component\":\"worker\",\"ready\":true" && record == expected && escaped == expected_escaped && len(record) == 97 && len(escaped) == 83 && runtime_attempt_len == 19 && runtime_ready_len == 20 && runtime_attempt_text_len == 26 && runtime_ready_text_len == 27 && runtime_fields2_len == 40 && runtime_fields3_len == 75 && runtime_event_len == 92 && runtime_event_message_len == 86 && written_ready == 21 && written_ready_text == 28 && written_fields3 == 76 && written_event == 93 && written_event_message == 87 && written_info_format == 47 && written_warn_format == 50 && written_error_format == 48 && written_info_attrs_message == 87 {
+let written_info_attrs_message_known_attrs: int = info_attrs(json_stringify_int(make_attempt()), subset_for_info_attrs)
+if component_gate && attempt_gate && ready_gate && attrs == "\"component\":\"worker\",\"attempt\":2,\"ready\":true" && subset == "\"component\":\"worker\",\"ready\":true" && record == expected && escaped == expected_escaped && len(record) == 97 && len(escaped) == 83 && runtime_attempt_len == 19 && runtime_ready_len == 20 && runtime_attempt_text_len == 26 && runtime_ready_text_len == 27 && runtime_fields2_len == 40 && runtime_fields3_len == 75 && runtime_event_len == 92 && runtime_event_message_len == 86 && runtime_event_message_known_attrs_len == 79 && runtime_event_message_empty_attrs_len == 46 && written_ready == 21 && written_ready_text == 28 && written_fields3 == 76 && written_event == 93 && written_event_message == 87 && written_event_message_known_attrs == 80 && written_event_message_empty_attrs == 47 && written_info_format == 47 && written_warn_format == 50 && written_error_format == 48 && written_info_attrs_message == 87 && written_info_attrs_message_known_attrs == 80 {
 return 48
 } else {
 return 1
