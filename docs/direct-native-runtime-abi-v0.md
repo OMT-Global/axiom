@@ -412,8 +412,13 @@ existing status-code convention without generated Rust and now append
 best-effort host audit JSONL to `AXIOM_HOST_AUDIT_LOG` without including path or
 content secrets. The runtime smoke asserts the target files and directories are
 not created or removed during build, then appear, are replaced or removed, and
-the created empty file remains only after the native binary runs. TOCTOU
-hardening remains open under #1001.
+the created empty file remains only after the native binary runs. The native
+runtime now revalidates write-side filesystem targets with `realpath(...)`
+against the canonical `fs_root` immediately before mutation, falling back to
+the parent or nearest existing ancestor when creating missing paths; the
+regression smoke builds while an allowed target is absent, swaps it to an
+out-of-root symlink before runtime, and proves the native binary returns a
+denied status without overwriting the outside file.
 
 The direct-native crypto hash slice is still marked partial: the Cranelift
 spike can build and run `std/crypto_hash.ax` `sha256(...)` while the public

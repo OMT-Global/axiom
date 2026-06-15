@@ -13,6 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const I64_REALPATH_BUFFER_BYTES: u32 = 4096;
+
 #[derive(Debug)]
 pub struct CraneliftBackendError {
     message: String,
@@ -59,6 +61,8 @@ struct I64RuntimeRefs {
     rmdir: FuncRef,
     opendir: FuncRef,
     closedir: FuncRef,
+    realpath: FuncRef,
+    strncmp: FuncRef,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +113,12 @@ pub enum I64Expr {
         package: String,
         path_len: usize,
         content_len: Option<usize>,
+        result: Box<I64Expr>,
+    },
+    RuntimeFsGuard {
+        root: String,
+        path: String,
+        fallback_path: String,
         result: Box<I64Expr>,
     },
     WriteFile {
@@ -631,6 +641,25 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare closedir import: {message}"))
         })?;
+    let mut realpath_sig = module.make_signature();
+    realpath_sig.params.push(AbiParam::new(pointer_type));
+    realpath_sig.params.push(AbiParam::new(pointer_type));
+    realpath_sig.returns.push(AbiParam::new(pointer_type));
+    let realpath_id = module
+        .declare_function("realpath", Linkage::Import, &realpath_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare realpath import: {message}"))
+        })?;
+    let mut strncmp_sig = module.make_signature();
+    strncmp_sig.params.push(AbiParam::new(pointer_type));
+    strncmp_sig.params.push(AbiParam::new(pointer_type));
+    strncmp_sig.params.push(AbiParam::new(pointer_type));
+    strncmp_sig.returns.push(AbiParam::new(types::I32));
+    let strncmp_id = module
+        .declare_function("strncmp", Linkage::Import, &strncmp_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare strncmp import: {message}"))
+        })?;
     let output_data_ids = declare_i64_output_data(&mut module, &program)?;
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
@@ -657,6 +686,8 @@ fn emit_i64_exit_object(
             rmdir_id,
             opendir_id,
             closedir_id,
+            realpath_id,
+            strncmp_id,
             &output_data_ids,
             index,
             function,
@@ -698,6 +729,8 @@ fn emit_i64_exit_object(
         let rmdir_ref = module.declare_func_in_func(rmdir_id, builder.func);
         let opendir_ref = module.declare_func_in_func(opendir_id, builder.func);
         let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
+        let realpath_ref = module.declare_func_in_func(realpath_id, builder.func);
+        let strncmp_ref = module.declare_func_in_func(strncmp_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             sleep: sleep_ref,
@@ -718,6 +751,8 @@ fn emit_i64_exit_object(
             rmdir: rmdir_ref,
             opendir: opendir_ref,
             closedir: closedir_ref,
+            realpath: realpath_ref,
+            strncmp: strncmp_ref,
         };
         let mut locals = Vec::new();
         for local_expr in &program.locals {
@@ -921,6 +956,8 @@ fn define_i64_function(
     rmdir_id: FuncId,
     opendir_id: FuncId,
     closedir_id: FuncId,
+    realpath_id: FuncId,
+    strncmp_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -970,6 +1007,8 @@ fn define_i64_function(
         let rmdir_ref = module.declare_func_in_func(rmdir_id, builder.func);
         let opendir_ref = module.declare_func_in_func(opendir_id, builder.func);
         let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
+        let realpath_ref = module.declare_func_in_func(realpath_id, builder.func);
+        let strncmp_ref = module.declare_func_in_func(strncmp_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             sleep: sleep_ref,
@@ -990,6 +1029,8 @@ fn define_i64_function(
             rmdir: rmdir_ref,
             opendir: opendir_ref,
             closedir: closedir_ref,
+            realpath: realpath_ref,
+            strncmp: strncmp_ref,
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
@@ -1857,6 +1898,21 @@ fn emit_i64_expr(
             *content_len,
             result,
         ),
+        I64Expr::RuntimeFsGuard {
+            root,
+            path,
+            fallback_path,
+            result,
+        } => emit_i64_runtime_fs_guard_expr(
+            builder,
+            locals,
+            function_refs,
+            runtime_refs,
+            root,
+            path,
+            fallback_path,
+            result,
+        ),
         I64Expr::WriteFile { path, content } => {
             emit_i64_write_file_expr(builder, runtime_refs, path, content)
         }
@@ -2245,6 +2301,122 @@ fn emit_i64_audit_fs_expr(
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
     Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_runtime_fs_guard_expr(
+    builder: &mut FunctionBuilder<'_>,
+    locals: &[Variable],
+    function_refs: &[FuncRef],
+    runtime_refs: I64RuntimeRefs,
+    root: &str,
+    path: &str,
+    fallback_path: &str,
+    result: &I64Expr,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    if root.as_bytes().contains(&0) {
+        return Err(CraneliftBackendError::new(
+            "filesystem root contains an interior null byte",
+        ));
+    }
+    let path_ptr = emit_i64_path_ptr(builder, path)?;
+    let fallback_ptr = emit_i64_path_ptr(builder, fallback_path)?;
+    let resolved_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        I64_REALPATH_BUFFER_BYTES,
+        0,
+    ));
+    let resolved_ptr = builder.ins().stack_addr(types::I64, resolved_slot, 0);
+
+    let realpath_call = builder
+        .ins()
+        .call(runtime_refs.realpath, &[path_ptr, resolved_ptr]);
+    let resolved = builder.inst_results(realpath_call)[0];
+
+    let fallback_block = builder.create_block();
+    let check_block = builder.create_block();
+    let allowed_block = builder.create_block();
+    let denied_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(check_block, types::I64);
+    builder.append_block_param(merge_block, types::I64);
+
+    let missing = builder.ins().icmp_imm(IntCC::Equal, resolved, 0);
+    builder.ins().brif(
+        missing,
+        fallback_block,
+        &[],
+        check_block,
+        &[BlockArg::Value(resolved)],
+    );
+
+    builder.switch_to_block(fallback_block);
+    builder.seal_block(fallback_block);
+    let fallback_call = builder
+        .ins()
+        .call(runtime_refs.realpath, &[fallback_ptr, resolved_ptr]);
+    let fallback_resolved = builder.inst_results(fallback_call)[0];
+    let fallback_missing = builder
+        .ins()
+        .icmp_imm(IntCC::Equal, fallback_resolved, 0);
+    builder.ins().brif(
+        fallback_missing,
+        denied_block,
+        &[],
+        check_block,
+        &[BlockArg::Value(fallback_resolved)],
+    );
+
+    builder.switch_to_block(check_block);
+    builder.seal_block(check_block);
+    let canonical_ptr = builder.block_params(check_block)[0];
+    let in_root = emit_i64_canonical_root_check(builder, runtime_refs, canonical_ptr, root)?;
+    builder
+        .ins()
+        .brif(in_root, allowed_block, &[], denied_block, &[]);
+
+    builder.switch_to_block(allowed_block);
+    builder.seal_block(allowed_block);
+    let result = emit_i64_expr(builder, locals, function_refs, runtime_refs, result)?;
+    builder.ins().jump(merge_block, &[BlockArg::Value(result)]);
+
+    builder.switch_to_block(denied_block);
+    builder.seal_block(denied_block);
+    let denied = builder.ins().iconst(types::I64, -1);
+    builder.ins().jump(merge_block, &[BlockArg::Value(denied)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_canonical_root_check(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    canonical_ptr: cranelift_codegen::ir::Value,
+    root: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let root_len = i64::try_from(root.len())
+        .map_err(|_| CraneliftBackendError::new("filesystem root is too large"))?;
+    let root_ptr = emit_i64_path_ptr(builder, root)?;
+    let root_len_value = builder.ins().iconst(types::I64, root_len);
+    let strncmp_call = builder
+        .ins()
+        .call(runtime_refs.strncmp, &[canonical_ptr, root_ptr, root_len_value]);
+    let strncmp_result = builder.inst_results(strncmp_call)[0];
+    let prefix_matches = builder
+        .ins()
+        .icmp_imm(IntCC::Equal, strncmp_result, 0);
+    if root == "/" {
+        return Ok(prefix_matches);
+    }
+    let boundary_ptr = builder.ins().iadd(canonical_ptr, root_len_value);
+    let boundary = builder.ins().load(types::I8, MemFlags::new(), boundary_ptr, 0);
+    let is_end = builder.ins().icmp_imm(IntCC::Equal, boundary, 0);
+    let is_separator = builder
+        .ins()
+        .icmp_imm(IntCC::Equal, boundary, i64::from(b'/'));
+    let boundary_ok = builder.ins().bor(is_end, is_separator);
+    Ok(builder.ins().band(prefix_matches, boundary_ok))
 }
 
 fn emit_i64_write_file_expr(

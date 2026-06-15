@@ -3169,6 +3169,65 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_denies_fs_write_symlink_escape_at_runtime() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("fs-write-symlink-escape");
+    write_fs_write_symlink_escape_project(&project);
+    let outside = temp.path().join("escape.txt");
+    let link = project.join("scratch/link.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift fs-write symlink build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    assert!(
+        !link.exists(),
+        "build should not create the fs_write symlink target"
+    );
+    fs::write(&outside, "outside-safe").expect("write outside symlink target");
+    std::os::unix::fs::symlink(&outside, &link).expect("create runtime symlink escape");
+
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift fs-write symlink binary");
+    assert_eq!(run.status.code(), Some(37));
+    assert_eq!(
+        fs::read_to_string(&outside).expect("read outside symlink target"),
+        "outside-safe"
+    );
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("stat runtime symlink")
+            .file_type()
+            .is_symlink(),
+        "runtime denial should leave the symlink fixture in place"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_builds_fs_write_binary() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -11741,6 +11800,58 @@ return 1
 "#,
     )
     .expect("write fs-write main source");
+}
+
+fn write_fs_write_symlink_escape_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create fs-write symlink project src");
+    fs::create_dir_all(project.join("scratch")).expect("create fs-write symlink scratch dir");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-fs-write-symlink-escape"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = true
+"fs:write" = true
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write fs-write symlink manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-fs-write-symlink-escape"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write fs-write symlink lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/fs.ax"
+
+fn main(): int {
+let wrote: int = write_file("scratch/link.txt", "outside-overwrite")
+if wrote == -1 {
+return 37
+} else {
+return 1
+}
+}
+"#,
+    )
+    .expect("write fs-write symlink source");
 }
 
 fn write_tcp_denial_project(project: &Path) {

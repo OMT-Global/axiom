@@ -11626,10 +11626,15 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             Some(content_len),
-            CraneliftI64Expr::WriteFile {
-                path: candidate.display().to_string(),
-                content,
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::WriteFile {
+                    path: candidate.display().to_string(),
+                    content,
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11660,10 +11665,15 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             Some(content_len),
-            CraneliftI64Expr::AppendFile {
-                path: candidate.display().to_string(),
-                content,
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::AppendFile {
+                    path: candidate.display().to_string(),
+                    content,
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11716,11 +11726,16 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             Some(content_len),
-            CraneliftI64Expr::ReplaceFile {
-                path: candidate.display().to_string(),
-                temp_path: temp_path.display().to_string(),
-                content,
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                parent,
+                CraneliftI64Expr::ReplaceFile {
+                    path: candidate.display().to_string(),
+                    temp_path: temp_path.display().to_string(),
+                    content,
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11741,9 +11756,14 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             None,
-            CraneliftI64Expr::CreateFile {
-                path: candidate.display().to_string(),
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::CreateFile {
+                    path: candidate.display().to_string(),
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11764,9 +11784,14 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             None,
-            CraneliftI64Expr::MakeDir {
-                path: candidate.display().to_string(),
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::MakeDir {
+                    path: candidate.display().to_string(),
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11787,9 +11812,14 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             None,
-            CraneliftI64Expr::MakeDirAll {
-                path: candidate.display().to_string(),
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_existing_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::MakeDirAll {
+                    path: candidate.display().to_string(),
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11810,9 +11840,14 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             None,
-            CraneliftI64Expr::RemoveFile {
-                path: candidate.display().to_string(),
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::RemoveFile {
+                    path: candidate.display().to_string(),
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11833,9 +11868,14 @@ fn lower_i64_fs_write_intrinsic_expr(
             name,
             path_len,
             None,
-            CraneliftI64Expr::RemoveDir {
-                path: candidate.display().to_string(),
-            },
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::RemoveDir {
+                    path: candidate.display().to_string(),
+                },
+            )?,
             static_bindings,
         );
     }
@@ -11861,6 +11901,33 @@ fn i64_audited_fs_expr(
         content_len,
         result: Box::new(result),
     })
+}
+
+fn i64_runtime_fs_guard_expr(
+    fs_root: &Path,
+    path: &Path,
+    fallback_path: &Path,
+    result: CraneliftI64Expr,
+) -> Option<CraneliftI64Expr> {
+    let root = std::fs::canonicalize(fs_root).ok()?;
+    Some(CraneliftI64Expr::RuntimeFsGuard {
+        root: root.display().to_string(),
+        path: path.display().to_string(),
+        fallback_path: fallback_path.display().to_string(),
+        result: Box::new(result),
+    })
+}
+
+fn i64_fs_runtime_parent_fallback(path: &Path) -> Option<PathBuf> {
+    path.parent().map(Path::to_path_buf)
+}
+
+fn i64_fs_runtime_existing_fallback(path: &Path) -> Option<PathBuf> {
+    let mut candidate = path;
+    while !candidate.exists() {
+        candidate = candidate.parent()?;
+    }
+    Some(candidate.to_path_buf())
 }
 
 fn lower_i64_crypto_random_intrinsic_expr(
