@@ -759,9 +759,11 @@ into native stderr writes from direct-native i64 `main` functions for known
 message and attributes strings, preserving the structured JSON line and
 byte-count return value without generated Rust. Known pure `print` expressions
 for string, integer, and boolean values now lower from direct-native i64 `main`
-functions into native stdout writes without generated Rust. Stdin reads,
-dynamic stdout/stderr text, runtime numeric formatting, dynamic log inputs, and
-broader streaming/runtime buffering remain tracked by issue #1001.
+functions into native stdout writes without generated Rust, and
+runtime-computed boolean `print` expressions now lower into conditional native
+stdout writes without generated Rust. Stdin reads, dynamic string
+stdout/stderr text, runtime numeric formatting, dynamic log inputs, and broader
+streaming/runtime buffering remain tracked by issue #1001.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a

@@ -3034,7 +3034,13 @@ fn lower_i64_runtime_stmt(
             helper_signatures,
             static_bindings,
         )?)),
-        Stmt::Print { expr, .. } => Some(lower_i64_print_stmt(expr, static_bindings)?),
+        Stmt::Print { expr, .. } => Some(lower_i64_print_stmt(
+            expr,
+            &local_indexes,
+            &local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?),
         Stmt::If {
             cond,
             then_block,
@@ -3088,12 +3094,34 @@ fn lower_i64_runtime_stmt(
 
 fn lower_i64_print_stmt(
     expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Stmt> {
-    let value = i64_known_expr_value(expr, static_bindings)?;
-    Some(CraneliftI64Stmt::WriteLine {
-        stream: OutputStream::Stdout,
-        text: render_value(&value),
+    if let Some(value) = i64_known_expr_value(expr, static_bindings) {
+        return Some(CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stdout,
+            text: render_value(&value),
+        });
+    }
+    let cond = lower_i64_condition(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Stmt::If {
+        cond,
+        then_body: vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stdout,
+            text: "true".to_string(),
+        }],
+        else_body: vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stdout,
+            text: "false".to_string(),
+        }],
     })
 }
 
