@@ -100,6 +100,46 @@ fn cranelift_backend_lowers_i64_main_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_terminal_panic_to_native_report() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let known_project = temp.path().join("terminal-panic-known");
+    write_terminal_panic_project(
+        &known_project,
+        r#"fn main(): int {
+panic("boom")
+}
+"#,
+    );
+    assert_terminal_panic_report(
+        &known_project,
+        "{\"kind\":\"panic\",\"message\":\"boom\"}\n",
+    );
+
+    let formatted_project = temp.path().join("terminal-panic-formatted");
+    write_terminal_panic_project(
+        &formatted_project,
+        r#"fn make_attempt(): int {
+return 2
+}
+
+fn main(): int {
+panic(json_stringify_int(make_attempt()))
+}
+"#,
+    );
+    assert_terminal_panic_report(
+        &formatted_project,
+        "{\"kind\":\"panic\",\"message\":\"2\"}\n",
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_i64_returning_main_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -6189,6 +6229,51 @@ fn write_i64_returning_main_exit_project(project: &Path) {
         "fn main(): i64 {\nreturn 48i64\n}\n",
     )
     .expect("write i64 returning main exit source");
+}
+
+fn write_terminal_panic_project(project: &Path, source: &str) {
+    fs::create_dir_all(project.join("src")).expect("create terminal panic project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-terminal-panic\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write terminal panic manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-terminal-panic\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write terminal panic lockfile");
+    fs::write(project.join("src/main.ax"), source).expect("write terminal panic source");
+}
+
+fn assert_terminal_panic_report(project: &Path, expected_stderr: &str) {
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift terminal panic build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift terminal panic binary");
+    assert_eq!(run.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert_eq!(String::from_utf8_lossy(&run.stderr), expected_stderr);
 }
 
 fn write_typed_numeric_returning_main_exit_project(

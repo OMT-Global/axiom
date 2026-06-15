@@ -3025,6 +3025,13 @@ fn lower_i64_body(
                 else_block,
             }
         }
+        Stmt::Panic { message, .. } => lower_i64_panic_exit_body(
+            message,
+            &local_indexes,
+            &local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?,
         _ => return None,
     };
     Some((locals, lowered_stmts, body))
@@ -6252,6 +6259,42 @@ fn lower_i64_exit_return(
         )?)),
         _ => None,
     }
+}
+
+fn lower_i64_panic_exit_body(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<I64ExitBody> {
+    let stmts = if let Some(formatted_message) = lower_i64_log_message_formatted_string_expr(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        let report = I64FormattedString::LogEmit {
+            prefix: "{\"kind\":\"panic\",\"message\":".to_string(),
+            message: Box::new(formatted_message),
+            suffix: "}".to_string(),
+        };
+        i64_formatted_string_write_stmts(OutputStream::Stderr, report, true)
+    } else {
+        let message = i64_string_text(message, static_bindings)?;
+        vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stderr,
+            text: format!(
+                "{{\"kind\":\"panic\",\"message\":{}}}",
+                json_escape_string(&message)
+            ),
+        }]
+    };
+    Some(I64ExitBody::BlockReturn(CraneliftI64ReturnBlock {
+        stmts,
+        result: CraneliftI64Expr::Literal(1),
+    }))
 }
 
 fn lower_i64_option_match_exit_return(
