@@ -2140,7 +2140,9 @@ fn cranelift_backend_lowers_std_log_dynamic_scalar_info_attrs_to_runtime_stderr(
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("std-log-stderr-audit.jsonl");
     let run = Command::new(binary)
+        .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .output()
         .expect("run cranelift std log dynamic scalar info attrs binary");
     assert_eq!(run.status.code(), Some(48));
@@ -2149,6 +2151,16 @@ fn cranelift_backend_lowers_std_log_dynamic_scalar_info_attrs_to_runtime_stderr(
         String::from_utf8_lossy(&run.stderr),
         "{\"level\":\"info\",\"message\":\"12345\",\"attributes\":{\"count\":12345,\"ready\":false}}\n"
     );
+    let audit = fs::read_to_string(&audit_log).expect("read std log stderr audit log");
+    assert!(
+        audit.contains("\"intrinsic\":\"io_stderr_write\""),
+        "{audit}"
+    );
+    assert!(audit.contains("\"stream\":\"stderr\""), "{audit}");
+    assert!(audit.contains("\"bytes\":\"int:"), "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 15, "{audit}");
+    assert!(!audit.contains("12345"));
+    assert!(!audit.contains("ready"));
 }
 
 #[cfg(not(windows))]
@@ -2228,7 +2240,9 @@ fn cranelift_backend_lowers_std_log_dynamic_event_print_to_runtime_stdout() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("std-log-stdout-audit.jsonl");
     let run = Command::new(binary)
+        .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .output()
         .expect("run cranelift std log dynamic event print binary");
     assert_eq!(run.status.code(), Some(48));
@@ -2237,6 +2251,16 @@ fn cranelift_backend_lowers_std_log_dynamic_event_print_to_runtime_stdout() {
         "{\"level\":\"warn\",\"message\":\"\\\"12345\\\"\",\"attributes\":{\"count\":12345,\"ready\":false}}\n{\"level\":\"info\",\"message\":\"12345\",\"attributes\":{\"count\":12345,\"ready\":false,\"quoted\":\"\\\"12345\\\"\"}}\n"
     );
     assert_eq!(String::from_utf8_lossy(&run.stderr), "");
+    let audit = fs::read_to_string(&audit_log).expect("read std log stdout audit log");
+    assert!(
+        audit.contains("\"intrinsic\":\"io_stdout_write\""),
+        "{audit}"
+    );
+    assert!(audit.contains("\"stream\":\"stdout\""), "{audit}");
+    assert!(audit.contains("\"bytes\":\"int:"), "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 40, "{audit}");
+    assert!(!audit.contains("12345"));
+    assert!(!audit.contains("quoted"));
 }
 
 #[cfg(not(windows))]

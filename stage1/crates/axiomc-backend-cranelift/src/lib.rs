@@ -1212,12 +1212,24 @@ fn emit_i64_stmt(
         I64Stmt::Assign(assign) => {
             emit_i64_assign(builder, locals, function_refs, runtime_refs, assign)
         }
-        I64Stmt::WriteText { stream, text } => {
-            emit_i64_write_text(module, builder, write_ref, output_data_ids, *stream, text)
-        }
-        I64Stmt::WriteLine { stream, text } => {
-            emit_i64_write_line(module, builder, write_ref, output_data_ids, *stream, text)
-        }
+        I64Stmt::WriteText { stream, text } => emit_i64_write_text(
+            module,
+            builder,
+            runtime_refs,
+            write_ref,
+            output_data_ids,
+            *stream,
+            text,
+        ),
+        I64Stmt::WriteLine { stream, text } => emit_i64_write_line(
+            module,
+            builder,
+            runtime_refs,
+            write_ref,
+            output_data_ids,
+            *stream,
+            text,
+        ),
         I64Stmt::WriteI64Text { stream, value } => emit_i64_write_i64_text(
             builder,
             locals,
@@ -1333,6 +1345,7 @@ fn emit_i64_stmt(
 fn emit_i64_write_line(
     module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     stream: OutputStream,
@@ -1341,6 +1354,7 @@ fn emit_i64_write_line(
     emit_i64_write_static(
         module,
         builder,
+        runtime_refs,
         write_ref,
         output_data_ids,
         stream,
@@ -1352,6 +1366,7 @@ fn emit_i64_write_line(
 fn emit_i64_write_text(
     module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     stream: OutputStream,
@@ -1360,6 +1375,7 @@ fn emit_i64_write_text(
     emit_i64_write_static(
         module,
         builder,
+        runtime_refs,
         write_ref,
         output_data_ids,
         stream,
@@ -1371,6 +1387,7 @@ fn emit_i64_write_text(
 fn emit_i64_write_static(
     module: &mut ObjectModule,
     builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
     write_ref: FuncRef,
     output_data_ids: &[I64OutputData],
     stream: OutputStream,
@@ -1393,6 +1410,8 @@ fn emit_i64_write_static(
         .ins()
         .iconst(pointer_type, output_data.byte_len as i64);
     builder.ins().call(write_ref, &[fd, pointer, len]);
+    let line = i64_stdio_audit_line(stream, Some(output_data.byte_len), "ok");
+    emit_i64_host_audit_line(builder, runtime_refs, &line)?;
     Ok(())
 }
 
@@ -1555,6 +1574,8 @@ fn emit_i64_write_i64(
     let len = builder.ins().isub(buffer_len, final_start);
     let fd = builder.ins().iconst(types::I32, output_stream_fd(stream));
     builder.ins().call(write_ref, &[fd, start_ptr, len]);
+    let line = i64_stdio_audit_line(stream, None, "ok");
+    emit_i64_host_audit_line(builder, runtime_refs, &line)?;
     builder.ins().jump(after_write, &[]);
     builder.seal_block(write_block);
 
@@ -1567,6 +1588,13 @@ fn output_stream_fd(stream: OutputStream) -> i64 {
     match stream {
         OutputStream::Stdout => 1,
         OutputStream::Stderr => 2,
+    }
+}
+
+fn output_stream_name(stream: OutputStream) -> &'static str {
+    match stream {
+        OutputStream::Stdout => "stdout",
+        OutputStream::Stderr => "stderr",
     }
 }
 
@@ -2686,6 +2714,25 @@ fn i64_fs_audit_line(
         i64_json_escape(package),
         i64_json_escape(intrinsic),
         args,
+        i64_json_escape(outcome)
+    )
+}
+
+fn i64_stdio_audit_line(stream: OutputStream, byte_len: Option<usize>, outcome: &str) -> String {
+    let stream_name = output_stream_name(stream);
+    let intrinsic = match stream {
+        OutputStream::Stdout => "io_stdout_write",
+        OutputStream::Stderr => "io_stderr_write",
+    };
+    let byte_shape = match byte_len {
+        Some(byte_len) => format!("int:{byte_len}"),
+        None => String::from("int"),
+    };
+    format!(
+        "{{\"package\":\"direct-native-i64\",\"intrinsic\":\"{}\",\"args\":{{\"stream\":\"{}\",\"bytes\":\"{}\"}},\"outcome\":\"{}\"}}\n",
+        i64_json_escape(intrinsic),
+        i64_json_escape(stream_name),
+        i64_json_escape(&byte_shape),
         i64_json_escape(outcome)
     )
 }

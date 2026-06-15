@@ -920,7 +920,10 @@ runtime-selected known string
 projections from map-key arrays, either directly or through string locals backed
 by those projections, also lower to native stderr JSON panic reports by
 selecting among finite known text values without materializing a general string
-runtime. Stdin reads, dynamic
+runtime. Supported direct-native stdout/stderr write primitives now append
+best-effort host audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only the
+stream, byte-count shape, and outcome without recording printed text, formatted
+integer values, log messages, field names, or field values. Stdin reads, dynamic
 stdout/stderr text beyond boolean, integer, JSON scalar formatting, and finite
 known-string projection selection, dynamic panic messages beyond scalar/string
 JSON stringify and finite known-string projection selection, and broader
