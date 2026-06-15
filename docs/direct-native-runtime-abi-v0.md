@@ -662,8 +662,11 @@ direct-native path also appends host audit JSONL entries when
 `ok`/`denied` outcome without recording environment values. Literal-key
 direct-native environment reads now also honor manifest env allowlists at
 runtime, returning the `None` arm for non-allowlisted keys even when those names
-exist in the host process. Broader runtime environment binding, stored option
-values, and dynamic-key allowlist handling remain open under #1001.
+exist in the host process. The same runtime env lookup can now be stored in a
+local `Option<string>` and matched later for supported `len(value)` expression
+and statement matches without capturing the compiler process environment.
+Broader runtime environment binding, stored string value materialization beyond
+length projection, and dynamic-key allowlist handling remain open under #1001.
 
 The FFI call row now has partial direct-native evidence: the spike builds and
 runs a narrow C ABI `extern fn strlen(value: string): int from "c"` fixture

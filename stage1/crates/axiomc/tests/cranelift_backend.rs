@@ -12399,8 +12399,22 @@ source = "path"
 fn main(): int {
 let present: int = match env_get("AXIOM_CRANELIFT_ENV_READ") { Some(value) => len(value), None => 0 }
 let missing: int = match get_env("__AXIOM_CRANELIFT_ENV_MISSING__") { Some(value) => len(value), None => 38 }
-if present == 11 && missing == 38 {
-return 48
+let stored_present: Option<string> = get_env("AXIOM_CRANELIFT_ENV_READ")
+let stored_missing: Option<string> = env_get("__AXIOM_CRANELIFT_ENV_MISSING__")
+let stored_present_for_statement: Option<string> = get_env("AXIOM_CRANELIFT_ENV_READ")
+let stored_present_len: int = match stored_present { Some(value) => len(value), None => 0 }
+let stored_missing_len: int = match stored_missing { Some(value) => len(value), None => 38 }
+let statement_present_len: int = 0
+match stored_present_for_statement {
+Some(value) {
+statement_present_len = len(value)
+}
+None {
+statement_present_len = 1
+}
+}
+if present == 11 && missing == 38 && stored_present_len == 11 && stored_missing_len == 38 && statement_present_len == 11 {
+return statement_present_len + 37
 } else {
 return 1
 }
@@ -12450,7 +12464,11 @@ source = "path"
 fn main(): int {
 let allowed: int = match env_get("AXIOM_CRANELIFT_ENV_READ") { Some(value) => len(value), None => 0 }
 let blocked: int = match get_env("AXIOM_CRANELIFT_ENV_BLOCKED") { Some(value) => len(value), None => 0 }
-if allowed == 11 && blocked == 0 {
+let stored_allowed: Option<string> = get_env("AXIOM_CRANELIFT_ENV_READ")
+let stored_blocked: Option<string> = env_get("AXIOM_CRANELIFT_ENV_BLOCKED")
+let stored_allowed_len: int = match stored_allowed { Some(value) => len(value), None => 0 }
+let stored_blocked_len: int = match stored_blocked { Some(value) => len(value), None => 0 }
+if allowed == 11 && blocked == 0 && stored_allowed_len == 11 && stored_blocked_len == 0 {
 return 48
 } else {
 return 1

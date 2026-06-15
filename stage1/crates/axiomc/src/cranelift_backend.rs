@@ -1489,7 +1489,17 @@ fn lower_i64_aggregate_return_body(
                 || is_i64_known_string_option_call_let_type(inner.as_ref()))
                 && !seen_runtime_stmt =>
             {
-                if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
+                if let Some(assigns) = lower_i64_env_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -2708,7 +2718,17 @@ fn lower_i64_body(
                 || is_i64_known_string_option_call_let_type(inner.as_ref()))
                 && !seen_runtime_stmt =>
             {
-                if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
+                if let Some(assigns) = lower_i64_env_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -3448,6 +3468,23 @@ fn lower_i64_runtime_let_stmts(
         helper_signatures,
         static_bindings,
     ) {
+        return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr,
+        ..
+    } = stmt
+        && let Some(assigns) = lower_i64_env_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        )
+    {
         return Some(assigns);
     }
     Some(vec![lower_i64_runtime_let(
@@ -4938,6 +4975,49 @@ fn lower_i64_known_string_option_call_let_stmts(
         .string_options
         .insert(name.to_string(), value);
     Some(Vec::new())
+}
+
+fn lower_i64_env_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !matches!(inner, Type::String | Type::Str) {
+        return None;
+    }
+    let key = i64_env_get_key(expr, static_bindings)?;
+    let env_len = i64_env_len_expr(&key, static_bindings)?;
+    let payload_local = local_indexes.len();
+    local_indexes.insert(i64_option_payload_slot_key(name, 0), payload_local);
+    local_indexes.insert(i64_option_payload_key(name), payload_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag_local = local_indexes.len();
+    local_indexes.insert(i64_option_tag_key(name), tag_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag = CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: CraneliftI64Expr::Local(payload_local),
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(CraneliftI64Expr::Literal(1)),
+        else_result: Box::new(CraneliftI64Expr::Literal(0)),
+    };
+    Some(vec![
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: payload_local,
+            value: env_len,
+        }),
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: tag_local,
+            value: tag,
+        }),
+    ])
 }
 
 fn lower_i64_result_literal_let_stmts(
@@ -7177,11 +7257,18 @@ fn lower_i64_option_match_parts<'a>(
     else {
         return None;
     };
-    if !is_i64_option_local_payload_type_static(inner, static_bindings) {
+    let string_len_option = i64_string_len_option_local(name, inner.as_ref(), local_indexes);
+    if !is_i64_option_local_payload_type_static(inner, static_bindings)
+        && string_len_option.is_none()
+    {
         return None;
     }
     let tag = *local_indexes.get(i64_option_tag_key(name).as_str())?;
-    let payloads = i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?;
+    let payloads = if let Some(payloads) = string_len_option {
+        payloads
+    } else {
+        i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?
+    };
     let (some_arm, none_arm) = i64_option_match_arms(arms)?;
     let mut some_indexes = local_indexes.clone();
     let mut some_conditions = local_conditions.clone();
@@ -7226,11 +7313,18 @@ fn lower_i64_option_stmt_match_parts<'a>(
     else {
         return None;
     };
-    if !is_i64_option_local_payload_type_static(inner, static_bindings) {
+    let string_len_option = i64_string_len_option_local(name, inner.as_ref(), local_indexes);
+    if !is_i64_option_local_payload_type_static(inner, static_bindings)
+        && string_len_option.is_none()
+    {
         return None;
     }
     let tag = *local_indexes.get(i64_option_tag_key(name).as_str())?;
-    let payloads = i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?;
+    let payloads = if let Some(payloads) = string_len_option {
+        payloads
+    } else {
+        i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?
+    };
     let (some_arm, none_arm) = i64_option_stmt_match_arms(arms)?;
     let mut some_indexes = local_indexes.clone();
     let mut some_conditions = local_conditions.clone();
@@ -7386,6 +7480,12 @@ fn insert_i64_option_payload_binding(
                 return;
             };
             indexes.insert(binding.clone(), payload);
+        }
+        Type::String | Type::Str => {
+            let Some(payload) = payloads.first().copied() else {
+                return;
+            };
+            indexes.insert(i64_string_len_key(binding), payload);
         }
         _ => {}
     }
@@ -11275,6 +11375,19 @@ fn i64_option_payload_locals(
                 .copied()
         })
         .collect()
+}
+
+fn i64_string_len_option_local(
+    name: &str,
+    payload_ty: &Type,
+    local_indexes: &HashMap<String, usize>,
+) -> Option<Vec<usize>> {
+    if !matches!(payload_ty, Type::String | Type::Str) {
+        return None;
+    }
+    Some(vec![
+        *local_indexes.get(i64_option_payload_slot_key(name, 0).as_str())?,
+    ])
 }
 
 fn i64_enum_tag_key(name: &str) -> String {
