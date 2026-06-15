@@ -871,15 +871,15 @@ The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `sleep` smoke, plus guards that a package without the `clock` capability fails
 before backend lowering. The public clock smokes now assert `generated_rust` is
 null. The direct-native i64 path now also lowers literal and static scalar
-`clock_sleep_ms(...)` nonpositive durations through entrypoint and helper
-functions to a native process exit status without generated Rust. Imported
-public `std/time.ax` `sleep(duration_ms(...))` wrappers now alias that same
-deterministic path for literal and static scalar zero-duration and
-negative-duration calls in runtime-exit programs. The supported runtime-exit
-sleep shape remains limited to compile-time-known nonpositive durations until
-the real runtime clock path lands. Full runtime-time clock/sleep execution,
-timer scheduling, async clock integration, broad positive-duration sleep
-semantics, and audit parity remain open under #1001.
+`clock_sleep_ms(...)` calls through entrypoint and helper functions to a native
+process exit status without generated Rust. Negative durations return `-1`,
+bounded nonnegative durations call the native object backend's `usleep` import,
+and durations above the current 1000 ms direct-native cap return `-1` without
+sleeping. Imported public `std/time.ax` `sleep(duration_ms(...))` wrappers now
+alias that same deterministic path for literal, static scalar, and runtime
+scalar durations in runtime-exit programs. Full clock values across the native
+ABI, timer scheduling, async clock integration, broader positive-duration sleep
+policy, and audit parity remain open under #1001.
 
 
 

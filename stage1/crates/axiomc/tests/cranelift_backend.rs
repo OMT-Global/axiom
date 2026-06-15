@@ -10930,7 +10930,11 @@ fn main(): int {
 let direct: int = sleep(duration_ms(ZERO_MS))
 let helper: int = pause_zero()
 let negative: int = pause_negative()
-if direct == 0 && helper == 0 && negative == -1 {
+let dynamic_ms: int = 1
+let positive: int = sleep(duration_ms(dynamic_ms))
+let direct_positive: int = clock_sleep_ms(dynamic_ms)
+let capped: int = sleep(duration_ms(1001))
+if direct == 0 && helper == 0 && negative == -1 && positive == 0 && direct_positive == 0 && capped == -1 {
 return 48
 } else {
 return 1

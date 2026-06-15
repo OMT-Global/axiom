@@ -9648,53 +9648,60 @@ fn lower_i64_expr(
             .or_else(|| static_bindings.values.get(name).cloned()),
         Expr::VarRef { name, .. } => static_bindings.values.get(name).cloned(),
         Expr::Call { name, args, ty } if is_i64_compatible_type(ty) => {
-            lower_i64_clock_intrinsic_expr(name, args, static_bindings)
-                .or_else(|| lower_i64_process_intrinsic_expr(name, args, static_bindings))
-                .or_else(|| lower_i64_fs_write_intrinsic_expr(name, args, static_bindings))
-                .or_else(|| lower_i64_crypto_random_intrinsic_expr(name, args, static_bindings))
-                .or_else(|| {
-                    lower_i64_ffi_intrinsic_expr(
-                        name,
-                        args,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
-                .or_else(|| {
-                    lower_i64_map_get_or_default_expr(
-                        name,
-                        args,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
-                .or_else(|| {
-                    lower_i64_fixed_array_intrinsic_expr(
-                        name,
-                        args,
-                        ty,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
-                .or_else(|| i64_known_helper_call_i64_expr(name, args, static_bindings))
-                .or_else(|| {
-                    lower_i64_call_expr(
-                        name,
-                        args,
-                        false,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
+            lower_i64_clock_intrinsic_expr(
+                name,
+                args,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+            .or_else(|| lower_i64_process_intrinsic_expr(name, args, static_bindings))
+            .or_else(|| lower_i64_fs_write_intrinsic_expr(name, args, static_bindings))
+            .or_else(|| lower_i64_crypto_random_intrinsic_expr(name, args, static_bindings))
+            .or_else(|| {
+                lower_i64_ffi_intrinsic_expr(
+                    name,
+                    args,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
+            .or_else(|| {
+                lower_i64_map_get_or_default_expr(
+                    name,
+                    args,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
+            .or_else(|| {
+                lower_i64_fixed_array_intrinsic_expr(
+                    name,
+                    args,
+                    ty,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
+            .or_else(|| i64_known_helper_call_i64_expr(name, args, static_bindings))
+            .or_else(|| {
+                lower_i64_call_expr(
+                    name,
+                    args,
+                    false,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
         }
         Expr::BinaryAdd { op, lhs, rhs, ty } if is_i64_compatible_type(ty) => {
             let op = match op {
@@ -11131,6 +11138,9 @@ fn lower_i64_array_literal_projection_index_expr(
 fn lower_i64_clock_intrinsic_expr(
     name: &str,
     args: &[Expr],
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     let milliseconds = match name {
@@ -11138,35 +11148,65 @@ fn lower_i64_clock_intrinsic_expr(
             let [milliseconds] = args else {
                 return None;
             };
-            i64_static_scalar_value(milliseconds, static_bindings)?
+            lower_i64_expr(
+                milliseconds,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?
         }
         name if is_i64_time_sleep_name(name, static_bindings) => {
             let [duration] = args else {
                 return None;
             };
-            lower_i64_duration_ms_value(duration, static_bindings)?
+            lower_i64_duration_ms_expr(
+                duration,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?
         }
         _ => return None,
     };
-    match milliseconds {
-        value if value < 0 => Some(CraneliftI64Expr::Literal(-1)),
-        0 => Some(CraneliftI64Expr::Literal(0)),
-        _ => None,
-    }
+    Some(CraneliftI64Expr::SleepMs {
+        milliseconds: Box::new(milliseconds),
+    })
 }
 
-fn lower_i64_duration_ms_value(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<i64> {
+fn lower_i64_duration_ms_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
     match expr {
         Expr::Call { name, args, .. } if is_i64_time_duration_ms_name(name, static_bindings) => {
             let [milliseconds] = args.as_slice() else {
                 return None;
             };
-            i64_static_scalar_value(milliseconds, static_bindings)
+            lower_i64_expr(
+                milliseconds,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
         }
         Expr::StructLiteral { fields, .. } => fields
             .iter()
             .find(|field| field.name == "ms")
-            .and_then(|field| i64_static_scalar_value(&field.expr, static_bindings)),
+            .and_then(|field| {
+                lower_i64_expr(
+                    &field.expr,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            }),
         _ => None,
     }
 }
