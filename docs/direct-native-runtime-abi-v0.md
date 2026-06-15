@@ -756,8 +756,11 @@ by selecting among finite JSON-escaped text lengths without materializing a
 general string runtime. Runtime scalar and boolean values can now feed
 `std/log.ax` `field_int`, `field_bool`, `fields2`, and `event` length
 projections by computing JSON-rendered byte lengths directly in native scalar
-IR without materializing log strings through generated Rust. It also lowers
-known-string public `std/io.ax`
+IR without materializing log strings through generated Rust. The same supported
+dynamic scalar and boolean log event shape can now feed public `std/log.ax`
+`info_attrs` stderr output by emitting native JSON punctuation, scalar field
+values, boolean field values, and newline-inclusive byte counts without
+generated Rust. It also lowers known-string public `std/io.ax`
 `eprintln` lets in direct-native i64 `main` functions and helper functions,
 including runtime-scope lets after assignments and inside branches, into native
 stderr writes while preserving newline-inclusive byte-count return values and
