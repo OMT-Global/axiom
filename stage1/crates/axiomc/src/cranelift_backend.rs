@@ -7074,6 +7074,18 @@ fn i64_known_helper_call_i64_expr(
     }
 }
 
+fn i64_known_expr_i64_expr(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match i64_known_expr_value(expr, static_bindings)? {
+        SpikeValue::Int(value) => Some(CraneliftI64Expr::Literal(value)),
+        SpikeValue::UInt(value) => i64::try_from(value).ok().map(CraneliftI64Expr::Literal),
+        SpikeValue::Bool(value) => Some(CraneliftI64Expr::Literal(i64::from(value))),
+        _ => None,
+    }
+}
+
 fn i64_known_helper_call_condition(
     name: &str,
     args: &[Expr],
@@ -7083,6 +7095,21 @@ fn i64_known_helper_call_condition(
         SpikeValue::Bool(value) => Some(CraneliftI64Condition::Literal(value)),
         _ => None,
     }
+}
+
+fn i64_known_expr_value(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<SpikeValue> {
+    if !i64_known_expr_is_pure(expr, static_bindings, 0) {
+        return None;
+    }
+    let functions = static_bindings
+        .functions
+        .iter()
+        .map(|(name, function)| (name.as_str(), function))
+        .collect::<HashMap<_, _>>();
+    let env = i64_known_static_env(static_bindings)?;
+    let mut lines = Vec::new();
+    let value = eval_expr(expr, &functions, &env, &mut lines).ok()?;
+    lines.is_empty().then_some(value)
 }
 
 fn i64_known_helper_call_value(
@@ -7207,6 +7234,7 @@ fn i64_known_expr_is_pure(expr: &Expr, static_bindings: &I64StaticBindings, dept
         Expr::StringBorrow { expr, .. } | Expr::Cast { expr, .. } => {
             i64_known_expr_is_pure(expr, static_bindings, depth + 1)
         }
+        Expr::Await { expr, .. } => i64_known_expr_is_pure(expr, static_bindings, depth + 1),
         Expr::BinaryAdd { lhs, rhs, .. }
         | Expr::BinaryCompare { lhs, rhs, .. }
         | Expr::BinaryLogic { lhs, rhs, .. } => {
@@ -7279,6 +7307,18 @@ fn i64_known_pure_intrinsic_call(name: &str, static_bindings: &I64StaticBindings
             | "json_serdes_parse_str"
             | "json_serdes_value_to_json"
             | "json_serdes_to_json"
+            | "async_ready"
+            | "async_spawn"
+            | "async_join"
+            | "async_cancel"
+            | "async_is_canceled"
+            | "async_timeout"
+            | "async_channel"
+            | "async_send"
+            | "async_recv"
+            | "async_select"
+            | "async_selected"
+            | "async_selected_value"
     ) || is_i64_encoding_percent_encode_name(name, static_bindings)
         || is_i64_encoding_url_query_pair_encode_name(name, static_bindings)
         || is_i64_encoding_path_join_segment_name(name, static_bindings)
@@ -7867,6 +7907,9 @@ fn lower_i64_expr(
         Expr::Literal(LiteralValue::Int(value)) => Some(CraneliftI64Expr::Literal(*value)),
         Expr::Literal(LiteralValue::Numeric { raw, ty }) => {
             lower_i64_numeric_literal(raw, *ty).map(CraneliftI64Expr::Literal)
+        }
+        Expr::Await { ty, .. } if is_i64_compatible_type(ty) => {
+            i64_known_expr_i64_expr(expr, static_bindings)
         }
         Expr::Call { name, args, .. } if is_i64_crypto_random_u64_name(name, static_bindings) => {
             lower_i64_crypto_random_intrinsic_expr(name, args, static_bindings)

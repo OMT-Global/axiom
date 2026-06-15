@@ -613,10 +613,14 @@ The async runtime row now has partial Cranelift evidence for `std/async.ax`
 single-slot channel `send`/`recv`, `select`, `selected`, and `selected_value`
 without generated Rust. The spike now also builds and runs the
 `std/async_net.ax` loopback TCP example through async `listen`, `accept`,
-`recv_text`, `send_text`, `tcp_dial`, and `join` flows without generated Rust. A
+`recv_text`, `send_text`, `tcp_dial`, and `join` flows without generated Rust.
+The direct-native i64 path now also lowers deterministic public `std/async.ax`
+`ready`, `await`, `spawn`/`join` over ready tasks, and `cancel`/`is_canceled`
+over known tasks into native process exit status without generated Rust. A
 package importing `std/async.ax` with no `async` capability must still receive
 the public manifest-policy denial before backend lowering. Full scheduler,
-timer, blocking, wakeup, cancellation, and audit parity remain open under #1001.
+timer, channel/select runtime storage, blocking, wakeup, cancellation, and audit
+parity remain open under #1001.
 
 The sync-primitives row has partial direct-native evidence: the Cranelift spike
 now evaluates ownership-shaped `std/sync.ax` mutex, once, and channel wrappers

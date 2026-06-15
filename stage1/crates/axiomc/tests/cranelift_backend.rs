@@ -4016,6 +4016,46 @@ right
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_std_async_known_tasks_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-async-known-tasks-main-exit");
+    write_std_async_known_tasks_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std async known tasks main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std async known tasks main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_builds_std_async_net_tcp_binary() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -8646,6 +8686,62 @@ print "none"
 "#,
     )
     .expect("write std async source");
+}
+
+fn write_std_async_known_tasks_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create std async known tasks project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-std-async-known-tasks-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+async = true
+
+[unsafe_rationale]
+async = "Direct-native ABI regression covers deterministic std/async.ax known task folding for issue 1001."
+"#,
+    )
+    .expect("write std async known tasks manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-std-async-known-tasks-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write std async known tasks lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/async.ax"
+
+fn main(): int {
+let ready_value: int = await ready<int>(40)
+let join_value: int = await join<int>(spawn<int>(ready<int>(6)))
+let canceled_gate: bool = is_canceled<int>(cancel<int>(ready<int>(1)))
+if ready_value == 40 && join_value == 6 && canceled_gate {
+return 48
+} else {
+return 1
+}
+}
+"#,
+    )
+    .expect("write std async known tasks source");
 }
 
 fn write_std_async_net_tcp_project(project: &Path) {
