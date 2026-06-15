@@ -7225,6 +7225,9 @@ fn i64_known_expr_is_pure(expr: &Expr, static_bindings: &I64StaticBindings, dept
             i64_known_expr_is_pure(base, static_bindings, depth + 1)
                 && i64_known_expr_is_pure(index, static_bindings, depth + 1)
         }
+        Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
+            i64_known_expr_is_pure(base, static_bindings, depth + 1)
+        }
         Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => elements
             .iter()
             .all(|element| i64_known_expr_is_pure(element, static_bindings, depth + 1)),
