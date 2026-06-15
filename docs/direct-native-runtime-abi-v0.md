@@ -179,11 +179,14 @@ supported runtime string length projection locals. Pure helper calls with known
 string arguments can now fold string helper parameters and returns into the same
 direct-native length, comparison, and `string_starts_with(...)` condition paths
 without generated Rust when the helper body is a direct return, pure local
-`let` bindings followed by a return, or a pure final `if` whose branches return.
-String length is represented as a byte-length projection local, matching the
-generated-Rust backend and Cranelift spike `.len()` semantics, and can feed
-direct-native integer locals, comparisons, helper calls, runtime branch-local
-string projection `let`s, and process exit status without generated Rust.
+`let` bindings followed by a return, a pure final `if` whose branches return,
+or a pure match-return expression or final match statement over known enum values
+such as `Option<string>`, including known string projections from tuple indexes
+and struct fields, plus direct indexes into known map literals. String length is
+represented as a byte-length projection local, matching the generated-Rust
+backend and Cranelift spike `.len()` semantics, and can feed direct-native
+integer locals, comparisons, helper calls, runtime branch-local string
+projection `let`s, and process exit status without generated Rust.
 String concatenation length also lowers for supported string length projection
 inputs by adding the operand byte lengths without materializing the concatenated
 runtime string.
@@ -519,8 +522,10 @@ helpers now also feed narrow direct-native string length/comparison lowering,
 known-input `string_line_at(...)` also accepts static scalar indexes, and
 known-input percent decode can feed direct `Option<string>` matches without
 generated Rust. Pure known-text helper calls can now fold direct-return,
-local-let-return, and final-if-return string helper arguments and returns into
-direct-native length, comparison, and `string_starts_with(...)` conditions
+local-let-return, final-if-return, match-return, and final-match-statement string
+helper arguments and returns, including tuple-index and struct-field string
+projections and direct map-index string projections over known map literals,
+into direct-native length, comparison, and `string_starts_with(...)` conditions
 without generated Rust.
 Imported public `std/string_builder.ax` builder, seed, push,
 line-push, and finish wrappers now alias known text facts that can feed
@@ -575,7 +580,9 @@ equality/inequality predicates, `string_starts_with(...)` predicates, and
 `string_trim(...)`/`string_trim_start(...)` length projections for
 direct-native process exit status. Trimmed dynamic key-array projection locals
 can also feed `string_starts_with(...)` predicates without materializing runtime
-strings.
+strings. Direct indexes into known map literals can also feed known string facts
+for helper returns, length projections, and `string_starts_with(...)`
+conditions.
 Broader map ownership, runtime map storage, general payload lookup bindings,
 runtime key array value projection, and host-boundary representation remain
 tracked by issue #1001.

@@ -7187,6 +7187,13 @@ fn i64_known_helper_body_is_pure(
                     i64_known_helper_body_is_pure(else_block, static_bindings, depth + 1)
                 })
         }
+        Stmt::Match { expr, arms, .. } => {
+            index + 1 == body.len()
+                && i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+                && arms
+                    .iter()
+                    .all(|arm| i64_known_helper_body_is_pure(&arm.body, static_bindings, depth + 1))
+        }
         _ => false,
     })
 }
@@ -7218,12 +7225,28 @@ fn i64_known_expr_is_pure(expr: &Expr, static_bindings: &I64StaticBindings, dept
             i64_known_expr_is_pure(base, static_bindings, depth + 1)
                 && i64_known_expr_is_pure(index, static_bindings, depth + 1)
         }
+        Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
+            i64_known_expr_is_pure(base, static_bindings, depth + 1)
+        }
         Expr::ArrayLiteral { elements, .. } | Expr::TupleLiteral { elements, .. } => elements
             .iter()
             .all(|element| i64_known_expr_is_pure(element, static_bindings, depth + 1)),
+        Expr::MapLiteral { entries, .. } => entries.iter().all(|entry| {
+            i64_known_expr_is_pure(&entry.key, static_bindings, depth + 1)
+                && i64_known_expr_is_pure(&entry.value, static_bindings, depth + 1)
+        }),
+        Expr::EnumVariant { payloads, .. } => payloads
+            .iter()
+            .all(|payload| i64_known_expr_is_pure(payload, static_bindings, depth + 1)),
         Expr::StructLiteral { fields, .. } => fields
             .iter()
             .all(|field| i64_known_expr_is_pure(&field.expr, static_bindings, depth + 1)),
+        Expr::Match { expr, arms, .. } => {
+            i64_known_expr_is_pure(expr, static_bindings, depth + 1)
+                && arms
+                    .iter()
+                    .all(|arm| i64_known_expr_is_pure(&arm.expr, static_bindings, depth + 1))
+        }
         _ => false,
     }
 }
