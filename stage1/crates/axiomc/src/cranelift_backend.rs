@@ -11655,6 +11655,16 @@ fn lower_i64_fs_write_intrinsic_expr(
             path: candidate.display().to_string(),
         });
     }
+    if name == "fs_mkdir_all" {
+        let path = i64_fs_path(args, static_bindings)?;
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, true) else {
+            return Some(CraneliftI64Expr::Literal(-1));
+        };
+        return Some(CraneliftI64Expr::MakeDirAll {
+            path: candidate.display().to_string(),
+        });
+    }
     if name == "fs_remove_file" {
         let path = i64_fs_path(args, static_bindings)?;
         let fs_root = static_bindings.fs_root.as_deref()?;

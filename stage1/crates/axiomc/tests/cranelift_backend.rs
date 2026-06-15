@@ -3078,6 +3078,8 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     let runtime_file = project.join("scratch/data.txt");
     let created_file = project.join("scratch/created.txt");
     let runtime_dir = project.join("scratch/native-dir");
+    let runtime_dir_all = project.join("scratch/native-all");
+    let runtime_nested_dir = project.join("scratch/native-all/deep");
     assert!(
         !runtime_file.exists(),
         "build should not create the fs_write runtime fixture"
@@ -3089,6 +3091,10 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     assert!(
         !runtime_dir.exists(),
         "build should not create the mkdir runtime fixture"
+    );
+    assert!(
+        !runtime_dir_all.exists(),
+        "build should not create the mkdir_all runtime fixture"
     );
     let run = Command::new(binary)
         .output()
@@ -3106,6 +3112,14 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     assert!(
         !runtime_dir.exists(),
         "runtime remove_dir should remove the mkdir fixture"
+    );
+    assert!(
+        runtime_nested_dir.is_dir(),
+        "runtime mkdir_all should create the nested directory fixture"
+    );
+    assert!(
+        runtime_dir_all.is_dir(),
+        "runtime mkdir_all should create the parent directory fixture"
     );
 }
 
@@ -11672,8 +11686,9 @@ let removed: int = remove_file("scratch/data.txt")
 let created: int = create_file("scratch/created.txt")
 let made_dir: int = mkdir("scratch/native-dir")
 let removed_dir: int = remove_dir("scratch/native-dir")
+let made_all: int = mkdir_all("scratch/native-all/deep")
 let blocked: int = write_file("../escape.txt", "blocked")
-if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && created == 0 && made_dir == 0 && removed_dir == 0 && blocked == -1 {
+if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && created == 0 && made_dir == 0 && removed_dir == 0 && made_all == 0 && blocked == -1 {
 return 48
 } else {
 return 1

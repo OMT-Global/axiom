@@ -10,7 +10,7 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug)]
@@ -56,6 +56,8 @@ struct I64RuntimeRefs {
     unlink: FuncRef,
     mkdir: FuncRef,
     rmdir: FuncRef,
+    opendir: FuncRef,
+    closedir: FuncRef,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +118,9 @@ pub enum I64Expr {
         path: String,
     },
     MakeDir {
+        path: String,
+    },
+    MakeDirAll {
         path: String,
     },
     RemoveDir {
@@ -588,6 +593,22 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare rmdir import: {message}"))
         })?;
+    let mut opendir_sig = module.make_signature();
+    opendir_sig.params.push(AbiParam::new(pointer_type));
+    opendir_sig.returns.push(AbiParam::new(pointer_type));
+    let opendir_id = module
+        .declare_function("opendir", Linkage::Import, &opendir_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare opendir import: {message}"))
+        })?;
+    let mut closedir_sig = module.make_signature();
+    closedir_sig.params.push(AbiParam::new(pointer_type));
+    closedir_sig.returns.push(AbiParam::new(types::I32));
+    let closedir_id = module
+        .declare_function("closedir", Linkage::Import, &closedir_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare closedir import: {message}"))
+        })?;
     let output_data_ids = declare_i64_output_data(&mut module, &program)?;
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
@@ -611,6 +632,8 @@ fn emit_i64_exit_object(
             unlink_id,
             mkdir_id,
             rmdir_id,
+            opendir_id,
+            closedir_id,
             &output_data_ids,
             index,
             function,
@@ -649,6 +672,8 @@ fn emit_i64_exit_object(
         let unlink_ref = module.declare_func_in_func(unlink_id, builder.func);
         let mkdir_ref = module.declare_func_in_func(mkdir_id, builder.func);
         let rmdir_ref = module.declare_func_in_func(rmdir_id, builder.func);
+        let opendir_ref = module.declare_func_in_func(opendir_id, builder.func);
+        let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             sleep: sleep_ref,
@@ -666,6 +691,8 @@ fn emit_i64_exit_object(
             unlink: unlink_ref,
             mkdir: mkdir_ref,
             rmdir: rmdir_ref,
+            opendir: opendir_ref,
+            closedir: closedir_ref,
         };
         let mut locals = Vec::new();
         for local_expr in &program.locals {
@@ -866,6 +893,8 @@ fn define_i64_function(
     unlink_id: FuncId,
     mkdir_id: FuncId,
     rmdir_id: FuncId,
+    opendir_id: FuncId,
+    closedir_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -912,6 +941,8 @@ fn define_i64_function(
         let unlink_ref = module.declare_func_in_func(unlink_id, builder.func);
         let mkdir_ref = module.declare_func_in_func(mkdir_id, builder.func);
         let rmdir_ref = module.declare_func_in_func(rmdir_id, builder.func);
+        let opendir_ref = module.declare_func_in_func(opendir_id, builder.func);
+        let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             sleep: sleep_ref,
@@ -929,6 +960,8 @@ fn define_i64_function(
             unlink: unlink_ref,
             mkdir: mkdir_ref,
             rmdir: rmdir_ref,
+            opendir: opendir_ref,
+            closedir: closedir_ref,
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
@@ -1788,6 +1821,7 @@ fn emit_i64_expr(
         I64Expr::CreateFile { path } => emit_i64_create_file_expr(builder, runtime_refs, path),
         I64Expr::RemoveFile { path } => emit_i64_remove_file_expr(builder, runtime_refs, path),
         I64Expr::MakeDir { path } => emit_i64_make_dir_expr(builder, runtime_refs, path),
+        I64Expr::MakeDirAll { path } => emit_i64_make_dir_all_expr(builder, runtime_refs, path),
         I64Expr::RemoveDir { path } => emit_i64_remove_dir_expr(builder, runtime_refs, path),
         I64Expr::ProcessStatus { command } => {
             emit_i64_process_status_expr(builder, runtime_refs, command)
@@ -2311,6 +2345,80 @@ fn emit_i64_make_dir_expr(
     let success = builder.ins().iconst(types::I64, 0);
     let failed = builder.ins().iconst(types::I64, -1);
     Ok(builder.ins().select(ok, success, failed))
+}
+
+fn i64_mkdir_all_prefixes(path: &str) -> Result<Vec<String>, CraneliftBackendError> {
+    if path.as_bytes().contains(&0) {
+        return Err(CraneliftBackendError::new(
+            "filesystem path contains an interior null byte",
+        ));
+    }
+    let mut prefixes = Vec::new();
+    let mut current = PathBuf::new();
+    for component in Path::new(path).components() {
+        current.push(component.as_os_str());
+        if current == Path::new("/") || current.as_os_str().is_empty() {
+            continue;
+        }
+        prefixes.push(current.display().to_string());
+    }
+    if prefixes.is_empty() {
+        return Err(CraneliftBackendError::new(
+            "filesystem mkdir_all path has no directory components",
+        ));
+    }
+    Ok(prefixes)
+}
+
+fn emit_i64_make_dir_all_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    path: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let prefixes = i64_mkdir_all_prefixes(path)?;
+    let mode = builder.ins().iconst(types::I32, 0o777);
+    for prefix in prefixes {
+        let prefix_ptr = emit_i64_path_ptr(builder, &prefix)?;
+        builder.ins().call(runtime_refs.mkdir, &[prefix_ptr, mode]);
+    }
+
+    let path_ptr = emit_i64_path_ptr(builder, path)?;
+    let opendir_call = builder.ins().call(runtime_refs.opendir, &[path_ptr]);
+    let dir = builder.inst_results(opendir_call)[0];
+
+    let failed_block = builder.create_block();
+    let close_block = builder.create_block();
+    let success_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let open_failed = builder.ins().icmp_imm(IntCC::Equal, dir, 0);
+    builder
+        .ins()
+        .brif(open_failed, failed_block, &[], close_block, &[]);
+
+    builder.switch_to_block(close_block);
+    builder.seal_block(close_block);
+    let closedir_call = builder.ins().call(runtime_refs.closedir, &[dir]);
+    let close_result = builder.inst_results(closedir_call)[0];
+    let close_ok = builder.ins().icmp_imm(IntCC::Equal, close_result, 0);
+    builder
+        .ins()
+        .brif(close_ok, success_block, &[], failed_block, &[]);
+
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+    let success = builder.ins().iconst(types::I64, 0);
+    builder.ins().jump(merge_block, &[BlockArg::Value(success)]);
+
+    builder.switch_to_block(failed_block);
+    builder.seal_block(failed_block);
+    let failed = builder.ins().iconst(types::I64, -1);
+    builder.ins().jump(merge_block, &[BlockArg::Value(failed)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
 }
 
 fn emit_i64_remove_dir_expr(
@@ -2983,6 +3091,60 @@ mod tests {
         assert!(
             !fixture.exists(),
             "runtime remove_dir should remove the directory fixture"
+        );
+    }
+
+    #[test]
+    fn links_i64_exit_program_with_recursive_directory_create() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("runtime-dir-all");
+        let nested = root.join("deep");
+        let object = temp.path().join("i64-exit-dir-all.o");
+        let binary = temp.path().join("i64-exit-dir-all");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: vec![I64Expr::MakeDirAll {
+                    path: nested.display().to_string(),
+                }],
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::Binary {
+                    op: I64BinaryOp::Add,
+                    lhs: Box::new(I64Expr::Binary {
+                        op: I64BinaryOp::Add,
+                        lhs: Box::new(I64Expr::Local(0)),
+                        rhs: Box::new(I64Expr::RemoveDir {
+                            path: nested.display().to_string(),
+                        }),
+                    }),
+                    rhs: Box::new(I64Expr::RemoveDir {
+                        path: root.display().to_string(),
+                    }),
+                }),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 recursive directory exit program");
+
+        assert!(
+            !nested.exists(),
+            "compile should not create the nested directory fixture"
+        );
+        let output = Command::new(&binary)
+            .output()
+            .expect("run recursive directory binary");
+        assert_eq!(output.status.code(), Some(0));
+        assert!(
+            !root.exists(),
+            "runtime remove_dir should remove the recursive directory fixture"
         );
     }
 

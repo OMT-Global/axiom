@@ -404,12 +404,14 @@ Literal-path `fs_create(...)` calls and public `std/fs.ax` `create_file(...)`
 wrappers now lower into native exclusive file creation. Literal-path
 `fs_mkdir(...)`/`fs_remove_dir(...)` calls and public `std/fs.ax`
 `mkdir(...)`/`remove_dir(...)` wrappers now lower into native directory
-create/remove execution. These paths return the existing status-code convention
-without generated Rust. The runtime smoke asserts the target files and directory
-are not created or removed during build, then appear, are replaced or removed,
-and the created empty file remains only after the native binary runs. Recursive
-`mkdir_all(...)`, plus atomic replace parity, TOCTOU hardening, and audit parity
-remain open under #1001.
+create/remove execution. Literal-path `fs_mkdir_all(...)` calls and public
+`std/fs.ax` `mkdir_all(...)` wrappers now lower into runtime native recursive
+directory creation with final directory verification. These paths return the
+existing status-code convention without generated Rust. The runtime smoke
+asserts the target files and directories are not created or removed during
+build, then appear, are replaced or removed, and the created empty file remains
+only after the native binary runs. Atomic replace parity, TOCTOU hardening, and
+audit parity remain open under #1001.
 
 The direct-native crypto hash slice is still marked partial: the Cranelift
 spike can build and run `std/crypto_hash.ax` `sha256(...)` while the public
