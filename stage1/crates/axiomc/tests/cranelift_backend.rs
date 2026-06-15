@@ -3657,6 +3657,7 @@ fn cranelift_backend_builds_net_resolve_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -3740,6 +3741,7 @@ fn cranelift_backend_builds_net_loopback_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -4336,6 +4338,7 @@ fn cranelift_backend_builds_sync_primitives_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -4506,6 +4509,7 @@ fn cranelift_backend_builds_std_async_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -4603,6 +4607,7 @@ fn cranelift_backend_builds_logging_stdio_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -5043,6 +5048,7 @@ fn cranelift_backend_builds_std_log_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()
@@ -5145,6 +5151,7 @@ fn cranelift_backend_builds_clock_binary() {
 
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let run = Command::new(binary)
         .output()

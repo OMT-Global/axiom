@@ -345,9 +345,10 @@ filesystem access, write-side filesystem wrappers, manifest policy parity,
 runtime filesystem binding, and audit parity remain open under #1001.
 
 The DNS row now has partial Cranelift evidence: the spike builds and runs a
-`std/net.ax` package resolving `localhost` through host DNS without generated
-Rust and returns the public `Option<string>` shape. The direct-native i64 path
-now also lowers known-host `net_resolve(...)` calls and the public `std/net.ax`
+`std/net.ax` package resolving `localhost` through host DNS while the public
+smoke asserts `generated_rust` is null and returns the public `Option<string>`
+shape. The direct-native i64 path now also lowers known-host `net_resolve(...)`
+calls and the public `std/net.ax`
 `resolve(...)` wrapper into native process exit status by selecting
 `Option<string>` match arms at compile time for `localhost`. Packages without
 the `net` capability still fail before backend lowering. Full runtime-time DNS
@@ -355,11 +356,11 @@ policy, non-loopback coverage, resolver portability, and audit parity remain
 open under #1001.
 
 The TCP row now has partial Cranelift evidence: the spike builds and runs
-`std/net.ax` `tcp_listen_loopback_once(...)` over `127.0.0.1` without generated
-Rust and returns a loopback port. The spike now also builds and runs
-`std/async_net.ax` loopback TCP `listen`, `local_port`, `accept`, `recv_text`,
-`send_text`, `close`, `close_listener`, and paired `tcp_dial` flows without
-generated Rust. The direct-native i64 path now also lowers known-response
+`std/net.ax` `tcp_listen_loopback_once(...)` over `127.0.0.1` while the public
+smoke asserts `generated_rust` is null and returns a loopback port. The spike
+now also builds and runs `std/async_net.ax` loopback TCP `listen`, `local_port`,
+`accept`, `recv_text`, `send_text`, `close`, `close_listener`, and paired
+`tcp_dial` flows without generated Rust. The direct-native i64 path now also lowers known-response
 `net_tcp_listen_loopback_once(...)` and public `std/net.ax`
 `tcp_listen_loopback_once(...)` calls into native process exit status by
 selecting `Option<int>` match arms at compile time for successful loopback
@@ -368,8 +369,9 @@ lowering. General runtime-time TCP socket lifecycle APIs, non-loopback policy
 coverage, timeout parity, and audit parity remain open under #1001.
 
 The UDP row now has partial Cranelift evidence: the spike builds and runs
-`std/net.ax` `udp_bind_loopback_once(...)` over `127.0.0.1` without generated
-Rust and returns a loopback port. The direct-native i64 path now also lowers
+`std/net.ax` `udp_bind_loopback_once(...)` over `127.0.0.1` while the same
+public loopback smoke asserts `generated_rust` is null and returns a loopback
+port. The direct-native i64 path now also lowers
 known-response `net_udp_bind_loopback_once(...)` and public `std/net.ax`
 `udp_bind_loopback_once(...)` calls into native process exit status by selecting
 `Option<int>` match arms at compile time for successful loopback binds. Packages
@@ -599,9 +601,8 @@ tracked by issue #1001.
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names while the public smoke
 asserts `generated_rust` is null, plus denial evidence that a package without the
-`env` capability fails before
-backend lowering. The direct-native i64 path now also lowers literal-key
-`env_get(...)` calls and the public `std/env.ax` `get_env(...)` wrapper into
+`env` capability fails before backend lowering. The direct-native i64 path now
+also lowers literal-key `env_get(...)` calls and the public `std/env.ax` `get_env(...)` wrapper into
 native process exit status by selecting `Option<string>` match arms at compile
 time for present and missing test environment names. Full runtime-time lookup,
 manifest allowlist parity, runtime environment binding, and audit parity remain
@@ -610,11 +611,10 @@ open under #1001.
 The FFI call row now has partial direct-native evidence: the spike builds and
 runs a narrow C ABI `extern fn strlen(value: string): int from "c"` fixture
 while the public smoke asserts `generated_rust` is null, using the source-level
-extern declaration. The
-direct-native i64 path also lowers that same narrow `strlen` declaration for
-supported literal and string-projection inputs into native process exit status
-without generated Rust. A package with an `extern fn` declaration and no `ffi`
-capability must still receive its public manifest-policy denial before any
+extern declaration. The direct-native i64 path also lowers that same narrow
+`strlen` declaration for supported literal and string-projection inputs into
+native process exit status without generated Rust. A package with an `extern fn`
+declaration and no `ffi` capability must still receive its public manifest-policy denial before any
 Cranelift-specific lowering diagnostic. Broad dynamic symbol loading, pointer
 and mutable-pointer ABI shapes, non-string arguments, ownership safety, platform
 library resolution, and audit parity remain open under #1001.
@@ -622,8 +622,8 @@ library resolution, and audit parity remain open under #1001.
 The async runtime row now has partial Cranelift evidence for `std/async.ax`
 `ready`, `await`, `spawn`, `join`, `cancel`, `is_canceled`, `timeout`,
 single-slot channel `send`/`recv`, `select`, `selected`, and `selected_value`
-without generated Rust. The spike now also builds and runs the
-`std/async_net.ax` loopback TCP example through async `listen`, `accept`,
+while the public smoke asserts `generated_rust` is null. The spike now also
+builds and runs the `std/async_net.ax` loopback TCP example through async `listen`, `accept`,
 `recv_text`, `send_text`, `tcp_dial`, and `join` flows without generated Rust. A
 package importing `std/async.ax` with no `async` capability must still receive
 the public manifest-policy denial before backend lowering. Full scheduler,
@@ -631,11 +631,12 @@ timer, blocking, wakeup, cancellation, and audit parity remain open under #1001.
 
 The sync-primitives row has partial direct-native evidence: the Cranelift spike
 now evaluates ownership-shaped `std/sync.ax` mutex, once, and channel wrappers
-and emits the expected native output. The direct-native i64 path now also lowers
-public `std/sync.ax` `mutex(...)`, `lock(...)`, `replace(...)`, and
-`into_inner(...)` wrappers over a scalar `int` payload into native process exit
-status without generated Rust. It also lowers public `std/sync.ax`
-`once_with(...)`, `once(...)`, `once_is_set(...)`, and `once_take(...)` wrappers
+while the public smoke asserts `generated_rust` is null and emits the expected
+native output. The direct-native i64 path now also lowers public `std/sync.ax`
+`mutex(...)`, `lock(...)`, `replace(...)`, and `into_inner(...)` wrappers over a
+scalar `int` payload into native process exit status without generated Rust. It
+also lowers public `std/sync.ax` `once_with(...)`, `once(...)`,
+`once_is_set(...)`, and `once_take(...)` wrappers
 over scalar `int`/`bool` payloads when the one-shot cell value is compile-time
 known, including pre-runtime `Once` locals, letting present and missing once
 cells feed direct-native process exit status without generated Rust. It also
@@ -774,7 +775,8 @@ ABI coverage remain tracked by issue #1001.
 The logging/stdio row has partial direct-native evidence: the Cranelift spike
 now evaluates `std/io.ax` stderr writes and `std/log.ax` structured event
 formatting plus `info_attrs` stderr emission, then emits the resulting stdout
-and stderr streams from the native binary. The direct-native i64 path now also
+and stderr streams from the native binary while the public smokes assert
+`generated_rust` is null. The direct-native i64 path now also
 lowers deterministic public `std/log.ax` formatting wrappers for field
 construction, field-list joining, and event rendering into known string facts
 that can feed comparisons, length projections, and native process exit status
@@ -868,7 +870,8 @@ The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a
 package without the `clock` capability fails before backend lowering and that
 nonzero sleep fails fast instead of ever reaching host sleep during
-compiler-side spike evaluation. The direct-native i64 path now also lowers
+compiler-side spike evaluation. The public clock smoke now asserts
+`generated_rust` is null. The direct-native i64 path now also lowers
 literal and static scalar `clock_sleep_ms(...)` nonpositive durations through
 entrypoint and helper functions to a native process exit status without
 generated Rust. Imported public `std/time.ax` `sleep(duration_ms(...))`
