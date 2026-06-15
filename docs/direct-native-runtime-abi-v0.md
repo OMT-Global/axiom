@@ -756,12 +756,16 @@ that can feed comparisons, length projections, and native process exit status
 without generated Rust. It also lowers known-string public `std/io.ax`
 `eprintln` calls inside direct-native i64 `main` functions into native stderr
 writes while preserving the newline-inclusive byte-count return value and
-`generated_rust` null. Known public `std/log.ax` `info_attrs` calls now lower
-into native stderr writes from direct-native i64 `main` functions for known
-message and attributes strings, preserving the structured JSON line and
-byte-count return value without generated Rust. Known pure `print` expressions
-for string, integer, and boolean values now lower from direct-native i64 `main`
-functions into native stdout writes without generated Rust, and
+`generated_rust` null. Public `std/io.ax` `eprintln` calls over runtime
+`std/json.ax` `stringify_int` and `stringify_bool` results also lower into
+native stderr integer/boolean writes while preserving the newline-inclusive
+byte-count return value without generated Rust. Known public `std/log.ax`
+`info_attrs` calls now lower into native stderr writes from direct-native i64
+`main` functions for known message and attributes strings, preserving the
+structured JSON line and byte-count return value without generated Rust. Known
+pure `print` expressions for string, integer, and boolean values now lower from
+direct-native i64 `main` functions into native stdout writes without generated
+Rust, and
 runtime-computed boolean `print` expressions now lower into conditional native
 stdout writes without generated Rust. Runtime-computed signed and unsigned
 integer `print` expressions for currently supported direct-native scalar widths
