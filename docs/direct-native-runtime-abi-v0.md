@@ -770,7 +770,10 @@ projections, stdout/stderr output, and `eprintln` byte counts without generated
 Rust. Public `std/log.ax` `fields2(...)` and `fields3(...)` wrappers over those
 runtime field fragments also lower to direct-native byte-length projections,
 stdout/stderr output, and `eprintln` byte counts without generated Rust. It
-also lowers known-string public `std/io.ax`
+also lowers public `std/log.ax` `event(...)` wrappers with known level/message
+strings and runtime field-list attributes to direct-native byte-length
+projections, stdout/stderr output, and `eprintln` byte counts without generated
+Rust. It also lowers known-string public `std/io.ax`
 `eprintln` calls inside direct-native i64 `main` functions into native stderr
 writes while preserving the newline-inclusive byte-count return value and
 `generated_rust` null. Public `std/io.ax` `eprintln` calls over runtime

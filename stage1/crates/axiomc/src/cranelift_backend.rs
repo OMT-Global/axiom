@@ -146,6 +146,11 @@ enum I64FormattedString {
         prefix: String,
         cond: CraneliftI64Condition,
     },
+    LogEvent {
+        prefix: String,
+        attributes: Vec<I64FormattedString>,
+        suffix: String,
+    },
 }
 
 struct I64HelperSignature {
@@ -3193,7 +3198,7 @@ fn lower_i64_print_stmts(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<Vec<CraneliftI64Stmt>> {
-    lower_i64_log_field_list_len_and_write_stmts(
+    if let Some((_, stmts)) = lower_i64_log_field_list_len_and_write_stmts(
         OutputStream::Stdout,
         expr,
         local_indexes,
@@ -3201,8 +3206,21 @@ fn lower_i64_print_stmts(
         helper_signatures,
         static_bindings,
         true,
-    )
-    .map(|(_, stmts)| stmts)
+    ) {
+        return Some(stmts);
+    }
+    let formatted = lower_i64_formatted_string_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(i64_formatted_string_write_stmts(
+        OutputStream::Stdout,
+        formatted,
+        true,
+    ))
 }
 
 fn lower_i64_print_stmt(
@@ -3375,6 +3393,28 @@ fn i64_formatted_string_write_stmts(
                 append_newline,
             )],
         }],
+        I64FormattedString::LogEvent {
+            prefix,
+            attributes,
+            suffix,
+        } => {
+            let mut stmts = vec![CraneliftI64Stmt::WriteText {
+                stream,
+                text: prefix,
+            }];
+            let last = attributes.len().saturating_sub(1);
+            for (index, field) in attributes.into_iter().enumerate() {
+                stmts.extend(i64_formatted_string_write_stmts(stream, field, false));
+                if index != last {
+                    stmts.push(CraneliftI64Stmt::WriteText {
+                        stream,
+                        text: ",".to_string(),
+                    });
+                }
+            }
+            stmts.push(i64_static_write_stmt(stream, &suffix, append_newline));
+            stmts
+        }
     }
 }
 
@@ -3452,7 +3492,8 @@ fn lower_i64_formatted_string_expr(
                 I64FormattedString::JsonFieldInt { .. }
                 | I64FormattedString::JsonFieldStringifiedInt { .. }
                 | I64FormattedString::JsonFieldStringifiedBool { .. }
-                | I64FormattedString::JsonFieldBool { .. } => None,
+                | I64FormattedString::JsonFieldBool { .. }
+                | I64FormattedString::LogEvent { .. } => None,
             }
         }
         Expr::Call { name, args, .. }
@@ -3479,7 +3520,8 @@ fn lower_i64_formatted_string_expr(
                 | I64FormattedString::JsonFieldStringifiedInt { .. }
                 | I64FormattedString::JsonFieldStringifiedBool { .. }
                 | I64FormattedString::JsonFieldInt { .. }
-                | I64FormattedString::JsonFieldBool { .. } => None,
+                | I64FormattedString::JsonFieldBool { .. }
+                | I64FormattedString::LogEvent { .. } => None,
             }
         }
         Expr::Call { name, args, .. } if is_i64_json_stringify_int_name(name, static_bindings) => {
@@ -3535,7 +3577,8 @@ fn lower_i64_formatted_string_expr(
                 | I64FormattedString::JsonFieldInt { .. }
                 | I64FormattedString::JsonFieldStringifiedInt { .. }
                 | I64FormattedString::JsonFieldStringifiedBool { .. }
-                | I64FormattedString::JsonFieldBool { .. } => None,
+                | I64FormattedString::JsonFieldBool { .. }
+                | I64FormattedString::LogEvent { .. } => None,
             }
         }
         Expr::Call { name, args, .. }
@@ -3580,6 +3623,26 @@ fn lower_i64_formatted_string_expr(
                     helper_signatures,
                     static_bindings,
                 )?,
+            })
+        }
+        Expr::Call { name, args, .. } if is_i64_log_event_name(name, static_bindings) => {
+            let [level, message, attributes] = args.as_slice() else {
+                return None;
+            };
+            Some(I64FormattedString::LogEvent {
+                prefix: format!(
+                    "{{\"level\":{},\"message\":{},\"attributes\":{{",
+                    json_escape_string(&i64_string_text(level, static_bindings)?),
+                    json_escape_string(&i64_string_text(message, static_bindings)?)
+                ),
+                attributes: lower_i64_log_field_list_fields(
+                    attributes,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+                suffix: "}}".to_string(),
             })
         }
         _ => None,
@@ -3656,7 +3719,8 @@ fn lower_i64_json_value_formatted_string_expr(
                 | I64FormattedString::JsonFieldStringifiedInt { .. }
                 | I64FormattedString::JsonFieldStringifiedBool { .. }
                 | I64FormattedString::JsonFieldInt { .. }
-                | I64FormattedString::JsonFieldBool { .. } => None,
+                | I64FormattedString::JsonFieldBool { .. }
+                | I64FormattedString::LogEvent { .. } => None,
             }
         }
         _ => {
@@ -3722,6 +3786,20 @@ fn i64_formatted_string_written_len(formatted: I64FormattedString) -> CraneliftI
             then_result: Box::new(CraneliftI64Expr::Literal(prefix.len() as i64 + 5)),
             else_result: Box::new(CraneliftI64Expr::Literal(prefix.len() as i64 + 6)),
         },
+        I64FormattedString::LogEvent {
+            prefix,
+            attributes,
+            suffix,
+        } => i64_add_expr(
+            i64_add_expr(
+                i64_add_expr(
+                    CraneliftI64Expr::Literal(prefix.len() as i64),
+                    i64_formatted_fields_len_expr(&attributes),
+                ),
+                CraneliftI64Expr::Literal(suffix.len() as i64),
+            ),
+            CraneliftI64Expr::Literal(1),
+        ),
     }
 }
 
@@ -3767,6 +3845,17 @@ fn i64_formatted_string_len_expr(formatted: I64FormattedString) -> CraneliftI64E
             then_result: Box::new(CraneliftI64Expr::Literal(prefix.len() as i64 + 4)),
             else_result: Box::new(CraneliftI64Expr::Literal(prefix.len() as i64 + 5)),
         },
+        I64FormattedString::LogEvent {
+            prefix,
+            attributes,
+            suffix,
+        } => i64_add_expr(
+            i64_add_expr(
+                CraneliftI64Expr::Literal(prefix.len() as i64),
+                i64_formatted_fields_len_expr(&attributes),
+            ),
+            CraneliftI64Expr::Literal(suffix.len() as i64),
+        ),
     }
 }
 
@@ -3778,6 +3867,18 @@ fn i64_add_expr(lhs: CraneliftI64Expr, rhs: CraneliftI64Expr) -> CraneliftI64Exp
     }
 }
 
+fn i64_formatted_fields_len_expr(fields: &[I64FormattedString]) -> CraneliftI64Expr {
+    let mut lengths = fields.iter().cloned().map(i64_formatted_string_len_expr);
+    let Some(first) = lengths.next() else {
+        return CraneliftI64Expr::Literal(0);
+    };
+    let fields_len = lengths.fold(first, i64_add_expr);
+    i64_add_expr(
+        fields_len,
+        CraneliftI64Expr::Literal(fields.len().saturating_sub(1) as i64),
+    )
+}
+
 fn i64_formatted_field_list_len_expr(
     fields: &[Expr],
     local_indexes: &HashMap<String, usize>,
@@ -3785,7 +3886,7 @@ fn i64_formatted_field_list_len_expr(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
-    let mut lengths = fields
+    let fields = fields
         .iter()
         .map(|field| {
             lower_i64_formatted_string_expr(
@@ -3795,16 +3896,9 @@ fn i64_formatted_field_list_len_expr(
                 helper_signatures,
                 static_bindings,
             )
-            .map(i64_formatted_string_len_expr)
         })
-        .collect::<Option<Vec<_>>>()?
-        .into_iter();
-    let first = lengths.next()?;
-    let fields_len = lengths.fold(first, i64_add_expr);
-    Some(i64_add_expr(
-        fields_len,
-        CraneliftI64Expr::Literal(fields.len().saturating_sub(1) as i64),
-    ))
+        .collect::<Option<Vec<_>>>()?;
+    Some(i64_formatted_fields_len_expr(&fields))
 }
 
 fn is_i64_unsigned_print_type(ty: &Type) -> bool {
@@ -4286,10 +4380,7 @@ fn lower_i64_eprintln_message(
     )?;
     Some((
         i64_formatted_string_written_len(formatted.clone()),
-        vec![i64_formatted_string_write_stmt(
-            OutputStream::Stderr,
-            formatted,
-        )],
+        i64_formatted_string_write_stmts(OutputStream::Stderr, formatted, true),
     ))
 }
 
@@ -4302,39 +4393,14 @@ fn lower_i64_log_field_list_len_and_write_stmts(
     static_bindings: &I64StaticBindings,
     append_newline: bool,
 ) -> Option<(CraneliftI64Expr, Vec<CraneliftI64Stmt>)> {
-    let Expr::Call { name, args, .. } = message else {
-        return None;
-    };
-    let expected = if is_i64_log_fields2_name(name, static_bindings) {
-        2
-    } else if is_i64_log_fields3_name(name, static_bindings) {
-        3
-    } else {
-        return None;
-    };
-    if args.len() != expected {
-        return None;
-    }
-
-    let fields = args
-        .iter()
-        .map(|field| {
-            lower_i64_formatted_string_expr(
-                field,
-                local_indexes,
-                local_conditions,
-                helper_signatures,
-                static_bindings,
-            )
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let mut lengths = fields.iter().cloned().map(i64_formatted_string_len_expr);
-    let first_len = lengths.next()?;
-    let fields_len = lengths.fold(first_len, i64_add_expr);
-    let written = i64_add_expr(
-        fields_len,
-        CraneliftI64Expr::Literal(fields.len().saturating_sub(1) as i64),
-    );
+    let fields = lower_i64_log_field_list_fields(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let written = i64_formatted_fields_len_expr(&fields);
 
     let last = fields.len().saturating_sub(1);
     let mut stmts = Vec::new();
@@ -4352,6 +4418,40 @@ fn lower_i64_log_field_list_len_and_write_stmts(
         }
     }
     Some((written, stmts))
+}
+
+fn lower_i64_log_field_list_fields(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<I64FormattedString>> {
+    let Expr::Call { name, args, .. } = message else {
+        return None;
+    };
+    let expected = if is_i64_log_fields2_name(name, static_bindings) {
+        2
+    } else if is_i64_log_fields3_name(name, static_bindings) {
+        3
+    } else {
+        return None;
+    };
+    if args.len() != expected {
+        return None;
+    }
+
+    args.iter()
+        .map(|field| {
+            lower_i64_formatted_string_expr(
+                field,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        })
+        .collect::<Option<Vec<_>>>()
 }
 
 fn lower_i64_log_emit_let_stmts(
