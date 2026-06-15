@@ -4311,6 +4311,47 @@ fn cranelift_backend_lowers_runtime_print_format_to_native_stdout_runtime_exit_c
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_cloned_runtime_format_output_to_native_streams_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("cloned-runtime-format-output-main-exit");
+    write_cloned_runtime_format_output_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift cloned runtime format output build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift cloned runtime format output binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "21\n");
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "true\n");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_runtime_bool_print_to_native_stdout_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -9435,6 +9476,74 @@ return 1
 "#,
     )
     .expect("write runtime print format source");
+}
+
+fn write_cloned_runtime_format_output_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create cloned runtime format output project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-cloned-runtime-format-output-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+
+[unsafe_rationale]
+stdio = "Direct-native stdout/stderr regression covers cloned runtime formatted output for issue 1001."
+"#,
+    )
+    .expect("write cloned runtime format output manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-cloned-runtime-format-output-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write cloned runtime format output lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/io.ax"
+import "std/json.ax"
+
+fn main(): int {
+let total: int = 0
+let enabled: bool = false
+let index: int = 0
+while index < 3 {
+total = total + 7
+enabled = total > 20
+index = index + 1
+}
+let total_text: string = stringify_int(total)
+let enabled_text: string = stringify_bool(enabled)
+let total_clone: string = string_clone(total_text)
+let enabled_clone: string = string_clone(enabled_text)
+print total_clone
+let written: int = eprintln(enabled_clone)
+if total == 21 && enabled && written == 5 {
+return 48
+} else {
+return 1
+}
+}
+"#,
+    )
+    .expect("write cloned runtime format output source");
 }
 
 fn write_runtime_bool_stdout_main_exit_project(project: &Path) {

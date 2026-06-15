@@ -771,9 +771,13 @@ generated Rust, and runtime-computed boolean `print` expressions now lower into
 conditional native stdout writes without generated Rust. Runtime-computed
 signed and unsigned integer `print` expressions for currently supported
 direct-native scalar widths now lower through native decimal formatters and
-stdout writes without generated Rust. Stdin reads, dynamic string stdout/stderr text, broader numeric
-formatting beyond supported integer lines, dynamic log inputs, and broader
-streaming/runtime buffering remain tracked by issue #1001.
+stdout writes without generated Rust. `string_clone` over those formatted
+integer and boolean strings, including through local string bindings, preserves
+the same native stdout/stderr lowering.
+Stdin reads, dynamic string stdout/stderr text beyond these formatted scalar
+passthroughs, broader numeric formatting beyond supported integer lines,
+dynamic log inputs, and broader streaming/runtime buffering remain tracked by
+issue #1001.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a
