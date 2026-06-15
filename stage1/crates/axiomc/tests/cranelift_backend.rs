@@ -1727,7 +1727,14 @@ fn cranelift_backend_lowers_std_log_format_wrappers_to_runtime_exit_code() {
         .output()
         .expect("run cranelift std log format wrapper main binary");
     assert_eq!(run.status.code(), Some(48));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "\"runtime_attempt\":2\n\"runtime_attempt_text\":\"2\"\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stderr),
+        "\"runtime_ready\":true\n\"runtime_ready_text\":\"true\"\n"
+    );
 }
 
 #[cfg(not(windows))]
@@ -7517,7 +7524,7 @@ fn write_std_log_format_wrapper_main_exit_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create std log format wrapper project src");
     fs::write(
         project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-std-log-format-wrapper-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+        "[package]\nname = \"cranelift-std-log-format-wrapper-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n\n[unsafe_rationale]\nstdio = \"Direct-native stdout/stderr regression covers std/log field wrappers for issue 1001.\"\n",
     )
     .expect("write std log format wrapper manifest");
     fs::write(
@@ -7527,7 +7534,54 @@ fn write_std_log_format_wrapper_main_exit_project(project: &Path) {
     .expect("write std log format wrapper lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/log.ax\"\n\nfn main(): int {\nlet component_gate: bool = field_string(\"component\", \"worker\") == \"\\\"component\\\":\\\"worker\\\"\"\nlet attempt_gate: bool = field_int(\"attempt\", 2) == \"\\\"attempt\\\":2\"\nlet ready_gate: bool = field_bool(\"ready\", true) == \"\\\"ready\\\":true\"\nlet attrs: string = fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true))\nlet subset: string = fields2(field_string(\"component\", \"worker\"), field_bool(\"ready\", true))\nlet record: string = event(\"info\", \"started\", fields3(field_string(\"component\", \"worker\"), field_int(\"attempt\", 2), field_bool(\"ready\", true)))\nlet escaped: string = event(\"warn\", \"quote \\\"ok\\\"\", fields2(field_string(\"path\", \"a/b\"), field_bool(\"ready\", false)))\nlet expected: string = \"{\\\"level\\\":\\\"info\\\",\\\"message\\\":\\\"started\\\",\\\"attributes\\\":{\\\"component\\\":\\\"worker\\\",\\\"attempt\\\":2,\\\"ready\\\":true}}\"\nlet expected_escaped: string = \"{\\\"level\\\":\\\"warn\\\",\\\"message\\\":\\\"quote \\\\\\\"ok\\\\\\\"\\\",\\\"attributes\\\":{\\\"path\\\":\\\"a/b\\\",\\\"ready\\\":false}}\"\nif component_gate && attempt_gate && ready_gate && attrs == \"\\\"component\\\":\\\"worker\\\",\\\"attempt\\\":2,\\\"ready\\\":true\" && subset == \"\\\"component\\\":\\\"worker\\\",\\\"ready\\\":true\" && record == expected && escaped == expected_escaped && len(record) == 97 && len(escaped) == 83 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        r#"import "std/log.ax"
+import "std/io.ax"
+
+fn make_attempt(): int {
+let value: int = 0
+while value < 2 {
+value = value + 1
+}
+return value
+}
+
+fn make_ready(): bool {
+return make_attempt() == 2
+}
+
+fn main(): int {
+let component_gate: bool = field_string("component", "worker") == "\"component\":\"worker\""
+let attempt_gate: bool = field_int("attempt", 2) == "\"attempt\":2"
+let ready_gate: bool = field_bool("ready", true) == "\"ready\":true"
+let attrs: string = fields3(field_string("component", "worker"), field_int("attempt", 2), field_bool("ready", true))
+let subset: string = fields2(field_string("component", "worker"), field_bool("ready", true))
+let record: string = event("info", "started", fields3(field_string("component", "worker"), field_int("attempt", 2), field_bool("ready", true)))
+let escaped: string = event("warn", "quote \"ok\"", fields2(field_string("path", "a/b"), field_bool("ready", false)))
+let expected: string = "{\"level\":\"info\",\"message\":\"started\",\"attributes\":{\"component\":\"worker\",\"attempt\":2,\"ready\":true}}"
+let expected_escaped: string = "{\"level\":\"warn\",\"message\":\"quote \\\"ok\\\"\",\"attributes\":{\"path\":\"a/b\",\"ready\":false}}"
+let runtime_attempt_text_source: string = json_stringify_int(make_attempt())
+let runtime_ready_text_source: string = json_stringify_bool(make_ready())
+let runtime_attempt_text_len_source: string = json_stringify_int(make_attempt())
+let runtime_ready_text_len_source: string = json_stringify_bool(make_ready())
+let runtime_attempt_field: string = field_int("runtime_attempt", make_attempt())
+let runtime_ready_field: string = field_bool("runtime_ready", make_ready())
+let runtime_attempt_text_field: string = field_string("runtime_attempt_text", runtime_attempt_text_source)
+let runtime_ready_text_field: string = field_string("runtime_ready_text", runtime_ready_text_source)
+let runtime_attempt_len: int = len(field_int("runtime_attempt", make_attempt()))
+let runtime_ready_len: int = len(field_bool("runtime_ready", make_ready()))
+let runtime_attempt_text_len: int = len(field_string("runtime_attempt_text", runtime_attempt_text_len_source))
+let runtime_ready_text_len: int = len(field_string("runtime_ready_text", runtime_ready_text_len_source))
+print runtime_attempt_field
+print runtime_attempt_text_field
+let written_ready: int = eprintln(runtime_ready_field)
+let written_ready_text: int = eprintln(runtime_ready_text_field)
+if component_gate && attempt_gate && ready_gate && attrs == "\"component\":\"worker\",\"attempt\":2,\"ready\":true" && subset == "\"component\":\"worker\",\"ready\":true" && record == expected && escaped == expected_escaped && len(record) == 97 && len(escaped) == 83 && runtime_attempt_len == 19 && runtime_ready_len == 20 && runtime_attempt_text_len == 26 && runtime_ready_text_len == 27 && written_ready == 21 && written_ready_text == 28 {
+return 48
+} else {
+return 1
+}
+}
+"#,
     )
     .expect("write std log format wrapper source");
 }

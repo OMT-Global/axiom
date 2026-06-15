@@ -763,7 +763,11 @@ and stderr streams from the native binary. The direct-native i64 path now also
 lowers deterministic public `std/log.ax` formatting wrappers for field
 construction, field-list joining, and event rendering into known string facts
 that can feed comparisons, length projections, and native process exit status
-without generated Rust. It also lowers known-string public `std/io.ax`
+without generated Rust. Public `std/log.ax` `field_int(...)`,
+`field_bool(...)`, and `field_string(...)` wrappers over supported runtime
+scalar/formatted-string values now also lower to direct-native field length
+projections, stdout/stderr output, and `eprintln` byte counts without generated
+Rust. It also lowers known-string public `std/io.ax`
 `eprintln` calls inside direct-native i64 `main` functions into native stderr
 writes while preserving the newline-inclusive byte-count return value and
 `generated_rust` null. Public `std/io.ax` `eprintln` calls over runtime
@@ -795,7 +799,10 @@ wrappers preserve the same native stdout/stderr lowering and `eprintln` byte
 counts for raw JSON scalar output. Public `std/json.ax` `field_int(...)`,
 `field_bool(...)`, and `field_string(...)` wrappers over supported runtime
 scalar/formatted-string values also preserve native stdout/stderr lowering and
-`eprintln` byte counts for JSON field output.
+`eprintln` byte counts for JSON field output. Public `std/log.ax` field
+wrappers over those same supported runtime scalar/formatted-string values
+preserve the same native stdout/stderr lowering and `eprintln` byte counts for
+structured log field output.
 Stdin reads, dynamic string stdout/stderr text beyond these formatted scalar
 passthroughs, broader numeric formatting beyond supported integer lines,
 dynamic log inputs, and broader streaming/runtime buffering remain tracked by

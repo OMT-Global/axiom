@@ -3431,7 +3431,10 @@ fn lower_i64_formatted_string_expr(
                 static_bindings,
             )?))
         }
-        Expr::Call { name, args, .. } if is_i64_json_field_string_name(name, static_bindings) => {
+        Expr::Call { name, args, .. }
+            if is_i64_json_field_string_name(name, static_bindings)
+                || is_i64_log_field_string_name(name, static_bindings) =>
+        {
             let [key, value] = args.as_slice() else {
                 return None;
             };
@@ -3460,7 +3463,10 @@ fn lower_i64_formatted_string_expr(
                 | I64FormattedString::JsonFieldBool { .. } => None,
             }
         }
-        Expr::Call { name, args, .. } if is_i64_json_field_int_name(name, static_bindings) => {
+        Expr::Call { name, args, .. }
+            if is_i64_json_field_int_name(name, static_bindings)
+                || is_i64_log_field_int_name(name, static_bindings) =>
+        {
             let [key, value] = args.as_slice() else {
                 return None;
             };
@@ -3479,7 +3485,10 @@ fn lower_i64_formatted_string_expr(
                 )?,
             })
         }
-        Expr::Call { name, args, .. } if is_i64_json_field_bool_name(name, static_bindings) => {
+        Expr::Call { name, args, .. }
+            if is_i64_json_field_bool_name(name, static_bindings)
+                || is_i64_log_field_bool_name(name, static_bindings) =>
+        {
             let [key, value] = args.as_slice() else {
                 return None;
             };
