@@ -747,8 +747,11 @@ and stderr streams from the native binary. The direct-native i64 path now also
 lowers deterministic public `std/log.ax` formatting wrappers for field
 construction, field-list joining, and event rendering into known string facts
 that can feed comparisons, length projections, and native process exit status
-without generated Rust. Stdin reads, runtime stderr emission, and broader
-streaming/runtime buffering remain tracked by issue #1001.
+without generated Rust. Terminal source-level `panic(...)` statements with
+known string messages, including terminal branch arms, also lower into native
+stderr JSON panic reports and exit status `1` without generated Rust. Stdin
+reads, runtime stderr emission, and broader streaming/runtime buffering remain
+tracked by issue #1001.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a

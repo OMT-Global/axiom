@@ -11,7 +11,7 @@ use axiomc_backend_cranelift::{
     I64Expr as CraneliftI64Expr, I64Function as CraneliftI64Function,
     I64ReturnBlock as CraneliftI64ReturnBlock, I64Stmt as CraneliftI64Stmt,
     I64ValueBody as CraneliftI64ValueBody, I64ValueReturnBlock as CraneliftI64ValueReturnBlock,
-    OutputLine,
+    OutputLine, OutputStream,
 };
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -872,6 +872,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         &helper_signatures,
         &static_bindings,
         &struct_defs,
+        true,
     )?;
     Some(I64ExitProgram {
         functions,
@@ -966,6 +967,7 @@ fn lower_i64_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        false,
     )?;
     Some(CraneliftI64Function {
         params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
@@ -2251,6 +2253,7 @@ fn lower_i64_body(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
+    allow_terminal_panic: bool,
 ) -> Option<(Vec<CraneliftI64Expr>, Vec<CraneliftI64Stmt>, I64ExitBody)> {
     let (return_stmt, body_stmts) = stmts.split_last()?;
     let mut locals = Vec::new();
@@ -2841,6 +2844,13 @@ fn lower_i64_body(
                 else_block,
             }
         }
+        Stmt::Panic { message, .. } if allow_terminal_panic => lower_i64_panic_exit_body(
+            message,
+            &local_indexes,
+            &local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?,
         _ => return None,
     };
     Some((locals, lowered_stmts, body))
@@ -4643,39 +4653,52 @@ fn lower_i64_return_block(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64ReturnBlock> {
-    let (return_stmt, body_stmts) = stmts.split_last()?;
-    let Stmt::Return { expr, .. } = return_stmt else {
-        return None;
-    };
+    let (terminal_stmt, body_stmts) = stmts.split_last()?;
     let mut stmts = Vec::new();
     for stmt in body_stmts {
-        if matches!(stmt, Stmt::Let { .. }) {
-            stmts.extend(lower_i64_runtime_let_stmts(
-                stmt,
-                locals,
-                &mut local_indexes,
-                &mut local_conditions,
-                helper_signatures,
-                static_bindings,
-            )?);
-        } else {
-            stmts.extend(lower_i64_runtime_stmt_stmts(
-                stmt,
-                locals,
-                local_indexes.clone(),
-                local_conditions.clone(),
-                helper_signatures,
-                static_bindings,
-            )?);
+        match stmt {
+            Stmt::Let { .. } => {
+                stmts.extend(lower_i64_runtime_let_stmts(
+                    stmt,
+                    locals,
+                    &mut local_indexes,
+                    &mut local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?);
+            }
+            _ => {
+                stmts.extend(lower_i64_runtime_stmt_stmts(
+                    stmt,
+                    locals,
+                    local_indexes.clone(),
+                    local_conditions.clone(),
+                    helper_signatures,
+                    static_bindings,
+                )?);
+            }
         }
     }
-    let result = lower_i64_return_value_expr(
-        expr,
-        &local_indexes,
-        &local_conditions,
-        helper_signatures,
-        static_bindings,
-    )?;
+    let result = match terminal_stmt {
+        Stmt::Return { expr, .. } => lower_i64_return_value_expr(
+            expr,
+            &local_indexes,
+            &local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?,
+        Stmt::Panic { message, .. } => {
+            stmts.extend(lower_i64_panic_report_stmts(
+                message,
+                &local_indexes,
+                &local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?);
+            CraneliftI64Expr::Literal(1)
+        }
+        _ => return None,
+    };
     Some(CraneliftI64ReturnBlock { stmts, result })
 }
 
@@ -4725,6 +4748,43 @@ fn lower_i64_exit_return(
         )?)),
         _ => None,
     }
+}
+
+fn lower_i64_panic_exit_body(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<I64ExitBody> {
+    let stmts = lower_i64_panic_report_stmts(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(I64ExitBody::BlockReturn(CraneliftI64ReturnBlock {
+        stmts,
+        result: CraneliftI64Expr::Literal(1),
+    }))
+}
+
+fn lower_i64_panic_report_stmts(
+    message: &Expr,
+    _local_indexes: &HashMap<String, usize>,
+    _local_conditions: &HashMap<String, CraneliftI64Condition>,
+    _helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let message = i64_string_text(message, static_bindings)?;
+    Some(vec![CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stderr,
+        text: format!(
+            "{{\"kind\":\"panic\",\"message\":{}}}",
+            json_escape_string(&message)
+        ),
+    }])
 }
 
 fn lower_i64_option_match_exit_return(
