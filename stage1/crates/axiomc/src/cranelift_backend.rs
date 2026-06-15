@@ -3105,6 +3105,19 @@ fn lower_i64_print_stmt(
             text: render_value(&value),
         });
     }
+    if is_i64_compatible_type(&expr.ty()) {
+        let value = lower_i64_expr(
+            expr,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        return Some(CraneliftI64Stmt::WriteIntLine {
+            stream: OutputStream::Stdout,
+            value,
+        });
+    }
     let cond = lower_i64_condition(
         expr,
         local_indexes,

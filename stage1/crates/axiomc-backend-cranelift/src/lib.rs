@@ -1,4 +1,7 @@
-use cranelift_codegen::ir::{AbiParam, BlockArg, FuncRef, InstBuilder, condcodes::IntCC, types};
+use cranelift_codegen::ir::{
+    AbiParam, BlockArg, FuncRef, InstBuilder, MemFlags, StackSlotData, StackSlotKind,
+    condcodes::IntCC, types,
+};
 use cranelift_codegen::isa;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
@@ -158,6 +161,10 @@ pub enum I64Stmt {
     WriteLine {
         stream: OutputStream,
         text: String,
+    },
+    WriteIntLine {
+        stream: OutputStream,
+        value: I64Expr,
     },
     CallAssign {
         locals: Vec<usize>,
@@ -506,7 +513,7 @@ fn collect_i64_output_lines(stmts: &[I64Stmt], lines: &mut Vec<(OutputStream, St
                 collect_i64_output_lines(else_body, lines);
             }
             I64Stmt::While { body, .. } => collect_i64_output_lines(body, lines),
-            I64Stmt::Assign(_) | I64Stmt::CallAssign { .. } => {}
+            I64Stmt::Assign(_) | I64Stmt::WriteIntLine { .. } | I64Stmt::CallAssign { .. } => {}
         }
     }
 }
@@ -695,6 +702,15 @@ fn emit_i64_stmt(
         I64Stmt::WriteLine { stream, text } => {
             emit_i64_write_line(module, builder, write_ref, output_data_ids, *stream, text)
         }
+        I64Stmt::WriteIntLine { stream, value } => emit_i64_write_int_line(
+            module,
+            builder,
+            locals,
+            function_refs,
+            write_ref,
+            *stream,
+            value,
+        ),
         I64Stmt::CallAssign {
             locals: assign_locals,
             function,
@@ -809,6 +825,105 @@ fn emit_i64_write_line(
     );
     let len = builder.ins().iconst(pointer_type, *byte_len as i64);
     builder.ins().call(write_ref, &[fd, pointer, len]);
+    Ok(())
+}
+
+fn emit_i64_write_int_line(
+    module: &mut ObjectModule,
+    builder: &mut FunctionBuilder<'_>,
+    locals: &[Variable],
+    function_refs: &[FuncRef],
+    write_ref: FuncRef,
+    stream: OutputStream,
+    value: &I64Expr,
+) -> Result<(), CraneliftBackendError> {
+    let pointer_type = module.target_config().pointer_type();
+    let value = emit_i64_expr(builder, locals, function_refs, value)?;
+    let buffer =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 32, 0));
+    let newline = builder.ins().iconst(types::I8, i64::from(b'\n'));
+    builder.ins().stack_store(newline, buffer, 31);
+
+    let zero = builder.ins().iconst(types::I64, 0);
+    let ten = builder.ins().iconst(types::I64, 10);
+    let is_negative = builder.ins().icmp(IntCC::SignedLessThan, value, zero);
+    let negated = builder.ins().isub(zero, value);
+    let magnitude = builder.ins().select(is_negative, negated, value);
+
+    let loop_block = builder.create_block();
+    let after_digits = builder.create_block();
+    let negative_block = builder.create_block();
+    let positive_block = builder.create_block();
+    let write_block = builder.create_block();
+    builder.append_block_param(loop_block, types::I64);
+    builder.append_block_param(loop_block, pointer_type);
+    builder.append_block_param(after_digits, pointer_type);
+    builder.append_block_param(write_block, pointer_type);
+
+    let initial_pos = builder.ins().iconst(pointer_type, 31);
+    builder.ins().jump(
+        loop_block,
+        &[BlockArg::Value(magnitude), BlockArg::Value(initial_pos)],
+    );
+
+    builder.switch_to_block(loop_block);
+    let current = builder.block_params(loop_block)[0];
+    let pos = builder.block_params(loop_block)[1];
+    let remainder = builder.ins().urem(current, ten);
+    let quotient = builder.ins().udiv(current, ten);
+    let digit = builder.ins().iadd_imm(remainder, i64::from(b'0'));
+    let digit = builder.ins().ireduce(types::I8, digit);
+    let next_pos = builder.ins().iadd_imm(pos, -1);
+    let base = builder.ins().stack_addr(pointer_type, buffer, 0);
+    let digit_addr = builder.ins().iadd(base, next_pos);
+    builder.ins().store(MemFlags::new(), digit, digit_addr, 0);
+    let has_more_digits = builder.ins().icmp_imm(IntCC::NotEqual, quotient, 0);
+    builder.ins().brif(
+        has_more_digits,
+        loop_block,
+        &[BlockArg::Value(quotient), BlockArg::Value(next_pos)],
+        after_digits,
+        &[BlockArg::Value(next_pos)],
+    );
+    builder.seal_block(loop_block);
+
+    builder.switch_to_block(after_digits);
+    let pos = builder.block_params(after_digits)[0];
+    builder
+        .ins()
+        .brif(is_negative, negative_block, &[], positive_block, &[]);
+    builder.seal_block(after_digits);
+
+    builder.switch_to_block(negative_block);
+    let signed_pos = builder.ins().iadd_imm(pos, -1);
+    let base = builder.ins().stack_addr(pointer_type, buffer, 0);
+    let sign_addr = builder.ins().iadd(base, signed_pos);
+    let sign = builder.ins().iconst(types::I8, i64::from(b'-'));
+    builder.ins().store(MemFlags::new(), sign, sign_addr, 0);
+    builder
+        .ins()
+        .jump(write_block, &[BlockArg::Value(signed_pos)]);
+    builder.seal_block(negative_block);
+
+    builder.switch_to_block(positive_block);
+    builder.ins().jump(write_block, &[BlockArg::Value(pos)]);
+    builder.seal_block(positive_block);
+
+    builder.switch_to_block(write_block);
+    let start = builder.block_params(write_block)[0];
+    let base = builder.ins().stack_addr(pointer_type, buffer, 0);
+    let pointer = builder.ins().iadd(base, start);
+    let end = builder.ins().iconst(pointer_type, 32);
+    let len = builder.ins().isub(end, start);
+    let fd = builder.ins().iconst(
+        types::I32,
+        match stream {
+            OutputStream::Stdout => 1,
+            OutputStream::Stderr => 2,
+        },
+    );
+    builder.ins().call(write_ref, &[fd, pointer, len]);
+    builder.seal_block(write_block);
     Ok(())
 }
 
@@ -1446,6 +1561,55 @@ mod tests {
         .expect("compile i64 exit program");
         let output = Command::new(&binary).output().expect("run binary");
         assert_eq!(output.status.code(), Some(12));
+    }
+
+    #[test]
+    fn links_i64_dynamic_int_lines() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-int-lines.o");
+        let binary = temp.path().join("i64-int-lines");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: vec![
+                    I64Stmt::WriteIntLine {
+                        stream: OutputStream::Stdout,
+                        value: I64Expr::Literal(0),
+                    },
+                    I64Stmt::WriteIntLine {
+                        stream: OutputStream::Stdout,
+                        value: I64Expr::Literal(42),
+                    },
+                    I64Stmt::WriteIntLine {
+                        stream: OutputStream::Stdout,
+                        value: I64Expr::Literal(-42),
+                    },
+                    I64Stmt::WriteIntLine {
+                        stream: OutputStream::Stderr,
+                        value: I64Expr::Literal(i64::MIN),
+                    },
+                ],
+                body: I64ExitBody::Return(I64Expr::Literal(7)),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 dynamic int lines");
+        let output = Command::new(&binary).output().expect("run binary");
+        assert_eq!(output.status.code(), Some(7));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "0\n42\n-42\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "-9223372036854775808\n"
+        );
     }
 
     #[test]
