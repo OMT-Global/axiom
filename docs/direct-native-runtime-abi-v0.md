@@ -760,7 +760,10 @@ IR without materializing log strings through generated Rust. The same supported
 dynamic scalar and boolean log event shape can now feed public `std/log.ax`
 `info_attrs` stderr output by emitting native JSON punctuation, scalar field
 values, boolean field values, and newline-inclusive byte counts without
-generated Rust. It also lowers known-string public `std/io.ax`
+generated Rust. Public `std/log.ax` level wrappers such as `info(...)` can
+reuse that native event writer for supported dynamic JSON-safe message
+projections and empty attribute objects. It also lowers known-string public
+`std/io.ax`
 `eprintln` lets in direct-native i64 `main` functions and helper functions,
 including runtime-scope lets after assignments and inside branches, into native
 stderr writes while preserving newline-inclusive byte-count return values and

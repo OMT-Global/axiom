@@ -85,6 +85,7 @@ struct I64StaticBindings {
     log_fields3_wrappers: HashSet<String>,
     log_event_wrappers: HashSet<String>,
     log_info_attrs_wrappers: HashSet<String>,
+    log_level_wrappers: HashMap<String, String>,
     string_builder_wrappers: HashSet<String>,
     string_builder_new_wrappers: HashSet<String>,
     string_builder_from_string_wrappers: HashSet<String>,
@@ -615,6 +616,25 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_log_wrapper(function, "info_attrs"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
+    for (source_name, level) in [
+        ("debug", "debug"),
+        ("info", "info"),
+        ("warn", "warn"),
+        ("error", "error"),
+    ] {
+        for function in program
+            .functions
+            .iter()
+            .filter(|function| is_i64_std_log_wrapper(function, source_name))
+        {
+            static_bindings
+                .log_level_wrappers
+                .insert(function.name.clone(), level.to_string());
+            static_bindings
+                .log_level_wrappers
+                .insert(function.source_name.clone(), level.to_string());
+        }
+    }
     static_bindings.string_builder_wrappers = program
         .functions
         .iter()
@@ -3534,32 +3554,57 @@ fn lower_i64_eprintln_let_stmts(
         return None;
     };
     if !is_i64_compatible_type(ty) || !is_i64_io_eprintln_name(call_name, static_bindings) {
-        if !is_i64_log_info_attrs_name(call_name, static_bindings) {
-            return None;
+        if is_i64_log_info_attrs_name(call_name, static_bindings) {
+            let [message, attributes] = args.as_slice() else {
+                return None;
+            };
+            let (mut stmts, written) = lower_i64_log_event_output_stmts(
+                "info",
+                message,
+                Some(attributes),
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let local = local_indexes.len();
+            local_indexes.insert(name.clone(), local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            stmts.push(CraneliftI64Stmt::Assign(
+                axiomc_backend_cranelift::I64Assign {
+                    local,
+                    value: written,
+                },
+            ));
+            return Some(stmts);
         }
-        let [message, attributes] = args.as_slice() else {
-            return None;
-        };
-        let (mut stmts, written) = lower_i64_log_event_output_stmts(
-            "info",
-            message,
-            attributes,
-            OutputStream::Stderr,
-            local_indexes,
-            local_conditions,
-            helper_signatures,
-            static_bindings,
-        )?;
-        let local = local_indexes.len();
-        local_indexes.insert(name.clone(), local);
-        locals.push(CraneliftI64Expr::Literal(0));
-        stmts.push(CraneliftI64Stmt::Assign(
-            axiomc_backend_cranelift::I64Assign {
-                local,
-                value: written,
-            },
-        ));
-        return Some(stmts);
+        if let Some(level) = i64_log_level_wrapper(call_name, static_bindings) {
+            let [message] = args.as_slice() else {
+                return None;
+            };
+            let (mut stmts, written) = lower_i64_log_event_output_stmts(
+                level,
+                message,
+                None,
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let local = local_indexes.len();
+            local_indexes.insert(name.clone(), local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            stmts.push(CraneliftI64Stmt::Assign(
+                axiomc_backend_cranelift::I64Assign {
+                    local,
+                    value: written,
+                },
+            ));
+            return Some(stmts);
+        }
+        return None;
     }
     let [message] = args.as_slice() else {
         return None;
@@ -3645,7 +3690,7 @@ fn lower_i64_eprintln_message_stmts(
             return lower_i64_log_event_output_stmts(
                 &level,
                 message,
-                attributes,
+                Some(attributes),
                 OutputStream::Stderr,
                 local_indexes,
                 local_conditions,
@@ -3719,7 +3764,7 @@ fn lower_i64_eprintln_bool_message_stmts(
 fn lower_i64_log_event_output_stmts(
     level: &str,
     message: &Expr,
-    attributes: &Expr,
+    attributes: Option<&Expr>,
     stream: OutputStream,
     local_indexes: &HashMap<String, usize>,
     local_conditions: &HashMap<String, CraneliftI64Condition>,
@@ -3753,14 +3798,16 @@ fn lower_i64_log_event_output_stmts(
         stream,
         text: String::from(",\"attributes\":{"),
     });
-    stmts.extend(lower_i64_log_fields_output_stmts(
-        attributes,
-        stream,
-        local_indexes,
-        local_conditions,
-        helper_signatures,
-        static_bindings,
-    )?);
+    if let Some(attributes) = attributes {
+        stmts.extend(lower_i64_log_fields_output_stmts(
+            attributes,
+            stream,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?);
+    }
     stmts.push(CraneliftI64Stmt::WriteLine {
         stream,
         text: String::from("}}"),
@@ -3778,13 +3825,17 @@ fn lower_i64_log_event_output_stmts(
         helper_signatures,
         static_bindings,
     )?;
-    let attributes_len = lower_i64_string_len_expr(
-        attributes,
-        local_indexes,
-        local_conditions,
-        helper_signatures,
-        static_bindings,
-    )?;
+    let attributes_len = if let Some(attributes) = attributes {
+        lower_i64_string_len_expr(
+            attributes,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?
+    } else {
+        CraneliftI64Expr::Literal(0)
+    };
     Some((
         stmts,
         CraneliftI64Expr::Binary {
@@ -11145,6 +11196,16 @@ fn is_i64_log_event_name(name: &str, static_bindings: &I64StaticBindings) -> boo
 
 fn is_i64_log_info_attrs_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.log_info_attrs_wrappers.contains(name)
+}
+
+fn i64_log_level_wrapper<'a>(
+    name: &str,
+    static_bindings: &'a I64StaticBindings,
+) -> Option<&'a str> {
+    static_bindings
+        .log_level_wrappers
+        .get(name)
+        .map(String::as_str)
 }
 
 fn is_i64_std_string_builder_wrapper(function: &Function, source_name: &str) -> bool {
