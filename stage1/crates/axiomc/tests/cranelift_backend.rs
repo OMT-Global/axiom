@@ -3076,9 +3076,14 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let runtime_file = project.join("scratch/data.txt");
+    let created_file = project.join("scratch/created.txt");
     assert!(
         !runtime_file.exists(),
         "build should not create the fs_write runtime fixture"
+    );
+    assert!(
+        !created_file.exists(),
+        "build should not create the create_file runtime fixture"
     );
     let run = Command::new(binary)
         .output()
@@ -3088,6 +3093,10 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     assert!(
         !runtime_file.exists(),
         "runtime remove_file should remove the fs_write fixture"
+    );
+    assert_eq!(
+        fs::read_to_string(&created_file).expect("read create_file runtime fixture"),
+        ""
     );
 }
 
@@ -11651,8 +11660,9 @@ let wrote: int = write_file("scratch/data.txt", "runtime-write")
 let appended: int = append_file("scratch/data.txt", "+runtime-append")
 let replaced: int = replace_file("scratch/data.txt", "runtime-replace")
 let removed: int = remove_file("scratch/data.txt")
+let created: int = create_file("scratch/created.txt")
 let blocked: int = write_file("../escape.txt", "blocked")
-if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && blocked == -1 {
+if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && created == 0 && blocked == -1 {
 return 48
 } else {
 return 1

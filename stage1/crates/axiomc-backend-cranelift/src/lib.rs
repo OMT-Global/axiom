@@ -107,6 +107,9 @@ pub enum I64Expr {
         path: String,
         content: String,
     },
+    CreateFile {
+        path: String,
+    },
     RemoveFile {
         path: String,
     },
@@ -1745,6 +1748,7 @@ fn emit_i64_expr(
         I64Expr::AppendFile { path, content } => {
             emit_i64_append_file_expr(builder, runtime_refs, path, content)
         }
+        I64Expr::CreateFile { path } => emit_i64_create_file_expr(builder, runtime_refs, path),
         I64Expr::RemoveFile { path } => emit_i64_remove_file_expr(builder, runtime_refs, path),
         I64Expr::ProcessStatus { command } => {
             emit_i64_process_status_expr(builder, runtime_refs, command)
@@ -2138,6 +2142,73 @@ fn emit_i64_append_file_expr(
     let write_ok = builder.ins().icmp_imm(IntCC::Equal, write_result, 0);
     let ok = builder.ins().band(close_ok, write_ok);
     builder.ins().brif(ok, success_block, &[], failed_block, &[]);
+
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+    let success = builder.ins().iconst(types::I64, 0);
+    builder.ins().jump(merge_block, &[BlockArg::Value(success)]);
+
+    builder.switch_to_block(failed_block);
+    builder.seal_block(failed_block);
+    let failed = builder.ins().iconst(types::I64, -1);
+    builder.ins().jump(merge_block, &[BlockArg::Value(failed)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_create_file_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    path: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    if path.as_bytes().contains(&0) {
+        return Err(CraneliftBackendError::new(
+            "filesystem path contains an interior null byte",
+        ));
+    }
+    let path_len = u32::try_from(path.len() + 1)
+        .map_err(|_| CraneliftBackendError::new("filesystem path is too large"))?;
+    let path_slot = builder
+        .create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, path_len, 0));
+    for (offset, byte) in path.bytes().chain(std::iter::once(0)).enumerate() {
+        let byte_value = builder.ins().iconst(types::I8, i64::from(byte));
+        builder.ins().stack_store(byte_value, path_slot, offset as i32);
+    }
+    let mode_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 3, 0));
+    for (offset, byte) in b"wx\0".iter().enumerate() {
+        let byte_value = builder.ins().iconst(types::I8, i64::from(*byte));
+        builder.ins().stack_store(byte_value, mode_slot, offset as i32);
+    }
+
+    let path_ptr = builder.ins().stack_addr(types::I64, path_slot, 0);
+    let mode_ptr = builder.ins().stack_addr(types::I64, mode_slot, 0);
+    let fopen_call = builder
+        .ins()
+        .call(runtime_refs.fopen, &[path_ptr, mode_ptr]);
+    let file = builder.inst_results(fopen_call)[0];
+
+    let failed_block = builder.create_block();
+    let close_block = builder.create_block();
+    let success_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let open_failed = builder.ins().icmp_imm(IntCC::Equal, file, 0);
+    builder
+        .ins()
+        .brif(open_failed, failed_block, &[], close_block, &[]);
+
+    builder.switch_to_block(close_block);
+    builder.seal_block(close_block);
+    let fclose_call = builder.ins().call(runtime_refs.fclose, &[file]);
+    let close_result = builder.inst_results(fclose_call)[0];
+    let close_ok = builder.ins().icmp_imm(IntCC::Equal, close_result, 0);
+    builder
+        .ins()
+        .brif(close_ok, success_block, &[], failed_block, &[]);
 
     builder.switch_to_block(success_block);
     builder.seal_block(success_block);
@@ -2746,6 +2817,52 @@ mod tests {
             !fixture.exists(),
             "runtime remove_file should remove the fixture"
         );
+    }
+
+    #[test]
+    fn links_i64_exit_program_with_create_file() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fixture = temp.path().join("created.txt");
+        let object = temp.path().join("i64-exit-create-file.o");
+        let binary = temp.path().join("i64-exit-create-file");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::CreateFile {
+                    path: fixture.display().to_string(),
+                }),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 create file exit program");
+
+        assert!(
+            !fixture.exists(),
+            "compile should not create the create_file fixture"
+        );
+        let output = Command::new(&binary)
+            .output()
+            .expect("run create file binary");
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(
+            fs::read_to_string(&fixture).expect("read created fixture"),
+            ""
+        );
+
+        let output = Command::new(&binary)
+            .output()
+            .expect("run create file binary again");
+        assert_eq!(output.status.code(), Some(255));
     }
 
     #[test]
