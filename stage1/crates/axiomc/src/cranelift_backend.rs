@@ -1653,7 +1653,11 @@ fn lower_i64_aggregate_return_body(
                     static_bindings,
                 )?);
             }
-            Stmt::Assign { .. } | Stmt::If { .. } | Stmt::While { .. } | Stmt::Match { .. } => {
+            Stmt::Assign { .. }
+            | Stmt::If { .. }
+            | Stmt::While { .. }
+            | Stmt::Match { .. }
+            | Stmt::Print { .. } => {
                 seen_runtime_stmt = true;
                 lowered_stmts.extend(lower_i64_runtime_stmt_stmts(
                     stmt,
@@ -2811,7 +2815,11 @@ fn lower_i64_body(
                     static_bindings,
                 )?);
             }
-            Stmt::Assign { .. } | Stmt::If { .. } | Stmt::While { .. } | Stmt::Match { .. } => {
+            Stmt::Assign { .. }
+            | Stmt::If { .. }
+            | Stmt::While { .. }
+            | Stmt::Match { .. }
+            | Stmt::Print { .. } => {
                 seen_runtime_stmt = true;
                 lowered_stmts.extend(lower_i64_runtime_stmt_stmts(
                     stmt,
@@ -2982,6 +2990,7 @@ fn lower_i64_runtime_stmt(
             helper_signatures,
             static_bindings,
         )?)),
+        Stmt::Print { expr, .. } => Some(lower_i64_print_stmt(expr, static_bindings)?),
         Stmt::If {
             cond,
             then_block,
@@ -3031,6 +3040,17 @@ fn lower_i64_runtime_stmt(
         }),
         _ => None,
     }
+}
+
+fn lower_i64_print_stmt(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Stmt> {
+    let value = i64_known_expr_value(expr, static_bindings)?;
+    Some(CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stdout,
+        text: render_value(&value),
+    })
 }
 
 fn lower_i64_option_match_stmt(
