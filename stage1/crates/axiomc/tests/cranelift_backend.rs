@@ -4558,9 +4558,11 @@ fn cranelift_backend_lowers_crypto_random_to_runtime_exit_code() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
     let audit = fs::read_to_string(&audit_log).expect("read crypto random audit log");
     assert!(audit.contains("\"intrinsic\":\"crypto_rand_bytes\""));
+    assert!(audit.contains("\"intrinsic\":\"crypto_rand_u64\""));
     assert!(audit.contains("\"length\":\"int:16\""));
     assert!(audit.contains("\"length\":\"int:0\""));
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 2);
+    assert!(audit.contains("\"args\":{}"));
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 3);
     assert!(!audit.contains("\"bytes\""));
 }
 

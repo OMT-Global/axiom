@@ -144,6 +144,10 @@ pub enum I64Expr {
         success: I64AuditSuccess,
         result: Box<I64Expr>,
     },
+    RandomU64 {
+        intrinsic: String,
+        package: String,
+    },
     RandomBytesLen {
         length: i64,
     },
@@ -2086,6 +2090,9 @@ fn emit_i64_expr(
             *success,
             result,
         ),
+        I64Expr::RandomU64 { intrinsic, package } => {
+            emit_i64_random_u64_expr(builder, runtime_refs, intrinsic, package)
+        }
         I64Expr::RandomBytesLen { length } => {
             emit_i64_random_bytes_len_expr(builder, runtime_refs, *length)
         }
@@ -2315,6 +2322,65 @@ fn emit_i64_c_string_len_expr(
     let value_ptr = builder.ins().stack_addr(types::I64, value_slot, 0);
     let call = builder.ins().call(runtime_refs.strlen, &[value_ptr]);
     Ok(builder.inst_results(call)[0])
+}
+
+fn emit_i64_random_u64_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    intrinsic: &str,
+    package: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let ok_line = i64_crypto_no_args_audit_line(intrinsic, package, "ok");
+    let denied_line = i64_crypto_no_args_audit_line(intrinsic, package, "denied");
+    let bytes_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 0));
+    let bytes_ptr = builder.ins().stack_addr(types::I64, bytes_slot, 0);
+    let source_ptr = emit_i64_path_ptr(builder, "/dev/urandom")?;
+    let open_flags = builder.ins().iconst(types::I32, 0);
+    let open_call = builder
+        .ins()
+        .call(runtime_refs.open, &[source_ptr, open_flags]);
+    let fd = builder.inst_results(open_call)[0];
+
+    let denied_block = builder.create_block();
+    let read_block = builder.create_block();
+    let success_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let open_failed = builder.ins().icmp_imm(IntCC::SignedLessThan, fd, 0);
+    builder
+        .ins()
+        .brif(open_failed, denied_block, &[], read_block, &[]);
+
+    builder.switch_to_block(read_block);
+    builder.seal_block(read_block);
+    let requested = builder.ins().iconst(types::I64, 8);
+    let read_call = builder
+        .ins()
+        .call(runtime_refs.read, &[fd, bytes_ptr, requested]);
+    let bytes_read = builder.inst_results(read_call)[0];
+    builder.ins().call(runtime_refs.close, &[fd]);
+    let read_complete = builder.ins().icmp(IntCC::Equal, bytes_read, requested);
+    builder
+        .ins()
+        .brif(read_complete, success_block, &[], denied_block, &[]);
+
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+    let value = builder.ins().stack_load(types::I64, bytes_slot, 0);
+    emit_i64_host_audit_line(builder, runtime_refs, &ok_line)?;
+    builder.ins().jump(merge_block, &[BlockArg::Value(value)]);
+
+    builder.switch_to_block(denied_block);
+    builder.seal_block(denied_block);
+    emit_i64_host_audit_line(builder, runtime_refs, &denied_line)?;
+    let failed = builder.ins().iconst(types::I64, 0);
+    builder.ins().jump(merge_block, &[BlockArg::Value(failed)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
 }
 
 fn emit_i64_random_bytes_len_expr(
@@ -2604,6 +2670,15 @@ fn i64_crypto_audit_line(
         i64_json_escape(intrinsic),
         i64_json_escape(arg_name),
         i64_json_escape(arg_value),
+        i64_json_escape(outcome)
+    )
+}
+
+fn i64_crypto_no_args_audit_line(intrinsic: &str, package: &str, outcome: &str) -> String {
+    format!(
+        "{{\"package\":\"{}\",\"intrinsic\":\"{}\",\"args\":{{}},\"outcome\":\"{}\"}}\n",
+        i64_json_escape(package),
+        i64_json_escape(intrinsic),
         i64_json_escape(outcome)
     )
 }

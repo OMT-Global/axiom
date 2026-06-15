@@ -12101,8 +12101,11 @@ fn lower_i64_crypto_random_intrinsic_expr(
     if !is_i64_crypto_random_u64_name(name, static_bindings) || !args.is_empty() {
         return None;
     }
-    let bytes: [u8; 8] = crypto_random_bytes(8).ok()?.try_into().ok()?;
-    Some(CraneliftI64Expr::Literal(i64::from_ne_bytes(bytes)))
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::RandomU64 {
+        intrinsic: "crypto_rand_u64".to_string(),
+        package: package.display().to_string(),
+    })
 }
 
 fn lower_i64_crypto_random_bytes_len_expr(
