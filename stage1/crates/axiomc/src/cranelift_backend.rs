@@ -6876,10 +6876,7 @@ fn lower_i64_fs_read_option_match_value_expr(
         .bindings
         .first()
         .filter(|binding| binding.as_str() != "_");
-    let file_len = CraneliftI64Expr::FileLen {
-        path: path.clone(),
-        max_bytes: SPIKE_MAX_FS_READ_BYTES,
-    };
+    let file_len = i64_fs_read_file_len_expr(&path, static_bindings)?;
     let then_result = lower_i64_fs_read_some_arm_expr(
         &some_arm.expr,
         binding.map(String::as_str),
@@ -6922,10 +6919,7 @@ fn lower_i64_fs_read_some_arm_expr(
         && let [Expr::VarRef { name, .. }] = args.as_slice()
         && name == binding
     {
-        return Some(CraneliftI64Expr::FileLen {
-            path: path.to_string(),
-            max_bytes: SPIKE_MAX_FS_READ_BYTES,
-        });
+        return i64_fs_read_file_len_expr(path, static_bindings);
     }
     lower_i64_return_value_expr(
         expr,
@@ -6956,6 +6950,23 @@ fn i64_fs_read_path(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<
     let fs_root = static_bindings.fs_root.as_deref()?;
     let path = i64_string_text(path, static_bindings)?;
     spike_fs_write_candidate_for_root(fs_root, &path, false).map(|path| path.display().to_string())
+}
+
+fn i64_fs_read_file_len_expr(
+    path: &str,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let fs_root = static_bindings.fs_root.as_deref()?;
+    let path = Path::new(path);
+    i64_runtime_fs_guard_expr(
+        fs_root,
+        path,
+        i64_fs_runtime_parent_fallback(path)?.as_path(),
+        CraneliftI64Expr::FileLen {
+            path: path.display().to_string(),
+            max_bytes: SPIKE_MAX_FS_READ_BYTES,
+        },
+    )
 }
 
 fn i64_stmts_have_fs_write_call(stmts: &[Stmt], static_bindings: &I64StaticBindings) -> bool {

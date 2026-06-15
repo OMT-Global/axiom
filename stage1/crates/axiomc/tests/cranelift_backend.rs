@@ -3044,6 +3044,58 @@ fn cranelift_backend_lowers_fs_read_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_denies_fs_read_symlink_escape_at_runtime() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("fs-read-symlink-escape");
+    write_fs_read_symlink_escape_project(&project);
+    let outside = temp.path().join("escape.txt");
+    let link = project.join("src/fixture.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift fs-read symlink build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    fs::write(&outside, "outside-readable").expect("write outside symlink target");
+    fs::remove_file(&link).expect("remove build-time read fixture");
+    std::os::unix::fs::symlink(&outside, &link).expect("create runtime read symlink escape");
+
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift fs-read symlink binary");
+    assert_eq!(run.status.code(), Some(37));
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("stat runtime read symlink")
+            .file_type()
+            .is_symlink(),
+        "runtime denial should leave the read symlink fixture in place"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -11740,6 +11792,54 @@ return 1
 "#,
     )
     .expect("write fs-read main source");
+}
+
+fn write_fs_read_symlink_escape_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create fs-read symlink project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-fs-read-symlink-escape"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = true
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write fs-read symlink manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-fs-read-symlink-escape"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write fs-read symlink lockfile");
+    fs::write(project.join("src/fixture.txt"), "native-fs\n")
+        .expect("write fs-read symlink fixture");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/fs.ax"
+
+fn main(): int {
+let status: int = match read_file("src/fixture.txt") { Some(_value) => 1, None => 37 }
+return status
+}
+"#,
+    )
+    .expect("write fs-read symlink source");
 }
 
 fn write_fs_write_main_exit_project(project: &Path) {
