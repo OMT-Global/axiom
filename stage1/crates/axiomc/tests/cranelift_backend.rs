@@ -5360,6 +5360,8 @@ false
 {"score":7,"ready":false}
 {"score":7,"ready":false}
 [7,false,"7"]
+{"type":"object","properties":{"name":{"type":"string"},"score":{"type":"integer"},"ready":{"type":"boolean"}}}
+7
 {"name":"axiom","count":3,"ready":true}
 "axiom"
 no int
@@ -11006,6 +11008,15 @@ let dynamic_array_value: JsonValue = array3(value_int(dynamic_count), value_bool
 print object2(dynamic_count_field_for_object, dynamic_ready_field_for_object)
 print stringify_value(dynamic_object_value)
 print stringify_value(dynamic_array_value)
+print schema_object3(schema_field_string("name"), schema_field_int("score"), schema_field_bool("ready"))
+match parse_field_value(value_object2(field_value("score", value_int(dynamic_count)), field_value("ready", value_bool(dynamic_ready))), "score") {
+Some(score_value) {
+print stringify_value(score_value)
+}
+None {
+print "missing score"
+}
+}
 
 match parse_value(doc()) {
 Some(value) {
