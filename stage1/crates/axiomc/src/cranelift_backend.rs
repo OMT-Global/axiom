@@ -5884,6 +5884,15 @@ fn lower_i64_panic_report_stmts(
             }],
         }]);
     }
+    if let Some(stmts) = lower_i64_panic_json_stringify_string_report_stmts(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(stmts);
+    }
     if let Some(stmts) = lower_i64_log_event_panic_report_stmts(
         message,
         local_indexes,
@@ -5910,6 +5919,41 @@ fn lower_i64_panic_report_stmts(
             json_escape_string(&message)
         ),
     }])
+}
+
+fn lower_i64_panic_json_stringify_string_report_stmts(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Expr::Call { name, args, .. } = message else {
+        return None;
+    };
+    if !is_i64_json_stringify_string_name(name, static_bindings) {
+        return None;
+    }
+    let [value] = args.as_slice() else {
+        return None;
+    };
+    let mut stmts = vec![CraneliftI64Stmt::WriteText {
+        stream: OutputStream::Stderr,
+        text: String::from("{\"kind\":\"panic\",\"message\":"),
+    }];
+    stmts.extend(lower_i64_log_json_string_value_stmts(
+        value,
+        OutputStream::Stderr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
+    stmts.push(CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stderr,
+        text: String::from("}"),
+    });
+    Some(stmts)
 }
 
 fn lower_i64_log_event_panic_report_stmts(

@@ -268,6 +268,23 @@ return 0
         "{\"kind\":\"panic\",\"message\":-3}\n",
     );
 
+    let quoted_stringify_project = temp.path().join("terminal-panic-quoted-stringify");
+    write_terminal_panic_project(
+        &quoted_stringify_project,
+        r#"import "std/json.ax"
+
+fn main(): int {
+let status: int = match parse_int("12345") { Some(value) => value, None => 1 }
+let message: string = stringify_int(status)
+panic(stringify_string(message))
+}
+"#,
+    );
+    assert_terminal_panic_report(
+        &quoted_stringify_project,
+        "{\"kind\":\"panic\",\"message\":\"12345\"}\n",
+    );
+
     let key_projection_project = temp.path().join("terminal-panic-key-projection");
     write_terminal_panic_project(
         &key_projection_project,
