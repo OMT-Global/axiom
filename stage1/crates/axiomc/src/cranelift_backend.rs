@@ -9365,10 +9365,10 @@ fn lower_i64_map_key_expr(expr: &Expr, static_bindings: &I64StaticBindings) -> O
     if let Some(text) = i64_string_text(expr, static_bindings) {
         return Some(I64MapKey::Text(text));
     }
-    match expr {
-        Expr::Literal(LiteralValue::Bool(value)) => Some(I64MapKey::Bool(*value)),
-        _ => i64_static_scalar_value(expr, static_bindings).map(I64MapKey::Int),
+    if let Some(value) = i64_static_bool_value(expr, static_bindings) {
+        return Some(I64MapKey::Bool(value));
     }
+    i64_static_scalar_value(expr, static_bindings).map(I64MapKey::Int)
 }
 
 fn i64_map_literal_entries<'a>(
