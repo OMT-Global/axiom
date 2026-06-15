@@ -489,9 +489,10 @@ non-loopback policy coverage, and audit parity remain open under #1001.
 The process status row now has partial direct-native evidence: the Cranelift
 spike builds and runs `std/process.ax` `run_status(...)` for literal,
 allowlisted deterministic commands and the checked-in missing-binary sentinel
-through compiler-side spike evaluation and emits their exit statuses without
-generated Rust. The direct-native i64 path also lowers literal
-`process_status(...)` calls and the `std/process.ax` `run_status(...)` wrapper
+through compiler-side spike evaluation and emits their exit statuses while the
+public smoke asserts `generated_rust` is null. The direct-native i64 path also
+lowers literal `process_status(...)` calls and the `std/process.ax`
+`run_status(...)` wrapper
 for deterministic `/usr/bin/true`, `/usr/bin/false`, and
 `__axiom_stage1_missing_binary__` commands into native process exit status
 without generated Rust. Denied `process` capability use still fails through the
@@ -589,8 +590,9 @@ runtime key array value projection, and host-boundary representation remain
 tracked by issue #1001.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
-`get_env` on present and missing environment names without generated Rust, plus
-denial evidence that a package without the `env` capability fails before
+`get_env` on present and missing environment names while the public smoke
+asserts `generated_rust` is null, plus denial evidence that a package without the
+`env` capability fails before
 backend lowering. The direct-native i64 path now also lowers literal-key
 `env_get(...)` calls and the public `std/env.ax` `get_env(...)` wrapper into
 native process exit status by selecting `Option<string>` match arms at compile
