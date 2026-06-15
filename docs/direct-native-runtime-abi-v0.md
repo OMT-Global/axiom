@@ -381,8 +381,9 @@ The filesystem write row now has partial Cranelift evidence: the spike
 evaluates `std/fs.ax` write helpers over configured `fs_root`-scoped literal
 paths during compilation and emits the resulting output, covering `mkdir_all`,
 `write_file`, `append_file`, readback, `replace_file`, `create_file`,
-`remove_file`, and `remove_dir`. It also covers `fs_root` scoping and preserves
-the public manifest-policy denial for a package with `fs = true` and
+`remove_file`, and `remove_dir`, with public write and `fs_root` smokes now
+asserting `generated_rust` is null. It also covers `fs_root` scoping and
+preserves the public manifest-policy denial for a package with `fs = true` and
 `"fs:write" = false` that calls `std/fs.ax` `write_file(...)`. The
 direct-native i64 path now also lowers literal-path `mkdir_all`, `write_file`,
 `append_file`, `replace_file`, `create_file`, `remove_file`, and `remove_dir`
@@ -456,7 +457,8 @@ hooks, audit parity, and non-Unix support remain open under #1001.
 
 The HTTP client row now has partial Cranelift evidence: the spike builds
 `std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL
-and fetches a local one-shot HTTP response without generated Rust. The
+and fetches a local one-shot HTTP response while the public smoke asserts
+`generated_rust` is null. The
 direct-native i64 path now also lowers known-url `http_get(...)` and public
 `std/http.ax` `get(...)` calls into native process exit status by selecting
 `Option<string>` match arms at compile time for local HTTP responses. Packages
@@ -465,7 +467,8 @@ nonlocal HTTP policy coverage, redirects, richer response handling, timeout
 parity, and audit parity remain open under #1001.
 
 The HTTP server row now has partial Cranelift evidence: the spike builds and
-runs loopback HTTP server entrypoints without generated Rust, covering
+runs loopback HTTP server entrypoints while the public smoke asserts
+`generated_rust` is null, covering
 `http_server_listen`, `http_server_local_port`, `http_server_accept`,
 `http_request_method`, `http_request_path`, `http_request_body`,
 `http_response_write`, and `http_server_close` over a one-request HTTP/1.0
@@ -478,11 +481,12 @@ lowering. Non-loopback policy coverage, richer response metadata, timeout
 parity, and audit parity remain open under #1001.
 
 The async HTTP server row now has partial Cranelift evidence: the spike builds
-and runs `http_async_serve_route` over a loopback server handle without
-generated Rust, returns a `Task<bool>`, and serves a one-request HTTP/1.0 route
-fixture. It also proves the async gate separately: with `net` present and
-`async` missing, `std/http_async.ax` `async_serve_route(...)` must fail through
-the public `async` capability denial before backend lowering. Real
+and runs `http_async_serve_route` over a loopback server handle while the public
+smoke asserts `generated_rust` is null, returns a `Task<bool>`, and serves a
+one-request HTTP/1.0 route fixture. It also proves the async gate separately:
+with `net` present and `async` missing, `std/http_async.ax`
+`async_serve_route(...)` must fail through the public `async` capability denial
+before backend lowering. Real
 scheduler-backed serving, concurrent clients, cancellation, timeout parity,
 non-loopback policy coverage, and audit parity remain open under #1001.
 
