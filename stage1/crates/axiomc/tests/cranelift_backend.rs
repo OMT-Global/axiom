@@ -3085,9 +3085,9 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
         .expect("run cranelift fs-write main binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
-    assert_eq!(
-        fs::read_to_string(&runtime_file).expect("read fs_write runtime fixture"),
-        "runtime-replace"
+    assert!(
+        !runtime_file.exists(),
+        "runtime remove_file should remove the fs_write fixture"
     );
 }
 
@@ -11650,8 +11650,9 @@ fn main(): int {
 let wrote: int = write_file("scratch/data.txt", "runtime-write")
 let appended: int = append_file("scratch/data.txt", "+runtime-append")
 let replaced: int = replace_file("scratch/data.txt", "runtime-replace")
+let removed: int = remove_file("scratch/data.txt")
 let blocked: int = write_file("../escape.txt", "blocked")
-if wrote == 0 && appended == 0 && replaced == 0 && blocked == -1 {
+if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && blocked == -1 {
 return 48
 } else {
 return 1

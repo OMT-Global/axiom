@@ -53,6 +53,7 @@ struct I64RuntimeRefs {
     fopen: FuncRef,
     fwrite: FuncRef,
     fclose: FuncRef,
+    unlink: FuncRef,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +106,9 @@ pub enum I64Expr {
     AppendFile {
         path: String,
         content: String,
+    },
+    RemoveFile {
+        path: String,
     },
     ProcessStatus {
         command: String,
@@ -548,6 +552,14 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare fclose import: {message}"))
         })?;
+    let mut unlink_sig = module.make_signature();
+    unlink_sig.params.push(AbiParam::new(pointer_type));
+    unlink_sig.returns.push(AbiParam::new(types::I32));
+    let unlink_id = module
+        .declare_function("unlink", Linkage::Import, &unlink_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare unlink import: {message}"))
+        })?;
     let output_data_ids = declare_i64_output_data(&mut module, &program)?;
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
@@ -568,6 +580,7 @@ fn emit_i64_exit_object(
             fopen_id,
             fwrite_id,
             fclose_id,
+            unlink_id,
             &output_data_ids,
             index,
             function,
@@ -603,6 +616,7 @@ fn emit_i64_exit_object(
         let fopen_ref = module.declare_func_in_func(fopen_id, builder.func);
         let fwrite_ref = module.declare_func_in_func(fwrite_id, builder.func);
         let fclose_ref = module.declare_func_in_func(fclose_id, builder.func);
+        let unlink_ref = module.declare_func_in_func(unlink_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             sleep: sleep_ref,
@@ -617,6 +631,7 @@ fn emit_i64_exit_object(
             fopen: fopen_ref,
             fwrite: fwrite_ref,
             fclose: fclose_ref,
+            unlink: unlink_ref,
         };
         let mut locals = Vec::new();
         for local_expr in &program.locals {
@@ -814,6 +829,7 @@ fn define_i64_function(
     fopen_id: FuncId,
     fwrite_id: FuncId,
     fclose_id: FuncId,
+    unlink_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -857,6 +873,7 @@ fn define_i64_function(
         let fopen_ref = module.declare_func_in_func(fopen_id, builder.func);
         let fwrite_ref = module.declare_func_in_func(fwrite_id, builder.func);
         let fclose_ref = module.declare_func_in_func(fclose_id, builder.func);
+        let unlink_ref = module.declare_func_in_func(unlink_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             sleep: sleep_ref,
@@ -871,6 +888,7 @@ fn define_i64_function(
             fopen: fopen_ref,
             fwrite: fwrite_ref,
             fclose: fclose_ref,
+            unlink: unlink_ref,
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
@@ -1727,6 +1745,7 @@ fn emit_i64_expr(
         I64Expr::AppendFile { path, content } => {
             emit_i64_append_file_expr(builder, runtime_refs, path, content)
         }
+        I64Expr::RemoveFile { path } => emit_i64_remove_file_expr(builder, runtime_refs, path),
         I64Expr::ProcessStatus { command } => {
             emit_i64_process_status_expr(builder, runtime_refs, command)
         }
@@ -2133,6 +2152,34 @@ fn emit_i64_append_file_expr(
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
     Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_remove_file_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    path: &str,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    if path.as_bytes().contains(&0) {
+        return Err(CraneliftBackendError::new(
+            "filesystem path contains an interior null byte",
+        ));
+    }
+    let path_len = u32::try_from(path.len() + 1)
+        .map_err(|_| CraneliftBackendError::new("filesystem path is too large"))?;
+    let path_slot = builder
+        .create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, path_len, 0));
+    for (offset, byte) in path.bytes().chain(std::iter::once(0)).enumerate() {
+        let byte_value = builder.ins().iconst(types::I8, i64::from(byte));
+        builder.ins().stack_store(byte_value, path_slot, offset as i32);
+    }
+
+    let path_ptr = builder.ins().stack_addr(types::I64, path_slot, 0);
+    let unlink_call = builder.ins().call(runtime_refs.unlink, &[path_ptr]);
+    let result = builder.inst_results(unlink_call)[0];
+    let ok = builder.ins().icmp_imm(IntCC::Equal, result, 0);
+    let success = builder.ins().iconst(types::I64, 0);
+    let failed = builder.ins().iconst(types::I64, -1);
+    Ok(builder.ins().select(ok, success, failed))
 }
 
 fn emit_i64_process_status_expr(
@@ -2659,6 +2706,45 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&fixture).expect("read runtime append fixture"),
             "base+runtime-append"
+        );
+    }
+
+    #[test]
+    fn links_i64_exit_program_with_remove_file() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fixture = temp.path().join("fixture.txt");
+        fs::write(&fixture, "remove-me").expect("write remove fixture");
+        let object = temp.path().join("i64-exit-remove-file.o");
+        let binary = temp.path().join("i64-exit-remove-file");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::RemoveFile {
+                    path: fixture.display().to_string(),
+                }),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 remove file exit program");
+
+        assert!(fixture.exists(), "compile should not remove the fixture");
+        let output = Command::new(&binary)
+            .output()
+            .expect("run remove file binary");
+        assert_eq!(output.status.code(), Some(0));
+        assert!(
+            !fixture.exists(),
+            "runtime remove_file should remove the fixture"
         );
     }
 
