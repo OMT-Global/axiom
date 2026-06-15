@@ -730,9 +730,10 @@ The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 package without the `clock` capability fails before backend lowering and that
 nonzero sleep fails fast instead of ever reaching host sleep during
 compiler-side spike evaluation. The direct-native i64 path now also lowers
-literal `clock_sleep_ms(0)` through entrypoint and helper functions to a native
-process exit status without generated Rust. Imported public `std/time.ax`
-`sleep(duration_ms(...))` wrappers now alias that same deterministic path for
+literal and static scalar `clock_sleep_ms(...)` nonpositive durations through
+entrypoint and helper functions to a native process exit status without
+generated Rust. Imported public `std/time.ax` `sleep(duration_ms(...))`
+wrappers now alias that same deterministic path for literal and static scalar
 zero-duration and negative-duration calls in runtime-exit programs. The
 supported sleep shape remains limited to compile-time-known nonpositive
 durations until the real runtime clock path lands. Full runtime-time

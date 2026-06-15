@@ -8384,7 +8384,7 @@ source = "path"
     .expect("write clock sleep zero lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn pause_zero(): int {\nreturn clock_sleep_ms(0)\n}\n\nfn main(): int {\nlet direct: int = clock_sleep_ms(0)\nlet helper: int = pause_zero()\nif direct == 0 && helper == 0 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "static ZERO_MS: int = 0\n\nfn pause_zero(): int {\nreturn clock_sleep_ms(ZERO_MS)\n}\n\nfn main(): int {\nlet direct: int = clock_sleep_ms(ZERO_MS)\nlet helper: int = pause_zero()\nif direct == 0 && helper == 0 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write clock sleep zero source");
 }
@@ -8426,16 +8426,19 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/time.ax"
 
+static ZERO_MS: int = 0
+static NEGATIVE_MS: int = -1
+
 fn pause_zero(): int {
-return sleep(duration_ms(0))
+return sleep(duration_ms(ZERO_MS))
 }
 
 fn pause_negative(): int {
-return sleep(duration_ms(-1))
+return sleep(duration_ms(NEGATIVE_MS))
 }
 
 fn main(): int {
-let direct: int = sleep(duration_ms(0))
+let direct: int = sleep(duration_ms(ZERO_MS))
 let helper: int = pause_zero()
 let negative: int = pause_negative()
 if direct == 0 && helper == 0 && negative == -1 {
