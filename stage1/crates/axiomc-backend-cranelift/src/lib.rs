@@ -3168,6 +3168,14 @@ fn emit_i64_runtime_fs_guard_expr(
             "filesystem root contains an interior null byte",
         ));
     }
+    if matches!(
+        std::fs::symlink_metadata(path),
+        Ok(metadata) if metadata.file_type().is_symlink()
+    ) {
+        return Err(CraneliftBackendError::new(
+            "filesystem path resolves through a dangling symlink",
+        ));
+    }
     let path_ptr = emit_i64_path_ptr(builder, path)?;
     let fallback_ptr = emit_i64_path_ptr(builder, fallback_path)?;
     let resolved_slot = builder.create_sized_stack_slot(StackSlotData::new(
