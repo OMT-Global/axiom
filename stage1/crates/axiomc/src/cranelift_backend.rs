@@ -7214,6 +7214,9 @@ fn i64_fs_read_file_len_expr(
     path_len: usize,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
+    if static_bindings.has_fs_write_calls {
+        return None;
+    }
     let fs_root = static_bindings.fs_root.as_deref()?;
     let path = Path::new(path);
     let guarded = i64_runtime_fs_guard_expr(
@@ -19429,6 +19432,12 @@ fn spike_fs_write_candidate_for_root(
             .starts_with(canonical_root)
             .then_some(canonical_candidate);
     }
+    if matches!(
+        std::fs::symlink_metadata(&candidate),
+        Ok(metadata) if metadata.file_type().is_symlink()
+    ) {
+        return None;
+    }
     let parent = candidate.parent()?;
     if !allow_missing_ancestors {
         let Ok(canonical_parent) = std::fs::canonicalize(parent) else {
@@ -20988,6 +20997,36 @@ mod tests {
                 &I64StaticBindings::default()
             ),
             Some(vec![I64MapKey::Int(2), I64MapKey::Int(1)])
+        );
+    }
+
+
+    #[test]
+    fn fs_read_folding_is_disabled_when_program_writes() {
+        let mut static_bindings = I64StaticBindings::default();
+        static_bindings.fs_root = Some(PathBuf::from("."));
+        static_bindings.has_fs_write_calls = true;
+
+        assert_eq!(
+            i64_fs_read_file_len_expr("fixture.txt", "fixture.txt".len(), &static_bindings),
+            None
+        );
+    }
+
+    #[test]
+    fn write_candidate_rejects_dangling_symlink_leaf() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let target = root.join("target.txt");
+        let link = root.join("dangling.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).expect("create dangling symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target, &link).expect("create dangling symlink");
+
+        assert_eq!(
+            spike_fs_write_candidate_for_root(root, "dangling.txt", false),
+            None
         );
     }
 }
