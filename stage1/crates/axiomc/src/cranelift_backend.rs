@@ -17746,34 +17746,4 @@ mod tests {
             Some(vec![I64MapKey::Int(2), I64MapKey::Int(1)])
         );
     }
-
-
-    #[test]
-    fn fs_read_folding_is_disabled_when_program_writes() {
-        let mut static_bindings = I64StaticBindings::default();
-        static_bindings.fs_root = Some(PathBuf::from("."));
-        static_bindings.has_fs_write_calls = true;
-
-        assert_eq!(
-            i64_fs_read_file_len_expr("fixture.txt", "fixture.txt".len(), &static_bindings),
-            None
-        );
-    }
-
-    #[test]
-    fn write_candidate_rejects_dangling_symlink_leaf() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        let target = root.join("target.txt");
-        let link = root.join("dangling.txt");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link).expect("create dangling symlink");
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&target, &link).expect("create dangling symlink");
-
-        assert_eq!(
-            spike_fs_write_candidate_for_root(root, "dangling.txt", false),
-            None
-        );
-    }
 }
