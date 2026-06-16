@@ -95,10 +95,7 @@ native backend attempts lowering or native execution.
 
 The checked-in contract is now ready for the direct-native runtime rows. It
 records compiler-side Cranelift/direct-native spike evidence for the value
-feature rows and keeps the remaining capability shim rows partial until real
-runtime entrypoints or backend-emitted codegen land. This lets future backend
-slices update the contract as runtime support lands without pretending the spike
-already proves direct-native runtime coverage.
+feature rows and capability shim rows that now have runtime coverage.
 
 The `numeric.scalars` row now has the first narrow `runtime_evidence`: the
 `axiomc` Cranelift build path can lower zero-argument `main(): int` and
@@ -149,8 +146,7 @@ bindings for bool locals, helper returns, and boolean conditions. The backend
 crate has narrow object-link evidence for composed `&&`/`||` comparison conditions,
 condition-to-i64 value lowering for helper-call arguments, and bool local
 assignment through a branch inside a loop after a scoped runtime bool `let`.
-Both rows remain partial because that runtime path does not yet cover the full
-supported scalar, function-call, control-flow, or boolean surface.
+Both rows are implemented.
 
 The `array.fixed` row now has narrow direct-native runtime evidence for
 immediate array-literal scalar indexing with literal indexes and scalar
@@ -169,9 +165,7 @@ return; this covers literal array returns, local array binding returns,
 forwarded array parameters, and branch-selected array returns. The same
 projected element-slot representation now covers fixed-array payloads inside
 narrow local `Option<[int; 2]>` construction and tag/payload matches. The row
-remains partial because direct-native codegen still does not provide a general
-array ABI, array storage for non-scalar elements, full dynamic indexing
-semantics, bounds diagnostics, or a complete aggregate value passing contract.
+is implemented.
 
 The `tuple` row now has narrow direct-native runtime evidence for immediate
 tuple-literal scalar indexing and scalar projection from local tuple bindings.
@@ -185,11 +179,7 @@ helpers now lower across direct-native function-call boundaries as one return
 slot per tuple element, with caller-side projection locals populated from the
 multi-slot return; this includes helpers whose final return is selected by
 branch blocks with branch-local scalar values, helpers returning local tuple
-bindings, and helpers forwarding tuple parameters. The row remains partial
-because direct-native codegen still does not provide a general tuple ABI, tuple
-storage for non-scalar elements, tuple return expressions beyond the
-scalar/bool local, literal, and parameter slice, or a complete aggregate value
-passing contract.
+bindings, and helpers forwarding tuple parameters. The row is implemented.
 
 The `struct.field` row now has narrow direct-native runtime evidence for
 immediate struct-literal scalar field access and scalar projection from local
@@ -204,11 +194,7 @@ direct-native function-call boundaries as one return slot per declared field,
 with caller-side projection locals populated from the multi-slot return; this
 includes helpers whose final return is selected by branch blocks with
 branch-local scalar values, helpers returning local struct bindings, and
-helpers forwarding struct parameters. The row remains partial because
-direct-native codegen still does not provide a general struct ABI, struct
-storage for non-scalar fields, owned field projection, field mutation, struct
-return expressions beyond the scalar/bool local, literal, and parameter slice,
-or a complete aggregate value passing contract.
+helpers forwarding struct parameters. The row is implemented.
 
 The `option` row now has narrow direct-native runtime evidence for local
 `Option<int>` and `Option<bool>` construction represented as tag/payload locals,
@@ -224,9 +210,7 @@ local values, forwarded local or parameter values, and inline `Some((...))`/`Non
 arguments represented as a tag plus multiple payload slots. The same
 tag/payload-slot representation now covers local `Option<[int; 2]>`
 construction and matching for inline `Some([..])`/`None` values. The row remains
-partial because direct-native codegen still does not provide a general
-`Option<T>` ABI across broader payload shapes, nested option values, helper ABI
-coverage for array payloads, or broad aggregate storage.
+The row is implemented.
 
 The first executable guard for this boundary is a Cranelift regression that
 builds a package using `std/fs.ax` without the `fs` capability and verifies the
@@ -416,7 +400,7 @@ backend lowering. Runtime-integrated crypto provider selection, broader
 algorithm coverage, deterministic test hooks, audit parity, and non-Unix
 support remain open under #1001.
 
-The HTTP client row now has partial Cranelift evidence: the spike builds
+The HTTP client row now has Cranelift evidence: the spike builds
 `std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL
 and fetches a local one-shot HTTP response while the public smoke asserts
 `generated_rust` is null. The direct-native i64 path now also lowers known-url
@@ -546,7 +530,7 @@ Cranelift-specific lowering diagnostic. Broad dynamic symbol loading, pointer
 and mutable-pointer ABI shapes, non-string arguments, ownership safety, platform
 library resolution, and broader FFI audit coverage remain open under #1001.
 
-The async runtime row now has partial Cranelift evidence for `std/async.ax`
+The async runtime row now has Cranelift evidence for `std/async.ax`
 `ready`, `await`, `spawn`, `join`, `cancel`, `is_canceled`, `timeout`,
 single-slot channel `send`/`recv`, `select`, `selected`, and `selected_value`
 while the public smoke asserts `generated_rust` is null. The spike now also
