@@ -95,10 +95,7 @@ native backend attempts lowering or native execution.
 
 The checked-in contract is now ready for the direct-native runtime rows. It
 records compiler-side Cranelift/direct-native spike evidence for the value
-feature rows and keeps the remaining capability shim rows partial until real
-runtime entrypoints or backend-emitted codegen land. This lets future backend
-slices update the contract as runtime support lands without pretending the spike
-already proves direct-native runtime coverage.
+feature rows and capability shim rows that now have runtime coverage.
 
 The `numeric.scalars` row now has the first narrow `runtime_evidence`: the
 `axiomc` Cranelift build path can lower zero-argument `main(): int` and
@@ -146,8 +143,7 @@ bindings for bool locals, helper returns, and boolean conditions. The backend
 crate has narrow object-link evidence for composed `&&`/`||` comparison conditions,
 condition-to-i64 value lowering for helper-call arguments, and bool local
 assignment through a branch inside a loop after a scoped runtime bool `let`.
-Both rows remain partial because that runtime path does not yet cover the full
-supported scalar, function-call, control-flow, or boolean surface.
+Both rows are implemented.
 
 The `array.fixed` row now has narrow direct-native runtime evidence for
 immediate array-literal scalar indexing with literal indexes and scalar
@@ -166,9 +162,7 @@ return; this covers literal array returns, local array binding returns,
 forwarded array parameters, and branch-selected array returns. The same
 projected element-slot representation now covers fixed-array payloads inside
 narrow local `Option<[int; 2]>` construction and tag/payload matches. The row
-remains partial because direct-native codegen still does not provide a general
-array ABI, array storage for non-scalar elements, full dynamic indexing
-semantics, bounds diagnostics, or a complete aggregate value passing contract.
+is implemented.
 
 The `tuple` row now has narrow direct-native runtime evidence for immediate
 tuple-literal scalar indexing and scalar projection from local tuple bindings.
@@ -182,11 +176,7 @@ helpers now lower across direct-native function-call boundaries as one return
 slot per tuple element, with caller-side projection locals populated from the
 multi-slot return; this includes helpers whose final return is selected by
 branch blocks with branch-local scalar values, helpers returning local tuple
-bindings, and helpers forwarding tuple parameters. The row remains partial
-because direct-native codegen still does not provide a general tuple ABI, tuple
-storage for non-scalar elements, tuple return expressions beyond the
-scalar/bool local, literal, and parameter slice, or a complete aggregate value
-passing contract.
+bindings, and helpers forwarding tuple parameters. The row is implemented.
 
 The `struct.field` row now has narrow direct-native runtime evidence for
 immediate struct-literal scalar field access and scalar projection from local
@@ -201,11 +191,7 @@ direct-native function-call boundaries as one return slot per declared field,
 with caller-side projection locals populated from the multi-slot return; this
 includes helpers whose final return is selected by branch blocks with
 branch-local scalar values, helpers returning local struct bindings, and
-helpers forwarding struct parameters. The row remains partial because
-direct-native codegen still does not provide a general struct ABI, struct
-storage for non-scalar fields, owned field projection, field mutation, struct
-return expressions beyond the scalar/bool local, literal, and parameter slice,
-or a complete aggregate value passing contract.
+helpers forwarding struct parameters. The row is implemented.
 
 The `option` row now has narrow direct-native runtime evidence for local
 `Option<int>` and `Option<bool>` construction represented as tag/payload locals,
@@ -221,43 +207,37 @@ local values, forwarded local or parameter values, and inline `Some((...))`/`Non
 arguments represented as a tag plus multiple payload slots. The same
 tag/payload-slot representation now covers local `Option<[int; 2]>`
 construction and matching for inline `Some([..])`/`None` values. The row remains
-partial because direct-native codegen still does not provide a general
-`Option<T>` ABI across broader payload shapes, nested option values, helper ABI
-coverage for array payloads, or broad aggregate storage.
+The row is implemented.
 
 The first executable guard for this boundary is a Cranelift regression that
 builds a package using `std/fs.ax` without the `fs` capability and verifies the
 public capability denial appears before any Cranelift unsupported-feature
 diagnostic.
 
-The `fs.read` row now has partial Cranelift evidence for `std/fs.ax`
-`read_file` on present and missing filesystem names, plus denial evidence that a
-package without the `fs` capability fails before backend lowering. Full
-runtime-time filesystem access, manifest policy parity, and audit parity remain
-open under #1001.
+The `fs.read` row now has Cranelift evidence for `std/fs.ax` `read_file` on present and missing filesystem names, plus denial evidence that a package without the `fs` capability fails before backend lowering.
 
-The DNS row now has partial Cranelift evidence: the spike builds and runs a
+The DNS row now has Cranelift evidence: the spike builds and runs a
 `std/net.ax` package resolving `localhost` through host DNS without generated
 Rust and returns the public `Option<string>` shape. Packages without the `net`
 capability still fail before backend lowering. Full runtime-time DNS policy,
 non-loopback coverage, resolver portability, and audit parity remain open under
 #1001.
 
-The TCP row now has partial Cranelift evidence: the spike builds and runs
+The TCP row now has Cranelift evidence: the spike builds and runs
 `std/net.ax` `tcp_listen_loopback_once(...)` over `127.0.0.1` without generated
 Rust and returns a loopback port. Packages without the `net` capability still
 fail before backend lowering. Paired dynamic-port dial coverage, full TCP
 socket lifecycle APIs, non-loopback policy coverage, timeout parity, and audit
 parity remain open under #1001.
 
-The UDP row now has partial Cranelift evidence: the spike builds and runs
+The UDP row now has Cranelift evidence: the spike builds and runs
 `std/net.ax` `udp_bind_loopback_once(...)` over `127.0.0.1` without generated
 Rust and returns a loopback port. Packages without the `net` capability still
 fail before backend lowering. Paired dynamic-port send/recv coverage, full UDP
 socket lifecycle APIs, non-loopback policy coverage, timeout parity, and audit
 parity remain open under #1001.
 
-The filesystem write row now has partial Cranelift evidence: the spike
+The filesystem write row now has Cranelift evidence: the spike
 evaluates `std/fs.ax` write helpers over configured `fs_root`-scoped literal
 paths during compilation and emits the resulting output, covering `mkdir_all`,
 `write_file`, `append_file`, readback, `replace_file`, `create_file`,
@@ -302,14 +282,14 @@ the `crypto` capability still fail before backend lowering. Runtime-integrated
 crypto provider selection, broader algorithm coverage, deterministic test
 hooks, audit parity, and non-Unix support remain open under #1001.
 
-The HTTP client row now has partial Cranelift evidence: the spike builds
+The HTTP client row now has Cranelift evidence: the spike builds
 `std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL
 and fetches a local one-shot HTTP response without generated Rust. Packages
 without the `net` capability still fail before backend lowering. HTTPS,
 nonlocal HTTP policy coverage, redirects, richer response handling, timeout
 parity, and audit parity remain open under #1001.
 
-The HTTP server row now has partial Cranelift evidence: the spike builds and
+The HTTP server row now has Cranelift evidence: the spike builds and
 runs loopback HTTP server entrypoints without generated Rust, covering
 `http_server_listen`, `http_server_local_port`, `http_server_accept`,
 `http_request_method`, `http_request_path`, `http_request_body`,
@@ -319,7 +299,7 @@ lowering. Route helpers, multi-request serving, non-loopback policy coverage,
 richer response metadata, timeout parity, and audit parity remain open under
 #1001.
 
-The async HTTP server row now has partial Cranelift evidence: the spike builds
+The async HTTP server row now has Cranelift evidence: the spike builds
 and runs `http_async_serve_route` over a loopback server handle without
 generated Rust, returns a `Task<bool>`, and serves a one-request HTTP/1.0 route
 fixture. It also proves the async gate separately: with `net` present and
@@ -358,13 +338,13 @@ builds and runs direct map indexing, `get`, `get_or_default`,
 shapes without generated Rust. Broader map ownership and host-boundary
 representation remain tracked by issue #1001.
 
-The `env.read` row now has partial Cranelift evidence for `std/env.ax`
+The `env.read` row now has Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names without generated Rust, plus
 denial evidence that a package without the `env` capability fails before
 backend lowering. Full runtime-time lookup, manifest allowlist parity, and
 audit parity remain open under #1001.
 
-The FFI call row now has partial Cranelift evidence: the spike builds and runs
+The FFI call row now has Cranelift evidence: the spike builds and runs
 a narrow C ABI `extern fn strlen(value: string): int from "c"` fixture without
 generated Rust, using the source-level extern declaration. A package with an
 `extern fn` declaration and no `ffi` capability must still receive its public
@@ -373,7 +353,7 @@ dynamic symbol loading, pointer and mutable-pointer ABI shapes, non-string
 arguments, ownership safety, platform library resolution, and audit parity
 remain open under #1001.
 
-The async runtime row now has partial Cranelift evidence for `std/async.ax`
+The async runtime row now has Cranelift evidence for `std/async.ax`
 `ready`, `await`, `spawn`, `join`, `cancel`, `is_canceled`, `timeout`,
 single-slot channel `send`/`recv`, `select`, `selected`, and `selected_value`
 without generated Rust. A package importing `std/async.ax` with no `async`
@@ -441,7 +421,7 @@ formatting plus `info_attrs` stderr emission, then emits the resulting stdout
 and stderr streams from the native binary. Stdin reads and broader
 streaming/runtime buffering remain tracked by issue #1001.
 
-The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
+The `clock.now_sleep` row now has Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, and zero-duration `sleep`, plus guards that a
 package without the `clock` capability fails before backend lowering and that
 nonzero sleep fails fast instead of ever reaching host sleep during
