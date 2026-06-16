@@ -3,10 +3,21 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 script="$repo_root/scripts/ci/run-direct-native-runtime-abi-evidence.sh"
+wrapper="$repo_root/scripts/ci/run-direct-native-example-smoke.sh"
 makefile="$repo_root/Makefile"
 
 [[ -x "$script" ]] || {
   echo "missing executable direct native runtime ABI evidence runner: $script" >&2
+  exit 1
+}
+
+[[ -x "$wrapper" ]] || {
+  echo "missing executable direct native example smoke wrapper: $wrapper" >&2
+  exit 1
+}
+
+grep -Fq 'run-direct-native-runtime-abi-evidence.sh' "$wrapper" || {
+  echo "direct native example smoke wrapper must delegate to the runtime ABI evidence runner" >&2
   exit 1
 }
 
