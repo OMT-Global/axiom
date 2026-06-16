@@ -27,6 +27,7 @@ assert report["blocked_rows"] == []
 assert len(report["incomplete_rows"]) == 34
 assert "ffi.call" in report["incomplete_rows"]
 assert "json.serdes" in report["incomplete_rows"]
+assert "process.status" in report["incomplete_rows"]
 assert report["blocker_issues"] == [1001]
 assert report["errors"] == []
 PY
