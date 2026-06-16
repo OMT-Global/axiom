@@ -7,14 +7,23 @@ temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
 
 case_dir="$temp_dir/repo"
-mkdir -p "$case_dir/docs" "$case_dir/scripts/ci" "$case_dir/stage1/runtime-abi" "$case_dir/stage1/compiler-contracts/snapshots"
+mkdir -p \
+  "$case_dir/docs" \
+  "$case_dir/scripts/ci" \
+  "$case_dir/stage1/runtime-abi" \
+  "$case_dir/stage1/compiler-contracts/snapshots" \
+  "$case_dir/stage1/crates/axiomc/tests" \
+  "$case_dir/stage1/crates/axiomc-backend-cranelift/src"
 cp "$script" "$case_dir/scripts/ci/check-rust-exit-readiness.sh"
 cp "$repo_root/scripts/ci/check-direct-native-runtime-abi.py" "$case_dir/scripts/ci/check-direct-native-runtime-abi.py"
+cp "$repo_root/scripts/ci/run-direct-native-runtime-abi-evidence.sh" "$case_dir/scripts/ci/run-direct-native-runtime-abi-evidence.sh"
 cp "$repo_root/docs/rust-exit-readiness.md" "$case_dir/docs/rust-exit-readiness.md"
 cp "$repo_root/docs/rust-exit-readiness.json" "$case_dir/docs/rust-exit-readiness.json"
 cp "$repo_root/stage1/runtime-abi/direct-native-v0.json" "$case_dir/stage1/runtime-abi/direct-native-v0.json"
 cp "$repo_root/stage1/compiler-contracts/snapshots/command-lsp.json" "$case_dir/stage1/compiler-contracts/snapshots/command-lsp.json"
 cp "$repo_root/stage1/compiler-contracts/snapshots/mir-backend.json" "$case_dir/stage1/compiler-contracts/snapshots/mir-backend.json"
+cp "$repo_root/stage1/crates/axiomc/tests/cranelift_backend.rs" "$case_dir/stage1/crates/axiomc/tests/cranelift_backend.rs"
+cp "$repo_root/stage1/crates/axiomc-backend-cranelift/src/lib.rs" "$case_dir/stage1/crates/axiomc-backend-cranelift/src/lib.rs"
 cat >"$case_dir/Makefile" <<'MAKE'
 rust-exit-readiness:
 	bash scripts/ci/check-rust-exit-readiness.sh --json
@@ -28,7 +37,6 @@ MAKE
 
 cat >"$temp_dir/open-issues.txt" <<'ISSUES'
 927 OPEN
-928 OPEN
 929 OPEN
 693 OPEN
 694 OPEN
@@ -58,7 +66,7 @@ statuses = {check["name"]: check["status"] for check in payload["checks"]}
 assert statuses["readiness_doc_present"] == "pass"
 assert statuses["readiness_manifest_valid"] == "pass"
 assert statuses["readiness_blockers_closed"] == "fail"
-assert statuses["direct_native_runtime_abi_ready"] == "pass"
+assert statuses["direct_native_runtime_abi_ready"] == "fail"
 assert statuses["command_lsp_release_boundary"] == "pass"
 assert statuses["mir_backend_direct_native_boundary"] == "pass"
 PY
@@ -66,7 +74,6 @@ PY
 
 cat >"$temp_dir/issues.txt" <<'ISSUES'
 927 CLOSED
-928 CLOSED
 929 CLOSED
 693 CLOSED
 694 CLOSED
@@ -79,11 +86,11 @@ ISSUES
 
 (
   cd "$case_dir"
-  if bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/issues.txt" >"$temp_dir/still-blocked.json" 2>"$temp_dir/still-blocked.err"; then
-    echo "expected readiness check to fail while blocking issues remain open" >&2
+  if bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/issues.txt" >"$temp_dir/ready.json" 2>"$temp_dir/ready.err"; then
+    echo "expected readiness check to fail because the direct-native ABI report is still partial" >&2
     exit 1
   fi
-  python3 - "$temp_dir/still-blocked.json" <<'PY'
+  python3 - "$temp_dir/ready.json" <<'PY'
 import json
 import sys
 
@@ -95,7 +102,7 @@ statuses = {check["name"]: check["status"] for check in payload["checks"]}
 assert statuses["readiness_blockers_closed"] == "pass"
 assert statuses["rust_exit_issue_927_closed"] == "pass"
 assert statuses["rust_exit_issue_564_closed"] == "pass"
-assert statuses["direct_native_runtime_abi_ready"] == "pass"
+assert statuses["direct_native_runtime_abi_ready"] == "fail"
 assert statuses["command_lsp_release_boundary"] == "pass"
 assert statuses["mir_backend_direct_native_boundary"] == "pass"
 PY
