@@ -1138,8 +1138,8 @@ fn define_i64_function(
     closedir_id: FuncId,
     realpath_id: FuncId,
     strncmp_id: FuncId,
-    getaddrinfo_id: FuncId,
-    freeaddrinfo_id: FuncId,
+    #[cfg(not(windows))] getaddrinfo_id: FuncId,
+    #[cfg(not(windows))] freeaddrinfo_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -1193,7 +1193,9 @@ fn define_i64_function(
         let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
         let realpath_ref = module.declare_func_in_func(realpath_id, builder.func);
         let strncmp_ref = module.declare_func_in_func(strncmp_id, builder.func);
+        #[cfg(not(windows))]
         let getaddrinfo_ref = module.declare_func_in_func(getaddrinfo_id, builder.func);
+        #[cfg(not(windows))]
         let freeaddrinfo_ref = module.declare_func_in_func(freeaddrinfo_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
@@ -1219,8 +1221,26 @@ fn define_i64_function(
             closedir: closedir_ref,
             realpath: realpath_ref,
             strncmp: strncmp_ref,
-            getaddrinfo: Some(getaddrinfo_ref),
-            freeaddrinfo: Some(freeaddrinfo_ref),
+            getaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(getaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
+            freeaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(freeaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {

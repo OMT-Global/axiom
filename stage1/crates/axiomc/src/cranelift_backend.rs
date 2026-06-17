@@ -21310,4 +21310,22 @@ mod tests {
             Some("::1")
         );
     }
+
+    #[test]
+    fn i64_net_resolve_host_uses_canonical_ipv6_length() {
+        let expr = Expr::Call {
+            name: String::from("net_resolve"),
+            args: vec![Expr::Literal(LiteralValue::String(String::from(
+                "0:0:0:0:0:0:0:1",
+            )))],
+            ty: Type::Option(Box::new(Type::String)),
+        };
+
+        let host = super::i64_net_resolve_host(&expr, &I64StaticBindings::default())
+            .expect("numeric IPv6 host should lower");
+
+        assert_eq!(host.host, "0:0:0:0:0:0:0:1");
+        assert_eq!(host.resolved_len, 3);
+        assert_ne!(host.resolved_len, host.host.len() as i64);
+    }
 }
