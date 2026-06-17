@@ -65,8 +65,8 @@ struct I64RuntimeRefs {
     closedir: FuncRef,
     realpath: FuncRef,
     strncmp: FuncRef,
-    getaddrinfo: FuncRef,
-    freeaddrinfo: FuncRef,
+    getaddrinfo: Option<FuncRef>,
+    freeaddrinfo: Option<FuncRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -743,19 +743,29 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare strncmp import: {message}"))
         })?;
+    #[cfg(not(windows))]
     let mut getaddrinfo_sig = module.make_signature();
+    #[cfg(not(windows))]
     getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
     getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
     getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
     getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
     getaddrinfo_sig.returns.push(AbiParam::new(types::I32));
+    #[cfg(not(windows))]
     let getaddrinfo_id = module
         .declare_function("getaddrinfo", Linkage::Import, &getaddrinfo_sig)
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare getaddrinfo import: {message}"))
         })?;
+    #[cfg(not(windows))]
     let mut freeaddrinfo_sig = module.make_signature();
+    #[cfg(not(windows))]
     freeaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
     let freeaddrinfo_id = module
         .declare_function("freeaddrinfo", Linkage::Import, &freeaddrinfo_sig)
         .map_err(|message| {
@@ -765,6 +775,43 @@ fn emit_i64_exit_object(
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
     for (index, function) in program.functions.iter().enumerate() {
+        #[cfg(not(windows))]
+        {
+            define_i64_function(
+                &mut module,
+                &function_ids,
+                write_id,
+                read_id,
+                sleep_id,
+                getenv_id,
+                strlen_id,
+                atoll_id,
+                open_id,
+                creat_id,
+                lseek_id,
+                close_id,
+                access_id,
+                system_id,
+                fopen_id,
+                fwrite_id,
+                fclose_id,
+                unlink_id,
+                rename_id,
+                mkdir_id,
+                rmdir_id,
+                opendir_id,
+                closedir_id,
+                realpath_id,
+                strncmp_id,
+                getaddrinfo_id,
+                freeaddrinfo_id,
+                &output_data_ids,
+                index,
+                function,
+            )?;
+            continue;
+        }
+        #[cfg(windows)]
         define_i64_function(
             &mut module,
             &function_ids,
@@ -791,8 +838,6 @@ fn emit_i64_exit_object(
             closedir_id,
             realpath_id,
             strncmp_id,
-            getaddrinfo_id,
-            freeaddrinfo_id,
             &output_data_ids,
             index,
             function,
@@ -838,7 +883,9 @@ fn emit_i64_exit_object(
         let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
         let realpath_ref = module.declare_func_in_func(realpath_id, builder.func);
         let strncmp_ref = module.declare_func_in_func(strncmp_id, builder.func);
+        #[cfg(not(windows))]
         let getaddrinfo_ref = module.declare_func_in_func(getaddrinfo_id, builder.func);
+        #[cfg(not(windows))]
         let freeaddrinfo_ref = module.declare_func_in_func(freeaddrinfo_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
@@ -864,8 +911,26 @@ fn emit_i64_exit_object(
             closedir: closedir_ref,
             realpath: realpath_ref,
             strncmp: strncmp_ref,
-            getaddrinfo: getaddrinfo_ref,
-            freeaddrinfo: freeaddrinfo_ref,
+            getaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(getaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
+            freeaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(freeaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
         };
         let mut locals = Vec::new();
         for local_expr in &program.locals {
@@ -1154,8 +1219,8 @@ fn define_i64_function(
             closedir: closedir_ref,
             realpath: realpath_ref,
             strncmp: strncmp_ref,
-            getaddrinfo: getaddrinfo_ref,
-            freeaddrinfo: freeaddrinfo_ref,
+            getaddrinfo: Some(getaddrinfo_ref),
+            freeaddrinfo: Some(freeaddrinfo_ref),
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
@@ -3939,6 +4004,7 @@ fn emit_i64_process_status_expr(
     Ok(builder.block_params(merge_block)[0])
 }
 
+#[cfg(not(windows))]
 fn emit_i64_net_resolve_len_expr(
     builder: &mut FunctionBuilder<'_>,
     runtime_refs: I64RuntimeRefs,
@@ -3959,10 +4025,14 @@ fn emit_i64_net_resolve_len_expr(
     ));
     builder.ins().stack_store(null_ptr, result_slot, 0);
     let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+    #[cfg(not(windows))]
     let call = builder.ins().call(
-        runtime_refs.getaddrinfo,
+        runtime_refs
+            .getaddrinfo
+            .expect("getaddrinfo import missing"),
         &[host_ptr, null_ptr, null_ptr, result_ptr],
     );
+    #[cfg(not(windows))]
     let status = builder.inst_results(call)[0];
 
     let success_block = builder.create_block();
@@ -3986,7 +4056,13 @@ fn emit_i64_net_resolve_len_expr(
 
     builder.switch_to_block(free_block);
     builder.seal_block(free_block);
-    builder.ins().call(runtime_refs.freeaddrinfo, &[result_head]);
+    #[cfg(not(windows))]
+    builder.ins().call(
+        runtime_refs
+            .freeaddrinfo
+            .expect("freeaddrinfo import missing"),
+        &[result_head],
+    );
     let len = builder.ins().iconst(types::I64, resolved_len);
     builder.ins().jump(merge_block, &[BlockArg::Value(len)]);
 
@@ -3998,6 +4074,18 @@ fn emit_i64_net_resolve_len_expr(
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
     Ok(builder.block_params(merge_block)[0])
+}
+
+#[cfg(windows)]
+fn emit_i64_net_resolve_len_expr(
+    _builder: &mut FunctionBuilder<'_>,
+    _runtime_refs: I64RuntimeRefs,
+    _host: &str,
+    _resolved_len: i64,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    Err(CraneliftBackendError::new(
+        "numeric native DNS lowering is unsupported on windows",
+    ))
 }
 
 fn emit_i64_sleep_ms_expr(
