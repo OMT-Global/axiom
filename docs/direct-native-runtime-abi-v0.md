@@ -147,6 +147,9 @@ branch statements into Cranelift loop, branch, return-block, and assignment
 instructions in both the entrypoint and helper functions, including helper
 function loop bodies with scoped runtime `let` declarations, then returns the
 computed value as the process exit status at runtime without generated Rust.
+The public scalar aggregate, numeric cross-width, and static scalar smokes now
+also assert that the build JSON reports `generated_rust: null`, so this evidence
+cannot silently drift back through generated Rust.
 The same path now has narrow boolean runtime
 evidence for signed i64 comparisons, bool local bindings backed by i64 slots,
 simple bool static values, and boolean literals composed with `&&`/`||` driving
@@ -690,6 +693,9 @@ extern declaration. The direct-native i64 path also lowers that same narrow
 `strlen` declaration for supported literal and string-projection inputs into
 native process exit status without generated Rust, including dynamic
 key-array string selections that feed the direct-native length projection path.
+Those same supported `strlen` inputs now also lower inside direct-native helper
+functions and return through native helper calls before the final process exit
+status.
 Known-string inputs now call the native `strlen` import at runtime instead of
 relying on compile-time length folding. That path also appends host audit JSONL
 entries when `AXIOM_HOST_AUDIT_LOG` is set, recording only the library, symbol,
@@ -813,9 +819,13 @@ Known-input `json_parse_string` and
 `json_parse_field_string`/`json_parse_field_value` direct `Option<string>`
 matches, and known-input `json_parse_int`, `json_parse_bool`,
 `json_parse_field_int`, and `json_parse_field_bool` direct scalar option matches
-into native process exit status without generated Rust. Schema validation,
-dynamic runtime JSON parsing, and broader JSON value modeling remain tracked by
-issue #1001. Imported public `std/json.ax` scalar parse/stringify wrappers for
+into native process exit status without generated Rust. Known JSON parse and
+stringify results can also flow through Axiom helper functions that return
+native scalar length projections before driving process exit status, including
+helper-local JSON string locals, field extraction, parsed value length matches,
+and quoted static bool stringify length projections. Schema validation, dynamic
+runtime JSON parsing, and broader JSON value modeling remain tracked by issue
+#1001. Imported public `std/json.ax` scalar parse/stringify wrappers for
 `parse_int(...)`, `parse_bool(...)`, `parse_string(...)`,
 `parse_field_int(...)`, `parse_field_bool(...)`, `parse_field_string(...)`,
 `stringify_int(...)`, `stringify_bool(...)`, and `stringify_string(...)` now
@@ -850,8 +860,9 @@ and broader schema helper coverage remain tracked by issue #1001.
 
 The owned move-state row has partial direct-native evidence: the Cranelift
 spike builds and runs projection-sensitive owned field moves while preserving
-access to disjoint sibling projections. Broader move-state, lifetime, and host
-ABI coverage remain tracked by issue #1001.
+access to disjoint sibling projections, and the public smoke now asserts the
+build JSON reports `generated_rust: null` for that path. Broader move-state,
+lifetime, and host ABI coverage remain tracked by issue #1001.
 
 The logging/stdio row has partial direct-native evidence: the Cranelift spike
 now evaluates `std/io.ax` stderr writes and `std/log.ax` structured event
