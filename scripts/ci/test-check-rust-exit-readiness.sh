@@ -16,7 +16,7 @@ mkdir -p \
   "$case_dir/stage1/crates/axiomc-backend-cranelift/src"
 cp "$script" "$case_dir/scripts/ci/check-rust-exit-readiness.sh"
 cp "$repo_root/scripts/ci/check-direct-native-runtime-abi.py" "$case_dir/scripts/ci/check-direct-native-runtime-abi.py"
-cp "$repo_root/scripts/ci/run-direct-native-example-smoke.sh" "$case_dir/scripts/ci/run-direct-native-example-smoke.sh"
+cp "$repo_root/scripts/ci/run-direct-native-runtime-abi-evidence.sh" "$case_dir/scripts/ci/run-direct-native-runtime-abi-evidence.sh"
 cp "$repo_root/docs/rust-exit-readiness.md" "$case_dir/docs/rust-exit-readiness.md"
 cp "$repo_root/docs/rust-exit-readiness.json" "$case_dir/docs/rust-exit-readiness.json"
 cp "$repo_root/stage1/runtime-abi/direct-native-v0.json" "$case_dir/stage1/runtime-abi/direct-native-v0.json"
@@ -24,6 +24,16 @@ cp "$repo_root/stage1/compiler-contracts/snapshots/command-lsp.json" "$case_dir/
 cp "$repo_root/stage1/compiler-contracts/snapshots/mir-backend.json" "$case_dir/stage1/compiler-contracts/snapshots/mir-backend.json"
 cp "$repo_root/stage1/crates/axiomc/tests/cranelift_backend.rs" "$case_dir/stage1/crates/axiomc/tests/cranelift_backend.rs"
 cp "$repo_root/stage1/crates/axiomc-backend-cranelift/src/lib.rs" "$case_dir/stage1/crates/axiomc-backend-cranelift/src/lib.rs"
+cat >"$case_dir/Makefile" <<'MAKE'
+rust-exit-readiness:
+	bash scripts/ci/check-rust-exit-readiness.sh --json
+
+rust-exit-readiness-github:
+	bash scripts/ci/check-rust-exit-readiness.sh --json --require-issue-states
+
+rust-exit-readiness-test:
+	bash scripts/ci/test-check-rust-exit-readiness.sh
+MAKE
 python3 - "$case_dir/stage1/runtime-abi/direct-native-v0.json" <<'PY'
 import json
 import sys
@@ -124,8 +134,7 @@ ISSUES
 (
   cd "$case_dir"
   if ! bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/issues.txt" >"$temp_dir/ready.json" 2>"$temp_dir/ready.err"; then
-    cat "$temp_dir/ready.err" >&2
-    echo "expected readiness check to pass when blockers are closed and the runtime ABI is ready" >&2
+    echo "expected readiness check to pass once blocking issues are closed and the ABI report is ready" >&2
     exit 1
   fi
   python3 - "$temp_dir/ready.json" <<'PY'
