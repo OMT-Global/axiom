@@ -16,6 +16,7 @@ mkdir -p \
   "$case_dir/stage1/crates/axiomc-backend-cranelift/src"
 cp "$script" "$case_dir/scripts/ci/check-rust-exit-readiness.sh"
 cp "$repo_root/scripts/ci/check-direct-native-runtime-abi.py" "$case_dir/scripts/ci/check-direct-native-runtime-abi.py"
+cp "$repo_root/scripts/ci/run-direct-native-example-smoke.sh" "$case_dir/scripts/ci/run-direct-native-example-smoke.sh"
 cp "$repo_root/scripts/ci/run-direct-native-runtime-abi-evidence.sh" "$case_dir/scripts/ci/run-direct-native-runtime-abi-evidence.sh"
 cp "$repo_root/docs/rust-exit-readiness.md" "$case_dir/docs/rust-exit-readiness.md"
 cp "$repo_root/docs/rust-exit-readiness.json" "$case_dir/docs/rust-exit-readiness.json"
