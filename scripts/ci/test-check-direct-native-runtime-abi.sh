@@ -48,6 +48,20 @@ with open(sys.argv[2], "w", encoding="utf-8") as handle:
     json.dump(contract, handle)
 PY
 
+python3 - "$contract" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    contract = json.load(handle)
+
+capability_rows = {row["id"]: row for row in contract["capability_shims"]}
+for row_id in ("regex.match_replace", "io.logging_stdio"):
+    runtime_evidence = capability_rows[row_id]["runtime_evidence"]
+    assert "stage1/crates/axiomc/src/cranelift_backend.rs" in runtime_evidence
+    assert "stage1/crates/axiomc-backend-cranelift/src/lib.rs" in runtime_evidence
+PY
+
 python3 - "$contract" "$temp_dir/missing-evidence.json" <<'PY'
 import json
 import sys
