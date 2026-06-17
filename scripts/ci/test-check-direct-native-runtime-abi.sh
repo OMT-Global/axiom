@@ -50,8 +50,8 @@ assert report["evidence_summary"]["value_features"] == {
 assert report["evidence_summary"]["capability_shims"] == {
     "with_evidence": 22,
     "without_evidence": 0,
-    "with_runtime_evidence": 13,
-    "without_runtime_evidence": 9,
+    "with_runtime_evidence": 19,
+    "without_runtime_evidence": 3,
     "with_denial_evidence": 18,
     "without_denial_evidence": 4,
 }
@@ -179,6 +179,12 @@ capability_rows = {row["id"]: row for row in contract["capability_shims"]}
 for row_id in (
     "fs.read",
     "fs.write",
+    "network.dns.resolve",
+    "network.tcp",
+    "network.udp",
+    "network.http.client",
+    "network.http.server",
+    "network.http.async_server",
     "process.status",
     "env.read",
     "clock.now_sleep",
