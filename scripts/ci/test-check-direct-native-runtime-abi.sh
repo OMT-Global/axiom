@@ -86,44 +86,66 @@ if python3 "$script" --contract "$temp_dir/invalid-contract.json" --json >"$temp
   echo "expected invalid contracts to fail" >&2
   exit 1
 fi
-python3 - "$temp_dir/invalid-report.json" <<'PY'
+
+printf '[]' >"$temp_dir/non-object-contract.json"
+if python3 "$script" --contract "$temp_dir/non-object-contract.json" --json >"$temp_dir/non-object-report.json"; then
+  echo "expected non-object contracts to fail" >&2
+  exit 1
+fi
+
+if python3 "$script" --contract "$temp_dir/missing-contract.json" --json >"$temp_dir/missing-report.json"; then
+  echo "expected missing contracts to fail" >&2
+  exit 1
+fi
+
+python3 - "$temp_dir/invalid-report.json" "$temp_dir/non-object-report.json" "$temp_dir/missing-report.json" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], encoding="utf-8") as handle:
-    report = json.load(handle)
+for report_path in sys.argv[1:]:
+    with open(report_path, encoding="utf-8") as handle:
+        report = json.load(handle)
 
-assert report["schema"] == "axiom.direct_native.runtime_abi.check.v1"
-assert report["ready"] is False
-assert report["incomplete_rows"] == []
-assert report["incomplete_rows_by_group"] == {
-    "value_features": [],
-    "capability_shims": [],
-}
-assert report["blocked_rows"] == []
-assert report["blocked_rows_by_group"] == {
-    "value_features": [],
-    "capability_shims": [],
-}
-assert report["evidence_summary"] == {
-    "value_features": {
-        "with_evidence": 0,
-        "without_evidence": 0,
-        "with_runtime_evidence": 0,
-        "without_runtime_evidence": 0,
-        "with_denial_evidence": 0,
-        "without_denial_evidence": 0,
-    },
-    "capability_shims": {
-        "with_evidence": 0,
-        "without_evidence": 0,
-        "with_runtime_evidence": 0,
-        "without_runtime_evidence": 0,
-        "with_denial_evidence": 0,
-        "without_denial_evidence": 0,
-    },
-}
-assert report["errors"]
+    assert report["schema"] == "axiom.direct_native.runtime_abi.check.v1"
+    assert report["ready"] is False
+    assert report["target_id"] is None
+    assert report["contract_status"] is None
+    assert report["status_counts"] == {
+        "value_features": {"blocked": 0, "implemented": 0, "partial": 0},
+        "capability_shims": {"blocked": 0, "implemented": 0, "partial": 0},
+    }
+    assert report["value_feature_count"] == 0
+    assert report["capability_shim_count"] == 0
+    assert report["incomplete_rows"] == []
+    assert report["incomplete_rows_by_group"] == {
+        "value_features": [],
+        "capability_shims": [],
+    }
+    assert report["blocked_rows"] == []
+    assert report["blocked_rows_by_group"] == {
+        "value_features": [],
+        "capability_shims": [],
+    }
+    assert report["blocker_issues"] == []
+    assert report["evidence_summary"] == {
+        "value_features": {
+            "with_evidence": 0,
+            "without_evidence": 0,
+            "with_runtime_evidence": 0,
+            "without_runtime_evidence": 0,
+            "with_denial_evidence": 0,
+            "without_denial_evidence": 0,
+        },
+        "capability_shims": {
+            "with_evidence": 0,
+            "without_evidence": 0,
+            "with_runtime_evidence": 0,
+            "without_runtime_evidence": 0,
+            "with_denial_evidence": 0,
+            "without_denial_evidence": 0,
+        },
+    }
+    assert report["errors"]
 PY
 
 python3 - "$contract" "$temp_dir/ready-contract.json" <<'PY'
