@@ -537,7 +537,10 @@ hooks, audit parity, and non-Unix support remain open under #1001.
 The direct-native crypto AEAD slice is now marked partial: the Cranelift spike
 builds and runs `std/crypto_aead.ax` AES-256-GCM seal/open while the public
 smoke asserts `generated_rust` is null through a dynamically loaded host OpenSSL
-EVP provider. Packages without the `crypto` capability still fail before
+EVP provider. The smoke now also sends AES-GCM seal length and opened plaintext
+length projections through helper functions before native binary stdout,
+proving sealed and opened AEAD byte-array values can cross helper boundaries in
+the spike path. Packages without the `crypto` capability still fail before
 backend lowering. Runtime-integrated crypto provider selection, broader
 algorithm coverage, deterministic test hooks, audit parity, and non-Unix
 support remain open under #1001.
