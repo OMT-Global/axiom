@@ -12403,16 +12403,32 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/fs.ax"
 
+static DATA_PATH: string = "scratch/data.txt"
+static RUNTIME_PREFIX: string = "runtime-"
+static DIR_PREFIX: string = "scratch/"
+
 fn main(): int {
-let wrote: int = write_file("scratch/data.txt", "runtime-write")
-let appended: int = append_file("scratch/data.txt", "+runtime-append")
-let replaced: int = replace_file("scratch/data.txt", "runtime-replace")
-let removed: int = remove_file("scratch/data.txt")
-let created: int = create_file("scratch/created.txt")
-let made_dir: int = mkdir("scratch/native-dir")
-let removed_dir: int = remove_dir("scratch/native-dir")
-let made_all: int = mkdir_all("scratch/native-all/deep")
-let blocked: int = write_file("../escape.txt", "blocked")
+let append_path: string = "scratch/data.txt"
+let replace_path: string = "scratch/data.txt"
+let remove_path: string = "scratch/data.txt"
+let create_path: string = "scratch/created.txt"
+let mkdir_name: string = "native-dir"
+let remove_dir_name: string = "native-dir"
+let nested_leaf: string = "deep"
+let blocked_path: string = "../escape.txt"
+let write_content: string = "runtime-write"
+let append_suffix: string = "append"
+let replace_suffix: string = "replace"
+let blocked_content: string = "blocked"
+let wrote: int = write_file(DATA_PATH, write_content)
+let appended: int = append_file(append_path, "+" + RUNTIME_PREFIX + append_suffix)
+let replaced: int = replace_file(replace_path, RUNTIME_PREFIX + replace_suffix)
+let removed: int = remove_file(remove_path)
+let created: int = create_file(create_path)
+let made_dir: int = mkdir(DIR_PREFIX + mkdir_name)
+let removed_dir: int = remove_dir(DIR_PREFIX + remove_dir_name)
+let made_all: int = mkdir_all(DIR_PREFIX + "native-all/" + nested_leaf)
+let blocked: int = write_file(blocked_path, blocked_content)
 if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && created == 0 && made_dir == 0 && removed_dir == 0 && made_all == 0 && blocked == -1 {
 return 48
 } else {
