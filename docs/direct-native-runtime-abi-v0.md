@@ -871,7 +871,10 @@ paths now also feed direct-native known string comparisons, length projections,
 Rust for literal `Value`/object-map and literal JSON inputs. Those same
 known-input `std/serdes` string results can now feed source-level `print`
 statements in runtime-exit `main` functions, preserving exact native stdout JSON
-lines and parse-error text while still reporting `generated_rust: null`. Broader
+lines and parse-error text while still reporting `generated_rust: null`. They
+can also feed public `std/io.ax` `eprintln(...)` statements in runtime-exit
+`main` functions, preserving exact native stderr JSON lines, parse-error text,
+and newline-inclusive byte-count return values without generated Rust. Broader
 dynamic runtime JSON parsing, broad `std/serdes` `Value` storage, `JsonValue`
 wrapper construction beyond the evidenced scalar/string/object/array source
 wrappers, and broader schema helper coverage remain tracked by issue #1001.
