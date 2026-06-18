@@ -123,6 +123,9 @@ pub enum I64Expr {
     EnvLen {
         key: String,
     },
+    StdinLen {
+        max_bytes: u32,
+    },
     AuditEnv {
         intrinsic: String,
         package: String,
@@ -2217,6 +2220,9 @@ fn emit_i64_expr(
         I64Expr::EnvLen { key } => {
             emit_i64_env_len_expr(builder, runtime_refs.getenv, runtime_refs.strlen, key)
         }
+        I64Expr::StdinLen { max_bytes } => {
+            emit_i64_stdin_len_expr(builder, runtime_refs, *max_bytes)
+        }
         I64Expr::AuditEnv {
             intrinsic,
             package,
@@ -2519,6 +2525,31 @@ fn emit_i64_env_len_expr(
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
     Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_stdin_len_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    max_bytes: u32,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    if max_bytes == 0 {
+        return Ok(builder.ins().iconst(types::I64, 0));
+    }
+    let bytes_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        max_bytes,
+        0,
+    ));
+    let bytes_ptr = builder.ins().stack_addr(types::I64, bytes_slot, 0);
+    let fd = builder.ins().iconst(types::I32, 0);
+    let requested = builder.ins().iconst(types::I64, i64::from(max_bytes));
+    let read_call = builder
+        .ins()
+        .call(runtime_refs.read, &[fd, bytes_ptr, requested]);
+    let bytes_read = builder.inst_results(read_call)[0];
+    let failed = builder.ins().icmp_imm(IntCC::SignedLessThan, bytes_read, 0);
+    let failure_result = builder.ins().iconst(types::I64, -1);
+    Ok(builder.ins().select(failed, failure_result, bytes_read))
 }
 
 fn emit_i64_c_string_len_expr(
