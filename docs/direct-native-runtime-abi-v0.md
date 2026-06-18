@@ -881,7 +881,9 @@ alias those same direct-native paths in runtime-exit programs; scalar
 `stringify_int(...)` and `stringify_bool(...)` results can also be assigned to
 string locals that feed native stdout `print` without materializing a general
 runtime string value, and `stringify_string(...)` over those supported
-projection locals can now feed quoted native stdout lines directly. Public
+projection locals can now feed quoted native stdout lines directly; the same
+stdout smoke also prints arithmetic-derived `stringify_int(...)` output from a
+runtime local while asserting `generated_rust: null`. Public
 `value_int(...)`, `value_bool(...)`, and `value_string(...)` `JsonValue`
 wrappers over supported dynamic scalar/bool string projections can also feed
 `stringify_value(...)` and native stdout output without generated Rust. Public
