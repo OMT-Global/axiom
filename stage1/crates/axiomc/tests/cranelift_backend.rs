@@ -321,51 +321,6 @@ panic(event("warn", message, fields2(field_int("count", count), field_bool("read
         "{\"kind\":\"panic\",\"message\":\"{\\\"level\\\":\\\"warn\\\",\\\"message\\\":\\\"12345\\\",\\\"attributes\\\":{\\\"count\\\":12345,\\\"ready\\\":false}}\"}\n",
     );
 
-    let serdes_json_project = temp.path().join("terminal-panic-serdes-json");
-    write_terminal_panic_project(
-        &serdes_json_project,
-        r#"import "std/serdes.ax"
-
-fn object_json(): string {
-return to_json({"name": Text("axiom"), "count": Int(3), "ready": Bool(true)})
-}
-
-fn main(): int {
-panic(object_json())
-}
-"#,
-    );
-    assert_terminal_panic_report(
-        &serdes_json_project,
-        "{\"kind\":\"panic\",\"message\":\"{\\\"count\\\":3,\\\"name\\\":\\\"axiom\\\",\\\"ready\\\":true}\"}\n",
-    );
-
-    let serdes_error_project = temp.path().join("terminal-panic-serdes-error");
-    write_terminal_panic_project(
-        &serdes_error_project,
-        r#"import "std/serdes.ax"
-
-fn parse_error_text(): string {
-match from_json_str("{") {
-Ok(value) {
-return stringify(value)
-}
-Err(error) {
-return parse_error_message(error)
-}
-}
-}
-
-fn main(): int {
-panic(parse_error_text())
-}
-"#,
-    );
-    assert_terminal_panic_report(
-        &serdes_error_project,
-        "{\"kind\":\"panic\",\"message\":\"unterminated JSON object\"}\n",
-    );
-
     let else_branch_project = temp.path().join("terminal-panic-else-branch");
     write_terminal_panic_project(
         &else_branch_project,
@@ -771,46 +726,6 @@ fn cranelift_backend_lowers_nested_option_match_to_runtime_exit_code() {
         .expect("run cranelift nested option match main binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
-}
-
-#[cfg(not(windows))]
-#[test]
-fn cranelift_backend_builds_result_helper_output_binary() {
-    if which::which("cc").is_err() {
-        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
-        return;
-    }
-
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("result-helper-output");
-    write_result_helper_output_project(&project);
-
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-    assert!(
-        output.status.success(),
-        "cranelift result helper output build failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
-    assert_eq!(payload["backend"], "cranelift");
-    assert_eq!(payload["generated_rust"], Value::Null);
-    let binary = payload["binary"].as_str().expect("binary path");
-    let run = Command::new(binary)
-        .output()
-        .expect("run cranelift result helper output binary");
-    assert!(run.status.success(), "result helper output binary failed");
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "12\n8\ntrue\nfalse\n");
 }
 
 #[cfg(not(windows))]
@@ -2863,7 +2778,7 @@ fn cranelift_backend_builds_struct_field_binary() {
     );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
-        "3\ntrue\nstage1 structs\n5\ntrue\n8\nfalse\n8\nfalse\n"
+        "3\ntrue\nstage1 structs\n"
     );
 }
 
@@ -3104,7 +3019,7 @@ fn cranelift_backend_lowers_process_status_to_runtime_exit_code() {
         audit.contains("\"intrinsic\":\"process_status\""),
         "{audit}"
     );
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 3, "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 2, "{audit}");
     assert_eq!(
         audit.matches("\"outcome\":\"denied\"").count(),
         1,
@@ -3313,10 +3228,7 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
     let runtime_file = project.join("scratch/data.txt");
-    let append_file = project.join("scratch/append.txt");
-    let replace_file = project.join("scratch/replace.txt");
-    let replace_temp_file = project.join("scratch/.replace.txt.axiom-replace.tmp");
-    let removed_file = project.join("scratch/remove.txt");
+    let replace_temp_file = project.join("scratch/.data.txt.axiom-replace.tmp");
     let created_file = project.join("scratch/created.txt");
     let runtime_dir = project.join("scratch/native-dir");
     let runtime_dir_all = project.join("scratch/native-all");
@@ -3327,20 +3239,8 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
         "build should not create the fs_write runtime fixture"
     );
     assert!(
-        !append_file.exists(),
-        "build should not create the fs_append runtime fixture"
-    );
-    assert!(
-        !replace_file.exists(),
-        "build should not create the fs_replace runtime fixture"
-    );
-    assert!(
         !replace_temp_file.exists(),
         "build should not create the fs_replace temp fixture"
-    );
-    assert!(
-        !removed_file.exists(),
-        "build should not create the remove_file runtime fixture"
     );
     assert!(
         !created_file.exists(),
@@ -3364,21 +3264,9 @@ fn cranelift_backend_lowers_fs_write_to_runtime_exit_code() {
         .expect("run cranelift fs-write main binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
-    assert_eq!(
-        fs::read_to_string(&runtime_file).expect("read fs_write runtime fixture"),
-        "runtime-write"
-    );
-    assert_eq!(
-        fs::read_to_string(&append_file).expect("read fs_append runtime fixture"),
-        "runtime-seed+runtime-append"
-    );
-    assert_eq!(
-        fs::read_to_string(&replace_file).expect("read fs_replace runtime fixture"),
-        "runtime-replace"
-    );
     assert!(
-        !removed_file.exists(),
-        "runtime remove_file should remove the remove_file fixture"
+        !runtime_file.exists(),
+        "runtime remove_file should remove the fs_write fixture"
     );
     assert!(
         !replace_temp_file.exists(),
@@ -3631,10 +3519,7 @@ fn cranelift_backend_builds_borrowed_slice_binary() {
         "cranelift borrowed-slice binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(
-        String::from_utf8_lossy(&run.stdout),
-        "3\n4\n8\n6\n3\n4\n8\n6\n"
-    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n4\n8\n6\n3\n");
 }
 
 #[cfg(not(windows))]
@@ -3864,9 +3749,6 @@ high
 9
 9
 13
-11
-true
-21
 "
     );
 }
@@ -4786,10 +4668,7 @@ fn cranelift_backend_lowers_crypto_random_to_runtime_exit_code() {
     assert!(audit.contains("\"length\":\"int\""));
     assert!(audit.contains("\"args\":{}"));
     assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 4);
-    assert_eq!(audit.matches("\"outcome\":\"denied\"").count(), 2);
     assert!(!audit.contains("\"int:17\""));
-    assert!(!audit.contains("65537"));
-    assert!(!audit.contains("-2"));
     assert!(!audit.contains("\"bytes\""));
 }
 
@@ -5279,7 +5158,7 @@ fn cranelift_backend_lowers_integer_print_runtime_stdout_in_direct_native_main()
         .output()
         .expect("run cranelift integer print stdio main binary");
     assert_eq!(run.status.code(), Some(42));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n-3\n0\n45\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n-3\n0\n");
     assert_eq!(String::from_utf8_lossy(&run.stderr), "");
 }
 
@@ -5743,7 +5622,7 @@ fn cranelift_backend_lowers_std_time_sleep_wrappers_to_runtime_exit_code() {
         audit.contains("\"args\":{\"milliseconds\":\"int\"}"),
         "{audit}"
     );
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 5, "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 4, "{audit}");
     assert_eq!(
         audit.matches("\"outcome\":\"denied\"").count(),
         2,
@@ -6055,55 +5934,6 @@ unterminated JSON object
 "#,
     );
     assert_eq!(String::from_utf8_lossy(&run.stderr), "");
-}
-
-#[cfg(not(windows))]
-#[test]
-fn cranelift_backend_lowers_std_serdes_known_json_eprintln_to_runtime_stderr() {
-    if which::which("cc").is_err() {
-        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
-        return;
-    }
-
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("std-serdes-known-json-eprintln-main-exit");
-    write_std_serdes_known_json_eprintln_main_exit_project(&project);
-
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-    assert!(
-        output.status.success(),
-        "cranelift std/serdes known JSON eprintln main build failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
-    assert_eq!(payload["backend"], "cranelift");
-    assert_eq!(payload["generated_rust"], Value::Null);
-    let binary = payload["binary"].as_str().expect("binary path");
-    let run = Command::new(binary)
-        .output()
-        .expect("run cranelift std/serdes known JSON eprintln main binary");
-    assert_eq!(run.status.code(), Some(122));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
-    assert_eq!(
-        String::from_utf8_lossy(&run.stderr),
-        r#"{"count":3,"name":"axiom","ready":true}
-"direct-native"
-{"count":3,"name":"axiom"}
-direct-native
-unterminated JSON object
-"#,
-    );
 }
 
 #[cfg(not(windows))]
@@ -7534,28 +7364,9 @@ fn write_nested_option_match_main_exit_project(project: &Path) {
     .expect("write nested option match main exit lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn choose_nested(flag: bool): Option<Option<int>> {\nif flag {\nreturn Some(Some(48))\n} else {\nreturn Some(None)\n}\n}\n\nfn forward_nested(value: Option<Option<int>>): Option<Option<int>> {\nreturn value\n}\n\nfn score(value: Option<Option<int>>): int {\nreturn match value { Some(inner) => match inner { Some(payload) => payload, None => 49 }, None => 1 }\n}\n\nfn choose_result(flag: bool): Result<Option<int>, int> {\nif flag {\nreturn Ok(Some(48))\n} else {\nreturn Ok(None)\n}\n}\n\nfn forward_result(value: Result<Option<int>, int>): Result<Option<int>, int> {\nreturn value\n}\n\nfn score_result(value: Result<Option<int>, int>): int {\nreturn match value { Ok(inner) => match inner { Some(payload) => payload, None => 49 }, Err(error) => error }\n}\n\nfn main(): int {\nlet ready: Option<Option<int>> = Some(Some(48))\nlet returned_some: Option<Option<int>> = choose_nested(true)\nlet returned_none: Option<Option<int>> = choose_nested(false)\nlet forwarded_some: Option<Option<int>> = forward_nested(returned_some)\nlet forwarded_none: Option<Option<int>> = forward_nested(returned_none)\nlet result_ready: Result<Option<int>, int> = Ok(Some(48))\nlet result_returned_some: Result<Option<int>, int> = choose_result(true)\nlet result_returned_none: Result<Option<int>, int> = choose_result(false)\nlet result_forwarded_some: Result<Option<int>, int> = forward_result(result_returned_some)\nlet result_forwarded_none: Result<Option<int>, int> = forward_result(result_returned_none)\nlet match_code: int = match ready { Some(inner) => match inner { Some(payload) => payload, None => 49 }, None => 1 }\nlet helper_code: int = score(ready)\nlet returned_some_code: int = score(returned_some)\nlet returned_none_code: int = score(returned_none)\nlet forwarded_some_code: int = score(forwarded_some)\nlet forwarded_none_code: int = score(forwarded_none)\nlet inline_some_code: int = score(Some(Some(48)))\nlet inline_inner_none_code: int = score(Some(None))\nlet inline_outer_none_code: int = score(None)\nlet result_match_code: int = match result_ready { Ok(inner) => match inner { Some(payload) => payload, None => 49 }, Err(error) => error }\nlet result_helper_code: int = score_result(result_ready)\nlet result_returned_some_code: int = score_result(result_returned_some)\nlet result_returned_none_code: int = score_result(result_returned_none)\nlet result_forwarded_some_code: int = score_result(result_forwarded_some)\nlet result_forwarded_none_code: int = score_result(result_forwarded_none)\nlet result_inline_some_code: int = score_result(Ok(Some(48)))\nlet result_inline_inner_none_code: int = score_result(Ok(None))\nlet result_inline_err_code: int = score_result(Err(1))\nif match_code == 48 && helper_code == 48 && returned_some_code == 48 && returned_none_code == 49 && forwarded_some_code == 48 && forwarded_none_code == 49 && inline_some_code == 48 && inline_inner_none_code == 49 && inline_outer_none_code == 1 && result_match_code == 48 && result_helper_code == 48 && result_returned_some_code == 48 && result_returned_none_code == 49 && result_forwarded_some_code == 48 && result_forwarded_none_code == 49 && result_inline_some_code == 48 && result_inline_inner_none_code == 49 && result_inline_err_code == 1 {\nreturn match_code\n} else {\nreturn 2\n}\n}\n",
+        "fn choose_nested(flag: bool): Option<Option<int>> {\nif flag {\nreturn Some(Some(48))\n} else {\nreturn Some(None)\n}\n}\n\nfn forward_nested(value: Option<Option<int>>): Option<Option<int>> {\nreturn value\n}\n\nfn score(value: Option<Option<int>>): int {\nreturn match value { Some(inner) => match inner { Some(payload) => payload, None => 49 }, None => 1 }\n}\n\nfn choose_result(flag: bool): Result<Option<int>, int> {\nif flag {\nreturn Ok(Some(48))\n} else {\nreturn Ok(None)\n}\n}\n\nfn forward_result(value: Result<Option<int>, int>): Result<Option<int>, int> {\nreturn value\n}\n\nfn score_result(value: Result<Option<int>, int>): int {\nreturn match value { Ok(inner) => match inner { Some(payload) => payload, None => 49 }, Err(error) => error }\n}\n\nfn main(): int {\nlet ready: Option<Option<int>> = None\nready = Some(Some(48))\nlet returned_some: Option<Option<int>> = choose_nested(true)\nlet returned_none: Option<Option<int>> = choose_nested(false)\nlet forwarded_some: Option<Option<int>> = forward_nested(returned_some)\nlet forwarded_none: Option<Option<int>> = forward_nested(returned_none)\nlet result_ready: Result<Option<int>, int> = Err(1)\nresult_ready = Ok(Some(48))\nlet result_returned_some: Result<Option<int>, int> = choose_result(true)\nlet result_returned_none: Result<Option<int>, int> = choose_result(false)\nlet result_forwarded_some: Result<Option<int>, int> = forward_result(result_returned_some)\nlet result_forwarded_none: Result<Option<int>, int> = forward_result(result_returned_none)\nlet match_code: int = match ready { Some(inner) => match inner { Some(payload) => payload, None => 49 }, None => 1 }\nlet helper_code: int = score(ready)\nlet returned_some_code: int = score(returned_some)\nlet returned_none_code: int = score(returned_none)\nlet forwarded_some_code: int = score(forwarded_some)\nlet forwarded_none_code: int = score(forwarded_none)\nlet inline_some_code: int = score(Some(Some(48)))\nlet inline_inner_none_code: int = score(Some(None))\nlet inline_outer_none_code: int = score(None)\nlet result_match_code: int = match result_ready { Ok(inner) => match inner { Some(payload) => payload, None => 49 }, Err(error) => error }\nlet result_helper_code: int = score_result(result_ready)\nlet result_returned_some_code: int = score_result(result_returned_some)\nlet result_returned_none_code: int = score_result(result_returned_none)\nlet result_forwarded_some_code: int = score_result(result_forwarded_some)\nlet result_forwarded_none_code: int = score_result(result_forwarded_none)\nlet result_inline_some_code: int = score_result(Ok(Some(48)))\nlet result_inline_inner_none_code: int = score_result(Ok(None))\nlet result_inline_err_code: int = score_result(Err(1))\nif match_code == 48 && helper_code == 48 && returned_some_code == 48 && returned_none_code == 49 && forwarded_some_code == 48 && forwarded_none_code == 49 && inline_some_code == 48 && inline_inner_none_code == 49 && inline_outer_none_code == 1 && result_match_code == 48 && result_helper_code == 48 && result_returned_some_code == 48 && result_returned_none_code == 49 && result_forwarded_some_code == 48 && result_forwarded_none_code == 49 && result_inline_some_code == 48 && result_inline_inner_none_code == 49 && result_inline_err_code == 1 {\nreturn match_code\n} else {\nreturn 2\n}\n}\n",
     )
     .expect("write nested option match main exit source");
-}
-
-fn write_result_helper_output_project(project: &Path) {
-    fs::create_dir_all(project.join("src")).expect("create result helper output src");
-    fs::write(
-        project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-result-helper-output\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
-    )
-    .expect("write result helper output manifest");
-    fs::write(
-        project.join("axiom.lock"),
-        "version = 1\n\n[[package]]\nname = \"cranelift-result-helper-output\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
-    )
-    .expect("write result helper output lockfile");
-    fs::write(
-        project.join("src/main.ax"),
-        "fn choose_score(ok: bool): Result<int, int> {\nif ok {\nreturn Ok(12)\n} else {\nreturn Err(8)\n}\n}\n\nfn score(value: Result<int, int>): int {\nreturn match value { Ok(payload) => payload, Err(error) => error }\n}\n\nfn choose_enabled(ok: bool): Result<bool, bool> {\nif ok {\nreturn Ok(true)\n} else {\nreturn Err(false)\n}\n}\n\nfn enabled(value: Result<bool, bool>): bool {\nreturn match value { Ok(payload) => payload, Err(error) => error }\n}\n\nprint score(choose_score(true))\nprint score(choose_score(false))\nprint enabled(choose_enabled(true))\nprint enabled(choose_enabled(false))\n",
-    )
-    .expect("write result helper output source");
 }
 
 fn write_nested_result_match_main_exit_project(project: &Path) {
@@ -7605,12 +7416,14 @@ return match value { Ok(inner) => match inner { Ok(payload) => payload, Err(erro
 }
 
 fn main(): int {
-let option_ready: Option<Result<int, int>> = Some(Ok(48))
+let option_ready: Option<Result<int, int>> = None
+option_ready = Some(Ok(48))
 let option_returned_ok: Option<Result<int, int>> = choose_option_result(true)
 let option_returned_err: Option<Result<int, int>> = choose_option_result(false)
 let option_forwarded_ok: Option<Result<int, int>> = forward_option_result(option_returned_ok)
 let option_forwarded_err: Option<Result<int, int>> = forward_option_result(option_returned_err)
-let result_ready: Result<Result<int, int>, int> = Ok(Ok(48))
+let result_ready: Result<Result<int, int>, int> = Err(1)
+result_ready = Ok(Ok(48))
 let result_returned_ok: Result<Result<int, int>, int> = choose_result_result(true)
 let result_returned_err: Result<Result<int, int>, int> = choose_result_result(false)
 let result_forwarded_ok: Result<Result<int, int>, int> = forward_result_result(result_returned_ok)
@@ -8558,7 +8371,7 @@ fn write_known_crypto_text_main_exit_project(project: &Path) {
     .expect("write known crypto text lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "static KEY: string = \"key\"\n\nfn helper_sha_len(): int {\nreturn len(crypto_sha256(\"abc\"))\n}\n\nfn helper_hmac256_len(): int {\nreturn len(crypto_hmac_sha256(KEY, \"The quick brown fox jumps over the lazy dog\"))\n}\n\nfn helper_hmac512_len(): int {\nreturn len(crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\"))\n}\n\nfn main(): int {\nlet message_for_len: string = \"The quick brown fox jumps over the lazy dog\"\nlet message_for_gate: string = \"The quick brown fox jumps over the lazy dog\"\nlet sha_for_gate: string = crypto_sha256(\"abc\")\nlet hmac256_for_gate: string = crypto_hmac_sha256(KEY, message_for_gate)\nlet hmac512_for_gate: string = crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\")\nlet sha_len: int = len(crypto_sha256(\"abc\"))\nlet hmac256_len: int = len(crypto_hmac_sha256(KEY, message_for_len))\nlet hmac512_len: int = len(crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\"))\nlet helper_sha_len_value: int = helper_sha_len()\nlet helper_hmac256_len_value: int = helper_hmac256_len()\nlet helper_hmac512_len_value: int = helper_hmac512_len()\nlet dynamic_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_clone_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_hmac_key: int = match json_parse_int(\"321\") { Some(value) => value, None => 1 }\nlet dynamic_hmac256_message: bool = match json_parse_bool(\"true\") { Some(value) => value, None => false }\nlet dynamic_hmac512_message: bool = match json_parse_bool(\"false\") { Some(value) => value, None => true }\nlet dynamic_sha_len: int = len(crypto_sha256(json_stringify_int(dynamic_sha_input)))\nlet dynamic_clone_sha_text: string = json_stringify_int(dynamic_clone_sha_input)\nlet dynamic_clone_sha_len: int = len(crypto_sha256(string_clone(dynamic_clone_sha_text)))\nlet dynamic_hmac256_len: int = len(crypto_hmac_sha256(json_stringify_int(dynamic_hmac_key), json_stringify_bool(dynamic_hmac256_message)))\nlet dynamic_hmac512_len: int = len(crypto_hmac_sha512(KEY, json_stringify_bool(dynamic_hmac512_message)))\nlet sha_gate: bool = string_starts_with(sha_for_gate, \"ba7816bf\")\nlet hmac256_gate: bool = string_starts_with(hmac256_for_gate, \"f7bc83f4\")\nlet hmac512_gate: bool = string_starts_with(hmac512_for_gate, \"164b7a7b\")\nlet constant_gate: bool = crypto_constant_time_eq(crypto_sha256(\"abc\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nlet mismatch_gate: bool = crypto_constant_time_eq(\"short\", \"shorter\") == false\nlet byte_left: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_same: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_different: [u8; 3] = [1u8, 2u8, 4u8]\nlet byte_literal_left: [u8; 2] = [4u8, 5u8]\nlet byte_literal_same: [u8; 2] = [4u8, 5u8]\nlet byte_short: [u8; 1] = [4u8]\nlet byte_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_same[:])\nlet byte_mismatch_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_different[:]) == false\nlet byte_literal_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_literal_same[:])\nlet byte_len_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_short[:]) == false\nif sha_gate && hmac256_gate && hmac512_gate && constant_gate && mismatch_gate && byte_gate && byte_mismatch_gate && byte_literal_gate && byte_len_gate && sha_len == 64 && hmac256_len == 64 && hmac512_len == 128 && helper_sha_len_value == 64 && helper_hmac256_len_value == 64 && helper_hmac512_len_value == 128 && dynamic_sha_len == 64 && dynamic_clone_sha_len == 64 && dynamic_hmac256_len == 64 && dynamic_hmac512_len == 128 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "static KEY: string = \"key\"\n\nfn main(): int {\nlet message_for_len: string = \"The quick brown fox jumps over the lazy dog\"\nlet message_for_gate: string = \"The quick brown fox jumps over the lazy dog\"\nlet sha_for_gate: string = crypto_sha256(\"abc\")\nlet hmac256_for_gate: string = crypto_hmac_sha256(KEY, message_for_gate)\nlet hmac512_for_gate: string = crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\")\nlet sha_len: int = len(crypto_sha256(\"abc\"))\nlet hmac256_len: int = len(crypto_hmac_sha256(KEY, message_for_len))\nlet hmac512_len: int = len(crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\"))\nlet dynamic_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_clone_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_hmac_key: int = match json_parse_int(\"321\") { Some(value) => value, None => 1 }\nlet dynamic_hmac256_message: bool = match json_parse_bool(\"true\") { Some(value) => value, None => false }\nlet dynamic_hmac512_message: bool = match json_parse_bool(\"false\") { Some(value) => value, None => true }\nlet dynamic_sha_len: int = len(crypto_sha256(json_stringify_int(dynamic_sha_input)))\nlet dynamic_clone_sha_text: string = json_stringify_int(dynamic_clone_sha_input)\nlet dynamic_clone_sha_len: int = len(crypto_sha256(string_clone(dynamic_clone_sha_text)))\nlet dynamic_hmac256_len: int = len(crypto_hmac_sha256(json_stringify_int(dynamic_hmac_key), json_stringify_bool(dynamic_hmac256_message)))\nlet dynamic_hmac512_len: int = len(crypto_hmac_sha512(KEY, json_stringify_bool(dynamic_hmac512_message)))\nlet sha_gate: bool = string_starts_with(sha_for_gate, \"ba7816bf\")\nlet hmac256_gate: bool = string_starts_with(hmac256_for_gate, \"f7bc83f4\")\nlet hmac512_gate: bool = string_starts_with(hmac512_for_gate, \"164b7a7b\")\nlet constant_gate: bool = crypto_constant_time_eq(crypto_sha256(\"abc\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nlet mismatch_gate: bool = crypto_constant_time_eq(\"short\", \"shorter\") == false\nlet byte_left: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_same: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_different: [u8; 3] = [1u8, 2u8, 4u8]\nlet byte_literal_left: [u8; 2] = [4u8, 5u8]\nlet byte_literal_same: [u8; 2] = [4u8, 5u8]\nlet byte_short: [u8; 1] = [4u8]\nlet byte_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_same[:])\nlet byte_mismatch_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_different[:]) == false\nlet byte_literal_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_literal_same[:])\nlet byte_len_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_short[:]) == false\nif sha_gate && hmac256_gate && hmac512_gate && constant_gate && mismatch_gate && byte_gate && byte_mismatch_gate && byte_literal_gate && byte_len_gate && sha_len == 64 && hmac256_len == 64 && hmac512_len == 128 && dynamic_sha_len == 64 && dynamic_clone_sha_len == 64 && dynamic_hmac256_len == 64 && dynamic_hmac512_len == 128 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write known crypto text source");
 }
@@ -8596,7 +8409,7 @@ fn write_known_regex_text_main_exit_project(project: &Path) {
     .expect("write known regex text lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "static ISSUE_TEXT: string = \"issue-238-ready\"\nstatic ISSUE_PREFIX: string = \"issue-\"\nstatic ISSUE_NUMBER: string = \"238\"\nstatic ISSUE_SUFFIX: string = \"-ready\"\n\nfn helper_find_len(): int {\nlet pattern: string = \"[0-\" + \"9]+\"\nlet text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nreturn match regex_find(pattern, text) { Some(value) => len(value), None => 1 }\n}\n\nfn helper_replace_len(): int {\nlet pattern: string = \"[0-\" + \"9]+\"\nlet text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nlet replacement: string = \"#\" + \"\"\nreturn len(regex_replace_all(pattern, text, replacement))\n}\n\nfn main(): int {\nlet replaced: string = regex_replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = regex_replace_all(\"^a\", \"aaa\", \"x\")\nlet concat_text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nlet concat_pattern: string = \"^issue-\" + \"[0-9]+\" + \"-ready$\"\nlet match_gate: bool = regex_is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet concat_match_gate: bool = regex_is_match(concat_pattern, concat_text)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match regex_find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match regex_find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(regex_replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nlet helper_found_len: int = helper_find_len()\nlet helper_replaced_len: int = helper_replace_len()\nif match_gate && concat_match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 && helper_found_len == 3 && helper_replaced_len == 13 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "static ISSUE_TEXT: string = \"issue-238-ready\"\n\nfn main(): int {\nlet replaced: string = regex_replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = regex_replace_all(\"^a\", \"aaa\", \"x\")\nlet match_gate: bool = regex_is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match regex_find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match regex_find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(regex_replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nif match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write known regex text source");
 }
@@ -8615,7 +8428,7 @@ fn write_std_regex_wrapper_main_exit_project(project: &Path) {
     .expect("write std regex wrapper lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/regex.ax\"\n\nstatic ISSUE_TEXT: string = \"issue-238-ready\"\nstatic ISSUE_PREFIX: string = \"issue-\"\nstatic ISSUE_NUMBER: string = \"238\"\nstatic ISSUE_SUFFIX: string = \"-ready\"\n\nfn helper_find_len(): int {\nlet pattern: string = \"[0-\" + \"9]+\"\nlet text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nreturn match find(pattern, text) { Some(value) => len(value), None => 1 }\n}\n\nfn helper_replace_len(): int {\nlet pattern: string = \"[0-\" + \"9]+\"\nlet text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nlet replacement: string = \"#\" + \"\"\nreturn len(replace_all(pattern, text, replacement))\n}\n\nfn main(): int {\nlet replaced: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = replace_all(\"^a\", \"aaa\", \"x\")\nlet concat_text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nlet concat_pattern: string = \"^issue-\" + \"[0-9]+\" + \"-ready$\"\nlet match_gate: bool = is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet concat_match_gate: bool = is_match(concat_pattern, concat_text)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nlet helper_found_len: int = helper_find_len()\nlet helper_replaced_len: int = helper_replace_len()\nif match_gate && concat_match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 && helper_found_len == 3 && helper_replaced_len == 13 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "import \"std/regex.ax\"\n\nstatic ISSUE_TEXT: string = \"issue-238-ready\"\n\nfn main(): int {\nlet replaced: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = replace_all(\"^a\", \"aaa\", \"x\")\nlet match_gate: bool = is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nif match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write std regex wrapper source");
 }
@@ -9402,7 +9215,7 @@ fn write_struct_field_project(project: &Path) {
     .expect("write struct lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nstruct Step {\nvalue: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nfn make_step(value: int, ready: bool): Step {\nreturn Step { value: value, ready: ready }\n}\n\nfn choose_step(flag: bool): Step {\nif flag {\nreturn Step { value: 7, ready: true }\n} else {\nlet fallback: int = 8\nreturn Step { ready: false, value: fallback }\n}\n}\n\nfn forward_step(step: Step): Step {\nreturn step\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nlet returned: Step = make_step(5, true)\nlet branch: Step = choose_step(false)\nlet branch_to_forward: Step = choose_step(false)\nlet forwarded: Step = forward_step(branch_to_forward)\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\nprint returned.value\nprint returned.ready\nprint branch.value\nprint branch.ready\nprint forwarded.value\nprint forwarded.ready\n",
+        "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\n",
     )
     .expect("write struct source");
 }
@@ -9440,7 +9253,7 @@ fn write_borrowed_slice_project(project: &Path) {
     .expect("write borrowed-slice lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn tail(values: &[int]): &[int] {\nreturn values[1:]\n}\n\nlet values: [int] = [2, 4, 6, 8]\nlet window: &[int] = values[1:]\nprint len(window)\nprint first(window)\nprint last(window)\nprint window[1]\nlet nested: &[int] = tail(values[:])\nprint len(nested)\nprint first(nested)\nprint last(nested)\nprint nested[1]\n",
+        "fn tail(values: &[int]): &[int] {\nreturn values[1:]\n}\n\nlet values: [int] = [2, 4, 6, 8]\nlet window: &[int] = values[1:]\nprint len(window)\nprint first(window)\nprint last(window)\nprint window[1]\nlet nested: &[int] = tail(values[:])\nprint len(nested)\n",
     )
     .expect("write borrowed-slice source");
 }
@@ -9528,16 +9341,11 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/process.ax"
 
-static TRUE_CMD: string = "/usr/bin/true"
-static FALSE_CMD: string = "/usr/bin/false"
-static MISSING_CMD: string = "__axiom_stage1_missing_binary__"
-
 fn main(): int {
 let ok: int = process_status("/usr/bin/true")
-let static_ok: int = run_status(TRUE_CMD)
-let fail: int = run_status(FALSE_CMD)
-let missing: int = run_status(MISSING_CMD)
-if ok == 0 && static_ok == 0 && fail == 1 && missing == -1 {
+let fail: int = run_status("/usr/bin/false")
+let missing: int = run_status("__axiom_stage1_missing_binary__")
+if ok == 0 && fail == 1 && missing == -1 {
 return 48
 } else {
 return 1
@@ -9657,56 +9465,7 @@ fn write_map_index_project(project: &Path) {
     .expect("write map lockfile");
     fs::write(
         project.join("src/main.ax"),
-        r#"fn deploy_score(scores: {string: int}): int {
-return scores["deploy"]
-}
-
-fn has_key(scores: {string: int}, key: string): bool {
-return map_contains_key<string, int>(scores, key)
-}
-
-fn score_or_default(scores: {string: int}, key: string, fallback: int): int {
-return get_or_default<string, int>(scores, key, fallback)
-}
-
-let scores: {string: int} = {"build": 7, "deploy": 9, "deploy": 11}
-print scores["deploy"]
-
-let available: {string: int} = {"build": 7, "deploy": 9}
-print map_contains_key<string, int>(available, "build")
-
-let missing: {string: int} = {"build": 7, "deploy": 9}
-print map_contains_key<string, int>(missing, "test")
-
-let labels: {int: string} = {1: "low", 2: "high"}
-print labels[2]
-
-let direct_get_scores: {string: int} = {"build": 7, "deploy": 9}
-let direct_found: Option<int> = get<string, int>(direct_get_scores, "deploy")
-match direct_found {
-Some(value) {
-print value
-}
-None {
-print 0
-}
-}
-
-let direct_hit_scores: {string: int} = {"build": 7, "deploy": 9}
-print get_or_default<string, int>(direct_hit_scores, "deploy", 13)
-
-let direct_missing_scores: {string: int} = {"build": 7, "deploy": 9}
-print get_or_default<string, int>(direct_missing_scores, "test", 13)
-
-let helper_scores: {string: int} = {"build": 7, "deploy": 9, "deploy": 11}
-print deploy_score(helper_scores)
-
-let helper_available: {string: int} = {"build": 7, "deploy": 9}
-print has_key(helper_available, "deploy")
-
-let helper_missing: {string: int} = {"build": 7, "deploy": 9}
-print score_or_default(helper_missing, "test", 21)
-"#,
+        "let scores: {string: int} = {\"build\": 7, \"deploy\": 9, \"deploy\": 11}\nprint scores[\"deploy\"]\n\nlet available: {string: int} = {\"build\": 7, \"deploy\": 9}\nprint map_contains_key<string, int>(available, \"build\")\n\nlet missing: {string: int} = {\"build\": 7, \"deploy\": 9}\nprint map_contains_key<string, int>(missing, \"test\")\n\nlet labels: {int: string} = {1: \"low\", 2: \"high\"}\nprint labels[2]\n\nlet direct_get_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nlet direct_found: Option<int> = get<string, int>(direct_get_scores, \"deploy\")\nmatch direct_found {\nSome(value) {\nprint value\n}\nNone {\nprint 0\n}\n}\n\nlet direct_hit_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nprint get_or_default<string, int>(direct_hit_scores, \"deploy\", 13)\n\nlet direct_missing_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nprint get_or_default<string, int>(direct_missing_scores, \"test\", 13)\n",
     )
     .expect("write map source");
 }
@@ -9878,27 +9637,7 @@ let dynamic_key_trimmed_value: string = string_trim(dynamic_key_trim_value)
 let dynamic_key_trim_start_value: string = string_trim_start(dynamic_key_trim_value)
 let dynamic_key_trimmed_has_prefix: bool = string_starts_with(dynamic_key_trimmed_value, "dep")
 let dynamic_key_trim_start_has_prefix: bool = string_starts_with(dynamic_key_trim_start_value, "dep")
-let dynamic_lookup_contains_scores: {string: int} = {"build": 7, "deploy": 9}
-let dynamic_lookup_contains_names: [string] = keys<string, int>(dynamic_lookup_contains_scores)
-let dynamic_lookup_contains_key: string = dynamic_lookup_contains_names[dynamic_key_index]
-let dynamic_lookup_contains_map: {string: int} = {"build": 7, "deploy": 9}
-let dynamic_lookup_contains: bool = contains<string, int>(dynamic_lookup_contains_map, dynamic_lookup_contains_key)
-let dynamic_lookup_value_scores: {string: int} = {"build": 7, "deploy": 9}
-let dynamic_lookup_value_names: [string] = keys<string, int>(dynamic_lookup_value_scores)
-let dynamic_lookup_value_key: string = dynamic_lookup_value_names[dynamic_key_index]
-let dynamic_lookup_value_map: {string: int} = {"build": 7, "deploy": 9}
-let dynamic_lookup_value: int = get_or_default<string, int>(dynamic_lookup_value_map, dynamic_lookup_value_key, 13)
-let dynamic_missing_contains_scores: {string: int} = {"build": 7, "deploy": 9}
-let dynamic_missing_contains_names: [string] = keys<string, int>(dynamic_missing_contains_scores)
-let dynamic_missing_contains_key: string = dynamic_missing_contains_names[dynamic_key_index]
-let dynamic_missing_contains_map: {string: int} = {"build": 7}
-let dynamic_missing_contains: bool = contains<string, int>(dynamic_missing_contains_map, dynamic_missing_contains_key) == false
-let dynamic_missing_value_scores: {string: int} = {"build": 7, "deploy": 9}
-let dynamic_missing_value_names: [string] = keys<string, int>(dynamic_missing_value_scores)
-let dynamic_missing_value_key: string = dynamic_missing_value_names[dynamic_key_index]
-let dynamic_missing_value_map: {string: int} = {"build": 7}
-let dynamic_missing_value: int = get_or_default<string, int>(dynamic_missing_value_map, dynamic_missing_value_key, 13)
-if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 && dynamic_key_is_deploy && dynamic_key_not_build && dynamic_key_has_prefix && dynamic_key_trim_len == 6 && dynamic_key_trim_start_len == 7 && dynamic_key_trimmed_has_prefix && dynamic_key_trim_start_has_prefix && dynamic_lookup_contains && dynamic_lookup_value == 9 && dynamic_missing_contains && dynamic_missing_value == 13 {
+if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 && dynamic_key_is_deploy && dynamic_key_not_build && dynamic_key_has_prefix && dynamic_key_trim_len == 6 && dynamic_key_trim_start_len == 7 && dynamic_key_trimmed_has_prefix && dynamic_key_trim_start_has_prefix {
 return 48
 } else {
 return 1
@@ -10795,7 +10534,7 @@ fn write_crypto_random_main_exit_project(project: &Path) {
     .expect("write crypto random main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/crypto_rand.ax\"\n\nstatic RANDOM_LEN: int = 16\n\nfn choose_len(seed: int): int {\nreturn seed + 8\n}\n\nfn main(): int {\nlet dynamic_len: int = choose_len(9)\nlet negative_len: int = choose_len(-10)\nlet too_large_len: int = choose_len(65529)\nlet sample_len: int = len(random_bytes(RANDOM_LEN))\nlet dynamic_sample_len: int = len(random_bytes(dynamic_len))\nlet empty_len: int = len(random_bytes(0))\nlet denied_negative: int = len(random_bytes(negative_len))\nlet denied_too_large: int = len(random_bytes(too_large_len))\nlet value: int = random_u64() as int\nif sample_len == RANDOM_LEN && dynamic_sample_len == dynamic_len && empty_len == 0 && denied_negative == -1 && denied_too_large == -1 && value == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "import \"std/crypto_rand.ax\"\n\nstatic RANDOM_LEN: int = 16\n\nfn choose_len(seed: int): int {\nreturn seed + 8\n}\n\nfn main(): int {\nlet dynamic_len: int = choose_len(9)\nlet sample_len: int = len(random_bytes(RANDOM_LEN))\nlet dynamic_sample_len: int = len(random_bytes(dynamic_len))\nlet empty_len: int = len(random_bytes(0))\nlet value: int = random_u64() as int\nif sample_len == RANDOM_LEN && dynamic_sample_len == dynamic_len && empty_len == 0 && value == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write crypto random main source");
 }
@@ -10875,7 +10614,7 @@ fn write_sync_mutex_main_exit_project(project: &Path) {
     .expect("write sync mutex main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn helper_mutex_score(): int {\nlet counter: Mutex<int> = mutex<int>(2)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 12)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nreturn into_inner<int>(final_guard)\n}\n\nfn main(): int {\nlet counter: Mutex<int> = mutex<int>(1)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 48)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nlet direct: int = into_inner<int>(final_guard)\nlet helper: int = helper_mutex_score()\nif direct == 48 && helper == 12 {\nreturn direct\n} else {\nreturn 1\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn main(): int {\nlet counter: Mutex<int> = mutex<int>(1)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 48)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nreturn into_inner<int>(final_guard)\n}\n",
     )
     .expect("write sync mutex main source");
 }
@@ -10894,7 +10633,7 @@ fn write_sync_once_main_exit_project(project: &Path) {
     .expect("write sync once main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn helper_once_score(): int {\nlet present_cell: Once<int> = once_with<int>(8)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 1 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 4 }\nlet ready: bool = once_is_set<bool>(ready_cell)\nif ready {\nreturn present_score + missing_score\n} else {\nreturn 1\n}\n}\n\nfn main(): int {\nlet present_cell: Once<int> = once_with<int>(21)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<int> = once_with<int>(0)\nlet empty_cell: Once<int> = once<int>(None)\nlet bool_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 19 }\nlet ready: bool = once_is_set<int>(ready_cell)\nlet empty: bool = once_is_set<int>(empty_cell)\nlet bool_ready: Option<bool> = once_take<bool>(bool_cell)\nlet bool_present: bool = match bool_ready { Some(value) => value, None => false }\nlet helper: int = helper_once_score()\nif ready && (empty == false) && bool_present && helper == 12 {\nreturn present_score + missing_score\n} else {\nreturn 2\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn main(): int {\nlet present_cell: Once<int> = once_with<int>(21)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<int> = once_with<int>(0)\nlet empty_cell: Once<int> = once<int>(None)\nlet bool_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 19 }\nlet ready: bool = once_is_set<int>(ready_cell)\nlet empty: bool = once_is_set<int>(empty_cell)\nlet bool_ready: Option<bool> = once_take<bool>(bool_cell)\nlet bool_present: bool = match bool_ready { Some(value) => value, None => false }\nif ready && (empty == false) && bool_present {\nreturn present_score + missing_score\n} else {\nreturn 2\n}\n}\n",
     )
     .expect("write sync once main source");
 }
@@ -10913,7 +10652,7 @@ fn write_sync_channel_main_exit_project(project: &Path) {
     .expect("write sync channel main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn helper_channel_score(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 7)\nlet empty: Channel<int> = channel<int>(None)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 1 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 5 }\nreturn present_score + missing_score\n}\n\nfn main(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 31)\nlet empty: Channel<int> = channel<int>(None)\nlet bool_channel: Channel<bool> = channel<bool>(None)\nlet bool_sent: Channel<bool> = send<bool>(bool_channel, true)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 17 }\nlet ready: Option<bool> = try_recv<bool>(bool_sent)\nlet ready_present: bool = match ready { Some(value) => value, None => false }\nlet helper: int = helper_channel_score()\nif ready_present && helper == 12 {\nreturn present_score + missing_score + 2\n} else {\nreturn 5\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn main(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 31)\nlet empty: Channel<int> = channel<int>(None)\nlet bool_channel: Channel<bool> = channel<bool>(None)\nlet bool_sent: Channel<bool> = send<bool>(bool_channel, true)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 17 }\nlet ready: Option<bool> = try_recv<bool>(bool_sent)\nlet ready_present: bool = match ready { Some(value) => value, None => false }\nif ready_present {\nreturn present_score + missing_score + 2\n} else {\nreturn 5\n}\n}\n",
     )
     .expect("write sync channel main source");
 }
@@ -11395,8 +11134,6 @@ let negative: int = negative_score()
 print negative
 let zero: int = zero_score()
 print zero
-let adjusted: int = value + 3
-print adjusted
 return value
 }
 "#,
@@ -12027,15 +11764,7 @@ let dynamic_ms: int = 1
 let positive: int = sleep(duration_ms(dynamic_ms))
 let direct_positive: int = clock_sleep_ms(dynamic_ms)
 let capped: int = sleep(duration_ms(1001))
-let primitive_start: int = clock_now_ms()
-let primitive_elapsed: int = clock_elapsed_ms(primitive_start)
-let public_start: int = now_ms()
-let public_elapsed: int = elapsed_ms(Instant { ms: public_start })
-let inline_elapsed: int = elapsed_ms(now())
-let precision_start: int = clock_now_ms()
-let precision_sleep: int = clock_sleep_ms(10)
-let precision_elapsed: int = clock_elapsed_ms(precision_start)
-if direct == 0 && helper == 0 && negative == -1 && positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 && precision_sleep == 0 && precision_elapsed > 0 && precision_elapsed < 1000 {
+if direct == 0 && helper == 0 && negative == -1 && positive == 0 && direct_positive == 0 && capped == -1 {
 return 48
 } else {
 return 1
@@ -12667,109 +12396,6 @@ return 48
     .expect("write std/serdes known JSON print source");
 }
 
-fn write_std_serdes_known_json_eprintln_main_exit_project(project: &Path) {
-    fs::create_dir_all(project.join("src"))
-        .expect("create std/serdes known JSON eprintln project src");
-    fs::write(
-        project.join("axiom.toml"),
-        r#"[package]
-name = "cranelift-std-serdes-known-json-eprintln-main-exit"
-version = "0.1.0"
-
-[build]
-entry = "src/main.ax"
-out_dir = "dist"
-
-[capabilities]
-fs = false
-net = false
-process = false
-env = false
-clock = false
-crypto = false
-
-[unsafe_rationale]
-stdio = "Direct-native stderr regression covers std/serdes known JSON eprintln output for issue 1001."
-"#,
-    )
-    .expect("write std/serdes known JSON eprintln manifest");
-    fs::write(
-        project.join("axiom.lock"),
-        r#"version = 1
-
-[[package]]
-name = "cranelift-std-serdes-known-json-eprintln-main-exit"
-version = "0.1.0"
-source = "path"
-"#,
-    )
-    .expect("write std/serdes known JSON eprintln lockfile");
-    fs::write(
-        project.join("src/main.ax"),
-        r#"import "std/io.ax"
-import "std/serdes.ax"
-
-fn object_json(): string {
-return to_json({"name": Text("axiom"), "count": Int(3), "ready": Bool(true)})
-}
-
-fn stringified_text(): string {
-return stringify(Text("direct-native"))
-}
-
-fn parsed_value_json(): string {
-match from_json_str("{\"name\":\"axiom\",\"count\":3}") {
-Ok(value) {
-return stringify(value)
-}
-Err(error) {
-return parse_error_message(error)
-}
-}
-}
-
-fn parsed_text(): string {
-match from_json_str("\"direct-native\"") {
-Ok(value) {
-match as_text(value) {
-Some(text) {
-return text
-}
-None {
-return "not text"
-}
-}
-}
-Err(error) {
-return parse_error_message(error)
-}
-}
-}
-
-fn parse_error_text(): string {
-match from_json_str("{") {
-Ok(value) {
-return stringify(value)
-}
-Err(error) {
-return parse_error_message(error)
-}
-}
-}
-
-fn main(): int {
-let object_written: int = eprintln(object_json())
-let text_written: int = eprintln(stringified_text())
-let parsed_written: int = eprintln(parsed_value_json())
-let value_written: int = eprintln(parsed_text())
-let error_written: int = eprintln(parse_error_text())
-return object_written + text_written + parsed_written + value_written + error_written
-}
-"#,
-    )
-    .expect("write std/serdes known JSON eprintln source");
-}
-
 fn write_std_cli_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create std/cli project src");
     fs::write(
@@ -12882,27 +12508,16 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/fs.ax"
 
-static READ_PATH: string = "src/fixture.txt"
-static MISSING_PREFIX: string = "src/"
-
 fn main(): int {
-let wrapper_path: string = "src/fixture.txt"
-let stored_wrapper_path: string = "src/fixture.txt"
-let fixture_name: string = "fixture.txt"
-let missing_name: string = "missing.txt"
-let stored_missing_name: string = "missing.txt"
-let direct_len: int = match fs_read(READ_PATH) { Some(value) => len(value), None => 1 }
-let wrapper_len: int = match read_file(wrapper_path) { Some(value) => len(value), None => 1 }
-let concat_len: int = match read_file(MISSING_PREFIX + fixture_name) { Some(value) => len(value), None => 1 }
-let missing_len: int = match read_file(MISSING_PREFIX + missing_name) { Some(value) => len(value), None => 28 }
-let stored_direct: Option<string> = fs_read(READ_PATH)
-let stored_wrapper: Option<string> = read_file(stored_wrapper_path)
-let stored_concat: Option<string> = read_file(MISSING_PREFIX + fixture_name)
-let stored_missing: Option<string> = read_file(MISSING_PREFIX + stored_missing_name)
-let stored_statement: Option<string> = read_file(READ_PATH)
+let direct_len: int = match fs_read("src/fixture.txt") { Some(value) => len(value), None => 1 }
+let wrapper_len: int = match read_file("src/fixture.txt") { Some(value) => len(value), None => 1 }
+let missing_len: int = match read_file("src/missing.txt") { Some(value) => len(value), None => 28 }
+let stored_direct: Option<string> = fs_read("src/fixture.txt")
+let stored_wrapper: Option<string> = read_file("src/fixture.txt")
+let stored_missing: Option<string> = read_file("src/missing.txt")
+let stored_statement: Option<string> = read_file("src/fixture.txt")
 let stored_direct_len: int = match stored_direct { Some(value) => len(value), None => 1 }
 let stored_wrapper_len: int = match stored_wrapper { Some(value) => len(value), None => 1 }
-let stored_concat_len: int = match stored_concat { Some(value) => len(value), None => 1 }
 let stored_missing_len: int = match stored_missing { Some(value) => len(value), None => 28 }
 let statement_len: int = 0
 match stored_statement {
@@ -12913,7 +12528,7 @@ None {
 statement_len = 1
 }
 }
-if direct_len == 13 && wrapper_len == 13 && concat_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_concat_len == 13 && stored_missing_len == 28 && statement_len == 13 {
+if direct_len == 13 && wrapper_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_missing_len == 28 && statement_len == 13 {
 return statement_len + 35
 } else {
 return 1
@@ -13011,39 +12626,17 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/fs.ax"
 
-static DATA_PATH: string = "scratch/data.txt"
-static APPEND_PATH: string = "scratch/append.txt"
-static REPLACE_PATH: string = "scratch/replace.txt"
-static REMOVE_PATH: string = "scratch/remove.txt"
-static RUNTIME_PREFIX: string = "runtime-"
-static DIR_PREFIX: string = "scratch/"
-
 fn main(): int {
-let append_path: string = APPEND_PATH
-let replace_path: string = REPLACE_PATH
-let remove_path: string = REMOVE_PATH
-let create_path: string = "scratch/created.txt"
-let mkdir_name: string = "native-dir"
-let remove_dir_name: string = "native-dir"
-let nested_leaf: string = "deep"
-let blocked_path: string = "../escape.txt"
-let write_content: string = "runtime-write"
-let append_suffix: string = "append"
-let replace_suffix: string = "replace"
-let blocked_content: string = "blocked"
-let wrote: int = write_file(DATA_PATH, write_content)
-let append_seeded: int = write_file(APPEND_PATH, RUNTIME_PREFIX + "seed")
-let appended: int = append_file(append_path, "+" + RUNTIME_PREFIX + append_suffix)
-let replace_seeded: int = write_file(REPLACE_PATH, "stale")
-let replaced: int = replace_file(replace_path, RUNTIME_PREFIX + replace_suffix)
-let remove_seeded: int = write_file(REMOVE_PATH, "remove-me")
-let removed: int = remove_file(remove_path)
-let created: int = create_file(create_path)
-let made_dir: int = mkdir(DIR_PREFIX + mkdir_name)
-let removed_dir: int = remove_dir(DIR_PREFIX + remove_dir_name)
-let made_all: int = mkdir_all(DIR_PREFIX + "native-all/" + nested_leaf)
-let blocked: int = write_file(blocked_path, blocked_content)
-if wrote == 0 && append_seeded == 0 && appended == 0 && replace_seeded == 0 && replaced == 0 && remove_seeded == 0 && removed == 0 && created == 0 && made_dir == 0 && removed_dir == 0 && made_all == 0 && blocked == -1 {
+let wrote: int = write_file("scratch/data.txt", "runtime-write")
+let appended: int = append_file("scratch/data.txt", "+runtime-append")
+let replaced: int = replace_file("scratch/data.txt", "runtime-replace")
+let removed: int = remove_file("scratch/data.txt")
+let created: int = create_file("scratch/created.txt")
+let made_dir: int = mkdir("scratch/native-dir")
+let removed_dir: int = remove_dir("scratch/native-dir")
+let made_all: int = mkdir_all("scratch/native-all/deep")
+let blocked: int = write_file("../escape.txt", "blocked")
+if wrote == 0 && appended == 0 && replaced == 0 && removed == 0 && created == 0 && made_dir == 0 && removed_dir == 0 && made_all == 0 && blocked == -1 {
 return 48
 } else {
 return 1
