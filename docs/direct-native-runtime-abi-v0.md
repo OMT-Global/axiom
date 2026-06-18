@@ -868,10 +868,13 @@ Imported public `std/serdes.ax` known-input `to_json(...)`,
 `from_json_str(...)`, `as_text(...)`, and `parse_error_message(...)` wrapper
 paths now also feed direct-native known string comparisons, length projections,
 `Result` matches, `Option` matches, and process exit status without generated
-Rust for literal `Value`/object-map and literal JSON inputs. Broader dynamic
-runtime JSON parsing, broad `std/serdes` `Value` storage, `JsonValue` wrapper
-construction beyond the evidenced scalar/string/object/array source wrappers,
-and broader schema helper coverage remain tracked by issue #1001.
+Rust for literal `Value`/object-map and literal JSON inputs. Those same
+known-input `std/serdes` string results can now feed source-level `print`
+statements in runtime-exit `main` functions, preserving exact native stdout JSON
+lines and parse-error text while still reporting `generated_rust: null`. Broader
+dynamic runtime JSON parsing, broad `std/serdes` `Value` storage, `JsonValue`
+wrapper construction beyond the evidenced scalar/string/object/array source
+wrappers, and broader schema helper coverage remain tracked by issue #1001.
 
 The owned move-state row has partial direct-native evidence: the Cranelift
 spike builds and runs projection-sensitive owned field moves while preserving

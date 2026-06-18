@@ -5889,6 +5889,55 @@ fn cranelift_backend_lowers_std_serdes_known_json_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_std_serdes_known_json_print_to_runtime_stdout() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-serdes-known-json-print-main-exit");
+    write_std_serdes_known_json_print_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std/serdes known JSON print main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std/serdes known JSON print main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        r#"{"count":3,"name":"axiom","ready":true}
+"direct-native"
+{"count":3,"name":"axiom"}
+direct-native
+unterminated JSON object
+"#,
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_builds_std_cli_no_args_binary() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -12246,6 +12295,105 @@ return 1
 "#,
     )
     .expect("write std/serdes known JSON source");
+}
+
+fn write_std_serdes_known_json_print_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create std/serdes known JSON print project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-std-serdes-known-json-print-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write std/serdes known JSON print manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-std-serdes-known-json-print-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write std/serdes known JSON print lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/serdes.ax"
+
+fn object_json(): string {
+return to_json({"name": Text("axiom"), "count": Int(3), "ready": Bool(true)})
+}
+
+fn stringified_text(): string {
+return stringify(Text("direct-native"))
+}
+
+fn parsed_value_json(): string {
+match from_json_str("{\"name\":\"axiom\",\"count\":3}") {
+Ok(value) {
+return stringify(value)
+}
+Err(error) {
+return parse_error_message(error)
+}
+}
+}
+
+fn parsed_text(): string {
+match from_json_str("\"direct-native\"") {
+Ok(value) {
+match as_text(value) {
+Some(text) {
+return text
+}
+None {
+return "not text"
+}
+}
+}
+Err(error) {
+return parse_error_message(error)
+}
+}
+}
+
+fn parse_error_text(): string {
+match from_json_str("{") {
+Ok(value) {
+return stringify(value)
+}
+Err(error) {
+return parse_error_message(error)
+}
+}
+}
+
+fn main(): int {
+print object_json()
+print stringified_text()
+print parsed_value_json()
+print parsed_text()
+print parse_error_text()
+return 48
+}
+"#,
+    )
+    .expect("write std/serdes known JSON print source");
 }
 
 fn write_std_cli_project(project: &Path) {
