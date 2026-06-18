@@ -349,7 +349,9 @@ that use `len(value)`, returning the runtime byte length or the `None` arm when
 the file is absent, inaccessible, or above the read cap. Those direct-native
 read paths now cover package-root-relative paths supplied by static string
 facts, local string facts, and known string concatenation rather than only inline
-literals. Paths are still resolved through the package-root `fs_root` guard
+literals, including a concatenated existing fixture path that returns the
+runtime byte length and a separate concatenated missing path that selects the
+`None` arm. Paths are still resolved through the package-root `fs_root` guard
 before codegen and are now revalidated with `realpath(...)` against the
 canonical `fs_root` immediately before runtime length checks. The symlink
 regression smoke builds while the read target is an in-root file, swaps that
