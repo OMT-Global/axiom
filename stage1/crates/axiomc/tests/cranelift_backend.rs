@@ -5161,7 +5161,7 @@ fn cranelift_backend_lowers_integer_print_runtime_stdout_in_direct_native_main()
         .output()
         .expect("run cranelift integer print stdio main binary");
     assert_eq!(run.status.code(), Some(42));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n-3\n0\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n-3\n0\n45\n");
     assert_eq!(String::from_utf8_lossy(&run.stderr), "");
 }
 
@@ -11137,6 +11137,8 @@ let negative: int = negative_score()
 print negative
 let zero: int = zero_score()
 print zero
+let adjusted: int = value + 3
+print adjusted
 return value
 }
 "#,
