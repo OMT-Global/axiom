@@ -5286,11 +5286,11 @@ fn cranelift_backend_lowers_aggregate_helper_eprintln_to_native_stderr() {
     let run = Command::new(binary)
         .output()
         .expect("run cranelift aggregate helper eprintln binary");
-    assert_eq!(run.status.code(), Some(144));
+    assert_eq!(run.status.code(), Some(149));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
     assert_eq!(
         String::from_utf8_lossy(&run.stderr),
-        "aggregate helper\naggregate helper\naggregate static\naggregate helper suffix\naggregate helper text\n31\nfalse\ndeploy\n"
+        "aggregate helper\naggregate helper\naggregate static\naggregate helper suffix\naggregate helper text\n31\nfalse\n\"31\"\ndeploy\n"
     );
 }
 
@@ -11289,8 +11289,10 @@ let value: int = 31
 let text: string = stringify_int(value)
 let int_written: int = eprintln(text)
 let bool_written: int = eprintln(stringify_bool(value == 32))
+let quoted_text: string = stringify_int(value)
+let quoted_written: int = eprintln(stringify_string(quoted_text))
 let selected_written: int = eprintln(selected_line)
-let written: int = first + cloned + static_written + concat_written + helper_written + int_written + bool_written + selected_written
+let written: int = first + cloned + static_written + concat_written + helper_written + int_written + bool_written + quoted_written + selected_written
 return (written, 31)
 }
 

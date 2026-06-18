@@ -917,7 +917,9 @@ including scalar stringify results first assigned to string locals, can also
 feed public `std/io.ax` `eprintln` lets in direct-native i64 `main` functions,
 scalar helpers, and aggregate-return helpers as native stderr writes while
 preserving newline-inclusive byte-count return values and without materializing
-general runtime strings. Dynamic `std/json.ax` `stringify_string` over those
+general runtime strings. The aggregate-return helper stderr smoke now asserts
+`generated_rust` null while preserving the byte-count return value for
+`stringify_string(...)` over a supported scalar stringify result. Dynamic `std/json.ax` `stringify_string` over those
 supported scalar/bool projection locals can also stream quoted JSON string
 values to native stderr lines while preserving newline-inclusive byte-count
 return values and without materializing a general runtime string.
