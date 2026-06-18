@@ -1015,13 +1015,15 @@ integer values, log messages, field names, or field values. Public `std/io.ax`
 generated native object output while asserting `generated_rust: null` and the
 native process exit status. The same bounded byte-count path also feeds string
 locals assigned from `read_to_string()` when those locals are used only for
-`len(local)` projections in direct-native `main` return values. Broader stdin
-reads beyond bounded `read_to_string()` length projections, materialized stdin
-strings, dynamic stdout/stderr text beyond boolean, integer, JSON scalar
-formatting, and finite known-string projection selection, dynamic panic messages
-beyond scalar/string JSON stringify and finite known-string projection
-selection, and broader streaming/runtime buffering remain tracked by issue
-#1001.
+`len(local)` projections in direct-native `main` return values. `string_clone(...)`
+over those stdin-backed local projections also preserves the same bounded
+byte-count path for `len(cloned)` without materializing a general runtime
+string. Broader stdin reads beyond bounded `read_to_string()` length projections,
+materialized stdin strings, dynamic stdout/stderr text beyond boolean, integer,
+JSON scalar formatting, and finite known-string projection selection, dynamic
+panic messages beyond scalar/string JSON stringify and finite known-string
+projection selection, and broader streaming/runtime buffering remain tracked by
+issue #1001.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, zero-duration `sleep`, and a bounded positive
