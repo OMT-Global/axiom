@@ -548,6 +548,89 @@ panic(parsed_array())
         "{\"kind\":\"panic\",\"message\":\"[\\\"one\\\",2,true]\"}\n",
     );
 
+    let serdes_parsed_object_field_project = temp
+        .path()
+        .join("terminal-panic-serdes-parsed-object-field");
+    write_terminal_panic_project(
+        &serdes_parsed_object_field_project,
+        r#"import "std/serdes.ax"
+
+fn parsed_object_field(): string {
+match from_json_str("{\"name\":\"axiom\",\"count\":3,\"ready\":true}") {
+Ok(value) {
+match text_field(value, "name") {
+Some(name) {
+return name
+}
+None {
+return "missing name"
+}
+}
+}
+Err(error) {
+return parse_error_message(error)
+}
+}
+}
+
+fn main(): int {
+panic(parsed_object_field())
+}
+"#,
+    );
+    assert_terminal_panic_report(
+        &serdes_parsed_object_field_project,
+        "{\"kind\":\"panic\",\"message\":\"axiom\"}\n",
+    );
+
+    let serdes_parsed_array_item_project =
+        temp.path().join("terminal-panic-serdes-parsed-array-item");
+    write_terminal_panic_project(
+        &serdes_parsed_array_item_project,
+        r#"import "std/serdes.ax"
+
+fn parsed_array_item(): string {
+match from_json_str("[\"one\",2,true]") {
+Ok(value) {
+match as_array(value) {
+Some(items) {
+match value_item(Array(items), 0) {
+Some(item) {
+match as_text(item) {
+Some(text) {
+return text
+}
+None {
+return "not text"
+}
+}
+}
+None {
+return "missing item"
+}
+}
+}
+None {
+return "not array"
+}
+}
+}
+Err(error) {
+return parse_error_message(error)
+}
+}
+}
+
+fn main(): int {
+panic(parsed_array_item())
+}
+"#,
+    );
+    assert_terminal_panic_report(
+        &serdes_parsed_array_item_project,
+        "{\"kind\":\"panic\",\"message\":\"one\"}\n",
+    );
+
     let serdes_error_project = temp.path().join("terminal-panic-serdes-error");
     write_terminal_panic_project(
         &serdes_error_project,

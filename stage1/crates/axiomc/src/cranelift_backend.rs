@@ -9946,6 +9946,8 @@ fn i64_known_pure_intrinsic_call(name: &str, static_bindings: &I64StaticBindings
         "len"
             | "first"
             | "last"
+            | "get"
+            | "map_get"
             | "string_clone"
             | "string_starts_with"
             | "string_strip_prefix"
@@ -9968,6 +9970,19 @@ fn i64_known_pure_intrinsic_call(name: &str, static_bindings: &I64StaticBindings
             | "json_serdes_parse_str"
             | "json_serdes_value_to_json"
             | "json_serdes_to_json"
+            | "std_serdes_is_null"
+            | "std_serdes_as_bool"
+            | "std_serdes_as_int"
+            | "std_serdes_as_text"
+            | "std_serdes_as_array"
+            | "std_serdes_as_object"
+            | "std_serdes_field"
+            | "std_serdes_bool_field"
+            | "std_serdes_text_field"
+            | "std_serdes_int_field"
+            | "std_serdes_array_field"
+            | "std_serdes_object_field"
+            | "std_serdes_value_item"
     ) || is_i64_encoding_percent_encode_name(name, static_bindings)
         || is_i64_encoding_url_query_pair_encode_name(name, static_bindings)
         || is_i64_encoding_path_join_segment_name(name, static_bindings)
@@ -16043,6 +16058,9 @@ fn eval_call(
     if is_json_serdes_call(name) {
         return eval_json_serdes_call(name, args, functions, env, lines);
     }
+    if is_std_serdes_call(name) {
+        return eval_std_serdes_call(name, args, functions, env, lines);
+    }
     if is_crypto_call(name) {
         return eval_crypto_call(name, args, functions, env, lines);
     }
@@ -17001,6 +17019,204 @@ fn eval_json_serdes_call(
             "unsupported cranelift spike JSON serdes call {name:?}"
         ))),
     }
+}
+
+fn is_std_serdes_call(name: &str) -> bool {
+    matches!(
+        name,
+        "std_serdes_is_null"
+            | "std_serdes_as_bool"
+            | "std_serdes_as_int"
+            | "std_serdes_as_text"
+            | "std_serdes_as_array"
+            | "std_serdes_as_object"
+            | "std_serdes_field"
+            | "std_serdes_bool_field"
+            | "std_serdes_text_field"
+            | "std_serdes_int_field"
+            | "std_serdes_array_field"
+            | "std_serdes_object_field"
+            | "std_serdes_value_item"
+    )
+}
+
+fn eval_std_serdes_call(
+    name: &str,
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<SpikeValue, Diagnostic> {
+    match name {
+        "std_serdes_is_null" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            let (variant, payloads) = expect_std_serdes_value(&value, name)?;
+            Ok(SpikeValue::Bool(variant == "Null" && payloads.is_empty()))
+        }
+        "std_serdes_as_bool" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_bool_value(&value)?))
+        }
+        "std_serdes_as_int" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_int_value(&value)?))
+        }
+        "std_serdes_as_text" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_text_value(&value)?))
+        }
+        "std_serdes_as_array" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_array_value(&value)?))
+        }
+        "std_serdes_as_object" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_object_value(&value)?))
+        }
+        "std_serdes_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(value))
+        }
+        "std_serdes_bool_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_bool_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_text_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_text_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_int_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_int_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_array_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_array_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_object_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_object_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_value_item" => {
+            let [value, index] = args else {
+                return Err(unsupported("std_serdes_value_item expects two arguments"));
+            };
+            let value = eval_expr(value, functions, env, lines)?;
+            let index = expect_signed_integer(eval_expr(index, functions, env, lines)?)?;
+            let (variant, payloads) = expect_std_serdes_value(&value, name)?;
+            let item = match (variant, payloads) {
+                ("Array", [SpikeValue::Array(items)]) if index >= 0 => usize::try_from(index)
+                    .ok()
+                    .and_then(|index| items.get(index).cloned()),
+                _ => None,
+            };
+            Ok(spike_option(item))
+        }
+        _ => Err(unsupported(&format!(
+            "unsupported cranelift spike std/serdes call {name:?}"
+        ))),
+    }
+}
+
+fn eval_std_serdes_field_value(
+    name: &str,
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<Option<SpikeValue>, Diagnostic> {
+    let [value, key] = args else {
+        return Err(unsupported(&format!("{name} expects two arguments")));
+    };
+    let value = eval_expr(value, functions, env, lines)?;
+    let key = match eval_expr(key, functions, env, lines)? {
+        SpikeValue::Text(value) => value,
+        _ => return Err(unsupported(&format!("{name} expects a string key"))),
+    };
+    let (variant, payloads) = expect_std_serdes_value(&value, name)?;
+    let ("Object", [SpikeValue::Map(entries)]) = (variant, payloads) else {
+        return Ok(None);
+    };
+    for (candidate, value) in entries {
+        if map_keys_equal(candidate, &SpikeValue::Text(key.clone()))? {
+            return Ok(Some(value.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn expect_std_serdes_value<'a>(
+    value: &'a SpikeValue,
+    name: &str,
+) -> Result<(&'a str, &'a [SpikeValue]), Diagnostic> {
+    let SpikeValue::Enum {
+        enum_name,
+        variant,
+        payloads,
+        ..
+    } = value
+    else {
+        return Err(unsupported(&format!("{name} expects std/serdes Value")));
+    };
+    if enum_name != "std_serdes_Value" {
+        return Err(unsupported(&format!("{name} expects std/serdes Value")));
+    }
+    Ok((variant.as_str(), payloads.as_slice()))
+}
+
+fn std_serdes_as_bool_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_bool")?;
+    Ok(match (variant, payloads) {
+        ("Bool", [SpikeValue::Bool(value)]) => Some(SpikeValue::Bool(*value)),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_int_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_int")?;
+    Ok(match (variant, payloads) {
+        ("Int", [SpikeValue::Int(value)]) => Some(SpikeValue::Int(*value)),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_text_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_text")?;
+    Ok(match (variant, payloads) {
+        ("Text", [SpikeValue::Text(value)]) => Some(SpikeValue::Text(value.clone())),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_array_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_array")?;
+    Ok(match (variant, payloads) {
+        ("Array", [SpikeValue::Array(values)]) => Some(SpikeValue::Array(values.clone())),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_object_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_object")?;
+    Ok(match (variant, payloads) {
+        ("Object", [SpikeValue::Map(entries)]) => Some(SpikeValue::Map(entries.clone())),
+        _ => None,
+    })
 }
 
 fn json_serdes_result(value: Result<SpikeValue, String>) -> SpikeValue {
