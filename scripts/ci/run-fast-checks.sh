@@ -48,10 +48,15 @@ else
       break
     fi
   done
+
+  if [[ -z "$rust_linker" ]] && smoke_rust_lld; then
+    rust_linker="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | awk '/^host:/ { print $2 }')/bin/rust-lld"
+    export AXIOM_FAST_CI_RUST_LINKER="$rust_linker"
+  fi
 fi
 
 if [[ -z "$rust_linker" ]]; then
-  echo "error: no usable cc, gcc, clang, or AXIOM_FAST_CI_RUST_LINKER was found for PR fast checks." >&2
+  echo "error: no usable cc, gcc, clang, rust-lld, or AXIOM_FAST_CI_RUST_LINKER was found for PR fast checks." >&2
   exit 1
 fi
 
