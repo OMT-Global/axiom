@@ -45,7 +45,7 @@ struct I64RuntimeRefs {
     write: FuncRef,
     read: FuncRef,
     sleep: FuncRef,
-    time: FuncRef,
+    timespec_get: FuncRef,
     getenv: FuncRef,
     strlen: FuncRef,
     atoll: FuncRef,
@@ -576,12 +576,15 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare usleep import: {message}"))
         })?;
-    let mut time_sig = module.make_signature();
-    time_sig.params.push(AbiParam::new(pointer_type));
-    time_sig.returns.push(AbiParam::new(types::I64));
-    let time_id = module
-        .declare_function("time", Linkage::Import, &time_sig)
-        .map_err(|message| CraneliftBackendError::new(format!("declare time import: {message}")))?;
+    let mut timespec_get_sig = module.make_signature();
+    timespec_get_sig.params.push(AbiParam::new(pointer_type));
+    timespec_get_sig.params.push(AbiParam::new(types::I32));
+    timespec_get_sig.returns.push(AbiParam::new(types::I32));
+    let timespec_get_id = module
+        .declare_function("timespec_get", Linkage::Import, &timespec_get_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare timespec_get import: {message}"))
+        })?;
     let mut getenv_sig = module.make_signature();
     getenv_sig.params.push(AbiParam::new(pointer_type));
     getenv_sig.returns.push(AbiParam::new(pointer_type));
@@ -794,6 +797,7 @@ fn emit_i64_exit_object(
                 write_id,
                 read_id,
                 sleep_id,
+                timespec_get_id,
                 getenv_id,
                 strlen_id,
                 atoll_id,
@@ -829,7 +833,7 @@ fn emit_i64_exit_object(
             write_id,
             read_id,
             sleep_id,
-            time_id,
+            timespec_get_id,
             getenv_id,
             strlen_id,
             atoll_id,
@@ -875,7 +879,7 @@ fn emit_i64_exit_object(
         let write_ref = module.declare_func_in_func(write_id, builder.func);
         let read_ref = module.declare_func_in_func(read_id, builder.func);
         let sleep_ref = module.declare_func_in_func(sleep_id, builder.func);
-        let time_ref = module.declare_func_in_func(time_id, builder.func);
+        let timespec_get_ref = module.declare_func_in_func(timespec_get_id, builder.func);
         let getenv_ref = module.declare_func_in_func(getenv_id, builder.func);
         let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
         let atoll_ref = module.declare_func_in_func(atoll_id, builder.func);
@@ -904,7 +908,7 @@ fn emit_i64_exit_object(
             write: write_ref,
             read: read_ref,
             sleep: sleep_ref,
-            time: time_ref,
+            timespec_get: timespec_get_ref,
             getenv: getenv_ref,
             strlen: strlen_ref,
             atoll: atoll_ref,
@@ -1132,7 +1136,7 @@ fn define_i64_function(
     write_id: FuncId,
     read_id: FuncId,
     sleep_id: FuncId,
-    time_id: FuncId,
+    timespec_get_id: FuncId,
     getenv_id: FuncId,
     strlen_id: FuncId,
     atoll_id: FuncId,
@@ -1188,7 +1192,7 @@ fn define_i64_function(
         let write_ref = module.declare_func_in_func(write_id, builder.func);
         let read_ref = module.declare_func_in_func(read_id, builder.func);
         let sleep_ref = module.declare_func_in_func(sleep_id, builder.func);
-        let time_ref = module.declare_func_in_func(time_id, builder.func);
+        let timespec_get_ref = module.declare_func_in_func(timespec_get_id, builder.func);
         let getenv_ref = module.declare_func_in_func(getenv_id, builder.func);
         let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
         let atoll_ref = module.declare_func_in_func(atoll_id, builder.func);
@@ -1217,7 +1221,7 @@ fn define_i64_function(
             write: write_ref,
             read: read_ref,
             sleep: sleep_ref,
-            time: time_ref,
+            timespec_get: timespec_get_ref,
             getenv: getenv_ref,
             strlen: strlen_ref,
             atoll: atoll_ref,
@@ -2285,13 +2289,9 @@ fn emit_i64_expr(
         I64Expr::RandomU64 { intrinsic, package } => {
             emit_i64_random_u64_expr(builder, runtime_refs, intrinsic, package)
         }
-        I64Expr::RandomBytesLen { length } => emit_i64_random_bytes_len_expr(
-            builder,
-            locals,
-            function_refs,
-            runtime_refs,
-            length,
-        ),
+        I64Expr::RandomBytesLen { length } => {
+            emit_i64_random_bytes_len_expr(builder, locals, function_refs, runtime_refs, length)
+        }
         I64Expr::AuditCrypto {
             intrinsic,
             package,
@@ -2659,8 +2659,12 @@ fn emit_i64_random_bytes_len_expr(
     builder.append_block_param(read_block, types::I32);
     builder.append_block_param(merge_block, types::I64);
 
-    let min_valid = builder.ins().icmp_imm(IntCC::SignedGreaterThanOrEqual, length, 0);
-    let max_valid = builder.ins().icmp_imm(IntCC::SignedLessThanOrEqual, length, 65_536);
+    let min_valid = builder
+        .ins()
+        .icmp_imm(IntCC::SignedGreaterThanOrEqual, length, 0);
+    let max_valid = builder
+        .ins()
+        .icmp_imm(IntCC::SignedLessThanOrEqual, length, 65_536);
     let valid_length = builder.ins().band(min_valid, max_valid);
     builder
         .ins()
@@ -2696,11 +2700,8 @@ fn emit_i64_random_bytes_len_expr(
 
     builder.switch_to_block(os_open_block);
     builder.seal_block(os_open_block);
-    let bytes_slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        65_536,
-        0,
-    ));
+    let bytes_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 65_536, 0));
     let bytes_ptr = builder.ins().stack_addr(types::I64, bytes_slot, 0);
     let source_ptr = emit_i64_path_ptr(builder, "/dev/urandom")?;
     let open_flags = builder.ins().iconst(types::I32, 0);
@@ -4059,11 +4060,8 @@ fn emit_i64_net_resolve_len_expr(
     }
     let host_ptr = emit_i64_path_ptr(builder, host)?;
     let null_ptr = builder.ins().iconst(types::I64, 0);
-    let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        8,
-        0,
-    ));
+    let result_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 0));
     builder.ins().stack_store(null_ptr, result_slot, 0);
     let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
     #[cfg(not(windows))]
@@ -4190,11 +4188,43 @@ fn emit_i64_clock_now_ms_expr(
     builder: &mut FunctionBuilder<'_>,
     runtime_refs: I64RuntimeRefs,
 ) -> cranelift_codegen::ir::Value {
-    let null = builder.ins().iconst(types::I64, 0);
-    let call = builder.ins().call(runtime_refs.time, &[null]);
-    let seconds = builder.inst_results(call)[0];
+    let timespec_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 0));
+    let timespec_ptr = builder.ins().stack_addr(types::I64, timespec_slot, 0);
+    let time_utc = builder.ins().iconst(types::I32, 1);
+    let call = builder
+        .ins()
+        .call(runtime_refs.timespec_get, &[timespec_ptr, time_utc]);
+    let status = builder.inst_results(call)[0];
+    let success_block = builder.create_block();
+    let denied_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let ok = builder.ins().icmp_imm(IntCC::Equal, status, 1);
+    builder
+        .ins()
+        .brif(ok, success_block, &[], denied_block, &[]);
+
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+    let seconds = builder.ins().stack_load(types::I64, timespec_slot, 0);
+    let nanos = builder.ins().stack_load(types::I64, timespec_slot, 8);
     let millis_factor = builder.ins().iconst(types::I64, 1_000);
-    builder.ins().imul(seconds, millis_factor)
+    let seconds_millis = builder.ins().imul(seconds, millis_factor);
+    let nanos_divisor = builder.ins().iconst(types::I64, 1_000_000);
+    let nanos_millis = builder.ins().sdiv(nanos, nanos_divisor);
+    let millis = builder.ins().iadd(seconds_millis, nanos_millis);
+    builder.ins().jump(merge_block, &[BlockArg::Value(millis)]);
+
+    builder.switch_to_block(denied_block);
+    builder.seal_block(denied_block);
+    let denied = builder.ins().iconst(types::I64, -1);
+    builder.ins().jump(merge_block, &[BlockArg::Value(denied)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    builder.block_params(merge_block)[0]
 }
 
 fn emit_i64_clock_elapsed_ms_expr(
@@ -5312,6 +5342,66 @@ mod tests {
         .expect("compile i64 division exit program");
         let output = Command::new(&binary).output().expect("run binary");
         assert_eq!(output.status.code(), Some(42));
+    }
+
+    #[test]
+    fn clock_now_ms_imports_timespec_get_without_time_fallback() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        if Command::new("nm").arg("--version").output().is_err()
+            && Command::new("nm").arg("-V").output().is_err()
+        {
+            eprintln!("skipping cranelift symbol test because nm is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-clock-now.o");
+        let binary = temp.path().join("i64-exit-clock-now");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::ClockNowMs),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 clock now exit program");
+
+        let output = Command::new("nm")
+            .arg("-u")
+            .arg(&object)
+            .output()
+            .expect("inspect clock object symbols");
+        assert!(
+            output.status.success(),
+            "nm failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let symbols = String::from_utf8_lossy(&output.stdout);
+        let imported_symbols = symbols
+            .lines()
+            .filter_map(|line| line.split_whitespace().last())
+            .collect::<Vec<_>>();
+        assert!(
+            imported_symbols
+                .iter()
+                .any(|symbol| *symbol == "timespec_get" || *symbol == "_timespec_get"),
+            "clock object should import timespec_get, got:\n{symbols}"
+        );
+        assert!(
+            !imported_symbols
+                .iter()
+                .any(|symbol| *symbol == "time" || *symbol == "_time"),
+            "clock object should not import time(), got:\n{symbols}"
+        );
     }
 
     #[test]

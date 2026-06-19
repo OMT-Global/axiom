@@ -5697,7 +5697,7 @@ fn cranelift_backend_lowers_std_time_sleep_wrappers_to_runtime_exit_code() {
         audit.contains("\"args\":{\"milliseconds\":\"int\"}"),
         "{audit}"
     );
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 4, "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 5, "{audit}");
     assert_eq!(
         audit.matches("\"outcome\":\"denied\"").count(),
         2,
@@ -11949,7 +11949,10 @@ let primitive_elapsed: int = clock_elapsed_ms(primitive_start)
 let public_start: int = now_ms()
 let public_elapsed: int = elapsed_ms(Instant { ms: public_start })
 let inline_elapsed: int = elapsed_ms(now())
-if direct == 0 && helper == 0 && negative == -1 && positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 {
+let precision_start: int = clock_now_ms()
+let precision_sleep: int = clock_sleep_ms(10)
+let precision_elapsed: int = clock_elapsed_ms(precision_start)
+if direct == 0 && helper == 0 && negative == -1 && positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 && precision_sleep == 0 && precision_elapsed > 0 && precision_elapsed < 1000 {
 return 48
 } else {
 return 1

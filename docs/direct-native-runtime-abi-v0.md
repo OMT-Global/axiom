@@ -1015,8 +1015,11 @@ sleeping. Primitive `clock_now_ms()` and `clock_elapsed_ms(start)` calls,
 imported public `std/time.ax` `now_ms()`, and public
 `elapsed_ms(Instant)` calls over inline `Instant.ms` scalar projections,
 including `elapsed_ms(now())`, now lower to native scalar values backed by the
-object backend's host `time` import and can feed direct-native comparisons and
-process exit status without generated Rust. Imported public `std/time.ax`
+object backend's host `timespec_get` import and can feed direct-native
+comparisons and process exit status without generated Rust. The backend symbol
+regression asserts the generated object imports `timespec_get` and does not
+import `time`, and the public runtime smoke requires a 10 ms sleep to report a
+positive elapsed value below one second. Imported public `std/time.ax`
 `sleep(duration_ms(...))` wrappers now alias that same deterministic path for
 literal, static scalar, and runtime scalar durations in runtime-exit programs.
 Those sleep paths now append host audit JSONL entries when
