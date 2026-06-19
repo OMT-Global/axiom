@@ -43,7 +43,9 @@ if [[ -n "$rust_linker" ]]; then
   fi
 else
   for candidate in cc gcc clang; do
-    if rust_linker="$(command -v "$candidate" 2>/dev/null)" && [[ -n "$rust_linker" ]] && smoke_linker "$rust_linker"; then
+    candidate_linker="$(command -v "$candidate" 2>/dev/null || true)"
+    if [[ -n "$candidate_linker" ]] && smoke_linker "$candidate_linker"; then
+      rust_linker="$candidate_linker"
       export AXIOM_FAST_CI_RUST_LINKER="$rust_linker"
       break
     fi
