@@ -51,11 +51,10 @@ else
   for candidate in cc gcc clang; do
     candidate_linker="$(command -v "$candidate" 2>/dev/null || true)"
     [[ -n "$candidate_linker" ]] || continue
-    if smoke_linker "$candidate_linker"; then
-      rust_linker="$candidate_linker"
-      export AXIOM_FAST_CI_RUST_LINKER="$rust_linker"
-      break
-    fi
+    smoke_linker "$candidate_linker" || continue
+    rust_linker="$candidate_linker"
+    export AXIOM_FAST_CI_RUST_LINKER="$rust_linker"
+    break
   done
 
   if [[ -z "$rust_linker" ]] && smoke_rust_lld; then
