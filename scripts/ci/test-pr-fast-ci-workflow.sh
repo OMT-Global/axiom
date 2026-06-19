@@ -3,9 +3,15 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$repo_root/.github/workflows/pr-fast-ci.yml"
+fast_checks_script="$repo_root/scripts/ci/run-fast-checks.sh"
 
 if [[ ! -f "$workflow" ]]; then
   echo "missing workflow: $workflow" >&2
+  exit 1
+fi
+
+if [[ ! -x "$fast_checks_script" ]]; then
+  echo "missing executable fast-check script: $fast_checks_script" >&2
   exit 1
 fi
 
@@ -101,6 +107,20 @@ fi
 if [[ -n "$benchmark_gate_reference" ]]; then
   echo "pr-fast-ci must not run the Stage 1 comparison benchmark gate; keep it in extended, nightly, or manual validation" >&2
   printf '%s\n' "$benchmark_gate_reference" >&2
+  exit 1
+fi
+
+candidate_line=$(nl -ba "$fast_checks_script" | grep -F 'candidate_linker="$(command -v "$candidate" 2>/dev/null || true)"' | head -n1 | awk '{print $1}')
+smoke_line=$(nl -ba "$fast_checks_script" | grep -F 'smoke_linker "$candidate_linker" || continue' | head -n1 | awk '{print $1}')
+assign_line=$(nl -ba "$fast_checks_script" | grep -F 'rust_linker="$candidate_linker"' | head -n1 | awk '{print $1}')
+
+if [[ -z "$candidate_line" || -z "$smoke_line" || -z "$assign_line" ]]; then
+  echo "run-fast-checks must keep linker candidates separate from the accepted Rust linker" >&2
+  exit 1
+fi
+
+if (( candidate_line >= smoke_line || smoke_line >= assign_line )); then
+  echo "run-fast-checks must only assign AXIOM_FAST_CI_RUST_LINKER after smoke_linker succeeds" >&2
   exit 1
 fi
 
