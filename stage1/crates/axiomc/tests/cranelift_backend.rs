@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[cfg(not(windows))]
 #[test]
@@ -5374,6 +5374,120 @@ fn cranelift_backend_lowers_known_eprintln_runtime_stderr_in_direct_native_main(
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_std_io_read_to_string_len_from_stdin() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("stdio-read-to-string-len");
+    write_std_io_read_to_string_len_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift stdio read_to_string len build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let mut child = Command::new(binary)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn cranelift stdio read_to_string len binary");
+    {
+        let stdin = child.stdin.as_mut().expect("open child stdin");
+        std::io::Write::write_all(stdin, b"alpha\nbeta\n").expect("write child stdin");
+    }
+    let run = child
+        .wait_with_output()
+        .expect("run cranelift stdio read_to_string len binary");
+    assert_eq!(
+        run.status.code(),
+        Some(11),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "");
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_lowers_std_io_read_to_string_local_len_from_stdin() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("stdio-read-to-string-local-len");
+    write_std_io_read_to_string_local_len_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift stdio read_to_string local len build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let mut child = Command::new(binary)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn cranelift stdio read_to_string local len binary");
+    {
+        let stdin = child.stdin.as_mut().expect("open child stdin");
+        std::io::Write::write_all(stdin, b"local\nstdin\n").expect("write child stdin");
+    }
+    let run = child
+        .wait_with_output()
+        .expect("run cranelift stdio read_to_string local len binary");
+    assert_eq!(
+        run.status.code(),
+        Some(12),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_known_print_runtime_stdout_in_direct_native_main() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -6319,6 +6433,102 @@ direct-native
 unterminated JSON object
 "#,
     );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_builds_std_outcome_known_values_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-outcome-known-values");
+    write_std_outcome_known_values_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std/outcome known values build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std/outcome known values binary");
+    assert!(
+        run.status.success(),
+        "cranelift std/outcome known values binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "true\ntrue\n7\nfallback\ntrue\ntrue\n11\nfallback\n31\ntrue\n4\nfalse\n41\ntrue\n6\nfalse\n"
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "");
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_builds_std_testing_known_assertions_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-testing-known-assertions");
+    write_std_testing_known_assertions_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std/testing known assertions build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std/testing known assertions binary");
+    assert!(
+        run.status.success(),
+        "cranelift std/testing known assertions binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n0\n"
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stderr), "");
 }
 
 #[cfg(not(windows))]
@@ -11436,6 +11646,97 @@ return first + status + tail + bool_written + number_written + quoted_bool_writt
     .expect("write logging stdio main source");
 }
 
+fn write_std_io_read_to_string_len_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create stdio read len project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-stdio-read-to-string-len"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write stdio read len manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-stdio-read-to-string-len"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write stdio read len lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/io.ax"
+
+fn main(): int {
+return len(read_to_string())
+}
+"#,
+    )
+    .expect("write stdio read len source");
+}
+
+fn write_std_io_read_to_string_local_len_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create stdio read local len project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-stdio-read-to-string-local-len"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write stdio read local len manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-stdio-read-to-string-local-len"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write stdio read local len lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/io.ax"
+
+fn main(): int {
+let content: string = read_to_string()
+return len(content)
+}
+"#,
+    )
+    .expect("write stdio read local len source");
+}
+
 fn write_print_stdio_main_exit_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create print stdio main project src");
     fs::write(
@@ -12669,6 +12970,141 @@ print "parse error"
 "#,
     )
     .expect("write std/serdes source");
+}
+
+fn write_std_outcome_known_values_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create std/outcome known values project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-std-outcome-known-values"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write std/outcome known values manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-std-outcome-known-values"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write std/outcome known values lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/outcome.ax"
+
+struct Step {
+value: int
+enabled: bool
+}
+
+let ready: Option<int> = Some(7)
+let missing: Option<int> = None
+print option_is_some<int>(ready)
+print option_is_none<int>(missing)
+
+let absent: Option<string> = None
+print option_unwrap_or<int>(Some(7), 1)
+print option_unwrap_or<string>(absent, "fallback")
+
+let ok_value: Result<int, string> = Ok(11)
+let err_value: Result<int, string> = Err("nope")
+print result_is_ok<int, string>(ok_value)
+print result_is_err<int, string>(err_value)
+print result_unwrap_or<int, string>(Ok(11), 1)
+print result_unwrap_or<string, string>(Err("failed"), "fallback")
+
+let selected_step: Step = option_unwrap_or<Step>(Some(Step { value: 31, enabled: true }), Step { value: 2, enabled: false })
+print selected_step.value
+print selected_step.enabled
+
+let fallback_step: Step = option_unwrap_or<Step>(None, Step { value: 4, enabled: false })
+print fallback_step.value
+print fallback_step.enabled
+
+let result_step: Step = result_unwrap_or<Step, Step>(Ok(Step { value: 41, enabled: true }), Step { value: 5, enabled: false })
+print result_step.value
+print result_step.enabled
+
+let result_fallback: Step = result_unwrap_or<Step, Step>(Err(Step { value: 3, enabled: true }), Step { value: 6, enabled: false })
+print result_fallback.value
+print result_fallback.enabled
+"#,
+    )
+    .expect("write std/outcome known values source");
+}
+
+fn write_std_testing_known_assertions_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create std/testing known assertions project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-std-testing-known-assertions"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write std/testing known assertions manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-std-testing-known-assertions"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write std/testing known assertions lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"import "std/testing.ax"
+
+let count: int = 3
+let ready: bool = true
+
+print assert_true(ready)
+print assert_true_case(count == 3)
+print assert_eq<int>(count, 3)
+print assert_eq_bool(ready, true)
+print assert_eq_int(count + 4, 7)
+print assert_eq_string("direct-native", string_clone("direct-native"))
+print table_int("count row", count, 3)
+print table_bool("ready row", ready, true)
+print table_string("label row", "direct-native", string_clone("direct-native"))
+print property("count positive", count > 0)
+print snapshot("label snapshot", string_clone("direct-native"), "direct-native")
+"#,
+    )
+    .expect("write std/testing known assertions source");
 }
 
 fn write_std_serdes_known_json_main_exit_project(project: &Path) {

@@ -330,6 +330,11 @@ The same nested slot representation now has narrow evidence for
 `Option<Result<int, int>>` construction, reassignment, matching, helper
 parameters, helper returns, forwarded helper values, and inline
 `Some(Ok(...))`, `Some(Err(...))`, and outer `None` helper arguments.
+The Cranelift evidence suite now also builds and runs public `std/outcome.ax`
+`option_is_some(...)`, `option_is_none(...)`, and `option_unwrap_or(...)`
+wrappers without generated Rust for known scalar, string, and struct payloads,
+including struct field projections from selected and fallback `Option<Step>`
+values.
 The row remains partial because direct-native codegen still does not provide a
 general `Option<T>` ABI across broader payload shapes, deeper nested option or
 result values, or broad aggregate storage.
@@ -755,8 +760,13 @@ remain tracked by issue #1001.
 The `Result<T, E>` row has partial direct-native evidence: the Cranelift spike
 now builds and runs a package importing `std/outcome.ax`, using result
 predicates, fallback unwrap helpers, direct match arms over `Result<T, E>`
-values, scalar payloads, string errors, and struct payloads. The direct-native
-runtime path now also has narrow evidence for local `Result<int, int>`,
+values, scalar payloads, string errors, and struct payloads. The dedicated
+std/outcome evidence binary now also asserts `generated_rust: null` while
+running public `result_is_ok(...)`, `result_is_err(...)`, and
+`result_unwrap_or(...)` wrappers over known scalar, string, and struct payloads,
+including field projections from selected and fallback `Result<Step, Step>`
+values. The direct-native runtime path now also has narrow evidence for local
+`Result<int, int>`,
 `Result<bool, bool>`, `Result<int, bool>`, and `Result<bool, int>` `Ok` and
 `Err` construction and reassignment, plus typed numeric `Result<i32, u32>`
 `Result<i64, u16>`, and `Result<u8, i8>` `Ok`/`Err` construction and
@@ -822,6 +832,9 @@ parsing, typed field accessors, value indexing, stringify, and parse-error
 reporting without generated Rust. The checked-in `stdlib_serdes` example now
 also runs through the direct-native example smoke, including deep `Value`
 equality and `std/testing.ax` assertion helpers without generated Rust. The
+Cranelift evidence suite now also builds and runs public `std/testing.ax`
+typed equality, table-case, property, and snapshot wrappers over known scalar,
+boolean, and string inputs while asserting `generated_rust: null`. The
 Cranelift evidence suite now also builds and runs known-message `std/lsp.ax`
 JSON-RPC wrapper flows without generated Rust, covering request construction,
 method/id dispatch, response framing, text-document field extraction, and
@@ -996,11 +1009,19 @@ selecting among finite known text values without materializing a general string
 runtime. Supported direct-native stdout/stderr write primitives now append
 best-effort host audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only the
 stream, byte-count shape, and outcome without recording printed text, formatted
-integer values, log messages, field names, or field values. Stdin reads, dynamic
-stdout/stderr text beyond boolean, integer, JSON scalar formatting, and finite
-known-string projection selection, dynamic panic messages beyond scalar/string
-JSON stringify and finite known-string projection selection, and broader
-streaming/runtime buffering remain tracked by issue #1001.
+integer values, log messages, field names, or field values. Public `std/io.ax`
+`read_to_string()` length projections now lower into a bounded native stdin
+`read(2)` byte-count path, and the evidence binary pipes fixed stdin into the
+generated native object output while asserting `generated_rust: null` and the
+native process exit status. The same bounded byte-count path also feeds string
+locals assigned from `read_to_string()` when those locals are used only for
+`len(local)` projections in direct-native `main` return values. Broader stdin
+reads beyond bounded `read_to_string()` length projections, materialized stdin
+strings, dynamic stdout/stderr text beyond boolean, integer, JSON scalar
+formatting, and finite known-string projection selection, dynamic panic messages
+beyond scalar/string JSON stringify and finite known-string projection
+selection, and broader streaming/runtime buffering remain tracked by issue
+#1001.
 
 The `clock.now_sleep` row now has partial Cranelift evidence for `std/time.ax`
 `now_ms`, `now`, `elapsed_ms`, zero-duration `sleep`, and a bounded positive
