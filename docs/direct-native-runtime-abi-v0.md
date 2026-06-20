@@ -250,7 +250,8 @@ for that arm, including static scalar `string_line_at(...)` indexes. Known-text
 length and comparison path, and known-input `encoding_url_component_decode(...)`
 can lower direct `Option<string>` matches by compile-time arm selection.
 Imported public `std/encoding.ax` wrappers now alias those same known-input
-encode, decode, query-pair, and path-join lowering paths.
+encode, decode, query-pair, and path-join lowering paths; the focused evidence
+manifest now links the encoding wrapper runtime-exit smoke to this row.
 Imported public `std/string_builder.ax` builder, seed, push, line-push, and
 finish wrappers now alias known text facts that can feed direct-native string
 comparisons, length projections, and process exit status without generated
@@ -694,12 +695,13 @@ encoding, and path segment joining without generated Rust. Known-text encoding
 helpers now also feed narrow direct-native string length/comparison lowering,
 known-input `string_line_at(...)` also accepts static scalar indexes, and
 known-input percent decode can feed direct `Option<string>` matches without
-generated Rust. Pure known-text helper calls can now fold direct-return,
-local-let-return, final-if-return, match-return, and final-match-statement string
-helper arguments and returns, including tuple-index and struct-field string
-projections and direct map-index string projections over known map literals,
-into direct-native length, comparison, and `string_starts_with(...)` conditions
-without generated Rust.
+generated Rust; the focused evidence manifest now links the encoding wrapper
+runtime-exit smoke to this row. Pure known-text helper calls can now fold
+direct-return, local-let-return, final-if-return, match-return, and
+final-match-statement string helper arguments and returns, including tuple-index
+and struct-field string projections and direct map-index string projections
+over known map literals, into direct-native length, comparison, and
+`string_starts_with(...)` conditions without generated Rust.
 Imported public `std/string_builder.ax` builder, seed, push,
 line-push, and finish wrappers now alias known text facts that can feed
 direct-native string comparisons, length projections, and process exit status
