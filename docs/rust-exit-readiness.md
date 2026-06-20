@@ -51,6 +51,9 @@ AXIOM_DIRECT_NATIVE_RUNTIME_ABI_STATUS=partial \
   bash scripts/ci/run-direct-native-runtime-abi-evidence.sh
 ```
 
+Add `AXIOM_DIRECT_NATIVE_RUNTIME_ABI_DRY_RUN=1` to print the resolved Cargo
+commands without executing them.
+
 ## Backend Matrix
 
 | Surface | Required state | Current disposition | Governing issue |
