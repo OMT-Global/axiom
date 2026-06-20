@@ -81,6 +81,8 @@
       "cranelift_backend_lowers_string_literal_len_to_runtime_exit_code",
       "cranelift_backend_lowers_string_branch_reassignment_to_runtime_exit_code",
       "cranelift_backend_lowers_string_concat_reassignment_to_runtime_exit_code",
+      "cranelift_backend_lowers_string_loop_concat_reassignment_to_runtime_exit_code",
+      "cranelift_backend_lowers_string_helper_concat_reassignment_to_runtime_exit_code",
       "cranelift_backend_lowers_string_dynamic_projection_reassignment_to_runtime_exit_code",
       "cranelift_backend_lowers_string_loop_dynamic_projection_reassignment_to_runtime_exit_code",
       "cranelift_backend_lowers_string_loop_reassignment_to_runtime_exit_code",
