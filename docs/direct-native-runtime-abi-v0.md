@@ -995,10 +995,11 @@ alias those same direct-native paths in runtime-exit programs; scalar
 `stringify_int(...)` and `stringify_bool(...)` results can also be assigned to
 string locals that feed native stdout `print` without materializing a general
 runtime string value, and `stringify_string(...)` over those supported
-projection locals can now feed quoted native stdout lines directly. Focused
-boundary evidence now records branch-, loop-, and helper-body reassignment of
-public `std/json.ax` wrapper-backed string results as failing closed at the
-direct-native i64 ABI boundary. Public
+projection locals can now feed quoted native stdout lines directly. Scalar
+`stringify_int(...)` and `stringify_bool(...)` wrapper results can now be
+reassigned through branch, loop, and helper-body string locals, feeding
+direct-native length projections and process exit status without generated
+Rust. Public
 `value_int(...)`, `value_bool(...)`, and `value_string(...)` `JsonValue`
 wrappers over supported dynamic scalar/bool string projections can also feed
 `stringify_value(...)` and native stdout output without generated Rust. Public
