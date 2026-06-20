@@ -31,6 +31,7 @@
     "numeric.scalars": [
       "cranelift_backend_lowers_i64_main_to_runtime_exit_code",
       "cranelift_backend_lowers_i64_typed_numeric_returning_main_to_runtime_exit_code",
+      "cranelift_backend_lowers_numeric_cross_width_to_runtime_exit_code",
       "cranelift_backend_builds_numeric_cross_width_binary",
       "cranelift_backend_lowers_i64_while_loop_to_runtime_exit_code"
     ],

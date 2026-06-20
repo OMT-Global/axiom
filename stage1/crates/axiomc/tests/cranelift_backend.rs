@@ -523,6 +523,46 @@ fn cranelift_backend_lowers_i64_typed_numeric_returning_main_to_runtime_exit_cod
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_numeric_cross_width_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("numeric-cross-width-main-exit");
+    write_numeric_cross_width_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift numeric cross-width main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift numeric cross-width main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_option_int_match_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -7448,6 +7488,25 @@ fn write_typed_numeric_returning_main_exit_project(
         format!("fn main(): {return_ty} {{\nreturn {literal}\n}}\n"),
     )
     .expect("write typed numeric main exit source");
+}
+
+fn write_numeric_cross_width_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src")).expect("create numeric cross-width main exit src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-numeric-cross-width-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write numeric cross-width main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-numeric-cross-width-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write numeric cross-width main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "fn bump_i8(value: i8): i8 {\nlet one: i8 = 1i8\nreturn value + one\n}\n\nfn widen_u16(value: u16): int {\nlet widened: i32 = value as i32\nreturn widened as int\n}\n\nfn main(): int {\nlet signed_seed: i8 = 47i8\nlet bumped: i8 = bump_i8(signed_seed)\nlet unsigned_seed: u16 = 5u16\nlet widened: int = widen_u16(unsigned_seed)\nlet truncated: u8 = 300i64 as u8\nlet truncated_int: int = truncated as int\nlet wrapped_signed: i8 = 130i64 as i8\nlet wrapped_signed_int: int = wrapped_signed as int\nlet round_trip: i64 = bumped as i64\nif round_trip == 48i64 && widened == 5 && truncated_int == 44 && wrapped_signed_int == -126 {\nreturn round_trip as int\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write numeric cross-width main exit source");
 }
 
 fn write_option_int_match_main_exit_project(project: &Path) {

@@ -165,7 +165,10 @@ expressions, helper `int -> int` and `int/i64` boundary functions, simple
 returns, and casts, narrow unsigned `u8`/`u16`/`u32` helper arguments, locals,
 returns, and casts, explicit narrow integer casts with unsigned truncation and
 signed extension, typed narrow integer arithmetic and helper return values cast
-back to their source width, immediate tuple-literal scalar indexing,
+back to their source width, and a focused runtime-exit cross-width smoke
+covering signed `i8` helper parameters and returns, `u16`-to-`int` widening,
+`u8` truncation, `i8` signed narrowing, and `i64` round-trip process exit
+status, immediate tuple-literal scalar indexing,
 scalar projection from local tuple bindings, immediate array-literal scalar
 indexing with literal indexes, scalar projection from local fixed-array
 bindings, immediate struct-literal scalar field access, scalar projection from
