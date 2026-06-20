@@ -21,11 +21,13 @@ assert report["target_id"] == "axiom://target/stage1-direct-native"
 assert report["contract_status"] == "partial"
 assert report["value_feature_count"] == 12
 assert report["capability_shim_count"] == 22
-assert report["status_counts"]["value_features"]["partial"] == 12
+assert report["status_counts"]["value_features"]["implemented"] == 1
+assert report["status_counts"]["value_features"]["partial"] == 11
 assert report["status_counts"]["capability_shims"]["implemented"] == 22
 assert report["status_counts"]["capability_shims"]["partial"] == 0
 assert report["blocked_rows"] == []
-assert len(report["incomplete_rows"]) == 12
+assert len(report["incomplete_rows"]) == 11
+assert "owned.move_state" not in report["incomplete_rows"]
 assert "ffi.call" not in report["incomplete_rows"]
 assert "json.serdes" not in report["incomplete_rows"]
 assert "crypto.hash" not in report["incomplete_rows"]
@@ -76,7 +78,9 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     contract = json.load(handle)
 
+value_rows = {row["id"]: row for row in contract["value_features"]}
 capability_rows = {row["id"]: row for row in contract["capability_shims"]}
+assert "stage1/crates/axiomc/src/hir.rs" in value_rows["owned.move_state"]["runtime_evidence"]
 for row_id in (
     "clock.now_sleep",
     "crypto.hash",

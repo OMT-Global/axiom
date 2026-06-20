@@ -898,11 +898,13 @@ feed terminal panic reports as escaped native stderr JSON while preserving
 evidenced scalar/string/object/array source wrappers, and broader schema helper
 coverage remain tracked by issue #1001.
 
-The owned move-state row has partial direct-native evidence: the Cranelift
-spike builds and runs projection-sensitive owned field moves while preserving
-access to disjoint sibling projections, and the public smoke now asserts the
-build JSON reports `generated_rust: null` for that path. Broader move-state,
-lifetime, and host ABI coverage remain tracked by issue #1001.
+The owned move-state row is now marked implemented: the Cranelift spike builds
+and runs projection-sensitive owned field moves while preserving access to
+disjoint sibling projections, and the public smoke now asserts the build JSON
+reports `generated_rust: null` for that path. HIR ownership lowering tracks
+moved projections independently, rejects conflicting whole-value or ancestor
+reuse, and keeps disjoint sibling projections traversable. Broader lifetime and
+host ABI coverage remain tracked by issue #1001.
 
 The logging/stdio row has partial direct-native evidence: the Cranelift spike
 now evaluates `std/io.ax` stderr writes and `std/log.ax` structured event
