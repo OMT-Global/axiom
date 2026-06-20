@@ -322,17 +322,35 @@ def validate_evidence_test_group(
 
 def resolve_evidence_row(
     manifest: dict[str, Any] | None,
+    contract: dict[str, Any],
     row_id: str,
 ) -> tuple[dict[str, Any], int]:
+    contract_row, contract_group = find_contract_row(contract, row_id)
     row_report = {
         "schema": "axiom.direct_native.runtime_abi.evidence_row.v1",
         "target_id": None,
         "row_id": row_id,
-        "group": None,
+        "group": contract_group,
+        "status": None,
+        "blockers": [],
+        "evidence": [],
+        "denial_evidence": [],
+        "runtime_evidence": [],
+        "notes": None,
         "test_source": None,
         "tests": [],
         "errors": [],
     }
+    if contract_row is None:
+        row_report["errors"].append(f"unknown direct native runtime ABI contract row: {row_id}")
+    else:
+        row_report["status"] = contract_row.get("status")
+        row_report["blockers"] = contract_row.get("blockers", [])
+        row_report["evidence"] = contract_row.get("evidence", [])
+        row_report["denial_evidence"] = contract_row.get("denial_evidence", [])
+        row_report["runtime_evidence"] = contract_row.get("runtime_evidence", [])
+        row_report["notes"] = contract_row.get("notes")
+
     if manifest is None:
         row_report["errors"].append("evidence test manifest is not available")
         return row_report, 1
@@ -343,12 +361,26 @@ def resolve_evidence_row(
         group = manifest.get(group_name)
         if isinstance(group, dict) and row_id in group:
             tests = group[row_id]
-            row_report["group"] = group_name
+            row_report["group"] = row_report["group"] or group_name
             row_report["tests"] = tests if isinstance(tests, list) else []
-            return row_report, 0
+            return row_report, 1 if row_report["errors"] else 0
 
     row_report["errors"].append(f"unknown direct native runtime ABI evidence row: {row_id}")
     return row_report, 1
+
+
+def find_contract_row(
+    contract: dict[str, Any],
+    row_id: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    for group_name in ("value_features", "capability_shims"):
+        rows = contract.get(group_name)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict) and row.get("id") == row_id:
+                return row, group_name
+    return None, None
 
 
 def build_report(
@@ -511,6 +543,7 @@ def main() -> int:
     if args.evidence_row:
         row_report, row_status = resolve_evidence_row(
             evidence_test_manifest,
+            contract,
             args.evidence_row,
         )
         row_report["errors"] = [*report["errors"], *row_report["errors"]]

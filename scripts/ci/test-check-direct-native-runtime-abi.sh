@@ -74,7 +74,32 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 assert report["schema"] == "axiom.direct_native.runtime_abi.evidence_row.v1"
 assert report["row_id"] == "option"
 assert report["group"] == "value_features"
+assert report["status"] == "partial"
+assert report["blockers"] == [1001]
+assert "stage1/crates/axiomc/tests/cranelift_backend.rs" in report["evidence"]
+assert "stage1/crates/axiomc/src/cranelift_backend.rs" in report["runtime_evidence"]
+assert "stage1/crates/axiomc-backend-cranelift/src/lib.rs" in report["runtime_evidence"]
+assert "general Option ABI" in report["notes"]
 assert "cranelift_backend_lowers_option_int_match_to_runtime_exit_code" in report["tests"]
+assert report["errors"] == []
+PY
+
+python3 "$script" --contract "$contract" --evidence-row fs.read --json >"$temp_dir/fs-read-row.json"
+python3 - "$temp_dir/fs-read-row.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+
+assert report["row_id"] == "fs.read"
+assert report["group"] == "capability_shims"
+assert report["status"] == "implemented"
+assert report["blockers"] == []
+assert "stage1/crates/axiomc/tests/cranelift_backend.rs" in report["evidence"]
+assert "stage1/crates/axiomc/tests/cranelift_backend.rs" in report["denial_evidence"]
+assert "stage1/crates/axiomc/src/cranelift_backend.rs" in report["runtime_evidence"]
+assert "cranelift_backend_lowers_fs_read_to_runtime_exit_code" in report["tests"]
 assert report["errors"] == []
 PY
 
@@ -83,6 +108,7 @@ if python3 "$script" --contract "$contract" --evidence-row missing.row >"$temp_d
   exit 1
 fi
 grep -Fq "unknown direct native runtime ABI evidence row: missing.row" "$temp_dir/missing-row.err"
+grep -Fq "unknown direct native runtime ABI contract row: missing.row" "$temp_dir/missing-row.err"
 
 python3 - "$contract" "$temp_dir/ready-contract.json" <<'PY'
 import json
