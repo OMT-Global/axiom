@@ -729,6 +729,9 @@ fixed-array slots, including helper-parameter arrays feeding a direct-native
 process exit status. Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots.
+The focused evidence manifest now also links the borrowed-slice helper-parameter
+rejection smoke to this row, proving general `&[T]` helper parameters still
+fail closed at the direct-native i64 ABI boundary.
 Broader borrowed-slice aliasing, dynamic slice bounds, slice returns, and host
 ABI coverage remain tracked by issue #1124.
 
