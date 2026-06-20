@@ -243,6 +243,11 @@ represented as a byte-length projection local, matching the generated-Rust
 backend and Cranelift spike `.len()` semantics, and can feed direct-native
 integer locals, comparisons, helper calls, runtime branch-local string
 projection `let`s, and process exit status without generated Rust.
+Branch-, loop-, and helper-body string reassignment can update those projection
+locals for reassigned known literals, known-text helper returns, known-text
+string intrinsic results, supported known-text concatenations, and supported
+runtime scalar/bool stringify projections without materializing a general string
+value.
 String concatenation length also lowers for supported string length projection
 inputs by adding the operand byte lengths without materializing the concatenated
 runtime string.
@@ -277,8 +282,12 @@ projections without materializing a general runtime string value. Known-input
 direct-native boolean conditions after normal front-end crypto capability
 checks. Imported public `std/crypto_hash.ax` and `std/crypto_mac.ax` hash, HMAC,
 verify, and constant-time equality wrappers now alias those same known-input
-direct-native paths in runtime-exit programs. The row
-remains partial because direct-native codegen still does not provide a general
+direct-native paths in runtime-exit programs. Public `std/crypto_hash.ax` and
+`std/crypto_mac.ax` wrapper-backed SHA/HMAC string results can now be
+reassigned through branch, loop, and helper-body string locals, feeding
+direct-native length projections, process exit status, and typed host-audit
+metadata without generated Rust. The row remains partial because direct-native
+codegen still does not provide a general
 string ABI, general runtime string parameters or returns, allocation or mutation
 behavior, non-literal string storage, general Option-string payload storage or
 helper ABI, broad string, encoding, or crypto string intrinsic lowering, or
@@ -554,9 +563,10 @@ into length and comparison conditions that can feed a native process exit
 status without generated Rust. Supported runtime string-projection inputs can
 also feed fixed SHA-256 hex length projections directly or through
 `string_clone(...)` over a projection local without materializing a general
-runtime string value. Those direct-native SHA-256 length projections now append
-best-effort host audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only typed
-input metadata and outcome without recording input text or digest values.
+runtime string value, including public wrapper results reassigned through
+branch-local string slots. Those direct-native SHA-256 length projections now
+append best-effort host audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only
+typed input metadata and outcome without recording input text or digest values.
 Random, signature, AEAD, dynamic runtime hash execution, and broader crypto
 audit parity remain open.
 
@@ -570,10 +580,11 @@ now also lowers known-input
 length and comparison conditions that can feed a native process exit status
 without generated Rust. Supported runtime string-projection inputs can also feed
 fixed HMAC hex length projections directly or through `string_clone(...)` over
-a projection local without materializing a general runtime string value. Those
-direct-native HMAC length projections now append best-effort host audit JSONL
-to `AXIOM_HOST_AUDIT_LOG`, recording only typed input metadata and outcome
-without recording key, message, or tag values.
+a projection local without materializing a general runtime string value,
+including public wrapper results reassigned through loop and helper-body string
+slots. Those direct-native HMAC length projections now append best-effort host
+audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only typed input metadata and
+outcome without recording key, message, or tag values.
 Known-input `crypto_constant_time_eq(...)` over known string values lowers into native
 boolean conditions. It also lowers
 `crypto_constant_time_eq_u8(...)` over narrow fixed-array/static-slice `u8`
@@ -698,7 +709,10 @@ native process exit status without generated Rust, including known-concatenated
 patterns, text, and replacement strings in entrypoints and helper-local regex
 calls. Imported public `std/regex.ax` `is_match`, `find`, and `replace_all`
 wrappers now alias that same direct-native known-input lowering, including those
-known-concatenated and helper-local input shapes.
+known-concatenated and helper-local input shapes. Public `std/regex.ax`
+`replace_all` wrapper results can now be reassigned through branch, loop, and
+helper-body string locals, feeding direct-native length projections and process
+exit status without generated Rust.
 Broader regex syntax, dynamic runtime regex execution, capture groups,
 replacement expansion semantics, and conformance coverage remain open under
 #1001.
@@ -720,6 +734,12 @@ final-match-statement string helper arguments and returns, including tuple-index
 and struct-field string projections and direct map-index string projections
 over known map literals, into direct-native length, comparison, and
 `string_starts_with(...)` conditions without generated Rust.
+Branch-, loop-, and helper-body string reassignment now update direct-native
+string length projection locals so reassigned known literals, known-text helper
+returns, known-text string intrinsic results, and supported known-text
+concatenations plus runtime scalar/bool stringify projections can feed
+post-control-flow length checks, helper returns, and process exit status without
+generated Rust.
 The focused evidence manifest now also links the unsupported string-helper
 `main` smoke to this row, proving side-effecting string helper bodies still
 fail closed at the direct-native i64 ABI boundary.
@@ -741,11 +761,13 @@ fixed-array slots, including helper-parameter arrays feeding a direct-native
 process exit status. Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots.
-The focused evidence manifest now also links the borrowed-slice helper-parameter
-rejection smoke to this row, proving general `&[T]` helper parameters still
-fail closed at the direct-native i64 ABI boundary.
-Broader borrowed-slice aliasing, dynamic slice bounds, slice returns, and host
-ABI coverage remain tracked by issue #1124.
+The focused evidence manifest now also links borrowed-slice helper-parameter
+runtime-exit evidence for scalar and bool slices whose helper ABI width is
+statically witnessed by call sites. Static-width borrowed-slice helper returns
+can also flow back through the same multi-slot ABI when the returned borrowed
+parameter width is statically witnessed by call sites. Broader borrowed-slice
+aliasing, dynamic slice bounds, unconstrained helper-parameter or helper-return
+widths, and host ABI coverage remain tracked by issue #1124.
 
 The map lookup row has partial direct-native evidence: the Cranelift spike now
 builds and runs direct map indexing, `get`, `get_or_default`,
@@ -790,15 +812,22 @@ conditions.
 The map helper-local runtime-exit smoke proves a known map direct index can be
 lowered inside an Axiom helper and returned through a native helper call into
 process exit status.
+Known local and inline map facts can now also cross pure helper-call
+boundaries for direct index, `get_or_default(...)`, and
+`map_contains_key(...)` lookups, `get(...)` `Option<int>`/`Option<bool>`/
+`Option<string>` payload matches, and `keys(...)` key-array projections without
+materializing a general runtime map ABI.
 The focused evidence manifest now also links the runtime-selected `keys(...)`
 projection smoke to this row, covering finite map-key selection through public
 `std/log.ax` length projection without generated Rust.
 The focused evidence manifest now also links the float-key rejection smoke to
 this row, covering the unsupported map-key boundary alongside supported
 scalar/string key lowering.
-Broader map ownership, runtime map storage, general payload lookup bindings,
-map helper parameters, runtime key array value projection, and host-boundary
-representation remain tracked by issue #1124.
+Broader map ownership, runtime map storage, general payload lookup bindings
+beyond the evidenced scalar/bool/known-string pure helper path, map helper
+parameters outside compile-time-known local and inline map facts, runtime key
+array value projection, and host-boundary representation remain tracked by
+issue #1124.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names while the public smoke
@@ -975,7 +1004,11 @@ alias those same direct-native paths in runtime-exit programs; scalar
 `stringify_int(...)` and `stringify_bool(...)` results can also be assigned to
 string locals that feed native stdout `print` without materializing a general
 runtime string value, and `stringify_string(...)` over those supported
-projection locals can now feed quoted native stdout lines directly. Public
+projection locals can now feed quoted native stdout lines directly. Scalar
+`stringify_int(...)` and `stringify_bool(...)` wrapper results can now be
+reassigned through branch, loop, and helper-body string locals, feeding
+direct-native length projections and process exit status without generated
+Rust. Public
 `value_int(...)`, `value_bool(...)`, and `value_string(...)` `JsonValue`
 wrappers over supported dynamic scalar/bool string projections can also feed
 `stringify_value(...)` and native stdout output without generated Rust. Public
