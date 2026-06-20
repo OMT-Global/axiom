@@ -126,6 +126,7 @@ struct I64StaticBindings {
 struct I64HelperSignature {
     function: usize,
     params: usize,
+    slice_param_slots: Vec<Option<usize>>,
     returns_bool: bool,
     return_ty: Type,
     returns: usize,
@@ -853,10 +854,16 @@ fn lower_i64_exit_program(
     let sync_channel_wrappers = static_bindings.sync_channel_wrappers.clone();
     let sync_send_wrappers = static_bindings.sync_send_wrappers.clone();
     let sync_try_recv_wrappers = static_bindings.sync_try_recv_wrappers.clone();
+    let helper_slice_param_slots =
+        i64_helper_slice_param_slots(&program.functions, &static_bindings);
     let helper_functions = program
         .functions
         .iter()
         .filter(|function| {
+            let slice_param_slots = helper_slice_param_slots
+                .get(function.name.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
             function.name != main.name
                 && !process_status_wrappers.contains(&function.name)
                 && !env_get_wrappers.contains(&function.name)
@@ -880,10 +887,14 @@ fn lower_i64_exit_program(
                 && !sync_send_wrappers.contains(&function.name)
                 && !sync_try_recv_wrappers.contains(&function.name)
                 && is_i64_function_return_type(&function.return_ty, &struct_defs, &static_bindings)
-                && function
-                    .params
-                    .iter()
-                    .all(|param| is_i64_param_type(&param.ty, &struct_defs, &static_bindings))
+                && function.params.iter().enumerate().all(|(index, param)| {
+                    is_i64_param_type_with_slice_slot(
+                        &param.ty,
+                        slice_param_slots.get(index).and_then(|slot| *slot),
+                        &struct_defs,
+                        &static_bindings,
+                    )
+                })
         })
         .collect::<Vec<_>>();
     let helper_signatures = helper_functions
@@ -895,6 +906,10 @@ fn lower_i64_exit_program(
                 I64HelperSignature {
                     function: index,
                     params: function.params.len(),
+                    slice_param_slots: helper_slice_param_slots
+                        .get(function.name.as_str())
+                        .cloned()
+                        .unwrap_or_else(|| vec![None; function.params.len()]),
                     returns_bool: matches!(function.return_ty, Type::Bool),
                     return_ty: function.return_ty.clone(),
                     returns: i64_return_slot_count_for_type(
@@ -923,7 +938,17 @@ fn lower_i64_exit_program(
     let functions = helper_functions
         .iter()
         .map(|function| {
-            lower_i64_function(function, &helper_signatures, &static_bindings, &struct_defs)
+            let slice_param_slots = helper_slice_param_slots
+                .get(function.name.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            lower_i64_function(
+                function,
+                slice_param_slots,
+                &helper_signatures,
+                &static_bindings,
+                &struct_defs,
+            )
         })
         .collect::<Option<Vec<_>>>()?;
     let (locals, stmts, body) = lower_i64_body(
@@ -932,6 +957,7 @@ fn lower_i64_exit_program(
         &helper_signatures,
         &static_bindings,
         &struct_defs,
+        &[],
         true,
         true,
     )?;
@@ -945,6 +971,7 @@ fn lower_i64_exit_program(
 
 fn lower_i64_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -953,10 +980,14 @@ fn lower_i64_function(
         || function.is_property
         || function.is_async
         || function.is_extern
-        || function
-            .params
-            .iter()
-            .any(|param| !is_i64_param_type(&param.ty, struct_defs, static_bindings))
+        || function.params.iter().enumerate().any(|(index, param)| {
+            !is_i64_param_type_with_slice_slot(
+                &param.ty,
+                slice_param_slots.get(index).and_then(|slot| *slot),
+                struct_defs,
+                static_bindings,
+            )
+        })
     {
         return None;
     }
@@ -964,6 +995,7 @@ fn lower_i64_function(
         if is_i64_option_local_payload_type_static(inner, static_bindings) {
             return lower_i64_option_return_function(
                 function,
+                slice_param_slots,
                 helper_signatures,
                 static_bindings,
                 struct_defs,
@@ -974,6 +1006,7 @@ fn lower_i64_function(
         if is_i64_result_local_payload_type_static(ok, err, static_bindings) {
             return lower_i64_result_return_function(
                 function,
+                slice_param_slots,
                 helper_signatures,
                 static_bindings,
                 struct_defs,
@@ -984,6 +1017,7 @@ fn lower_i64_function(
         if is_i64_enum_payload_type(enum_name, static_bindings) {
             return lower_i64_enum_return_function(
                 function,
+                slice_param_slots,
                 helper_signatures,
                 static_bindings,
                 struct_defs,
@@ -994,6 +1028,7 @@ fn lower_i64_function(
         if is_i64_tuple_param_type(elements) {
             return lower_i64_tuple_return_function(
                 function,
+                slice_param_slots,
                 helper_signatures,
                 static_bindings,
                 struct_defs,
@@ -1004,6 +1039,7 @@ fn lower_i64_function(
         if is_i64_array_param_element_type(element) {
             return lower_i64_array_return_function(
                 function,
+                slice_param_slots,
                 helper_signatures,
                 static_bindings,
                 struct_defs,
@@ -1016,6 +1052,7 @@ fn lower_i64_function(
         if i64_scalar_struct_def(name, struct_defs).is_some() {
             return lower_i64_struct_return_function(
                 function,
+                slice_param_slots,
                 helper_signatures,
                 static_bindings,
                 struct_defs,
@@ -1028,11 +1065,17 @@ fn lower_i64_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
         true,
         false,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: 1,
         locals,
         stmts,
@@ -1042,6 +1085,7 @@ fn lower_i64_function(
 
 fn lower_i64_array_return_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -1059,9 +1103,15 @@ fn lower_i64_array_return_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: shape.slot_count(),
         locals,
         stmts,
@@ -1071,6 +1121,7 @@ fn lower_i64_array_return_function(
 
 fn lower_i64_tuple_return_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -1088,9 +1139,15 @@ fn lower_i64_tuple_return_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: elements.len(),
         locals,
         stmts,
@@ -1100,6 +1157,7 @@ fn lower_i64_tuple_return_function(
 
 fn lower_i64_struct_return_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -1123,9 +1181,15 @@ fn lower_i64_struct_return_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: shape.slot_count(),
         locals,
         stmts,
@@ -1135,6 +1199,7 @@ fn lower_i64_struct_return_function(
 
 fn lower_i64_option_return_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -1156,9 +1221,15 @@ fn lower_i64_option_return_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: shape.slot_count(),
         locals,
         stmts,
@@ -1168,6 +1239,7 @@ fn lower_i64_option_return_function(
 
 fn lower_i64_result_return_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -1192,9 +1264,15 @@ fn lower_i64_result_return_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: shape.slot_count(),
         locals,
         stmts,
@@ -1204,6 +1282,7 @@ fn lower_i64_result_return_function(
 
 fn lower_i64_enum_return_function(
     function: &Function,
+    slice_param_slots: &[Option<usize>],
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
@@ -1225,9 +1304,15 @@ fn lower_i64_enum_return_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        slice_param_slots,
     )?;
     Some(CraneliftI64Function {
-        params: i64_abi_param_count(&function.params, struct_defs, static_bindings)?,
+        params: i64_abi_param_count(
+            &function.params,
+            struct_defs,
+            static_bindings,
+            slice_param_slots,
+        )?,
         returns: shape.slot_count(),
         locals,
         stmts,
@@ -1242,6 +1327,7 @@ fn lower_i64_aggregate_return_body(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
+    slice_param_slots: &[Option<usize>],
 ) -> Option<(
     Vec<CraneliftI64Expr>,
     Vec<CraneliftI64Stmt>,
@@ -1255,7 +1341,7 @@ fn lower_i64_aggregate_return_body(
     let static_bindings = &mut static_bindings;
     let assigned_string_locals = i64_assigned_string_locals(body_stmts);
     let (mut local_indexes, mut local_conditions) =
-        i64_param_local_bindings(params, struct_defs, static_bindings)?;
+        i64_param_local_bindings(params, struct_defs, static_bindings, slice_param_slots)?;
     for stmt in body_stmts {
         match stmt {
             Stmt::Let { name, ty, expr, .. }
@@ -1921,19 +2007,22 @@ fn i64_param_local_bindings(
     params: &[crate::mir::Param],
     struct_defs: &I64StructDefs<'_>,
     static_bindings: &I64StaticBindings,
+    slice_param_slots: &[Option<usize>],
 ) -> Option<(
     HashMap<String, usize>,
     HashMap<String, CraneliftI64Condition>,
 )> {
     let mut local_indexes = HashMap::new();
     let mut local_conditions = HashMap::new();
-    for param in params {
-        if !is_i64_param_type(&param.ty, struct_defs, static_bindings) {
+    for (param_index, param) in params.iter().enumerate() {
+        let slice_slot = slice_param_slots.get(param_index).and_then(|slot| *slot);
+        if !is_i64_param_type_with_slice_slot(&param.ty, slice_slot, struct_defs, static_bindings) {
             return None;
         }
         insert_i64_param_local_bindings(
             &param.name,
             &param.ty,
+            slice_slot,
             &mut local_indexes,
             &mut local_conditions,
             struct_defs,
@@ -1946,6 +2035,7 @@ fn i64_param_local_bindings(
 fn insert_i64_param_local_bindings(
     name: &str,
     ty: &Type,
+    slice_slot: Option<usize>,
     local_indexes: &mut HashMap<String, usize>,
     local_conditions: &mut HashMap<String, CraneliftI64Condition>,
     struct_defs: &I64StructDefs<'_>,
@@ -1975,6 +2065,18 @@ fn insert_i64_param_local_bindings(
         }
         Type::Array(element, Some(size)) if is_i64_array_param_element_type(element) => {
             for index in 0..*size {
+                let local = local_indexes.len();
+                let key = i64_array_projection_key(name, index);
+                local_indexes.insert(key.clone(), local);
+                if matches!(element.as_ref(), Type::Bool) {
+                    local_conditions.insert(key, i64_local_truthy_condition(local));
+                }
+            }
+        }
+        Type::Slice(element) | Type::MutSlice(element)
+            if is_i64_array_param_element_type(element) =>
+        {
+            for index in 0..slice_slot? {
                 let local = local_indexes.len();
                 let key = i64_array_projection_key(name, index);
                 local_indexes.insert(key.clone(), local);
@@ -2371,6 +2473,7 @@ fn lower_i64_body(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
+    slice_param_slots: &[Option<usize>],
     allow_stdio_effects: bool,
     allow_terminal_panic: bool,
 ) -> Option<(Vec<CraneliftI64Expr>, Vec<CraneliftI64Stmt>, I64ExitBody)> {
@@ -2383,8 +2486,9 @@ fn lower_i64_body(
     let mut static_bindings = static_bindings.clone();
     let static_bindings = &mut static_bindings;
     let assigned_string_locals = i64_assigned_string_locals(body_stmts);
-    for param in params {
-        if !is_i64_param_type(&param.ty, struct_defs, static_bindings) {
+    for (param_index, param) in params.iter().enumerate() {
+        let slice_slot = slice_param_slots.get(param_index).and_then(|slot| *slot);
+        if !is_i64_param_type_with_slice_slot(&param.ty, slice_slot, struct_defs, static_bindings) {
             return None;
         }
         match &param.ty {
@@ -2425,6 +2529,25 @@ fn lower_i64_body(
             }
             Type::Array(element, Some(size)) if is_i64_array_param_element_type(element) => {
                 for index in 0..*size {
+                    let local = local_indexes.len();
+                    let key = i64_array_projection_key(&param.name, index);
+                    local_indexes.insert(key.clone(), local);
+                    if matches!(element.as_ref(), Type::Bool) {
+                        local_conditions.insert(
+                            key,
+                            CraneliftI64Condition::Compare(CraneliftI64Compare {
+                                op: CraneliftI64CompareOp::Ne,
+                                lhs: CraneliftI64Expr::Local(local),
+                                rhs: CraneliftI64Expr::Literal(0),
+                            }),
+                        );
+                    }
+                }
+            }
+            Type::Slice(element) | Type::MutSlice(element)
+                if is_i64_array_param_element_type(element) =>
+            {
+                for index in 0..slice_slot? {
                     let local = local_indexes.len();
                     let key = i64_array_projection_key(&param.name, index);
                     local_indexes.insert(key.clone(), local);
@@ -5387,14 +5510,23 @@ fn lower_i64_tuple_call_let_stmts(
             .struct_fields
             .get(index)
             .and_then(|fields| fields.as_deref());
-        lowered_args.extend(lower_i64_call_arg_exprs(
+        let arg_values = lower_i64_call_arg_exprs(
             arg,
             struct_fields,
             local_indexes,
             local_conditions,
             helper_signatures,
             static_bindings,
-        )?);
+        )?;
+        if let Some(expected_slots) = signature
+            .slice_param_slots
+            .get(index)
+            .and_then(|slot| *slot)
+            && arg_values.len() != expected_slots
+        {
+            return None;
+        }
+        lowered_args.extend(arg_values);
     }
     let mut assign_locals = Vec::new();
     for (index, element) in elements.iter().enumerate() {
@@ -5440,14 +5572,23 @@ fn lower_i64_array_call_let_stmts(
             .struct_fields
             .get(index)
             .and_then(|fields| fields.as_deref());
-        lowered_args.extend(lower_i64_call_arg_exprs(
+        let arg_values = lower_i64_call_arg_exprs(
             arg,
             struct_fields,
             local_indexes,
             local_conditions,
             helper_signatures,
             static_bindings,
-        )?);
+        )?;
+        if let Some(expected_slots) = signature
+            .slice_param_slots
+            .get(index)
+            .and_then(|slot| *slot)
+            && arg_values.len() != expected_slots
+        {
+            return None;
+        }
+        lowered_args.extend(arg_values);
     }
     let mut assign_locals = Vec::new();
     for index in 0..size {
@@ -5492,14 +5633,23 @@ fn lower_i64_struct_call_let_stmts(
             .struct_fields
             .get(index)
             .and_then(|fields| fields.as_deref());
-        lowered_args.extend(lower_i64_call_arg_exprs(
+        let arg_values = lower_i64_call_arg_exprs(
             arg,
             struct_fields,
             local_indexes,
             local_conditions,
             helper_signatures,
             static_bindings,
-        )?);
+        )?;
+        if let Some(expected_slots) = signature
+            .slice_param_slots
+            .get(index)
+            .and_then(|slot| *slot)
+            && arg_values.len() != expected_slots
+        {
+            return None;
+        }
+        lowered_args.extend(arg_values);
     }
     let mut assign_locals = Vec::new();
     for field in &struct_def.fields {
@@ -5679,14 +5829,23 @@ fn lower_i64_flat_call_args(
             .struct_fields
             .get(index)
             .and_then(|fields| fields.as_deref());
-        lowered_args.extend(lower_i64_call_arg_exprs(
+        let arg_values = lower_i64_call_arg_exprs(
             arg,
             struct_fields,
             local_indexes,
             local_conditions,
             helper_signatures,
             static_bindings,
-        )?);
+        )?;
+        if let Some(expected_slots) = signature
+            .slice_param_slots
+            .get(index)
+            .and_then(|slot| *slot)
+            && arg_values.len() != expected_slots
+        {
+            return None;
+        }
+        lowered_args.extend(arg_values);
     }
     Some(lowered_args)
 }
@@ -14426,6 +14585,429 @@ fn i64_static_slice_base_range<'a>(
     Some((name.as_str(), start, end - start))
 }
 
+fn i64_helper_slice_param_slots(
+    functions: &[Function],
+    static_bindings: &I64StaticBindings,
+) -> HashMap<String, Vec<Option<usize>>> {
+    let function_by_name = functions
+        .iter()
+        .map(|function| (function.name.as_str(), function))
+        .collect::<HashMap<_, _>>();
+    let mut slots = functions
+        .iter()
+        .filter(|function| {
+            function
+                .params
+                .iter()
+                .any(|param| is_i64_slice_param_type(&param.ty))
+        })
+        .map(|function| (function.name.clone(), vec![None; function.params.len()]))
+        .collect::<HashMap<_, _>>();
+    let mut invalid = HashSet::new();
+    for function in functions {
+        let mut local_slice_widths = HashMap::new();
+        for stmt in &function.body {
+            collect_i64_helper_slice_param_slots_stmt(
+                stmt,
+                &function_by_name,
+                &mut slots,
+                &mut invalid,
+                &mut local_slice_widths,
+                static_bindings,
+            );
+        }
+    }
+    for name in invalid {
+        slots.remove(&name);
+    }
+    slots
+}
+
+fn collect_i64_helper_slice_param_slots_stmt(
+    stmt: &Stmt,
+    functions: &HashMap<&str, &Function>,
+    slots: &mut HashMap<String, Vec<Option<usize>>>,
+    invalid: &mut HashSet<String>,
+    local_slice_widths: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) {
+    match stmt {
+        Stmt::Let { name, ty, expr, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                expr,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            if matches!(ty, Type::Slice(_) | Type::MutSlice(_))
+                && let Some(width) =
+                    i64_static_slice_arg_width(expr, local_slice_widths, static_bindings)
+            {
+                local_slice_widths.insert(name.clone(), width);
+            }
+        }
+        Stmt::Assign { target, expr, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                target,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            collect_i64_helper_slice_param_slots_expr(
+                expr,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+        }
+        Stmt::Print { expr, .. } | Stmt::Defer { expr, .. } | Stmt::Return { expr, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                expr,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+        }
+        Stmt::Panic { message, .. } => collect_i64_helper_slice_param_slots_expr(
+            message,
+            functions,
+            slots,
+            invalid,
+            local_slice_widths,
+            static_bindings,
+        ),
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            collect_i64_helper_slice_param_slots_expr(
+                cond,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            for stmt in then_block {
+                collect_i64_helper_slice_param_slots_stmt(
+                    stmt,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    collect_i64_helper_slice_param_slots_stmt(
+                        stmt,
+                        functions,
+                        slots,
+                        invalid,
+                        local_slice_widths,
+                        static_bindings,
+                    );
+                }
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                cond,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            for stmt in body {
+                collect_i64_helper_slice_param_slots_stmt(
+                    stmt,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Stmt::Match { expr, arms, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                expr,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            for arm in arms {
+                for stmt in &arm.body {
+                    collect_i64_helper_slice_param_slots_stmt(
+                        stmt,
+                        functions,
+                        slots,
+                        invalid,
+                        local_slice_widths,
+                        static_bindings,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn collect_i64_helper_slice_param_slots_expr(
+    expr: &Expr,
+    functions: &HashMap<&str, &Function>,
+    slots: &mut HashMap<String, Vec<Option<usize>>>,
+    invalid: &mut HashSet<String>,
+    local_slice_widths: &HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) {
+    match expr {
+        Expr::Call { name, args, .. } => {
+            if let Some(function) = functions.get(name.as_str())
+                && let Some(param_slots) = slots.get_mut(name)
+                && function.params.len() == args.len()
+            {
+                for (index, (param, arg)) in function.params.iter().zip(args).enumerate() {
+                    if is_i64_slice_param_type(&param.ty)
+                        && let Some(width) =
+                            i64_static_slice_arg_width(arg, local_slice_widths, static_bindings)
+                    {
+                        match param_slots.get_mut(index) {
+                            Some(slot @ None) => *slot = Some(width),
+                            Some(Some(existing)) if *existing == width => {}
+                            _ => {
+                                invalid.insert(name.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            for arg in args {
+                collect_i64_helper_slice_param_slots_expr(
+                    arg,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::BinaryAdd { lhs, rhs, .. }
+        | Expr::BinaryCompare { lhs, rhs, .. }
+        | Expr::BinaryLogic { lhs, rhs, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                lhs,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            collect_i64_helper_slice_param_slots_expr(
+                rhs,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+        }
+        Expr::Cast { expr, .. }
+        | Expr::MutBorrow { expr, .. }
+        | Expr::Deref { expr, .. }
+        | Expr::Try { expr, .. }
+        | Expr::Await { expr, .. }
+        | Expr::StringBorrow { expr, .. } => collect_i64_helper_slice_param_slots_expr(
+            expr,
+            functions,
+            slots,
+            invalid,
+            local_slice_widths,
+            static_bindings,
+        ),
+        Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_i64_helper_slice_param_slots_expr(
+                    &field.expr,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::FieldAccess { base, .. } | Expr::TupleIndex { base, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                base,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+        }
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_i64_helper_slice_param_slots_expr(
+                    element,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                collect_i64_helper_slice_param_slots_expr(
+                    &entry.key,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+                collect_i64_helper_slice_param_slots_expr(
+                    &entry.value,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::EnumVariant { payloads, .. } => {
+            for payload in payloads {
+                collect_i64_helper_slice_param_slots_expr(
+                    payload,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::Closure { body, .. } => collect_i64_helper_slice_param_slots_expr(
+            body,
+            functions,
+            slots,
+            invalid,
+            local_slice_widths,
+            static_bindings,
+        ),
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            collect_i64_helper_slice_param_slots_expr(
+                base,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            if let Some(start) = start {
+                collect_i64_helper_slice_param_slots_expr(
+                    start,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+            if let Some(end) = end {
+                collect_i64_helper_slice_param_slots_expr(
+                    end,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                base,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            collect_i64_helper_slice_param_slots_expr(
+                index,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+        }
+        Expr::Match { expr, arms, .. } => {
+            collect_i64_helper_slice_param_slots_expr(
+                expr,
+                functions,
+                slots,
+                invalid,
+                local_slice_widths,
+                static_bindings,
+            );
+            for arm in arms {
+                collect_i64_helper_slice_param_slots_expr(
+                    &arm.expr,
+                    functions,
+                    slots,
+                    invalid,
+                    local_slice_widths,
+                    static_bindings,
+                );
+            }
+        }
+        Expr::Literal(_) | Expr::VarRef { .. } => {}
+    }
+}
+
+fn i64_static_slice_arg_width(
+    expr: &Expr,
+    local_slice_widths: &HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<usize> {
+    if let Some((_, _, width)) = i64_static_slice_base_range(expr, static_bindings) {
+        return Some(width);
+    }
+    match expr {
+        Expr::VarRef {
+            name,
+            ty: Type::Slice(_) | Type::MutSlice(_),
+        } => local_slice_widths.get(name).copied(),
+        _ => None,
+    }
+}
+
+fn is_i64_slice_param_type(ty: &Type) -> bool {
+    matches!(ty, Type::Slice(element) | Type::MutSlice(element) if is_i64_array_param_element_type(element))
+}
+
 fn i64_static_slice_range(
     base_size: usize,
     start: Option<&Expr>,
@@ -14481,14 +15063,23 @@ fn lower_i64_call_expr(
             .struct_fields
             .get(index)
             .and_then(|fields| fields.as_deref());
-        lowered_args.extend(lower_i64_call_arg_exprs(
+        let arg_values = lower_i64_call_arg_exprs(
             arg,
             struct_fields,
             local_indexes,
             local_conditions,
             helper_signatures,
             static_bindings,
-        )?);
+        )?;
+        if let Some(expected_slots) = signature
+            .slice_param_slots
+            .get(index)
+            .and_then(|slot| *slot)
+            && arg_values.len() != expected_slots
+        {
+            return None;
+        }
+        lowered_args.extend(arg_values);
     }
     Some(CraneliftI64Expr::Call {
         function: signature.function,
@@ -14558,6 +15149,15 @@ fn lower_i64_call_arg_exprs(
         static_bindings,
     ) {
         return Some(array_args);
+    }
+    if let Some(slice_args) = lower_i64_array_or_slice_call_arg_exprs(
+        arg,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(slice_args);
     }
     Some(vec![
         lower_i64_expr(
@@ -15277,8 +15877,9 @@ fn i64_return_slot_count_for_type(
     }
 }
 
-fn is_i64_param_type(
+fn is_i64_param_type_with_slice_slot(
     ty: &Type,
+    slice_slot: Option<usize>,
     struct_defs: &I64StructDefs<'_>,
     static_bindings: &I64StaticBindings,
 ) -> bool {
@@ -15287,6 +15888,7 @@ fn is_i64_param_type(
         || matches!(ty, Type::Struct(name) if i64_scalar_struct_def(name, struct_defs).is_some())
         || matches!(ty, Type::Tuple(elements) if is_i64_tuple_param_type(elements))
         || matches!(ty, Type::Array(element, Some(_)) if is_i64_array_param_element_type(element))
+        || matches!(ty, Type::Slice(element) | Type::MutSlice(element) if slice_slot.is_some() && is_i64_array_param_element_type(element))
         || matches!(ty, Type::Option(inner) if is_i64_option_local_payload_type_static(inner, static_bindings))
         || matches!(ty, Type::Result(ok, err) if is_i64_result_local_payload_type_static(ok, err, static_bindings))
         || matches!(ty, Type::Enum(enum_name) if is_i64_enum_payload_type(enum_name, static_bindings))
@@ -15437,10 +16039,19 @@ fn i64_abi_param_count(
     params: &[crate::mir::Param],
     struct_defs: &I64StructDefs<'_>,
     static_bindings: &I64StaticBindings,
+    slice_param_slots: &[Option<usize>],
 ) -> Option<usize> {
     params
         .iter()
-        .map(|param| i64_abi_param_count_for_type(&param.ty, struct_defs, static_bindings))
+        .enumerate()
+        .map(|(index, param)| {
+            i64_abi_param_count_for_type(
+                &param.ty,
+                struct_defs,
+                static_bindings,
+                slice_param_slots.get(index).and_then(|slot| *slot),
+            )
+        })
         .try_fold(0usize, |total, count| Some(total + count?))
 }
 
@@ -15448,12 +16059,18 @@ fn i64_abi_param_count_for_type(
     ty: &Type,
     struct_defs: &I64StructDefs<'_>,
     static_bindings: &I64StaticBindings,
+    slice_slot: Option<usize>,
 ) -> Option<usize> {
     match ty {
         ty if is_i64_compatible_type(ty) || matches!(ty, Type::Bool) => Some(1),
         Type::Struct(name) => Some(i64_scalar_struct_def(name, struct_defs)?.fields.len()),
         Type::Tuple(elements) if is_i64_tuple_param_type(elements) => Some(elements.len()),
         Type::Array(element, Some(size)) if is_i64_array_param_element_type(element) => Some(*size),
+        Type::Slice(element) | Type::MutSlice(element)
+            if is_i64_array_param_element_type(element) =>
+        {
+            slice_slot
+        }
         Type::Option(inner) if is_i64_option_local_payload_type_static(inner, static_bindings) => {
             Some(1 + i64_option_payload_slot_count_static(inner.as_ref(), static_bindings)?)
         }

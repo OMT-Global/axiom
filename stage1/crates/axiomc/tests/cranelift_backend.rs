@@ -2027,7 +2027,7 @@ fn cranelift_backend_lowers_static_slice_bounds_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
-fn cranelift_backend_rejects_slice_helper_params_as_i64_abi() {
+fn cranelift_backend_lowers_slice_helper_params_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
         return;
@@ -2048,28 +2048,21 @@ fn cranelift_backend_rejects_slice_helper_params_as_i64_abi() {
         .output()
         .expect("run axiomc build --backend cranelift");
     assert!(
-        !output.status.success(),
-        "cranelift slice helper params main unexpectedly built: stdout={} stderr={}",
+        output.status.success(),
+        "cranelift slice helper params main build failed: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if output.stdout.is_empty() {
-        assert!(
-            stderr.contains("main function is outside the direct-native i64 ABI subset"),
-            "unexpected cranelift slice helper params error: stdout={stdout} stderr={stderr}"
-        );
-        return;
-    }
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
-    assert_eq!(payload["ok"], Value::Bool(false));
-    let message = payload["error"]["message"].as_str().expect("error message");
-    assert!(
-        message.contains("main function is outside the direct-native i64 ABI subset"),
-        "unexpected cranelift slice helper params error: {message}"
-    );
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift slice helper params main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
 #[cfg(not(windows))]
