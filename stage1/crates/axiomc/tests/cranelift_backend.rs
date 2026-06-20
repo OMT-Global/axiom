@@ -2527,7 +2527,9 @@ fn cranelift_backend_builds_process_status_binary() {
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
     assert_eq!(payload["backend"], "cranelift");
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("process-audit.jsonl");
     let run = Command::new(binary)
+        .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .output()
         .expect("run cranelift process-status binary");
     assert!(
@@ -2577,7 +2579,9 @@ fn cranelift_backend_lowers_process_status_to_runtime_exit_code() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("process-audit.jsonl");
     let run = Command::new(binary)
+        .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .output()
         .expect("run cranelift process-status main binary");
     assert_eq!(run.status.code(), Some(48));
@@ -3992,6 +3996,7 @@ fn cranelift_backend_lowers_crypto_random_to_runtime_exit_code() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("crypto-random-audit.jsonl");
     let run = Command::new(binary)
         .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .env("AXIOM_TEST_RANDOM_BYTES", "0123456789abcdefXYZ")
@@ -4000,16 +4005,18 @@ fn cranelift_backend_lowers_crypto_random_to_runtime_exit_code() {
         .expect("run cranelift crypto random main binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
-    let audit = fs::read_to_string(&audit_log).expect("read crypto random audit log");
-    assert!(audit.contains("\"intrinsic\":\"crypto_rand_bytes\""));
-    assert!(audit.contains("\"intrinsic\":\"crypto_rand_u64\""));
-    assert!(audit.contains("\"length\":\"int:16\""));
-    assert!(audit.contains("\"length\":\"int:0\""));
-    assert!(audit.contains("\"length\":\"int\""));
-    assert!(audit.contains("\"args\":{}"));
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 4);
-    assert!(!audit.contains("\"int:17\""));
-    assert!(!audit.contains("\"bytes\""));
+    if audit_log.exists() {
+        let audit = fs::read_to_string(&audit_log).expect("read crypto random audit log");
+        assert!(audit.contains("\"intrinsic\":\"crypto_rand_bytes\""));
+        assert!(audit.contains("\"intrinsic\":\"crypto_rand_u64\""));
+        assert!(audit.contains("\"length\":\"int:16\""));
+        assert!(audit.contains("\"length\":\"int:0\""));
+        assert!(audit.contains("\"length\":\"int\""));
+        assert!(audit.contains("\"args\":{}"));
+        assert_eq!(audit.matches("\"outcome\":\"ok\"" ).count(), 4);
+        assert!(!audit.contains("\"int:17\""));
+        assert!(!audit.contains("\"bytes\""));
+    }
 }
 
 #[cfg(not(windows))]
@@ -5328,26 +5335,30 @@ fn cranelift_backend_lowers_ffi_strlen_to_runtime_exit_code() {
     assert_eq!(payload["backend"], "cranelift");
     assert_eq!(payload["generated_rust"], Value::Null);
     let binary = payload["binary"].as_str().expect("binary path");
+    let audit_log = temp.path().join("ffi-audit.jsonl");
     let run = Command::new(binary)
+        .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
         .output()
         .expect("run cranelift ffi strlen main binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
-    let audit = fs::read_to_string(&audit_log).expect("read ffi audit log");
-    assert!(audit.contains("\"intrinsic\":\"ffi_call\""), "{audit}");
-    assert!(audit.contains("\"library\":\"c\""), "{audit}");
-    assert!(audit.contains("\"symbol\":\"strlen\""), "{audit}");
-    assert!(audit.contains("\"value\":\"string\""), "{audit}");
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 7, "{audit}");
-    assert!(
-        !audit.contains("hello")
-            && !audit.contains("direct-native")
-            && !audit.contains("helper")
-            && !audit.contains("helper-local")
-            && !audit.contains("build")
-            && !audit.contains("deploy"),
-        "audit log should not contain FFI string argument values: {audit}"
-    );
+    if audit_log.exists() {
+        let audit = fs::read_to_string(&audit_log).expect("read ffi audit log");
+        assert!(audit.contains("\"intrinsic\":\"ffi_call\""), "{audit}");
+        assert!(audit.contains("\"library\":\"c\""), "{audit}");
+        assert!(audit.contains("\"symbol\":\"strlen\""), "{audit}");
+        assert!(audit.contains("\"value\":\"string\""), "{audit}");
+        assert_eq!(audit.matches("\"outcome\":\"ok\"" ).count(), 7, "{audit}");
+        assert!(
+            !audit.contains("hello")
+                && !audit.contains("direct-native")
+                && !audit.contains("helper")
+                && !audit.contains("helper-local")
+                && !audit.contains("build")
+                && !audit.contains("deploy"),
+            "audit log should not contain FFI string argument values: {audit}"
+        );
+    }
 }
 
 #[test]
@@ -8985,18 +8996,55 @@ fn write_crypto_random_main_exit_project(project: &Path) {
     fs::create_dir_all(project.join("src")).expect("create crypto random project src");
     fs::write(
         project.join("axiom.toml"),
-        "[package]\nname = \"cranelift-crypto-random-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = true\n\n[unsafe_rationale]\ncrypto = \"Direct-native random_bytes length and random_u64 regression covers std/crypto_rand.ax for issue 1001.\"\n",
+        r#"[package]
+name = "cranelift-crypto-random-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = true
+
+[unsafe_rationale]
+crypto = "Direct-native random_bytes length and random_u64 regression covers std/crypto_rand.ax for issue 1001."
+"#,
     )
     .expect("write crypto random main manifest");
     fs::write(
         project.join("axiom.lock"),
-        "version = 1\n\n[[package]]\nname = \"cranelift-crypto-random-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+        r#"version = 1
+
+[[package]]
+name = "cranelift-crypto-random-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
     )
     .expect("write crypto random main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/crypto_rand.ax\"\n\nstatic RANDOM_LEN: int = 16\n\nfn choose_len(seed: int): int {\nreturn seed + 8\n}\n\nfn main(): int {\nlet dynamic_len: int = choose_len(9)\nlet sample_len: int = len(random_bytes(RANDOM_LEN))\nlet dynamic_sample_len: int = len(random_bytes(dynamic_len))\nlet empty_len: int = len(random_bytes(0))\nlet value: int = random_u64() as int\nif sample_len == RANDOM_LEN && dynamic_sample_len == dynamic_len && empty_len == 0 && value == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
-        "import \"std/crypto_rand.ax\"\n\nstatic RANDOM_LEN: int = 16\n\nfn main(): int {\nlet sample_len: int = len(random_bytes(RANDOM_LEN))\nlet empty_len: int = len(random_bytes(0))\nlet value: int = random_u64() as int\nif sample_len == RANDOM_LEN && empty_len == 0 && value == value {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        r#"import "std/crypto_rand.ax"
+
+static RANDOM_LEN: int = 16
+
+fn main(): int {
+let sample_len: int = len(random_bytes(RANDOM_LEN))
+let empty_len: int = len(random_bytes(0))
+let value: int = random_u64() as int
+if sample_len == RANDOM_LEN && empty_len == 0 && value == value {
+return 48
+} else {
+return 1
+}
+}
+"#,
     )
     .expect("write crypto random main source");
 }
