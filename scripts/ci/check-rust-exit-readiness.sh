@@ -93,25 +93,6 @@ for entry in payload.get("blockingIssues", []):
 PY
 }
 
-all_blocking_issues_closed() {
-  local issue_state
-  local issue
-
-  if [[ ! -f docs/rust-exit-readiness.json ]]; then
-    return 1
-  fi
-
-  while IFS= read -r issue; do
-    issue_state=""
-    if ! issue_state="$(read_issue_state "$issue")" || [[ -z "$issue_state" ]]; then
-      return 1
-    fi
-    if [[ "$issue_state" != "CLOSED" ]]; then
-      return 1
-    fi
-  done < <(blocking_issues_from_manifest)
-}
-
 direct_native_runtime_abi_report() {
   if [[ ! -f scripts/ci/check-direct-native-runtime-abi.py ]]; then
     return 1
@@ -194,16 +175,8 @@ else
   add_check "readiness_manifest_present" "fail" "docs/rust-exit-readiness.json is missing"
 fi
 
-if [[ ! -f docs/rust-exit-readiness.json ]]; then
-  add_check "readiness_blockers_closed" "fail" "Rust exit readiness manifest is unavailable"
-elif all_blocking_issues_closed; then
-  add_check "readiness_blockers_closed" "pass" "All blocking issues listed in docs/rust-exit-readiness.json are CLOSED"
-else
-  add_check "readiness_blockers_closed" "fail" "One or more blocking issues listed in docs/rust-exit-readiness.json are not CLOSED"
-fi
-
 if [[ -f docs/rust-exit-readiness.json ]]; then
-  python3 - <<'PY'
+  if python3 - <<'PY'
 import json
 import sys
 
@@ -216,19 +189,81 @@ if payload.get("schemaVersion") != 1:
 if payload.get("finalBootstrapIssue") != 721:
     print("finalBootstrapIssue must be 721", file=sys.stderr)
     sys.exit(1)
-issues = [entry.get("issue") for entry in payload.get("blockingIssues", [])]
-required = {562, 563, 564, 693, 694, 927, 929, 930, 931}
-missing = sorted(required - set(issues))
-if missing:
-    print("missing required blocking issues: " + ", ".join(f"#{issue}" for issue in missing), file=sys.stderr)
+blockers = payload.get("blockingIssues")
+if not isinstance(blockers, list):
+    print("blockingIssues must be a list", file=sys.stderr)
     sys.exit(1)
+issues = []
+for index, entry in enumerate(blockers):
+    if not isinstance(entry, dict):
+        print(f"blockingIssues[{index}] must be an object", file=sys.stderr)
+        sys.exit(1)
+    issue = entry.get("issue")
+    lane = entry.get("lane")
+    check = entry.get("check")
+    if not isinstance(issue, int) or issue <= 0:
+        print(f"blockingIssues[{index}].issue must be a positive integer", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(lane, str) or not lane.strip():
+        print(f"blockingIssues[{index}].lane must be a non-empty string", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(check, str) or not check.strip():
+        print(f"blockingIssues[{index}].check must be a non-empty string", file=sys.stderr)
+        sys.exit(1)
+    issues.append(issue)
 if len(set(issues)) != len(issues):
     print("blocking issue list contains duplicates", file=sys.stderr)
     sys.exit(1)
 PY
-  add_check "readiness_manifest_valid" "pass" "docs/rust-exit-readiness.json has the required schema and blockers"
+  then
+    add_check "readiness_manifest_valid" "pass" "docs/rust-exit-readiness.json has the required live-blocker schema"
+  else
+    add_check "readiness_manifest_valid" "fail" "docs/rust-exit-readiness.json failed schema validation"
+  fi
 else
   add_check "readiness_manifest_valid" "fail" "docs/rust-exit-readiness.json cannot be validated"
+fi
+
+blocking_issue_count=0
+blocking_issue_state_failures=0
+blocking_issue_state_unavailable=0
+blocking_issue_states_checked=0
+if [[ ! -f docs/rust-exit-readiness.json ]]; then
+  add_check "readiness_blockers_current" "fail" "Rust exit readiness manifest is unavailable"
+  add_check "readiness_blockers_clear" "fail" "Rust exit readiness manifest is unavailable"
+else
+  while IFS= read -r issue; do
+    [[ -z "$issue" ]] && continue
+    blocking_issue_count=$((blocking_issue_count + 1))
+    issue_state=""
+    if issue_state="$(read_issue_state "$issue")" && [[ -n "$issue_state" ]]; then
+      blocking_issue_states_checked=$((blocking_issue_states_checked + 1))
+      if [[ "$issue_state" != "OPEN" ]]; then
+        blocking_issue_state_failures=$((blocking_issue_state_failures + 1))
+      fi
+    else
+      blocking_issue_state_unavailable=$((blocking_issue_state_unavailable + 1))
+      if [[ "$require_issue_states" == true ]]; then
+        blocking_issue_state_failures=$((blocking_issue_state_failures + 1))
+      fi
+    fi
+  done < <(blocking_issues_from_manifest 2>/dev/null || true)
+
+  if [[ "$blocking_issue_count" -eq 0 ]]; then
+    add_check "readiness_blockers_current" "pass" "No live blockers are listed"
+    add_check "readiness_blockers_clear" "pass" "No live blocker issues remain listed"
+  else
+    if [[ "$blocking_issue_state_failures" -eq 0 ]]; then
+      if [[ "$blocking_issue_state_unavailable" -gt 0 ]]; then
+        add_check "readiness_blockers_current" "pass" "$blocking_issue_count blocker issue(s) listed; $blocking_issue_state_unavailable state(s) unavailable without --require-issue-states"
+      else
+        add_check "readiness_blockers_current" "pass" "All $blocking_issue_count listed blocker issue(s) are OPEN"
+      fi
+    else
+      add_check "readiness_blockers_current" "fail" "$blocking_issue_state_failures listed blocker issue state(s) are closed or unavailable"
+    fi
+    add_check "readiness_blockers_clear" "fail" "$blocking_issue_count live blocker issue(s) remain listed"
+  fi
 fi
 
 abi_report=""
@@ -271,13 +306,13 @@ if [[ -f docs/rust-exit-readiness.json ]]; then
   while IFS= read -r issue; do
     issue_state=""
     if issue_state="$(read_issue_state "$issue")" && [[ -n "$issue_state" ]]; then
-      if [[ "$issue_state" == "CLOSED" ]]; then
-        add_check "rust_exit_issue_${issue}_closed" "pass" "issue #$issue is CLOSED"
+      if [[ "$issue_state" == "OPEN" ]]; then
+        add_check "rust_exit_issue_${issue}_open" "pass" "issue #$issue is OPEN"
       else
-        add_check "rust_exit_issue_${issue}_closed" "fail" "issue #$issue is $issue_state"
+        add_check "rust_exit_issue_${issue}_open" "fail" "issue #$issue is $issue_state; remove or replace stale closed blockers while readiness is false"
       fi
     elif [[ "$require_issue_states" == true ]]; then
-      add_check "rust_exit_issue_${issue}_closed" "fail" "issue #$issue state is unavailable"
+      add_check "rust_exit_issue_${issue}_open" "fail" "issue #$issue state is unavailable"
     fi
   done < <(blocking_issues_from_manifest)
 fi
