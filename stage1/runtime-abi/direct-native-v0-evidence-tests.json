@@ -68,7 +68,8 @@
     ],
     "slice.borrowed": [
       "cranelift_backend_lowers_static_slice_bounds_to_runtime_exit_code",
-      "cranelift_backend_builds_borrowed_slice_binary"
+      "cranelift_backend_builds_borrowed_slice_binary",
+      "cranelift_backend_rejects_slice_helper_params_as_i64_abi"
     ],
     "string": [
       "cranelift_backend_lowers_string_literal_len_to_runtime_exit_code",

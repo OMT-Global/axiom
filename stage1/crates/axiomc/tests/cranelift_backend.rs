@@ -1747,6 +1747,53 @@ fn cranelift_backend_lowers_static_slice_bounds_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_rejects_slice_helper_params_as_i64_abi() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("slice-helper-params-main-exit");
+    write_slice_helper_params_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        !output.status.success(),
+        "cranelift slice helper params main unexpectedly built: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.stdout.is_empty() {
+        assert!(
+            stderr.contains("main function is outside the direct-native i64 ABI subset"),
+            "unexpected cranelift slice helper params error: stdout={stdout} stderr={stderr}"
+        );
+        return;
+    }
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["ok"], Value::Bool(false));
+    let message = payload["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains("main function is outside the direct-native i64 ABI subset"),
+        "unexpected cranelift slice helper params error: {message}"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_string_literal_len_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -8284,6 +8331,26 @@ fn write_static_slice_bounds_main_exit_project(project: &Path) {
         "static TAIL_START: int = 1\nstatic PREFIX_END: int = 2\n\nfn tail_score(values: [int; 3]): int {\nreturn len(values[TAIL_START:]) + first(values[TAIL_START:]) + last(values[TAIL_START:])\n}\n\nfn prefix_score(values: [int; 3]): int {\nreturn len(values[:PREFIX_END]) + first(values[:PREFIX_END]) + last(values[:PREFIX_END])\n}\n\nfn main(): int {\nlet tail_values: [int; 3] = [1, 20, 26]\nlet prefix_values: [int; 3] = [20, 26, 1]\nlet helper_tail_values: [int; 3] = [1, 20, 26]\nlet helper_prefix_values: [int; 3] = [20, 26, 1]\nlet tail_window: &[int] = tail_values[TAIL_START:]\nlet prefix_window: &[int] = prefix_values[:PREFIX_END]\nlet tail_code: int = len(tail_window) + first(tail_window) + last(tail_window)\nlet prefix_code: int = len(prefix_window) + first(prefix_window) + last(prefix_window)\nlet helper_tail: int = tail_score(helper_tail_values)\nlet helper_prefix: int = prefix_score(helper_prefix_values)\nif tail_code == 48 && prefix_code == 48 && helper_tail == 48 && helper_prefix == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write static slice bounds main exit source");
+}
+
+fn write_slice_helper_params_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create slice helper params main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-slice-helper-params-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write slice helper params main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-slice-helper-params-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write slice helper params main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "fn score(values: &[int]): int {\nreturn len(values) + first(values) + last(values)\n}\n\nfn pick(values: &[int], index: int): int {\nreturn values[index]\n}\n\nfn gate(flags: &[bool], index: int): bool {\nreturn first(flags) == false && last(flags) && flags[index]\n}\n\nfn main(): int {\nlet values: [int; 3] = [1, 20, 26]\nlet local_values: [int; 3] = [1, 20, 26]\nlet pick_values: [int; 3] = [1, 20, 26]\nlet local_pick_values: [int; 3] = [1, 20, 26]\nlet flags: [bool; 3] = [true, false, true]\nlet local_flags: [bool; 3] = [true, false, true]\nlet index: int = 1\nlet window: &[int] = local_values[1:]\nlet pick_window: &[int] = local_pick_values[1:]\nlet flag_window: &[bool] = local_flags[1:]\nlet inline_score: int = score(values[1:])\nlet local_score: int = score(window)\nlet inline_pick: int = pick(pick_values[1:], index) + 22\nlet local_pick: int = pick(pick_window, index) + 22\nlet inline_gate: bool = gate(flags[1:], index)\nlet local_gate: bool = gate(flag_window, index)\nif inline_gate && local_gate && inline_score == 48 && local_score == 48 && inline_pick == 48 && local_pick == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write slice helper params main exit source");
 }
 
 fn write_string_literal_len_main_exit_project(project: &Path) {
