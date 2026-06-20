@@ -772,6 +772,9 @@ conditions.
 The map helper-local runtime-exit smoke proves a known map direct index can be
 lowered inside an Axiom helper and returned through a native helper call into
 process exit status.
+The focused evidence manifest now also links the runtime-selected `keys(...)`
+projection smoke to this row, covering finite map-key selection through public
+`std/log.ax` length projection without generated Rust.
 Broader map ownership, runtime map storage, general payload lookup bindings,
 map helper parameters, runtime key array value projection, and host-boundary
 representation remain tracked by issue #1124.
@@ -1013,7 +1016,10 @@ projections and empty attribute objects. Supported dynamic `std/log.ax`
 `event(...)` expressions can also feed source-level `print` statements as
 native stdout JSON-line writes without generated Rust, including event messages
 and `field_string(...)` values backed by `std/json.ax` `stringify_string(...)`
-over supported scalar/bool projection locals. It also lowers known-string public
+over supported scalar/bool projection locals. The focused evidence manifest now
+links the selected projection, dynamic scalar length, dynamic `info_attrs`
+stderr, and dynamic event stdout smokes to this stdio row so the evidence
+runner exercises those public logging paths explicitly. It also lowers known-string public
 `std/io.ax`
 `eprintln` lets in direct-native i64 `main` functions and helper functions,
 including runtime-scope lets after assignments and inside branches, into native
