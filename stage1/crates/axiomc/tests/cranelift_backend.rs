@@ -2905,8 +2905,14 @@ fn cranelift_backend_lowers_std_regex_wrappers_to_runtime_exit_code() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
+#[cfg(not(windows))]
 #[test]
-fn cranelift_backend_rejects_std_regex_wrapper_reassignment_as_i64_abi() {
+fn cranelift_backend_lowers_std_regex_wrapper_reassignment_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("std-regex-wrapper-reassignment-main-exit");
     write_std_regex_wrapper_reassignment_main_exit_project(&project);
@@ -2922,28 +2928,21 @@ fn cranelift_backend_rejects_std_regex_wrapper_reassignment_as_i64_abi() {
         .output()
         .expect("run axiomc build --backend cranelift");
     assert!(
-        !output.status.success(),
-        "cranelift std regex wrapper reassignment unexpectedly built: stdout={} stderr={}",
+        output.status.success(),
+        "cranelift std regex wrapper reassignment build failed: stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if output.stdout.is_empty() {
-        assert!(
-            stderr.contains("main function is outside the direct-native i64 ABI subset"),
-            "unexpected cranelift std regex wrapper reassignment error: stdout={stdout} stderr={stderr}"
-        );
-        return;
-    }
     let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
-    assert_eq!(payload["ok"], Value::Bool(false));
-    let message = payload["error"]["message"].as_str().expect("error message");
-    assert!(
-        message.contains("main function is outside the direct-native i64 ABI subset"),
-        "unexpected cranelift std regex wrapper reassignment error: {message}"
-    );
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std regex wrapper reassignment binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
 #[cfg(not(windows))]
@@ -10681,7 +10680,49 @@ fn write_std_regex_wrapper_reassignment_main_exit_project(project: &Path) {
     .expect("write std regex wrapper reassignment lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/regex.ax\"\n\nstatic ISSUE_TEXT: string = \"issue-238-ready\"\n\nfn helper_score(flag: bool): int {\nlet helper_text: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet selected: string = \"unset\"\nif flag {\nselected = helper_text\n} else {\nselected = \"bad\"\n}\nreturn len(selected)\n}\n\nfn main(): int {\nlet branch_text: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet branch_selected: string = \"unset\"\nif true {\nbranch_selected = branch_text\n} else {\nbranch_selected = \"bad\"\n}\nlet loop_text: string = match find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => value, None => \"bad\" }\nlet loop_selected: string = \"unset\"\nlet index: int = 0\nwhile index < 2 {\nif index == 0 {\nloop_selected = \"bad\"\n} else {\nloop_selected = string_clone(loop_text)\n}\nindex = index + 1\n}\nlet branch_len: int = len(branch_selected)\nlet loop_len: int = len(loop_selected)\nlet helper_true_len: int = helper_score(true)\nlet helper_false_len: int = helper_score(false)\nlet branch_gate: bool = branch_selected == \"issue-#-ready\"\nlet loop_gate: bool = loop_selected == \"238\"\nlet match_gate: bool = is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nif branch_gate && loop_gate && match_gate && branch_len == 13 && loop_len == 3 && helper_true_len == 13 && helper_false_len == 3 && index == 2 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        r##"import "std/regex.ax"
+
+static ISSUE_TEXT: string = "issue-238-ready"
+
+fn helper_score(flag: bool): int {
+let selected: string = "unset"
+if flag {
+selected = replace_all("[0-9]+", ISSUE_TEXT, "#")
+} else {
+selected = "bad"
+}
+return len(selected)
+}
+
+fn main(): int {
+let branch_selected: string = "unset"
+if true {
+branch_selected = replace_all("[0-9]+", ISSUE_TEXT, "#")
+} else {
+branch_selected = "bad"
+}
+let loop_selected: string = "unset"
+let index: int = 0
+while index < 2 {
+if index == 0 {
+loop_selected = "bad"
+} else {
+loop_selected = replace_all("[0-9]+", ISSUE_TEXT, "#")
+}
+index = index + 1
+}
+let branch_len: int = len(branch_selected)
+let loop_len: int = len(loop_selected)
+let helper_true_len: int = helper_score(true)
+let helper_false_len: int = helper_score(false)
+let match_gate: bool = is_match("^issue-[0-9]+-ready$", ISSUE_TEXT)
+if match_gate && branch_len == 13 && loop_len == 13 && helper_true_len == 13 && helper_false_len == 3 && index == 2 {
+return 48
+} else {
+return 1
+}
+}
+"##,
     )
     .expect("write std regex wrapper reassignment source");
 }

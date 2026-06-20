@@ -709,10 +709,10 @@ native process exit status without generated Rust, including known-concatenated
 patterns, text, and replacement strings in entrypoints and helper-local regex
 calls. Imported public `std/regex.ax` `is_match`, `find`, and `replace_all`
 wrappers now alias that same direct-native known-input lowering, including those
-known-concatenated and helper-local input shapes. Focused boundary evidence now
-records branch-, loop-, and helper-body reassignment of public `std/regex.ax`
-wrapper-backed string results as failing closed at the direct-native i64 ABI
-boundary.
+known-concatenated and helper-local input shapes. Public `std/regex.ax`
+`replace_all` wrapper results can now be reassigned through branch, loop, and
+helper-body string locals, feeding direct-native length projections and process
+exit status without generated Rust.
 Broader regex syntax, dynamic runtime regex execution, capture groups,
 replacement expansion semantics, and conformance coverage remain open under
 #1001.
