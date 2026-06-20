@@ -1253,6 +1253,7 @@ fn lower_i64_aggregate_return_body(
     let mut seen_runtime_stmt = false;
     let mut static_bindings = static_bindings.clone();
     let static_bindings = &mut static_bindings;
+    let assigned_string_locals = i64_assigned_string_locals(body_stmts);
     let (mut local_indexes, mut local_conditions) =
         i64_param_local_bindings(params, struct_defs, static_bindings)?;
     for stmt in body_stmts {
@@ -1296,6 +1297,7 @@ fn lower_i64_aggregate_return_body(
                     &mut local_conditions,
                     helper_signatures,
                     &mut *static_bindings,
+                    !assigned_string_locals.contains(name),
                 )?;
             }
             Stmt::Let {
@@ -1749,6 +1751,7 @@ fn lower_i64_aggregate_return_body(
             | Stmt::While { .. }
             | Stmt::Match { .. } => {
                 seen_runtime_stmt = true;
+                invalidate_i64_assigned_string_facts(stmt, static_bindings);
                 lowered_stmts.extend(lower_i64_runtime_stmt_stmts(
                     stmt,
                     &mut locals,
@@ -2379,6 +2382,7 @@ fn lower_i64_body(
     let mut seen_runtime_stmt = false;
     let mut static_bindings = static_bindings.clone();
     let static_bindings = &mut static_bindings;
+    let assigned_string_locals = i64_assigned_string_locals(body_stmts);
     for param in params {
         if !is_i64_param_type(&param.ty, struct_defs, static_bindings) {
             return None;
@@ -2545,6 +2549,7 @@ fn lower_i64_body(
                     &mut local_conditions,
                     helper_signatures,
                     &mut *static_bindings,
+                    !assigned_string_locals.contains(name),
                 )?;
             }
             Stmt::Let {
@@ -3078,6 +3083,15 @@ fn lower_i64_runtime_stmt_stmts(
     ) {
         return Some(assigns);
     }
+    if let Some(assigns) = lower_i64_string_assign_stmts(
+        stmt,
+        &local_indexes,
+        &local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(assigns);
+    }
     if allow_stdio_effects {
         if let Some(stmts) = lower_i64_print_stmt_stmts(
             stmt,
@@ -3462,6 +3476,7 @@ fn lower_i64_runtime_stmts(
                 allow_stdio_effects,
             )?);
         } else {
+            invalidate_i64_assigned_string_facts(stmt, static_bindings);
             lowered.extend(lower_i64_runtime_stmt_stmts(
                 stmt,
                 locals,
@@ -6118,6 +6133,55 @@ fn lower_i64_assign(
     })
 }
 
+fn lower_i64_string_assign_stmts(
+    stmt: &Stmt,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Stmt::Assign {
+        target: Expr::VarRef {
+            name,
+            ty: Type::String | Type::Str,
+        },
+        expr,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    let key = i64_string_len_key(name);
+    let local = *local_indexes.get(key.as_str())?;
+    let mut assigns = vec![CraneliftI64Stmt::Assign(
+        axiomc_backend_cranelift::I64Assign {
+            local,
+            value: lower_i64_string_len_expr(
+                expr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?,
+        },
+    )];
+    if let Some(json_safe_local) = local_indexes.get(i64_json_safe_string_len_key(name).as_str()) {
+        assigns.push(CraneliftI64Stmt::Assign(
+            axiomc_backend_cranelift::I64Assign {
+                local: *json_safe_local,
+                value: lower_i64_json_safe_string_len_expr(
+                    expr,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+            },
+        ));
+    }
+    Some(assigns)
+}
+
 fn lower_i64_return_block(
     stmts: &[Stmt],
     locals: &mut Vec<CraneliftI64Expr>,
@@ -6148,6 +6212,7 @@ fn lower_i64_return_block(
                 )?);
             }
             _ => {
+                invalidate_i64_assigned_string_facts(stmt, static_bindings);
                 stmts.extend(lower_i64_runtime_stmt_stmts(
                     stmt,
                     locals,
@@ -6201,6 +6266,61 @@ fn record_i64_known_string_let(
     };
     static_bindings.strings.insert(name.clone(), text);
     Some(true)
+}
+
+fn i64_assigned_string_locals(stmts: &[Stmt]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for stmt in stmts {
+        collect_i64_assigned_string_locals(stmt, &mut names);
+    }
+    names
+}
+
+fn invalidate_i64_assigned_string_facts(stmt: &Stmt, static_bindings: &mut I64StaticBindings) {
+    let mut names = HashSet::new();
+    collect_i64_assigned_string_locals(stmt, &mut names);
+    for name in names {
+        static_bindings.strings.remove(&name);
+        static_bindings.map_key_array_string_indexes.remove(&name);
+    }
+}
+
+fn collect_i64_assigned_string_locals(stmt: &Stmt, names: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Assign {
+            target: Expr::VarRef { name, .. },
+            ..
+        } => {
+            names.insert(name.clone());
+        }
+        Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            for stmt in then_block {
+                collect_i64_assigned_string_locals(stmt, names);
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    collect_i64_assigned_string_locals(stmt, names);
+                }
+            }
+        }
+        Stmt::While { body, .. } => {
+            for stmt in body {
+                collect_i64_assigned_string_locals(stmt, names);
+            }
+        }
+        Stmt::Match { arms, .. } => {
+            for arm in arms {
+                for stmt in &arm.body {
+                    collect_i64_assigned_string_locals(stmt, names);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn lower_i64_exit_return(
@@ -13398,6 +13518,7 @@ fn lower_i64_string_len_projection_local(
     local_conditions: &mut HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &mut I64StaticBindings,
+    record_static_text: bool,
 ) -> Option<()> {
     let text = i64_string_text(expr, static_bindings);
     let value = text
@@ -13437,7 +13558,7 @@ fn lower_i64_string_len_projection_local(
         helper_signatures,
         static_bindings,
     )?;
-    if let Some(text) = text {
+    if record_static_text && let Some(text) = text {
         static_bindings.strings.insert(name.to_string(), text);
     }
     if let Some(binding) = i64_map_key_array_string_index_binding(expr, static_bindings) {
