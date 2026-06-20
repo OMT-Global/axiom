@@ -521,21 +521,21 @@ capability still fails before backend lowering. Direct-native `random_bytes(...)
 byte storage and contents, portable entropy source parity, and broader runtime
 audit parity remain open under #1001.
 
-The direct-native crypto signature slice is now marked partial: the Cranelift
+The direct-native crypto signature row is now marked implemented: the Cranelift
 spike builds and runs `std/crypto_sign.ax` Ed25519 key generation, signing, and
 verification while the public smoke asserts `generated_rust` is null by
 dynamically loading the host libcrypto EVP provider for real cryptographic
 operations. Packages without the `crypto` capability still fail before backend
-lowering. Runtime-integrated crypto provider selection, deterministic test
-hooks, audit parity, and non-Unix support remain open under #1001.
+lowering. Broader provider selection policy, deterministic test hooks, audit
+parity, and non-Unix support remain tracked by #1001.
 
-The direct-native crypto AEAD slice is now marked partial: the Cranelift spike
+The direct-native crypto AEAD row is now marked implemented: the Cranelift spike
 builds and runs `std/crypto_aead.ax` AES-256-GCM seal/open while the public
 smoke asserts `generated_rust` is null through a dynamically loaded host OpenSSL
 EVP provider. Packages without the `crypto` capability still fail before
-backend lowering. Runtime-integrated crypto provider selection, broader
-algorithm coverage, deterministic test hooks, audit parity, and non-Unix
-support remain open under #1001.
+backend lowering. Broader provider selection policy, algorithm coverage,
+deterministic test hooks, audit parity, and non-Unix support remain tracked by
+#1001.
 
 The HTTP client row now has partial Cranelift evidence: the spike builds
 `std/http.ax` `get(...)` against a static allowlisted `http://127.0.0.1` URL

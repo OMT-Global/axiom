@@ -22,15 +22,17 @@ assert report["contract_status"] == "partial"
 assert report["value_feature_count"] == 12
 assert report["capability_shim_count"] == 22
 assert report["status_counts"]["value_features"]["partial"] == 12
-assert report["status_counts"]["capability_shims"]["implemented"] == 19
-assert report["status_counts"]["capability_shims"]["partial"] == 3
+assert report["status_counts"]["capability_shims"]["implemented"] == 21
+assert report["status_counts"]["capability_shims"]["partial"] == 1
 assert report["blocked_rows"] == []
-assert len(report["incomplete_rows"]) == 15
+assert len(report["incomplete_rows"]) == 13
 assert "ffi.call" not in report["incomplete_rows"]
 assert "json.serdes" not in report["incomplete_rows"]
 assert "crypto.hash" not in report["incomplete_rows"]
 assert "crypto.mac" not in report["incomplete_rows"]
 assert "crypto.random" not in report["incomplete_rows"]
+assert "crypto.signature" not in report["incomplete_rows"]
+assert "crypto.aead" not in report["incomplete_rows"]
 assert "clock.now_sleep" not in report["incomplete_rows"]
 assert "env.read" not in report["incomplete_rows"]
 assert "fs.read" not in report["incomplete_rows"]
@@ -96,6 +98,8 @@ assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["netwo
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["network.http.client"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["network.http.server"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["network.http.async_server"]["runtime_evidence"]
+assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["crypto.signature"]["runtime_evidence"]
+assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["crypto.aead"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["ffi.call"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["json.serdes"]["runtime_evidence"]
 PY
