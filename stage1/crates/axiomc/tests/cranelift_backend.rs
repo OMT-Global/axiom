@@ -2152,6 +2152,46 @@ fn cranelift_backend_lowers_string_branch_reassignment_to_runtime_exit_code() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_lowers_string_loop_reassignment_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("string-loop-reassignment-main-exit");
+    write_string_loop_reassignment_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift string loop reassignment main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift string loop reassignment main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
 #[test]
 fn cranelift_backend_rejects_unsupported_string_helper_main() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -9003,6 +9043,69 @@ return 1
 "#,
     )
     .expect("write string branch reassignment main exit source");
+}
+
+fn write_string_loop_reassignment_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create string loop reassignment main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-string-loop-reassignment-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write string loop reassignment main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-string-loop-reassignment-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write string loop reassignment main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"fn main(): int {
+let selected: string = "unset"
+let fallback: string = "unset"
+let index: int = 0
+while index < 2 {
+if index == 0 {
+selected = "rust"
+fallback = "bad"
+} else {
+selected = string_clone("direct-native")
+fallback = string_trim("  fallback  ")
+}
+index = index + 1
+}
+let selected_len: int = len(selected)
+let fallback_len: int = len(fallback)
+if selected_len == 13 && fallback_len == 8 && index == 2 {
+return 48
+} else {
+return 1
+}
+}
+"#,
+    )
+    .expect("write string loop reassignment main exit source");
 }
 
 fn write_unsupported_string_helper_main_project(project: &Path) {
