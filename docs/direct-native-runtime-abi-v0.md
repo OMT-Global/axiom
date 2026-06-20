@@ -251,6 +251,11 @@ length and comparison path, and known-input `encoding_url_component_decode(...)`
 can lower direct `Option<string>` matches by compile-time arm selection.
 Imported public `std/encoding.ax` wrappers now alias those same known-input
 encode, decode, query-pair, and path-join lowering paths.
+Imported public `std/string_builder.ax` builder, seed, push, line-push, and
+finish wrappers now alias known text facts that can feed direct-native string
+comparisons, length projections, and process exit status without generated
+Rust; the focused evidence manifest now links the wrapper runtime-exit smoke to
+this row.
 Known-input `crypto_sha256(...)`, `crypto_hmac_sha256(...)`, and
 `crypto_hmac_sha512(...)` calls can also feed direct-native string length and
 comparison paths after normal front-end crypto capability checks. Supported
@@ -695,7 +700,8 @@ without generated Rust.
 Imported public `std/string_builder.ax` builder, seed, push,
 line-push, and finish wrappers now alias known text facts that can feed
 direct-native string comparisons, length projections, and process exit status
-without generated Rust. Broader string ABI coverage, allocation behavior,
+without generated Rust; the focused evidence manifest now links the wrapper
+runtime-exit smoke to this row. Broader string ABI coverage, allocation behavior,
 general runtime string parameters and returns, non-literal storage, and
 host-boundary representation remain tracked by issue #1124.
 
