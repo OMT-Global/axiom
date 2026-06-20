@@ -12219,6 +12219,18 @@ fn has_key(scores: {string: int}, key: string): bool {
 return map_contains_key<string, int>(scores, key)
 }
 
+fn matched_score(scores: {string: int}, key: string): int {
+return match get<string, int>(scores, key) { Some(value) => value, None => 13 }
+}
+
+fn matched_flag(flags: {string: bool}, key: string): bool {
+return match get<string, bool>(flags, key) { Some(value) => value, None => false }
+}
+
+fn matched_label_len(labels: {string: string}, key: string): int {
+return match get<string, string>(labels, key) { Some(value) => len(value), None => 13 }
+}
+
 fn key_count(scores: {string: int}): int {
 let names: [string] = keys<string, int>(scores)
 return len(names)
@@ -12238,6 +12250,9 @@ fn main(): int {
 let local_lookup_scores: {string: int} = {"build": 7, "deploy": 48}
 let local_contains_scores: {string: int} = {"build": 7, "deploy": 48}
 let duplicate_scores: {string: int} = {"deploy": 9, "deploy": 48}
+let local_match_scores: {string: int} = {"build": 7, "deploy": 48}
+let local_match_flags: {string: bool} = {"build": false, "deploy": true}
+let local_match_labels: {string: string} = {"build": "forge", "deploy": "ship"}
 let key_count_scores: {string: int} = {"build": 7, "deploy": 9, "deploy": 11}
 let first_key_scores: {string: int} = {"build": 7, "deploy": 9}
 let inline_score: int = deploy_score({"build": 7, "deploy": 48})
@@ -12246,10 +12261,16 @@ let default_score: int = score_or_default({"build": 7}, "test")
 let duplicate_score: int = deploy_score(duplicate_scores)
 let local_contains: bool = has_key(local_contains_scores, "deploy")
 let inline_missing: bool = has_key({"build": 7}, "deploy") == false
+let local_match_score: int = matched_score(local_match_scores, "deploy")
+let inline_match_miss: int = matched_score({"build": 7}, "deploy")
+let local_match_flag: bool = matched_flag(local_match_flags, "deploy")
+let inline_match_flag_miss: bool = matched_flag({"build": true}, "deploy") == false
+let local_match_label_len: int = matched_label_len(local_match_labels, "deploy")
+let inline_match_label_miss: int = matched_label_len({"build": "forge"}, "deploy")
 let key_count_score: int = key_count(key_count_scores)
 let first_key_score: int = first_key_len(first_key_scores)
 let second_key_score: int = second_key_len({"build": 7, "deploy": 9})
-if inline_score == 48 && local_score == 48 && default_score == 13 && duplicate_score == 48 && local_contains && inline_missing && key_count_score == 2 && first_key_score == 5 && second_key_score == 6 {
+if inline_score == 48 && local_score == 48 && default_score == 13 && duplicate_score == 48 && local_contains && inline_missing && local_match_score == 48 && inline_match_miss == 13 && local_match_flag && inline_match_flag_miss && local_match_label_len == 4 && inline_match_label_miss == 13 && key_count_score == 2 && first_key_score == 5 && second_key_score == 6 {
 return 48
 } else {
 return 1
