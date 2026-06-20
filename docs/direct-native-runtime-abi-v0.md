@@ -193,6 +193,9 @@ is counted explicitly.
 The public integer stdout smoke also asserts `generated_rust: null` while
 printing helper-returned integer locals and arithmetic derived from those locals
 from a direct-native main function.
+The focused evidence manifest now links that smoke to both the numeric scalar
+row and the stdio capability row so native integer formatting and native stdout
+emission are counted together.
 The same path now has narrow boolean runtime
 evidence for signed i64 comparisons, bool local bindings backed by i64 slots,
 simple bool static values, and boolean literals composed with `&&`/`||` driving
