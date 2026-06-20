@@ -211,7 +211,9 @@ boolean equality/inequality between dynamic bool expressions, local/static bool
 values, and boolean literals in conditions, plus a focused runtime-exit smoke
 proving helper bool equality/inequality predicates, chosen bool branches, and
 composed `&&`/`||` conditions can drive native process exit status `48` without
-generated Rust. It also covers immediate tuple-literal bool
+generated Rust. A focused runtime-exit test now also covers branch-local bool
+reassignment from helper-returned comparisons before the reassigned booleans
+drive process exit status. It also covers immediate tuple-literal bool
 indexing, bool projection from local tuple bindings, immediate array-literal
 bool indexing, bool projection from local fixed-array bindings, immediate
 struct-literal bool field access, and bool projection from local struct
@@ -304,13 +306,15 @@ narrow `Option<[int; 2]>` and `Result<[int; 2], [int; 2]>` construction,
 tag/payload matches, helper parameters, helper returns, and forwarded helper
 values. Existing fixed-array locals can now be reassigned from fixed-array
 helper returns using the same element-slot ABI, including inside runtime loop
-blocks. Fixed-array `len`, `first`, and `last` over scalar and bool element
-arrays also lower through the same projected element-slot representation for
-local arrays, inline literals, helper parameters, and helper-returned arrays
-feeding a direct-native process exit status. The row remains partial because
-direct-native codegen still does not provide a general array ABI, array storage
-for non-scalar elements, full dynamic indexing semantics, bounds diagnostics,
-or a complete aggregate value passing contract.
+blocks; a focused runtime-exit test now also tracks branch-local fixed-array
+reassignment from helper returns. Fixed-array `len`, `first`, and `last` over
+scalar and bool element arrays also lower through the same projected
+element-slot representation for local arrays, inline literals, helper
+parameters, and helper-returned arrays feeding a direct-native process exit
+status. The row remains partial because direct-native codegen still does not
+provide a general array ABI, array storage for non-scalar elements, full
+dynamic indexing semantics, bounds diagnostics, or a complete aggregate value
+passing contract.
 
 The focused value-feature evidence manifest also links the public scalar
 aggregate smoke, the while-loop aggregate reassignment smoke, and the aggregate
@@ -337,10 +341,12 @@ multi-slot return; this includes helpers whose final return is selected by
 branch blocks with branch-local scalar values, helpers returning local tuple
 bindings, and helpers forwarding tuple parameters. Existing tuple locals can
 now be reassigned from tuple helper returns using the same tuple-element ABI,
-including inside runtime loop blocks. The row remains partial because
-direct-native codegen still does not provide a general tuple ABI, tuple storage
-for non-scalar elements, tuple return expressions beyond the scalar/bool local,
-literal, and parameter slice, or a complete aggregate value passing contract.
+including inside runtime loop blocks; a focused runtime-exit test now also
+tracks branch-local tuple reassignment from helper returns. The row remains
+partial because direct-native codegen still does not provide a general tuple
+ABI, tuple storage for non-scalar elements, tuple return expressions beyond the
+scalar/bool local, literal, and parameter slice, or a complete aggregate value
+passing contract.
 
 The `struct.field` row now has narrow direct-native runtime evidence for
 immediate struct-literal scalar field access and scalar projection from local
@@ -364,10 +370,12 @@ payload construction, matching, helper parameters, helper returns, forwarded
 helper values, and inline `Some(Step { ... })`/`None` and
 `Ok(Step { ... })`/`Err(Step { ... })` helper arguments. Existing struct locals
 can now be reassigned from struct helper returns using the declared-field slot
-ABI, including inside runtime branch blocks. The row remains partial because
-direct-native codegen still does not provide a general struct ABI, struct
-storage for non-scalar fields, owned field projection, field mutation, struct
-return expressions beyond the scalar/bool local, literal, and parameter slice,
+ABI, including inside runtime branch blocks; a focused runtime-exit test now
+tracks branch-local struct reassignment from helper returns. The row remains
+partial because direct-native codegen still does not provide a general struct
+ABI, struct storage for non-scalar fields, owned field projection, field
+mutation, struct return expressions beyond the scalar/bool local, literal, and
+parameter slice,
 or a complete aggregate value passing contract.
 
 The focused value-feature evidence manifest also records aggregate smoke
@@ -403,10 +411,12 @@ helper parameters, helper returns, forwarded helper values, and inline
 `Some(Step { ... })`/`None` helper arguments using declared field-order payload
 slots. Existing narrow `Option<Step>` locals can now be reassigned from option
 helper returns using the same tag/payload slots, including inside runtime branch
-blocks. The direct-native path also has narrow evidence for nested
-`Option<Option<int>>` construction, reassignment, matching, helper parameters,
-helper returns, forwarded helper values, and inline `Some(Some(...))`,
-`Some(None)`, and outer `None` helper arguments using nested tag/payload slots.
+blocks; a focused runtime-exit test now tracks branch-local `Option<Step>`
+reassignment from helper returns. The direct-native path also has narrow
+evidence for nested `Option<Option<int>>` construction, reassignment, matching,
+helper parameters, helper returns, forwarded helper values, and inline
+`Some(Some(...))`, `Some(None)`, and outer `None` helper arguments using nested
+tag/payload slots.
 The same nested slot representation now has narrow evidence for
 `Option<Result<int, int>>` construction, reassignment, matching, helper
 parameters, helper returns, forwarded helper values, and inline
@@ -890,10 +900,12 @@ parameters, helper returns, forwarded helper values, and inline
 `Ok(Step { ... })`/`Err(Step { ... })` helper arguments using declared
 field-order payload slots. Existing narrow `Result<Step, Step>` locals can now
 be reassigned from result helper returns using the same tag/payload slots,
-including inside runtime branch blocks. The nested option payload slice now also
-has narrow direct-native evidence for `Result<Option<int>, int>` construction,
-reassignment, matching, helper parameters, helper returns, forwarded helper
-values, and inline `Ok(Some(...))`, `Ok(None)`, and `Err(...)` helper arguments.
+including inside runtime branch blocks; a focused runtime-exit test now tracks
+branch-local `Result<Step, Step>` reassignment from helper returns. The nested
+option payload slice now also has narrow direct-native evidence for
+`Result<Option<int>, int>` construction, reassignment, matching, helper
+parameters, helper returns, forwarded helper values, and inline
+`Ok(Some(...))`, `Ok(None)`, and `Err(...)` helper arguments.
 The recursive result payload slice now also has narrow evidence for
 `Result<Result<int, int>, int>` construction, reassignment, matching, helper
 parameters, helper returns, forwarded helper values, and inline `Ok(Ok(...))`,
@@ -916,13 +928,15 @@ slots for local values and inline variant arguments. Narrow custom enum helper
 returns and forwarded local or parameter values also lower through the same
 tag/payload slots for scalar struct payload variants. Existing narrow custom
 enum locals can now be reassigned from enum helper returns using the same
-tag/payload slots, including inside runtime branch blocks. The same
-representation now has narrow evidence for positional custom enum payloads
-carrying nested `Option<Result<int, int>>` and `Result<Option<int>, int>` values,
-including runtime-scope literal construction, reassignment, value-producing
-matches, helper returns, forwarded helper values, and inline nested variant
-arguments. Broader enum ABI support, deeper nested payload shapes, and aggregate
-payload storage beyond the evidenced slices remain tracked by issue #1124.
+tag/payload slots, including inside runtime branch blocks; a focused
+runtime-exit test now tracks this branch-local helper-return reassignment path
+for the enum row. The same representation now has narrow evidence for
+positional custom enum payloads carrying nested `Option<Result<int, int>>` and
+`Result<Option<int>, int>` values, including runtime-scope literal construction,
+reassignment, value-producing matches, helper returns, forwarded helper values,
+and inline nested variant arguments. Broader enum ABI support, deeper nested
+payload shapes, and aggregate payload storage beyond the evidenced slices
+remain tracked by issue #1124.
 
 The `json.serdes` row has expanded partial direct-native evidence: the
 Cranelift spike now builds and runs `std/json.ax` scalar/object helpers and
