@@ -22,10 +22,10 @@ assert report["contract_status"] == "partial"
 assert report["value_feature_count"] == 12
 assert report["capability_shim_count"] == 22
 assert report["status_counts"]["value_features"]["partial"] == 12
-assert report["status_counts"]["capability_shims"]["implemented"] == 21
-assert report["status_counts"]["capability_shims"]["partial"] == 1
+assert report["status_counts"]["capability_shims"]["implemented"] == 22
+assert report["status_counts"]["capability_shims"]["partial"] == 0
 assert report["blocked_rows"] == []
-assert len(report["incomplete_rows"]) == 13
+assert len(report["incomplete_rows"]) == 12
 assert "ffi.call" not in report["incomplete_rows"]
 assert "json.serdes" not in report["incomplete_rows"]
 assert "crypto.hash" not in report["incomplete_rows"]
@@ -47,6 +47,7 @@ assert "network.http.server" not in report["incomplete_rows"]
 assert "network.http.async_server" not in report["incomplete_rows"]
 assert "network.tcp" not in report["incomplete_rows"]
 assert "network.udp" not in report["incomplete_rows"]
+assert "async.runtime" not in report["incomplete_rows"]
 assert report["blocker_issues"] == [1001]
 assert report["errors"] == []
 PY
@@ -101,6 +102,7 @@ assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["netwo
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["crypto.signature"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["crypto.aead"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["ffi.call"]["runtime_evidence"]
+assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["async.runtime"]["runtime_evidence"]
 assert "stage1/crates/axiomc/src/cranelift_backend.rs" in capability_rows["json.serdes"]["runtime_evidence"]
 PY
 

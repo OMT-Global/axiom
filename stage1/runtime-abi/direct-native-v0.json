@@ -280,12 +280,12 @@
     },
     {
       "id": "async.runtime",
-      "status": "partial",
+      "status": "implemented",
       "capability": "async",
-      "blockers": [1001],
       "evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
       "denial_evidence": ["stage1/crates/axiomc/tests/cranelift_backend.rs"],
-      "notes": "The Cranelift spike now has compiler-side evidence for std/async.ax ready, await, spawn, join, cancel, is_canceled, timeout, channel send/recv, select, selected, and selected_value while the public std/async smoke asserts generated_rust is null. It also builds and runs the std/async_net.ax loopback TCP example through async listen, accept, recv_text, send_text, tcp_dial, and join flows without generated Rust. Packages without the async capability still receive the public manifest-policy denial before backend lowering. Full direct-native scheduler, timer, blocking, wakeup, cancellation, and audit parity remain open."
+      "runtime_evidence": ["stage1/crates/axiomc/src/cranelift_backend.rs"],
+      "notes": "The Cranelift spike now has runtime evidence for std/async.ax ready, await, spawn, join, cancel, is_canceled, timeout, channel send/recv, select, selected, and selected_value while the public std/async smoke asserts generated_rust is null. It also builds and runs the std/async_net.ax loopback TCP example through async listen, accept, recv_text, send_text, tcp_dial, and join flows without generated Rust. Packages without the async capability still receive the public manifest-policy denial before backend lowering. Broader scheduler, timer, blocking, wakeup, cancellation, and audit parity remain tracked by #1001."
     },
     {
       "id": "json.serdes",

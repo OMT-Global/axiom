@@ -732,15 +732,16 @@ Cranelift-specific lowering diagnostic. Broad dynamic symbol loading, pointer
 and mutable-pointer ABI shapes, non-string arguments, ownership safety, platform
 library resolution, and broader FFI audit coverage remain open under #1001.
 
-The async runtime row now has partial Cranelift evidence for `std/async.ax`
-`ready`, `await`, `spawn`, `join`, `cancel`, `is_canceled`, `timeout`,
-single-slot channel `send`/`recv`, `select`, `selected`, and `selected_value`
-while the public smoke asserts `generated_rust` is null. The spike now also
-builds and runs the `std/async_net.ax` loopback TCP example through async `listen`, `accept`,
+The async runtime row is now marked implemented with Cranelift runtime evidence
+for `std/async.ax` `ready`, `await`, `spawn`, `join`, `cancel`,
+`is_canceled`, `timeout`, single-slot channel `send`/`recv`, `select`,
+`selected`, and `selected_value` while the public smoke asserts
+`generated_rust` is null. The spike now also builds and runs the
+`std/async_net.ax` loopback TCP example through async `listen`, `accept`,
 `recv_text`, `send_text`, `tcp_dial`, and `join` flows without generated Rust. A
 package importing `std/async.ax` with no `async` capability must still receive
-the public manifest-policy denial before backend lowering. Full scheduler,
-timer, blocking, wakeup, cancellation, and audit parity remain open under #1001.
+the public manifest-policy denial before backend lowering. Broader scheduler,
+timer, blocking, wakeup, cancellation, and audit parity remain tracked by #1001.
 
 The sync-primitives row has partial direct-native evidence: the Cranelift spike
 now evaluates ownership-shaped `std/sync.ax` mutex, once, and channel wrappers
