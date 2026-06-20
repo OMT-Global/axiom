@@ -2896,6 +2896,47 @@ fn cranelift_backend_lowers_std_regex_wrappers_to_runtime_exit_code() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
+#[test]
+fn cranelift_backend_rejects_std_regex_wrapper_reassignment_as_i64_abi() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-regex-wrapper-reassignment-main-exit");
+    write_std_regex_wrapper_reassignment_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        !output.status.success(),
+        "cranelift std regex wrapper reassignment unexpectedly built: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.stdout.is_empty() {
+        assert!(
+            stderr.contains("main function is outside the direct-native i64 ABI subset"),
+            "unexpected cranelift std regex wrapper reassignment error: stdout={stdout} stderr={stderr}"
+        );
+        return;
+    }
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["ok"], Value::Bool(false));
+    let message = payload["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains("main function is outside the direct-native i64 ABI subset"),
+        "unexpected cranelift std regex wrapper reassignment error: {message}"
+    );
+}
+
 #[cfg(not(windows))]
 #[test]
 fn cranelift_backend_lowers_known_json_text_to_runtime_exit_code() {
@@ -10531,6 +10572,26 @@ fn write_std_regex_wrapper_main_exit_project(project: &Path) {
         "import \"std/regex.ax\"\n\nstatic ISSUE_TEXT: string = \"issue-238-ready\"\nstatic ISSUE_PREFIX: string = \"issue-\"\nstatic ISSUE_NUMBER: string = \"238\"\nstatic ISSUE_SUFFIX: string = \"-ready\"\n\nfn helper_find_len(): int {\nlet pattern: string = \"[0-\" + \"9]+\"\nlet text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nreturn match find(pattern, text) { Some(value) => len(value), None => 1 }\n}\n\nfn helper_replace_len(): int {\nlet pattern: string = \"[0-\" + \"9]+\"\nlet text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nlet replacement: string = \"#\" + \"\"\nreturn len(replace_all(pattern, text, replacement))\n}\n\nfn main(): int {\nlet replaced: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet anchored: string = replace_all(\"^a\", \"aaa\", \"x\")\nlet concat_text: string = ISSUE_PREFIX + ISSUE_NUMBER + ISSUE_SUFFIX\nlet concat_pattern: string = \"^issue-\" + \"[0-9]+\" + \"-ready$\"\nlet match_gate: bool = is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nlet concat_match_gate: bool = is_match(concat_pattern, concat_text)\nlet replaced_gate: bool = replaced == \"issue-#-ready\"\nlet anchored_gate: bool = anchored == \"xaa\"\nlet found_len: int = match find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => len(value), None => 1 }\nlet missing_len: int = match find(\"z+\", ISSUE_TEXT) { Some(value) => len(value), None => 4 }\nlet replaced_len: int = len(replace_all(\"[a-z]+\", \"abc-123\", \"x\"))\nlet helper_found_len: int = helper_find_len()\nlet helper_replaced_len: int = helper_replace_len()\nif match_gate && concat_match_gate && replaced_gate && anchored_gate && found_len == 3 && missing_len == 4 && replaced_len == 5 && helper_found_len == 3 && helper_replaced_len == 13 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write std regex wrapper source");
+}
+
+fn write_std_regex_wrapper_reassignment_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create std regex wrapper reassignment project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-std-regex-wrapper-reassignment-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write std regex wrapper reassignment manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-std-regex-wrapper-reassignment-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write std regex wrapper reassignment lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/regex.ax\"\n\nstatic ISSUE_TEXT: string = \"issue-238-ready\"\n\nfn helper_score(flag: bool): int {\nlet helper_text: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet selected: string = \"unset\"\nif flag {\nselected = helper_text\n} else {\nselected = \"bad\"\n}\nreturn len(selected)\n}\n\nfn main(): int {\nlet branch_text: string = replace_all(\"[0-9]+\", ISSUE_TEXT, \"#\")\nlet branch_selected: string = \"unset\"\nif true {\nbranch_selected = branch_text\n} else {\nbranch_selected = \"bad\"\n}\nlet loop_text: string = match find(\"[0-9]+\", ISSUE_TEXT) { Some(value) => value, None => \"bad\" }\nlet loop_selected: string = \"unset\"\nlet index: int = 0\nwhile index < 2 {\nif index == 0 {\nloop_selected = \"bad\"\n} else {\nloop_selected = string_clone(loop_text)\n}\nindex = index + 1\n}\nlet branch_len: int = len(branch_selected)\nlet loop_len: int = len(loop_selected)\nlet helper_true_len: int = helper_score(true)\nlet helper_false_len: int = helper_score(false)\nlet branch_gate: bool = branch_selected == \"issue-#-ready\"\nlet loop_gate: bool = loop_selected == \"238\"\nlet match_gate: bool = is_match(\"^issue-[0-9]+-ready$\", ISSUE_TEXT)\nif branch_gate && loop_gate && match_gate && branch_len == 13 && loop_len == 3 && helper_true_len == 13 && helper_false_len == 3 && index == 2 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write std regex wrapper reassignment source");
 }
 
 fn write_known_json_text_main_exit_project(project: &Path) {
