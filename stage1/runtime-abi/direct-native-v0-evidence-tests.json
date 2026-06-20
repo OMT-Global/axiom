@@ -200,6 +200,7 @@
     "json.serdes": [
       "cranelift_backend_lowers_known_json_text_to_runtime_exit_code",
       "cranelift_backend_lowers_std_json_wrappers_to_runtime_exit_code",
+      "cranelift_backend_rejects_std_json_wrapper_reassignment_as_i64_abi",
       "cranelift_backend_builds_json_serdes_binary",
       "cranelift_backend_builds_std_serdes_binary",
       "cranelift_backend_lowers_std_serdes_known_json_to_runtime_exit_code",

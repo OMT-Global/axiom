@@ -3017,6 +3017,47 @@ fn cranelift_backend_lowers_std_json_wrappers_to_runtime_exit_code() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
+#[test]
+fn cranelift_backend_rejects_std_json_wrapper_reassignment_as_i64_abi() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-json-wrapper-reassignment-main-exit");
+    write_std_json_wrapper_reassignment_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        !output.status.success(),
+        "cranelift std json wrapper reassignment unexpectedly built: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.stdout.is_empty() {
+        assert!(
+            stderr.contains("main function is outside the direct-native i64 ABI subset"),
+            "unexpected cranelift std json wrapper reassignment error: stdout={stdout} stderr={stderr}"
+        );
+        return;
+    }
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["ok"], Value::Bool(false));
+    let message = payload["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains("main function is outside the direct-native i64 ABI subset"),
+        "unexpected cranelift std json wrapper reassignment error: {message}"
+    );
+}
+
 #[cfg(not(windows))]
 #[test]
 fn cranelift_backend_lowers_std_log_format_wrappers_to_runtime_exit_code() {
@@ -10717,6 +10758,26 @@ fn write_std_json_wrapper_main_exit_project(project: &Path) {
         "import \"std/json.ax\"\n\nstatic DOC: string = \"{\\\"name\\\":\\\"axiom\\\",\\\"count\\\":3,\\\"ready\\\":true}\"\nstatic STATIC_COUNT: int = 321\nstatic STATIC_READY: bool = true\n\nfn main(): int {\nlet int_len: int = len(stringify_int(42))\nlet static_int_len: int = len(stringify_int(STATIC_COUNT))\nlet bool_len: int = len(stringify_bool(false))\nlet static_bool_len: int = len(stringify_bool(STATIC_READY))\nlet string_len: int = len(stringify_string(\"axiom\"))\nlet parsed_int: int = match parse_int(\" 42 \") { Some(value) => value, None => 1 }\nlet parsed_bool: bool = match parse_bool(\"true\") { Some(value) => value, None => false }\nlet parsed_string_len: int = match parse_string(\"\\\"hello\\\"\") { Some(value) => len(value), None => 1 }\nlet missing_string_len: int = match parse_string(\"42\") { Some(value) => len(value), None => 4 }\nlet count_value: int = match parse_field_int(DOC, \"count\") { Some(value) => value, None => 1 }\nlet ready_value: bool = match parse_field_bool(DOC, \"ready\") { Some(value) => value, None => false }\nlet name_len: int = match parse_field_string(DOC, \"name\") { Some(value) => len(value), None => 1 }\nlet missing_int: int = match parse_field_int(DOC, \"missing\") { Some(value) => value, None => 4 }\nlet dynamic_int: int = match parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_bool: bool = match parse_bool(\"false\") { Some(value) => value, None => true }\nlet dynamic_int_len: int = len(stringify_int(dynamic_int))\nlet dynamic_bool_len: int = len(stringify_bool(dynamic_bool))\nlet dynamic_string_text: string = stringify_int(dynamic_int)\nlet dynamic_string_len: int = len(stringify_string(dynamic_string_text))\nif parsed_bool && ready_value && int_len == 2 && static_int_len == 3 && bool_len == 5 && static_bool_len == 4 && string_len == 7 && parsed_int == 42 && parsed_string_len == 5 && missing_string_len == 4 && count_value == 3 && name_len == 5 && missing_int == 4 && dynamic_int_len == 5 && dynamic_bool_len == 5 && dynamic_string_len == 7 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write std json wrapper source");
+}
+
+fn write_std_json_wrapper_reassignment_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create std json wrapper reassignment project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-std-json-wrapper-reassignment-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write std json wrapper reassignment manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-std-json-wrapper-reassignment-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write std json wrapper reassignment lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/json.ax\"\n\nstatic DOC: string = \"{\\\"name\\\":\\\"axiom\\\",\\\"count\\\":3,\\\"ready\\\":true}\"\n\nfn helper_score(flag: bool): int {\nlet helper_text: string = stringify_bool(true)\nlet selected: string = \"unset\"\nif flag {\nselected = helper_text\n} else {\nselected = \"bad\"\n}\nreturn len(selected)\n}\n\nfn main(): int {\nlet branch_value: int = match parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet branch_text: string = stringify_int(branch_value)\nlet branch_selected: string = \"unset\"\nif true {\nbranch_selected = branch_text\n} else {\nbranch_selected = \"bad\"\n}\nlet loop_value: int = match parse_field_int(DOC, \"count\") { Some(value) => value, None => 1 }\nlet loop_text: string = stringify_int(loop_value)\nlet loop_selected: string = \"unset\"\nlet index: int = 0\nwhile index < 2 {\nif index == 0 {\nloop_selected = \"bad\"\n} else {\nloop_selected = string_clone(loop_text)\n}\nindex = index + 1\n}\nlet field_selected: string = match parse_field_string(DOC, \"name\") { Some(value) => value, None => \"bad\" }\nlet branch_len: int = len(branch_selected)\nlet loop_len: int = len(loop_selected)\nlet field_len: int = len(field_selected)\nlet helper_true_len: int = helper_score(true)\nlet helper_false_len: int = helper_score(false)\nif branch_len == 5 && loop_len == 1 && field_len == 5 && helper_true_len == 4 && helper_false_len == 3 && index == 2 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write std json wrapper reassignment source");
 }
 
 fn write_std_log_format_wrapper_main_exit_project(project: &Path) {
