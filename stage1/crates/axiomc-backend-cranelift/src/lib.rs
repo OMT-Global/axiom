@@ -14,6 +14,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const I64_REALPATH_BUFFER_BYTES: u32 = 4096;
+const I64_TIMESPEC_BYTES: u32 = 16;
+const I64_TIMESPEC_SECONDS_OFFSET: i32 = 0;
+const I64_TIMESPEC_NANOS_OFFSET: i32 = 8;
+const I64_TIME_UTC_BASE: i64 = 1;
 
 #[derive(Debug)]
 pub struct CraneliftBackendError {
@@ -4188,10 +4192,13 @@ fn emit_i64_clock_now_ms_expr(
     builder: &mut FunctionBuilder<'_>,
     runtime_refs: I64RuntimeRefs,
 ) -> cranelift_codegen::ir::Value {
-    let timespec_slot =
-        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 0));
+    let timespec_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        I64_TIMESPEC_BYTES,
+        0,
+    ));
     let timespec_ptr = builder.ins().stack_addr(types::I64, timespec_slot, 0);
-    let time_utc = builder.ins().iconst(types::I32, 1);
+    let time_utc = builder.ins().iconst(types::I32, I64_TIME_UTC_BASE);
     let call = builder
         .ins()
         .call(runtime_refs.timespec_get, &[timespec_ptr, time_utc]);
@@ -4208,14 +4215,27 @@ fn emit_i64_clock_now_ms_expr(
 
     builder.switch_to_block(success_block);
     builder.seal_block(success_block);
-    let seconds = builder.ins().stack_load(types::I64, timespec_slot, 0);
-    let nanos = builder.ins().stack_load(types::I64, timespec_slot, 8);
+    // Preserve millisecond precision by lowering C11 timespec_get(TIME_UTC)
+    // directly: tv_sec contributes epoch seconds, tv_nsec contributes the
+    // subsecond millisecond portion. This path must not fall back to time().
+    let timespec_seconds =
+        builder
+            .ins()
+            .stack_load(types::I64, timespec_slot, I64_TIMESPEC_SECONDS_OFFSET);
+    let timespec_nanos =
+        builder
+            .ins()
+            .stack_load(types::I64, timespec_slot, I64_TIMESPEC_NANOS_OFFSET);
     let millis_factor = builder.ins().iconst(types::I64, 1_000);
-    let seconds_millis = builder.ins().imul(seconds, millis_factor);
+    let epoch_millis_from_seconds = builder.ins().imul(timespec_seconds, millis_factor);
     let nanos_divisor = builder.ins().iconst(types::I64, 1_000_000);
-    let nanos_millis = builder.ins().sdiv(nanos, nanos_divisor);
-    let millis = builder.ins().iadd(seconds_millis, nanos_millis);
-    builder.ins().jump(merge_block, &[BlockArg::Value(millis)]);
+    let subsecond_millis_from_nanos = builder.ins().sdiv(timespec_nanos, nanos_divisor);
+    let epoch_millis = builder
+        .ins()
+        .iadd(epoch_millis_from_seconds, subsecond_millis_from_nanos);
+    builder
+        .ins()
+        .jump(merge_block, &[BlockArg::Value(epoch_millis)]);
 
     builder.switch_to_block(denied_block);
     builder.seal_block(denied_block);
@@ -5402,6 +5422,65 @@ mod tests {
                 .any(|symbol| *symbol == "time" || *symbol == "_time"),
             "clock object should not import time(), got:\n{symbols}"
         );
+    }
+
+    #[test]
+    fn clock_now_ms_tracks_subsecond_elapsed_after_sleep() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-clock-precision.o");
+        let binary = temp.path().join("i64-exit-clock-precision");
+        let elapsed_ms = || I64Expr::ClockElapsedMs {
+            start: Box::new(I64Expr::Local(0)),
+        };
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: vec![I64Expr::ClockNowMs, I64Expr::Literal(-1)],
+                stmts: vec![I64Stmt::Assign(I64Assign {
+                    local: 1,
+                    value: I64Expr::SleepMs {
+                        milliseconds: Box::new(I64Expr::Literal(10)),
+                    },
+                })],
+                body: I64ExitBody::IfReturn {
+                    cond: I64Condition::And {
+                        lhs: Box::new(I64Condition::Compare(I64Compare {
+                            op: I64CompareOp::Eq,
+                            lhs: I64Expr::Local(1),
+                            rhs: I64Expr::Literal(0),
+                        })),
+                        rhs: Box::new(I64Condition::And {
+                            lhs: Box::new(I64Condition::Compare(I64Compare {
+                                op: I64CompareOp::Gt,
+                                lhs: elapsed_ms(),
+                                rhs: I64Expr::Literal(0),
+                            })),
+                            rhs: Box::new(I64Condition::Compare(I64Compare {
+                                op: I64CompareOp::Lt,
+                                lhs: elapsed_ms(),
+                                rhs: I64Expr::Literal(1_000),
+                            })),
+                        }),
+                    },
+                    then_result: I64Expr::Literal(48),
+                    else_result: I64Expr::Literal(1),
+                },
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 clock precision exit program");
+        let output = Command::new(&binary)
+            .output()
+            .expect("run clock precision binary");
+        assert_eq!(output.status.code(), Some(48));
     }
 
     #[test]
