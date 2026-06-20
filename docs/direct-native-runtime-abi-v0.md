@@ -794,12 +794,12 @@ lowering, and
 `len(keys(...))`/`len(map_keys(...))` can count static map keys without
 materializing a runtime key array. Static scalar integer and boolean keys can
 also feed inline and pre-runtime map lookup, contains, and get-or-default
-lowering. Imported public `std/collections.ax` `contains`, `get`,
-`get_or_default`, and `keys` map wrappers now alias the same direct-native i64
-lowering for static string/int map-local cases, and `contains`, `get`, and
-`get_or_default` wrapper calls also cover static bool-keyed map-local cases.
-The focused evidence manifest now links the wrapper runtime-exit smoke to this
-row. Literal indexes into static string key arrays can also feed known string
+lowering. Imported public `std/collections.ax` `contains`, `get`, and
+`get_or_default` map wrappers now alias the same direct-native i64 lowering for
+static string-, int-, and bool-keyed map-local cases, and `keys` wrapper calls
+cover static string-keyed map-local key-array projections. The focused evidence
+manifest now links the wrapper runtime-exit smoke to this row. Literal indexes
+into static string key arrays can also feed known string
 length lowering, and non-literal scalar indexes into those static string key
 arrays can select among known key byte lengths. Dynamic key-array value
 projection locals whose index is derived from a prior collection predicate local
