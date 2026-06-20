@@ -2641,6 +2641,48 @@ fn cranelift_backend_lowers_std_encoding_wrappers_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_std_encoding_wrapper_reassignment_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp
+        .path()
+        .join("std-encoding-wrapper-reassignment-main-exit");
+    write_std_encoding_wrapper_reassignment_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std encoding wrapper reassignment main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift std encoding wrapper reassignment main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_known_crypto_text_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -10290,6 +10332,26 @@ fn write_std_encoding_wrapper_main_exit_project(project: &Path) {
         "import \"std/encoding.ax\"\n\nfn main(): int {\nlet component: string = url_component_encode(\"hello world/one\")\nlet segment: string = path_segment_encode(\"a/b c\")\nlet pair: string = query_pair_encode(\"q\", \"agent path/one\")\nlet joined: string = path_join_segment(\"/docs\", \"stage 1/encoding\")\nlet decoded_len: int = match url_component_decode(\"hello%20axiom\") { Some(value) => len(value), None => 1 }\nlet decode_missing: int = match url_component_decode(\"bad%2\") { Some(value) => len(value), None => 4 }\nlet component_gate: bool = component == \"hello%20world%2Fone\"\nlet segment_gate: bool = segment == \"a%2Fb%20c\"\nlet pair_gate: bool = pair == \"q=agent%20path%2Fone\"\nlet joined_gate: bool = joined == \"/docs/stage%201%2Fencoding\"\nif component_gate && segment_gate && pair_gate && joined_gate && len(component) == 19 && len(segment) == 9 && len(pair) == 20 && len(joined) == 26 && decoded_len == 11 && decode_missing == 4 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write std encoding wrapper source");
+}
+
+fn write_std_encoding_wrapper_reassignment_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create std encoding wrapper reassignment project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-std-encoding-wrapper-reassignment-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write std encoding wrapper reassignment manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-std-encoding-wrapper-reassignment-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write std encoding wrapper reassignment lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "import \"std/encoding.ax\"\n\nfn helper_score(flag: bool): int {\nlet selected: string = \"unset\"\nif flag {\nselected = query_pair_encode(\"q\", \"agent path/one\")\n} else {\nselected = \"bad\"\n}\nreturn len(selected)\n}\n\nfn main(): int {\nlet branch_selected: string = \"unset\"\nif true {\nbranch_selected = url_component_encode(\"hello world/one\")\n} else {\nbranch_selected = \"bad\"\n}\nlet loop_selected: string = \"unset\"\nlet index: int = 0\nwhile index < 2 {\nif index == 0 {\nloop_selected = \"bad\"\n} else {\nloop_selected = path_join_segment(\"/docs\", \"stage 1/encoding\")\n}\nindex = index + 1\n}\nlet branch_len: int = len(branch_selected)\nlet loop_len: int = len(loop_selected)\nlet helper_true_len: int = helper_score(true)\nlet helper_false_len: int = helper_score(false)\nif branch_len == 19 && loop_len == 26 && helper_true_len == 20 && helper_false_len == 3 && index == 2 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write std encoding wrapper reassignment source");
 }
 
 fn write_known_crypto_text_main_exit_project(project: &Path) {
