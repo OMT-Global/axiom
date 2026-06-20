@@ -9260,6 +9260,20 @@ fn lower_i64_condition(
             index,
             ty: Type::Bool,
         } => {
+            if let Some(value) = lower_i64_map_key_array_tuple_projection_expr(
+                base,
+                *index,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
+                return Some(CraneliftI64Condition::Compare(CraneliftI64Compare {
+                    op: CraneliftI64CompareOp::Ne,
+                    lhs: value,
+                    rhs: CraneliftI64Expr::Literal(0),
+                }));
+            }
             if let Expr::VarRef { name, .. } = base.as_ref() {
                 return local_conditions
                     .get(i64_tuple_projection_key(name, *index).as_str())
@@ -11149,6 +11163,16 @@ fn lower_i64_expr(
             lower_i64_cast_expr(expr, ty)
         }
         Expr::TupleIndex { base, index, ty } if is_i64_compatible_type(ty) => {
+            if let Some(expr) = lower_i64_map_key_array_tuple_projection_expr(
+                base,
+                *index,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
+                return lower_i64_cast_expr(expr, ty);
+            }
             if let Expr::VarRef { name, .. } = base.as_ref() {
                 return local_indexes
                     .get(i64_tuple_projection_key(name, *index).as_str())
@@ -12464,6 +12488,79 @@ fn lower_i64_map_key_array_element_expr(
         (I64MapKey::Bool(value), Type::Bool) => Some(CraneliftI64Expr::Literal(i64::from(*value))),
         _ => None,
     }
+}
+
+fn lower_i64_map_key_array_tuple_projection_expr(
+    base: &Expr,
+    tuple_index: usize,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Index {
+        base: array,
+        index,
+        ty: Type::Tuple(elements),
+    } = base
+    else {
+        return None;
+    };
+    let Expr::VarRef {
+        name,
+        ty: Type::Array(array_element, None),
+    } = array.as_ref()
+    else {
+        return None;
+    };
+    if !matches!(array_element.as_ref(), Type::Tuple(array_elements) if array_elements == elements)
+    {
+        return None;
+    }
+    let element = elements.get(tuple_index)?;
+    let keys = static_bindings.map_key_arrays.get(name)?;
+    if keys.is_empty() {
+        return None;
+    }
+    if let Some(index) = lower_i64_literal_index(index) {
+        return lower_i64_map_key_tuple_component_expr(keys.get(index)?, tuple_index, element);
+    }
+    let index = lower_i64_expr(
+        index,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let last = keys.len() - 1;
+    let mut result = lower_i64_map_key_tuple_component_expr(keys.get(last)?, tuple_index, element)?;
+    for candidate in (0..last).rev() {
+        result = CraneliftI64Expr::Select {
+            cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+                op: CraneliftI64CompareOp::Eq,
+                lhs: index.clone(),
+                rhs: CraneliftI64Expr::Literal(candidate as i64),
+            })),
+            then_result: Box::new(lower_i64_map_key_tuple_component_expr(
+                keys.get(candidate)?,
+                tuple_index,
+                element,
+            )?),
+            else_result: Box::new(result),
+        };
+    }
+    Some(result)
+}
+
+fn lower_i64_map_key_tuple_component_expr(
+    key: &I64MapKey,
+    tuple_index: usize,
+    element: &Type,
+) -> Option<CraneliftI64Expr> {
+    let I64MapKey::Tuple(elements) = key else {
+        return None;
+    };
+    lower_i64_map_key_array_element_expr(elements.get(tuple_index)?, element)
 }
 
 fn lower_i64_slice_projection_index_expr(
