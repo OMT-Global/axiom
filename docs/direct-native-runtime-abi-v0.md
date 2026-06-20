@@ -245,8 +245,9 @@ integer locals, comparisons, helper calls, runtime branch-local string
 projection `let`s, and process exit status without generated Rust.
 Branch-, loop-, and helper-body string reassignment can update those projection
 locals for reassigned known literals, known-text helper returns, known-text
-string intrinsic results, and supported known-text concatenations without
-materializing a general string value.
+string intrinsic results, supported known-text concatenations, and supported
+runtime scalar/bool stringify projections without materializing a general string
+value.
 String concatenation length also lowers for supported string length projection
 inputs by adding the operand byte lengths without materializing the concatenated
 runtime string.
@@ -727,8 +728,9 @@ over known map literals, into direct-native length, comparison, and
 Branch-, loop-, and helper-body string reassignment now update direct-native
 string length projection locals so reassigned known literals, known-text helper
 returns, known-text string intrinsic results, and supported known-text
-concatenations can feed post-control-flow length checks, helper returns, and
-process exit status without generated Rust.
+concatenations plus runtime scalar/bool stringify projections can feed
+post-control-flow length checks, helper returns, and process exit status without
+generated Rust.
 The focused evidence manifest now also links the unsupported string-helper
 `main` smoke to this row, proving side-effecting string helper bodies still
 fail closed at the direct-native i64 ABI boundary.
