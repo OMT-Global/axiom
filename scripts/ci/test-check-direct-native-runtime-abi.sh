@@ -22,13 +22,12 @@ assert report["contract_status"] == "partial"
 assert report["value_feature_count"] == 12
 assert report["capability_shim_count"] == 22
 assert report["status_counts"]["value_features"]["partial"] == 12
-assert report["status_counts"]["capability_shims"]["implemented"] == 11
-assert report["status_counts"]["capability_shims"]["partial"] == 11
+assert report["status_counts"]["capability_shims"]["implemented"] == 12
+assert report["status_counts"]["capability_shims"]["partial"] == 10
 assert report["blocked_rows"] == []
-assert len(report["incomplete_rows"]) == 23
+assert len(report["incomplete_rows"]) == 22
 assert "ffi.call" in report["incomplete_rows"]
 assert "json.serdes" in report["incomplete_rows"]
-assert "network.dns.resolve" in report["incomplete_rows"]
 assert "crypto.hash" not in report["incomplete_rows"]
 assert "crypto.mac" not in report["incomplete_rows"]
 assert "crypto.random" not in report["incomplete_rows"]
@@ -40,6 +39,7 @@ assert "process.status" not in report["incomplete_rows"]
 assert "sync.primitives" not in report["incomplete_rows"]
 assert "regex.match_replace" not in report["incomplete_rows"]
 assert "io.logging_stdio" not in report["incomplete_rows"]
+assert "network.dns.resolve" not in report["incomplete_rows"]
 assert report["blocker_issues"] == [1001]
 assert report["errors"] == []
 PY
@@ -77,6 +77,7 @@ for row_id in (
     "env.read",
     "fs.read",
     "fs.write",
+    "network.dns.resolve",
     "process.status",
     "regex.match_replace",
     "io.logging_stdio",
