@@ -3,8 +3,9 @@
 Axiom is an agent-native typed intent and semantic construction system. It
 defines what must be true, which effects are allowed, what evidence proves a
 change, and which artifacts should be produced. The current implementation is a
-Rust-hosted stage1 compiler and generated-Rust backend, but Rust is a bootstrap
-host and backend target rather than the ontology of the language.
+Rust-hosted stage1 compiler with direct-native Cranelift output for supported
+native builds and a generated-Rust compatibility backend, but Rust is a
+bootstrap host and backend target rather than the ontology of the language.
 
 The supported toolchain today is the Rust bootstrap compiler in `stage1/`.
 
@@ -14,12 +15,14 @@ Python `stage0` and its bytecode VM are not supported execution paths; see
 
 ## Current Status
 
-Axiom currently supports a Rust-only `axiomc` workflow with:
+Axiom currently supports a Rust-hosted `axiomc` workflow with:
 
 - `axiom.toml` and `axiom.lock` package manifests.
 - Package-local modules, local path dependencies, and workspace member
   selection.
-- Native builds through generated Rust and `rustc`.
+- Native builds through the direct-native Cranelift backend for the supported
+  subset, with generated Rust and `rustc` retained as explicit compatibility
+  and targeted-build fallback paths.
 - `check`, `build`, `run`, `test`, and capability inspection commands.
 - A stage1 conformance corpus under `stage1/conformance`.
 - Synthetic standard library modules under the `std/` import prefix.
