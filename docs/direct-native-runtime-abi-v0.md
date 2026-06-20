@@ -298,6 +298,10 @@ fixed-array row, because those tests prove fixed-array helper arguments,
 scalar projection, and loop-body reassignment paths through direct-native output
 without generated Rust.
 
+The aggregate helper-argument smoke also proves local fixed arrays and inline
+fixed-array literals can cross direct-native helper-call boundaries and feed
+process exit status through element-slot lowering.
+
 The `tuple` row now has narrow direct-native runtime evidence for immediate
 tuple-literal scalar indexing and scalar projection from local tuple bindings.
 This includes runtime-scope loop-body bindings. Numeric projections can feed
@@ -350,6 +354,11 @@ coverage for tuple and struct rows: scalar aggregate output covers public
 string/int tuple projection, and the while-loop aggregate reassignment smoke
 covers tuple, fixed-array, and struct projection/reassignment through runtime
 loop blocks without generated Rust.
+
+The aggregate helper-argument smoke adds focused runtime-exit evidence that
+local tuple values, inline tuple literals, local structs, and inline struct
+literals lower across direct-native helper-call boundaries without generated
+Rust.
 
 The `option` row now has narrow direct-native runtime evidence for local
 `Option<int>` and `Option<bool>` construction represented as tag/payload locals,
