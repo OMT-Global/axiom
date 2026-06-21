@@ -2229,6 +2229,48 @@ fn cranelift_backend_lowers_slice_dynamic_branch_return_subranges_to_runtime_exi
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_slice_dynamic_branch_return_helper_chain_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp
+        .path()
+        .join("slice-dynamic-branch-return-helper-chain-main-exit");
+    write_slice_dynamic_branch_return_helper_chain_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift slice dynamic branch return helper chain main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift slice dynamic branch return helper chain main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_slice_branch_return_helper_args_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -9905,6 +9947,26 @@ fn write_slice_dynamic_branch_return_subranges_main_exit_project(project: &Path)
         "fn choose_values(flag: bool, values: &[int]): &[int] {\nif flag {\nreturn values[0:3]\n} else {\nreturn values[1:4]\n}\n}\n\nfn choose_flags(flag: bool, flags: &[bool]): &[bool] {\nif flag {\nlet chosen: &[bool] = flags[0:3]\nreturn chosen\n} else {\nlet backup: &[bool] = flags[1:4]\nreturn backup\n}\n}\n\nfn score(values: &[int]): int {\nreturn len(values) + first(values) + last(values)\n}\n\nfn gate(flags: &[bool], index: int): bool {\nreturn first(flags) == false && last(flags) && flags[index]\n}\n\nfn main(): int {\nlet input: [int; 4] = [9, 20, 26, 9]\nlet values: &[int] = input[:]\nlet flags_input: [bool; 4] = [false, true, false, true]\nlet flags: &[bool] = flags_input[:]\nlet pick_index: int = 1\nlet selected_selector: bool = first(flags) == false\nlet fallback_selector: bool = first(flags)\nlet selected_values: &[int] = choose_values(selected_selector, values)\nlet fallback_values: &[int] = choose_values(fallback_selector, values)\nlet selected_flags: &[bool] = choose_flags(selected_selector, flags)\nlet selected_window: &[int] = selected_values[1:3]\nlet fallback_window: &[int] = fallback_values[0:2]\nlet selected_flag_window: &[bool] = selected_flags[0:2]\nlet selected_code: int = score(selected_window)\nlet selected_pick: int = selected_window[pick_index] + 22\nlet fallback_code: int = score(fallback_window)\nlet selected_gate: bool = gate(selected_flag_window, pick_index)\nif selected_gate && selected_code == 48 && selected_pick == 48 && fallback_code == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write slice dynamic branch return subranges main exit source");
+}
+
+fn write_slice_dynamic_branch_return_helper_chain_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create slice dynamic branch return helper chain main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-slice-dynamic-branch-return-helper-chain-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write slice dynamic branch return helper chain main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-slice-dynamic-branch-return-helper-chain-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write slice dynamic branch return helper chain main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "fn choose_values(flag: bool, values: &[int]): &[int] {\nif flag {\nreturn values[0:3]\n} else {\nreturn values[1:4]\n}\n}\n\nfn identity(values: &[int]): &[int] {\nreturn values\n}\n\nfn score(values: &[int]): int {\nreturn len(values) + first(values) + last(values)\n}\n\nfn main(): int {\nlet input: [int; 4] = [9, 20, 26, 9]\nlet values: &[int] = input[:]\nlet flags_input: [bool; 4] = [false, true, false, true]\nlet flags: &[bool] = flags_input[:]\nlet pick_index: int = 1\nlet selector: bool = first(flags) == false\nlet selected_values: &[int] = choose_values(selector, values)\nlet selected_window: &[int] = selected_values[1:3]\nlet forwarded: &[int] = identity(selected_window)\nlet selected_code: int = score(forwarded)\nlet selected_pick: int = forwarded[pick_index] + 22\nif selector && selected_code == 48 && selected_pick == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write slice dynamic branch return helper chain main exit source");
 }
 
 fn write_slice_branch_return_helper_args_main_exit_project(project: &Path) {
