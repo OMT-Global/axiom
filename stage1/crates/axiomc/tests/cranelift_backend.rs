@@ -2823,7 +2823,7 @@ fn cranelift_backend_builds_struct_field_binary() {
     );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
-        "3\ntrue\nstage1 structs\n"
+        "3\ntrue\nstage1 structs\n5\ntrue\n8\nfalse\n8\nfalse\n"
     );
 }
 
@@ -9342,7 +9342,7 @@ fn write_struct_field_project(project: &Path) {
     .expect("write struct lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\n",
+        "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nstruct Step {\nvalue: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nfn make_step(value: int, ready: bool): Step {\nreturn Step { value: value, ready: ready }\n}\n\nfn choose_step(flag: bool): Step {\nif flag {\nreturn Step { value: 7, ready: true }\n} else {\nlet fallback: int = 8\nreturn Step { ready: false, value: fallback }\n}\n}\n\nfn forward_step(step: Step): Step {\nreturn step\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nlet returned: Step = make_step(5, true)\nlet branch: Step = choose_step(false)\nlet branch_to_forward: Step = choose_step(false)\nlet forwarded: Step = forward_step(branch_to_forward)\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\nprint returned.value\nprint returned.ready\nprint branch.value\nprint branch.ready\nprint forwarded.value\nprint forwarded.ready\n",
     )
     .expect("write struct source");
 }
@@ -12794,16 +12794,27 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/fs.ax"
 
+static READ_PATH: string = "src/fixture.txt"
+static MISSING_PREFIX: string = "src/"
+
 fn main(): int {
-let direct_len: int = match fs_read("src/fixture.txt") { Some(value) => len(value), None => 1 }
-let wrapper_len: int = match read_file("src/fixture.txt") { Some(value) => len(value), None => 1 }
-let missing_len: int = match read_file("src/missing.txt") { Some(value) => len(value), None => 28 }
-let stored_direct: Option<string> = fs_read("src/fixture.txt")
-let stored_wrapper: Option<string> = read_file("src/fixture.txt")
-let stored_missing: Option<string> = read_file("src/missing.txt")
-let stored_statement: Option<string> = read_file("src/fixture.txt")
+let wrapper_path: string = "src/fixture.txt"
+let stored_wrapper_path: string = "src/fixture.txt"
+let fixture_name: string = "fixture.txt"
+let missing_name: string = "missing.txt"
+let stored_missing_name: string = "missing.txt"
+let direct_len: int = match fs_read(READ_PATH) { Some(value) => len(value), None => 1 }
+let wrapper_len: int = match read_file(wrapper_path) { Some(value) => len(value), None => 1 }
+let concat_len: int = match read_file(MISSING_PREFIX + fixture_name) { Some(value) => len(value), None => 1 }
+let missing_len: int = match read_file(MISSING_PREFIX + missing_name) { Some(value) => len(value), None => 28 }
+let stored_direct: Option<string> = fs_read(READ_PATH)
+let stored_wrapper: Option<string> = read_file(stored_wrapper_path)
+let stored_concat: Option<string> = read_file(MISSING_PREFIX + fixture_name)
+let stored_missing: Option<string> = read_file(MISSING_PREFIX + stored_missing_name)
+let stored_statement: Option<string> = read_file(READ_PATH)
 let stored_direct_len: int = match stored_direct { Some(value) => len(value), None => 1 }
 let stored_wrapper_len: int = match stored_wrapper { Some(value) => len(value), None => 1 }
+let stored_concat_len: int = match stored_concat { Some(value) => len(value), None => 1 }
 let stored_missing_len: int = match stored_missing { Some(value) => len(value), None => 28 }
 let statement_len: int = 0
 match stored_statement {
@@ -12814,7 +12825,7 @@ None {
 statement_len = 1
 }
 }
-if direct_len == 13 && wrapper_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_missing_len == 28 && statement_len == 13 {
+if direct_len == 13 && wrapper_len == 13 && concat_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_concat_len == 13 && stored_missing_len == 28 && statement_len == 13 {
 return statement_len + 35
 } else {
 return 1
