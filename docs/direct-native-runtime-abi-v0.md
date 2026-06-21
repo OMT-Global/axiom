@@ -187,6 +187,10 @@ computed value as the process exit status at runtime without generated Rust.
 The public scalar aggregate, numeric cross-width, and static scalar smokes now
 also assert that the build JSON reports `generated_rust: null`, so this evidence
 cannot silently drift back through generated Rust.
+The focused evidence manifest now also links the static scalar smoke to the
+numeric, boolean, and string rows, proving string, int, typed integer, and bool
+static globals can flow through the produced native binary's stdout surface
+without generated Rust.
 The focused evidence manifest now also links the `main(): i64` runtime-exit
 smoke to the numeric row so that direct i64 entrypoint process-status lowering
 is counted explicitly.
@@ -274,7 +278,8 @@ length and comparison path, and known-input `encoding_url_component_decode(...)`
 can lower direct `Option<string>` matches by compile-time arm selection.
 Imported public `std/encoding.ax` wrappers now alias those same known-input
 encode, decode, query-pair, and path-join lowering paths; the focused evidence
-manifest now links the encoding wrapper runtime-exit smoke to this row.
+manifest now links the encoding wrapper runtime-exit smoke and the
+`std/encoding.ax` binary smoke to this row.
 Imported public `std/string_builder.ax` builder, seed, push, line-push, and
 finish wrappers now alias known text facts that can feed direct-native string
 comparisons, length projections, and process exit status without generated
@@ -814,6 +819,10 @@ evidence manifest now links the wrapper runtime-exit smoke to this row. Imported
 public `std/collections.ax` `keys` wrappers over static tuple-keyed maps can
 also feed literal and dynamic scalar/bool component projections from
 `keys(...)[index].field` without materializing a general tuple key-array value.
+The focused evidence manifest now also links the broader
+`std/collections.ax` lookup binary smoke to this row, covering successful
+native execution of contains, lookup, defaulted miss, key counts, and known
+string key projections without generated Rust.
 Literal indexes into static string key arrays can also feed
 known string length lowering, and non-literal scalar indexes into those static
 string key arrays can select among known key byte lengths. Dynamic key-array value
@@ -1096,8 +1105,9 @@ native stdout JSON-line writes without generated Rust, including event messages
 and `field_string(...)` values backed by `std/json.ax` `stringify_string(...)`
 over supported scalar/bool projection locals. The focused evidence manifest now
 links the selected projection, dynamic scalar length, dynamic `info_attrs`
-stderr, and dynamic event stdout smokes to this stdio row so the evidence
-runner exercises those public logging paths explicitly. It also lowers known-string public
+stderr, dynamic event stdout, and broader `std/log.ax` binary smokes to this
+stdio row so the evidence runner exercises those public logging paths
+explicitly. It also lowers known-string public
 `std/io.ax`
 `eprintln` lets in direct-native i64 `main` functions and helper functions,
 including runtime-scope lets after assignments and inside branches, into native
