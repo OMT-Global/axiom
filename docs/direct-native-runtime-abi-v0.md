@@ -540,9 +540,12 @@ The direct-native crypto signature slice is now marked partial: the Cranelift
 spike builds and runs `std/crypto_sign.ax` Ed25519 key generation, signing, and
 verification while the public smoke asserts `generated_rust` is null by
 dynamically loading the host libcrypto EVP provider for real cryptographic
-operations. Packages without the `crypto` capability still fail before backend
-lowering. Runtime-integrated crypto provider selection, deterministic test
-hooks, audit parity, and non-Unix support remain open under #1001.
+operations. The smoke now also sends Ed25519 verification, signature length, and
+public-key length projections through helper functions before native binary
+stdout, proving those crypto byte-array values can cross helper boundaries in
+the spike path. Packages without the `crypto` capability still fail before
+backend lowering. Runtime-integrated crypto provider selection, deterministic
+test hooks, audit parity, and non-Unix support remain open under #1001.
 
 The direct-native crypto AEAD slice is now marked partial: the Cranelift spike
 builds and runs `std/crypto_aead.ax` AES-256-GCM seal/open while the public

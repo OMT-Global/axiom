@@ -6390,7 +6390,7 @@ fn cranelift_backend_builds_crypto_signature_binary() {
         "cranelift crypto signature binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\ntrue\n64\n32\n");
 }
 
 #[test]
@@ -10825,7 +10825,7 @@ fn write_crypto_signature_project(project: &Path, crypto: bool) {
     .expect("write crypto signature lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/crypto_sign.ax\"\nlet message: [u8] = [104u8, 101u8, 108u8, 108u8, 111u8]\nlet keys: ([u8], [u8]) = ed25519_keygen()\nlet public_key: [u8] = keys.0\nlet secret_key: [u8] = keys.1\nlet signature: [u8] = ed25519_sign(secret_key[:], message[:])\nprint ed25519_verify(public_key[:], message[:], signature[:])\n",
+        "import \"std/crypto_sign.ax\"\n\nfn signature_ok(public_key: &[u8], message: &[u8], signature: &[u8]): bool {\nreturn ed25519_verify(public_key, message, signature)\n}\n\nfn signature_len(secret_key: &[u8], message: &[u8]): int {\nreturn len(ed25519_sign(secret_key, message))\n}\n\nfn public_key_len(public_key: &[u8]): int {\nreturn len(public_key)\n}\n\nlet message: [u8] = [104u8, 101u8, 108u8, 108u8, 111u8]\nlet keys: ([u8], [u8]) = ed25519_keygen()\nlet public_key: [u8] = keys.0\nlet secret_key: [u8] = keys.1\nlet signature: [u8] = ed25519_sign(secret_key[:], message[:])\nprint ed25519_verify(public_key[:], message[:], signature[:])\nprint signature_ok(public_key[:], message[:], signature[:])\nprint signature_len(secret_key[:], message[:])\nprint public_key_len(public_key[:])\n",
     )
     .expect("write crypto signature source");
 }
