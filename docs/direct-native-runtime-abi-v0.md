@@ -283,8 +283,10 @@ struct bindings, including runtime-scope loop-body bindings. Numeric fields can
 feed `int` and typed integer locals; boolean fields can feed bool locals, helper
 return conditions, and composed boolean conditions. The public struct-field
 smoke also asserts the Cranelift build JSON reports `generated_rust: null`
-while running scalar, boolean, and string field projection output. It also
-covers reassignment of scalar-projection struct locals. Scalar and bool struct
+while running scalar, boolean, and string field projection output, including
+caller-side scalar and boolean projections from direct, branch-selected, and
+forwarded struct helper returns. It also covers reassignment of
+scalar-projection struct locals. Scalar and bool struct
 helper parameters
 lower across direct-native function-call boundaries as one ABI slot per field
 in declared field order for local struct values and inline struct literal
@@ -345,27 +347,32 @@ diagnostic.
 The `fs.read` row now has partial Cranelift evidence for `std/fs.ax`
 `read_file` on present and missing filesystem names, plus denial evidence that a
 package without the `fs` capability fails before backend lowering. The
-direct-native i64 path now also lowers literal-path `fs_read(...)` calls and the
-public `std/fs.ax` `read_file(...)` wrapper into native process exit status by
+direct-native i64 path now also lowers `fs_read(...)` calls and the public
+`std/fs.ax` `read_file(...)` wrapper into native process exit status by
 performing runtime native file length checks for direct `Option<string>` matches
 that use `len(value)`, returning the runtime byte length or the `None` arm when
-the file is absent, inaccessible, or above the read cap. Literal paths are still
-resolved through the package-root `fs_root` guard before codegen and are now
-revalidated with `realpath(...)` against the canonical `fs_root` immediately
-before runtime length checks. The symlink regression smoke builds while the
-literal read target is an in-root file, swaps that target to an out-of-root
-symlink before runtime, and proves the native binary selects the denied `None`
-arm. These read-length paths now append best-effort host audit JSONL to
-`AXIOM_HOST_AUDIT_LOG` without including path or file-content secrets, recording
-nonnegative read lengths as `ok` and missing/denied reads as `denied`. This
+the file is absent, inaccessible, or above the read cap. Those direct-native
+read paths now cover package-root-relative paths supplied by static string
+facts, local string facts, and known string concatenation rather than only inline
+literals, including a concatenated existing fixture path that returns the
+runtime byte length and a separate concatenated missing path that selects the
+`None` arm. Paths are still resolved through the package-root `fs_root` guard
+before codegen and are now revalidated with `realpath(...)` against the
+canonical `fs_root` immediately before runtime length checks. The symlink
+regression smoke builds while the read target is an in-root file, swaps that
+target to an out-of-root symlink before runtime, and proves the native binary
+selects the denied `None` arm. These read-length paths now append best-effort
+host audit JSONL to `AXIOM_HOST_AUDIT_LOG` without including path or
+file-content secrets, recording nonnegative read lengths as `ok` and
+missing/denied reads as `denied`. This
 runtime native file length check can now also be stored in a local
 `Option<string>` and matched later for supported `len(value)` expression and
 statement matches without reading the build-time fixture contents. This native
 read path currently opts out for programs that contain write-side filesystem
 calls so existing write/read sequencing stays on the prior path. General string
-file contents beyond length projection, non-literal path binding, write-side
-filesystem wrappers, manifest policy parity, and runtime filesystem binding
-remain open under #1001.
+file contents beyond length projection, dynamic path binding beyond known string
+facts, write-side filesystem wrappers, manifest policy parity, and runtime
+filesystem binding remain open under #1001.
 
 The DNS row now has partial Cranelift evidence: the spike builds and runs a
 `std/net.ax` package resolving `localhost` through host DNS while the public
@@ -466,7 +473,9 @@ into length and comparison conditions that can feed a native process exit
 status without generated Rust. Supported runtime string-projection inputs can
 also feed fixed SHA-256 hex length projections directly or through
 `string_clone(...)` over a projection local without materializing a general
-runtime string value. Those direct-native SHA-256 length projections now append
+runtime string value. Known-input SHA-256 hex length projections can also
+return through direct-native helper functions as integer values before feeding
+process exit status. Those direct-native SHA-256 length projections now append
 best-effort host audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only typed
 input metadata and outcome without recording input text or digest values.
 Random, signature, AEAD, dynamic runtime hash execution, and broader crypto
@@ -482,10 +491,12 @@ now also lowers known-input
 length and comparison conditions that can feed a native process exit status
 without generated Rust. Supported runtime string-projection inputs can also feed
 fixed HMAC hex length projections directly or through `string_clone(...)` over
-a projection local without materializing a general runtime string value. Those
-direct-native HMAC length projections now append best-effort host audit JSONL
-to `AXIOM_HOST_AUDIT_LOG`, recording only typed input metadata and outcome
-without recording key, message, or tag values.
+a projection local without materializing a general runtime string value.
+Known-input HMAC-SHA256 and HMAC-SHA512 hex length projections can also return
+through direct-native helper functions as integer values before feeding process
+exit status. Those direct-native HMAC length projections now append best-effort
+host audit JSONL to `AXIOM_HOST_AUDIT_LOG`, recording only typed input metadata
+and outcome without recording key, message, or tag values.
 Known-input `crypto_constant_time_eq(...)` over known string values lowers into native
 boolean conditions. It also lowers
 `crypto_constant_time_eq_u8(...)` over narrow fixed-array/static-slice `u8`
@@ -649,8 +660,11 @@ fixed-array slots, including helper-parameter arrays feeding a direct-native
 process exit status. Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots.
-Broader borrowed-slice aliasing, dynamic slice bounds, slice returns, and host
-ABI coverage remain tracked by issue #1001.
+The public borrowed-slice smoke also prints `len`, `first`, `last`, and indexed
+projection output for both a local slice and a helper-returned slice while
+asserting `generated_rust: null`. Broader borrowed-slice aliasing, dynamic
+slice bounds, slice returns, and host ABI coverage remain tracked by issue
+#1001.
 
 The map lookup row has partial direct-native evidence: the Cranelift spike now
 builds and runs direct map indexing, `get`, `get_or_default`,
@@ -689,10 +703,13 @@ direct-native process exit status. Trimmed dynamic key-array projection locals
 can also feed `string_starts_with(...)` predicates without materializing runtime
 strings. Direct indexes into known map literals can also feed known string facts
 for helper returns, length projections, and `string_starts_with(...)`
-conditions.
+conditions. Dynamic finite string-key projections from `keys(...)` over known
+map literals can now also feed public `std/collections.ax` `contains(...)` and
+`get_or_default(...)` wrappers by lowering the selected-key lookup to native
+candidate-key selection without generated Rust.
 Broader map ownership, runtime map storage, general payload lookup bindings,
-runtime key array value projection, and host-boundary representation remain
-tracked by issue #1001.
+general `get(...)` Option payload selection for dynamic keys, key/value
+ownership, and host-boundary representation remain tracked by issue #1001.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names while the public smoke
@@ -758,9 +775,11 @@ lowers public `std/sync.ax`
 `channel(...)`, `send(...)`, and `try_recv(...)` wrappers for compile-time-known
 single-slot `int`/`bool` payloads, including pre-runtime channel locals, so
 present and missing channel receives can feed direct-native process exit status
-without generated Rust. Concurrent execution, blocking behavior, dynamic channel
-or once state after runtime scalar lowering, and host runtime synchronization
-remain tracked by issue #1001.
+without generated Rust. The same known mutex, once, and channel wrapper shapes
+now also lower inside helper functions and return through direct-native helper
+calls before driving process exit status. Concurrent execution, blocking
+behavior, dynamic channel or once state after runtime scalar lowering, and host
+runtime synchronization remain tracked by issue #1001.
 
 The `Result<T, E>` row has partial direct-native evidence: the Cranelift spike
 now builds and runs a package importing `std/outcome.ax`, using result

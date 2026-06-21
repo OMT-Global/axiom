@@ -2823,7 +2823,7 @@ fn cranelift_backend_builds_struct_field_binary() {
     );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
-        "3\ntrue\nstage1 structs\n"
+        "3\ntrue\nstage1 structs\n5\ntrue\n8\nfalse\n8\nfalse\n"
     );
 }
 
@@ -3591,7 +3591,10 @@ fn cranelift_backend_builds_borrowed_slice_binary() {
         "cranelift borrowed-slice binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n4\n8\n6\n3\n");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "3\n4\n8\n6\n3\n4\n8\n6\n"
+    );
 }
 
 #[cfg(not(windows))]
@@ -8498,7 +8501,7 @@ fn write_known_crypto_text_main_exit_project(project: &Path) {
     .expect("write known crypto text lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "static KEY: string = \"key\"\n\nfn main(): int {\nlet message_for_len: string = \"The quick brown fox jumps over the lazy dog\"\nlet message_for_gate: string = \"The quick brown fox jumps over the lazy dog\"\nlet sha_for_gate: string = crypto_sha256(\"abc\")\nlet hmac256_for_gate: string = crypto_hmac_sha256(KEY, message_for_gate)\nlet hmac512_for_gate: string = crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\")\nlet sha_len: int = len(crypto_sha256(\"abc\"))\nlet hmac256_len: int = len(crypto_hmac_sha256(KEY, message_for_len))\nlet hmac512_len: int = len(crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\"))\nlet dynamic_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_clone_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_hmac_key: int = match json_parse_int(\"321\") { Some(value) => value, None => 1 }\nlet dynamic_hmac256_message: bool = match json_parse_bool(\"true\") { Some(value) => value, None => false }\nlet dynamic_hmac512_message: bool = match json_parse_bool(\"false\") { Some(value) => value, None => true }\nlet dynamic_sha_len: int = len(crypto_sha256(json_stringify_int(dynamic_sha_input)))\nlet dynamic_clone_sha_text: string = json_stringify_int(dynamic_clone_sha_input)\nlet dynamic_clone_sha_len: int = len(crypto_sha256(string_clone(dynamic_clone_sha_text)))\nlet dynamic_hmac256_len: int = len(crypto_hmac_sha256(json_stringify_int(dynamic_hmac_key), json_stringify_bool(dynamic_hmac256_message)))\nlet dynamic_hmac512_len: int = len(crypto_hmac_sha512(KEY, json_stringify_bool(dynamic_hmac512_message)))\nlet sha_gate: bool = string_starts_with(sha_for_gate, \"ba7816bf\")\nlet hmac256_gate: bool = string_starts_with(hmac256_for_gate, \"f7bc83f4\")\nlet hmac512_gate: bool = string_starts_with(hmac512_for_gate, \"164b7a7b\")\nlet constant_gate: bool = crypto_constant_time_eq(crypto_sha256(\"abc\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nlet mismatch_gate: bool = crypto_constant_time_eq(\"short\", \"shorter\") == false\nlet byte_left: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_same: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_different: [u8; 3] = [1u8, 2u8, 4u8]\nlet byte_literal_left: [u8; 2] = [4u8, 5u8]\nlet byte_literal_same: [u8; 2] = [4u8, 5u8]\nlet byte_short: [u8; 1] = [4u8]\nlet byte_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_same[:])\nlet byte_mismatch_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_different[:]) == false\nlet byte_literal_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_literal_same[:])\nlet byte_len_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_short[:]) == false\nif sha_gate && hmac256_gate && hmac512_gate && constant_gate && mismatch_gate && byte_gate && byte_mismatch_gate && byte_literal_gate && byte_len_gate && sha_len == 64 && hmac256_len == 64 && hmac512_len == 128 && dynamic_sha_len == 64 && dynamic_clone_sha_len == 64 && dynamic_hmac256_len == 64 && dynamic_hmac512_len == 128 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "static KEY: string = \"key\"\n\nfn helper_sha_len(): int {\nreturn len(crypto_sha256(\"abc\"))\n}\n\nfn helper_hmac256_len(): int {\nreturn len(crypto_hmac_sha256(KEY, \"The quick brown fox jumps over the lazy dog\"))\n}\n\nfn helper_hmac512_len(): int {\nreturn len(crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\"))\n}\n\nfn main(): int {\nlet message_for_len: string = \"The quick brown fox jumps over the lazy dog\"\nlet message_for_gate: string = \"The quick brown fox jumps over the lazy dog\"\nlet sha_for_gate: string = crypto_sha256(\"abc\")\nlet hmac256_for_gate: string = crypto_hmac_sha256(KEY, message_for_gate)\nlet hmac512_for_gate: string = crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\")\nlet sha_len: int = len(crypto_sha256(\"abc\"))\nlet hmac256_len: int = len(crypto_hmac_sha256(KEY, message_for_len))\nlet hmac512_len: int = len(crypto_hmac_sha512(\"Jefe\", \"what do ya want for nothing?\"))\nlet helper_sha_len_value: int = helper_sha_len()\nlet helper_hmac256_len_value: int = helper_hmac256_len()\nlet helper_hmac512_len_value: int = helper_hmac512_len()\nlet dynamic_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_clone_sha_input: int = match json_parse_int(\"12345\") { Some(value) => value, None => 1 }\nlet dynamic_hmac_key: int = match json_parse_int(\"321\") { Some(value) => value, None => 1 }\nlet dynamic_hmac256_message: bool = match json_parse_bool(\"true\") { Some(value) => value, None => false }\nlet dynamic_hmac512_message: bool = match json_parse_bool(\"false\") { Some(value) => value, None => true }\nlet dynamic_sha_len: int = len(crypto_sha256(json_stringify_int(dynamic_sha_input)))\nlet dynamic_clone_sha_text: string = json_stringify_int(dynamic_clone_sha_input)\nlet dynamic_clone_sha_len: int = len(crypto_sha256(string_clone(dynamic_clone_sha_text)))\nlet dynamic_hmac256_len: int = len(crypto_hmac_sha256(json_stringify_int(dynamic_hmac_key), json_stringify_bool(dynamic_hmac256_message)))\nlet dynamic_hmac512_len: int = len(crypto_hmac_sha512(KEY, json_stringify_bool(dynamic_hmac512_message)))\nlet sha_gate: bool = string_starts_with(sha_for_gate, \"ba7816bf\")\nlet hmac256_gate: bool = string_starts_with(hmac256_for_gate, \"f7bc83f4\")\nlet hmac512_gate: bool = string_starts_with(hmac512_for_gate, \"164b7a7b\")\nlet constant_gate: bool = crypto_constant_time_eq(crypto_sha256(\"abc\"), \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\")\nlet mismatch_gate: bool = crypto_constant_time_eq(\"short\", \"shorter\") == false\nlet byte_left: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_same: [u8; 3] = [1u8, 2u8, 3u8]\nlet byte_different: [u8; 3] = [1u8, 2u8, 4u8]\nlet byte_literal_left: [u8; 2] = [4u8, 5u8]\nlet byte_literal_same: [u8; 2] = [4u8, 5u8]\nlet byte_short: [u8; 1] = [4u8]\nlet byte_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_same[:])\nlet byte_mismatch_gate: bool = crypto_constant_time_eq_u8(byte_left[:], byte_different[:]) == false\nlet byte_literal_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_literal_same[:])\nlet byte_len_gate: bool = crypto_constant_time_eq_u8(byte_literal_left[:], byte_short[:]) == false\nif sha_gate && hmac256_gate && hmac512_gate && constant_gate && mismatch_gate && byte_gate && byte_mismatch_gate && byte_literal_gate && byte_len_gate && sha_len == 64 && hmac256_len == 64 && hmac512_len == 128 && helper_sha_len_value == 64 && helper_hmac256_len_value == 64 && helper_hmac512_len_value == 128 && dynamic_sha_len == 64 && dynamic_clone_sha_len == 64 && dynamic_hmac256_len == 64 && dynamic_hmac512_len == 128 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write known crypto text source");
 }
@@ -9342,7 +9345,7 @@ fn write_struct_field_project(project: &Path) {
     .expect("write struct lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\n",
+        "struct Pipeline {\nname: string\nsteps: int\nready: bool\n}\n\nstruct Step {\nvalue: int\nready: bool\n}\n\nfn label(pipeline: Pipeline): string {\nreturn pipeline.name\n}\n\nfn make_step(value: int, ready: bool): Step {\nreturn Step { value: value, ready: ready }\n}\n\nfn choose_step(flag: bool): Step {\nif flag {\nreturn Step { value: 7, ready: true }\n} else {\nlet fallback: int = 8\nreturn Step { ready: false, value: fallback }\n}\n}\n\nfn forward_step(step: Step): Step {\nreturn step\n}\n\nlet pipeline: Pipeline = Pipeline { name: \"stage1 structs\", steps: 3, ready: true }\nlet returned: Step = make_step(5, true)\nlet branch: Step = choose_step(false)\nlet branch_to_forward: Step = choose_step(false)\nlet forwarded: Step = forward_step(branch_to_forward)\nprint pipeline.steps\nprint pipeline.ready\nprint label(pipeline)\nprint returned.value\nprint returned.ready\nprint branch.value\nprint branch.ready\nprint forwarded.value\nprint forwarded.ready\n",
     )
     .expect("write struct source");
 }
@@ -9380,7 +9383,7 @@ fn write_borrowed_slice_project(project: &Path) {
     .expect("write borrowed-slice lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn tail(values: &[int]): &[int] {\nreturn values[1:]\n}\n\nlet values: [int] = [2, 4, 6, 8]\nlet window: &[int] = values[1:]\nprint len(window)\nprint first(window)\nprint last(window)\nprint window[1]\nlet nested: &[int] = tail(values[:])\nprint len(nested)\n",
+        "fn tail(values: &[int]): &[int] {\nreturn values[1:]\n}\n\nlet values: [int] = [2, 4, 6, 8]\nlet window: &[int] = values[1:]\nprint len(window)\nprint first(window)\nprint last(window)\nprint window[1]\nlet nested: &[int] = tail(values[:])\nprint len(nested)\nprint first(nested)\nprint last(nested)\nprint nested[1]\n",
     )
     .expect("write borrowed-slice source");
 }
@@ -9818,7 +9821,27 @@ let dynamic_key_trimmed_value: string = string_trim(dynamic_key_trim_value)
 let dynamic_key_trim_start_value: string = string_trim_start(dynamic_key_trim_value)
 let dynamic_key_trimmed_has_prefix: bool = string_starts_with(dynamic_key_trimmed_value, "dep")
 let dynamic_key_trim_start_has_prefix: bool = string_starts_with(dynamic_key_trim_start_value, "dep")
-if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 && dynamic_key_is_deploy && dynamic_key_not_build && dynamic_key_has_prefix && dynamic_key_trim_len == 6 && dynamic_key_trim_start_len == 7 && dynamic_key_trimmed_has_prefix && dynamic_key_trim_start_has_prefix {
+let dynamic_lookup_contains_scores: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_lookup_contains_names: [string] = keys<string, int>(dynamic_lookup_contains_scores)
+let dynamic_lookup_contains_key: string = dynamic_lookup_contains_names[dynamic_key_index]
+let dynamic_lookup_contains_map: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_lookup_contains: bool = contains<string, int>(dynamic_lookup_contains_map, dynamic_lookup_contains_key)
+let dynamic_lookup_value_scores: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_lookup_value_names: [string] = keys<string, int>(dynamic_lookup_value_scores)
+let dynamic_lookup_value_key: string = dynamic_lookup_value_names[dynamic_key_index]
+let dynamic_lookup_value_map: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_lookup_value: int = get_or_default<string, int>(dynamic_lookup_value_map, dynamic_lookup_value_key, 13)
+let dynamic_missing_contains_scores: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_missing_contains_names: [string] = keys<string, int>(dynamic_missing_contains_scores)
+let dynamic_missing_contains_key: string = dynamic_missing_contains_names[dynamic_key_index]
+let dynamic_missing_contains_map: {string: int} = {"build": 7}
+let dynamic_missing_contains: bool = contains<string, int>(dynamic_missing_contains_map, dynamic_missing_contains_key) == false
+let dynamic_missing_value_scores: {string: int} = {"build": 7, "deploy": 9}
+let dynamic_missing_value_names: [string] = keys<string, int>(dynamic_missing_value_scores)
+let dynamic_missing_value_key: string = dynamic_missing_value_names[dynamic_key_index]
+let dynamic_missing_value_map: {string: int} = {"build": 7}
+let dynamic_missing_value: int = get_or_default<string, int>(dynamic_missing_value_map, dynamic_missing_value_key, 13)
+if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 && dynamic_key_is_deploy && dynamic_key_not_build && dynamic_key_has_prefix && dynamic_key_trim_len == 6 && dynamic_key_trim_start_len == 7 && dynamic_key_trimmed_has_prefix && dynamic_key_trim_start_has_prefix && dynamic_lookup_contains && dynamic_lookup_value == 9 && dynamic_missing_contains && dynamic_missing_value == 13 {
 return 48
 } else {
 return 1
@@ -10795,7 +10818,7 @@ fn write_sync_mutex_main_exit_project(project: &Path) {
     .expect("write sync mutex main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn main(): int {\nlet counter: Mutex<int> = mutex<int>(1)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 48)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nreturn into_inner<int>(final_guard)\n}\n",
+        "import \"std/sync.ax\"\n\nfn helper_mutex_score(): int {\nlet counter: Mutex<int> = mutex<int>(2)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 12)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nreturn into_inner<int>(final_guard)\n}\n\nfn main(): int {\nlet counter: Mutex<int> = mutex<int>(1)\nlet guard: MutexGuard<int> = lock<int>(counter)\nlet updated: Mutex<int> = replace<int>(guard, 48)\nlet final_guard: MutexGuard<int> = lock<int>(updated)\nlet direct: int = into_inner<int>(final_guard)\nlet helper: int = helper_mutex_score()\nif direct == 48 && helper == 12 {\nreturn direct\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write sync mutex main source");
 }
@@ -10814,7 +10837,7 @@ fn write_sync_once_main_exit_project(project: &Path) {
     .expect("write sync once main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn main(): int {\nlet present_cell: Once<int> = once_with<int>(21)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<int> = once_with<int>(0)\nlet empty_cell: Once<int> = once<int>(None)\nlet bool_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 19 }\nlet ready: bool = once_is_set<int>(ready_cell)\nlet empty: bool = once_is_set<int>(empty_cell)\nlet bool_ready: Option<bool> = once_take<bool>(bool_cell)\nlet bool_present: bool = match bool_ready { Some(value) => value, None => false }\nif ready && (empty == false) && bool_present {\nreturn present_score + missing_score\n} else {\nreturn 2\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn helper_once_score(): int {\nlet present_cell: Once<int> = once_with<int>(8)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 1 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 4 }\nlet ready: bool = once_is_set<bool>(ready_cell)\nif ready {\nreturn present_score + missing_score\n} else {\nreturn 1\n}\n}\n\nfn main(): int {\nlet present_cell: Once<int> = once_with<int>(21)\nlet missing_cell: Once<int> = once<int>(None)\nlet ready_cell: Once<int> = once_with<int>(0)\nlet empty_cell: Once<int> = once<int>(None)\nlet bool_cell: Once<bool> = once_with<bool>(true)\nlet present: Option<int> = once_take<int>(present_cell)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = once_take<int>(missing_cell)\nlet missing_score: int = match missing { Some(value) => value, None => 19 }\nlet ready: bool = once_is_set<int>(ready_cell)\nlet empty: bool = once_is_set<int>(empty_cell)\nlet bool_ready: Option<bool> = once_take<bool>(bool_cell)\nlet bool_present: bool = match bool_ready { Some(value) => value, None => false }\nlet helper: int = helper_once_score()\nif ready && (empty == false) && bool_present && helper == 12 {\nreturn present_score + missing_score\n} else {\nreturn 2\n}\n}\n",
     )
     .expect("write sync once main source");
 }
@@ -10833,7 +10856,7 @@ fn write_sync_channel_main_exit_project(project: &Path) {
     .expect("write sync channel main lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/sync.ax\"\n\nfn main(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 31)\nlet empty: Channel<int> = channel<int>(None)\nlet bool_channel: Channel<bool> = channel<bool>(None)\nlet bool_sent: Channel<bool> = send<bool>(bool_channel, true)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 17 }\nlet ready: Option<bool> = try_recv<bool>(bool_sent)\nlet ready_present: bool = match ready { Some(value) => value, None => false }\nif ready_present {\nreturn present_score + missing_score + 2\n} else {\nreturn 5\n}\n}\n",
+        "import \"std/sync.ax\"\n\nfn helper_channel_score(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 7)\nlet empty: Channel<int> = channel<int>(None)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 1 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 5 }\nreturn present_score + missing_score\n}\n\nfn main(): int {\nlet channel: Channel<int> = channel<int>(None)\nlet sent: Channel<int> = send<int>(channel, 31)\nlet empty: Channel<int> = channel<int>(None)\nlet bool_channel: Channel<bool> = channel<bool>(None)\nlet bool_sent: Channel<bool> = send<bool>(bool_channel, true)\nlet present: Option<int> = try_recv<int>(sent)\nlet present_score: int = match present { Some(value) => value, None => 4 }\nlet missing: Option<int> = try_recv<int>(empty)\nlet missing_score: int = match missing { Some(value) => value, None => 17 }\nlet ready: Option<bool> = try_recv<bool>(bool_sent)\nlet ready_present: bool = match ready { Some(value) => value, None => false }\nlet helper: int = helper_channel_score()\nif ready_present && helper == 12 {\nreturn present_score + missing_score + 2\n} else {\nreturn 5\n}\n}\n",
     )
     .expect("write sync channel main source");
 }
@@ -12794,16 +12817,27 @@ source = "path"
         project.join("src/main.ax"),
         r#"import "std/fs.ax"
 
+static READ_PATH: string = "src/fixture.txt"
+static MISSING_PREFIX: string = "src/"
+
 fn main(): int {
-let direct_len: int = match fs_read("src/fixture.txt") { Some(value) => len(value), None => 1 }
-let wrapper_len: int = match read_file("src/fixture.txt") { Some(value) => len(value), None => 1 }
-let missing_len: int = match read_file("src/missing.txt") { Some(value) => len(value), None => 28 }
-let stored_direct: Option<string> = fs_read("src/fixture.txt")
-let stored_wrapper: Option<string> = read_file("src/fixture.txt")
-let stored_missing: Option<string> = read_file("src/missing.txt")
-let stored_statement: Option<string> = read_file("src/fixture.txt")
+let wrapper_path: string = "src/fixture.txt"
+let stored_wrapper_path: string = "src/fixture.txt"
+let fixture_name: string = "fixture.txt"
+let missing_name: string = "missing.txt"
+let stored_missing_name: string = "missing.txt"
+let direct_len: int = match fs_read(READ_PATH) { Some(value) => len(value), None => 1 }
+let wrapper_len: int = match read_file(wrapper_path) { Some(value) => len(value), None => 1 }
+let concat_len: int = match read_file(MISSING_PREFIX + fixture_name) { Some(value) => len(value), None => 1 }
+let missing_len: int = match read_file(MISSING_PREFIX + missing_name) { Some(value) => len(value), None => 28 }
+let stored_direct: Option<string> = fs_read(READ_PATH)
+let stored_wrapper: Option<string> = read_file(stored_wrapper_path)
+let stored_concat: Option<string> = read_file(MISSING_PREFIX + fixture_name)
+let stored_missing: Option<string> = read_file(MISSING_PREFIX + stored_missing_name)
+let stored_statement: Option<string> = read_file(READ_PATH)
 let stored_direct_len: int = match stored_direct { Some(value) => len(value), None => 1 }
 let stored_wrapper_len: int = match stored_wrapper { Some(value) => len(value), None => 1 }
+let stored_concat_len: int = match stored_concat { Some(value) => len(value), None => 1 }
 let stored_missing_len: int = match stored_missing { Some(value) => len(value), None => 28 }
 let statement_len: int = 0
 match stored_statement {
@@ -12814,7 +12848,7 @@ None {
 statement_len = 1
 }
 }
-if direct_len == 13 && wrapper_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_missing_len == 28 && statement_len == 13 {
+if direct_len == 13 && wrapper_len == 13 && concat_len == 13 && missing_len == 28 && stored_direct_len == 13 && stored_wrapper_len == 13 && stored_concat_len == 13 && stored_missing_len == 28 && statement_len == 13 {
 return statement_len + 35
 } else {
 return 1
