@@ -1,14 +1,15 @@
 use crate::diagnostics::Diagnostic;
+use crate::manifest::CapabilityConfig;
 use crate::mir::{
     ArithmeticOp, CompareOp, EnumDef, EnumVariantDef, Expr, Function, LiteralValue, LogicOp,
     MapEntry, MatchArm, MatchExprArm, Program, StaticDef, Stmt, StructDef, Type,
 };
 use crate::syntax::NumericType;
 use axiomc_backend_cranelift::{
-    I64BinaryOp as CraneliftI64BinaryOp, I64Cast as CraneliftI64Cast,
-    I64Compare as CraneliftI64Compare, I64CompareOp as CraneliftI64CompareOp,
-    I64Condition as CraneliftI64Condition, I64ExitBody, I64ExitProgram,
-    I64Expr as CraneliftI64Expr, I64Function as CraneliftI64Function,
+    I64AuditSuccess as CraneliftI64AuditSuccess, I64BinaryOp as CraneliftI64BinaryOp,
+    I64Cast as CraneliftI64Cast, I64Compare as CraneliftI64Compare,
+    I64CompareOp as CraneliftI64CompareOp, I64Condition as CraneliftI64Condition, I64ExitBody,
+    I64ExitProgram, I64Expr as CraneliftI64Expr, I64Function as CraneliftI64Function,
     I64ReturnBlock as CraneliftI64ReturnBlock, I64Stmt as CraneliftI64Stmt,
     I64ValueBody as CraneliftI64ValueBody, I64ValueReturnBlock as CraneliftI64ValueReturnBlock,
     OutputLine, OutputStream,
@@ -16,7 +17,7 @@ use axiomc_backend_cranelift::{
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -24,6 +25,7 @@ use std::sync::{Mutex, OnceLock};
 const SPIKE_FS_ROOT_BINDING: &str = "$axiom_fs_root";
 const SPIKE_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;
 const SPIKE_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;
+const SPIKE_MAX_CLOCK_SLEEP_MS: i64 = 1_000;
 
 #[derive(Clone, Default)]
 struct I64StaticBindings {
@@ -41,13 +43,20 @@ struct I64StaticBindings {
     map_key_array_string_indexes: HashMap<String, I64MapKeyArrayStringIndex>,
     process_status_wrappers: HashSet<String>,
     env_get_wrappers: HashSet<String>,
+    env_allowed_names: HashSet<String>,
+    env_unrestricted: bool,
     time_wrappers: HashSet<String>,
+    time_now_wrappers: HashSet<String>,
+    time_now_ms_wrappers: HashSet<String>,
+    time_elapsed_ms_wrappers: HashSet<String>,
     time_duration_ms_wrappers: HashSet<String>,
     time_sleep_wrappers: HashSet<String>,
     fs_read_wrappers: HashSet<String>,
     fs_write_wrappers: HashMap<String, String>,
+    has_fs_write_calls: bool,
     fs_shim_wrappers: HashSet<String>,
     net_shim_wrappers: HashSet<String>,
+    net_resolve_wrappers: HashSet<String>,
     http_shim_wrappers: HashSet<String>,
     http_get_wrappers: HashSet<String>,
     http_serve_once_wrappers: HashSet<String>,
@@ -76,6 +85,7 @@ struct I64StaticBindings {
     json_stringify_int_wrappers: HashSet<String>,
     json_stringify_bool_wrappers: HashSet<String>,
     json_stringify_string_wrappers: HashSet<String>,
+    io_eprintln_wrappers: HashSet<String>,
     log_wrappers: HashSet<String>,
     log_field_string_wrappers: HashSet<String>,
     log_field_int_wrappers: HashSet<String>,
@@ -83,6 +93,8 @@ struct I64StaticBindings {
     log_fields2_wrappers: HashSet<String>,
     log_fields3_wrappers: HashSet<String>,
     log_event_wrappers: HashSet<String>,
+    log_info_attrs_wrappers: HashSet<String>,
+    log_level_wrappers: HashMap<String, String>,
     string_builder_wrappers: HashSet<String>,
     string_builder_new_wrappers: HashSet<String>,
     string_builder_from_string_wrappers: HashSet<String>,
@@ -107,6 +119,7 @@ struct I64StaticBindings {
     sync_channel_wrappers: HashSet<String>,
     sync_send_wrappers: HashSet<String>,
     sync_try_recv_wrappers: HashSet<String>,
+    package_root: Option<PathBuf>,
     fs_root: Option<PathBuf>,
     structs: HashMap<String, StructDef>,
     enums: HashMap<String, EnumDef>,
@@ -267,6 +280,7 @@ static SPIKE_TCP_STREAMS: OnceLock<Mutex<HashMap<i64, SpikeTcpStream>>> = OnceLo
 
 pub fn compile_cranelift_hello_spike(
     program: &Program,
+    capabilities: &CapabilityConfig,
     package_root: &Path,
     fs_root: &Path,
     object_path: &Path,
@@ -279,7 +293,7 @@ pub fn compile_cranelift_hello_spike(
             "the cranelift backend spike currently supports only the host target",
         ));
     }
-    if let Some(program) = lower_i64_exit_program(program, fs_root) {
+    if let Some(program) = lower_i64_exit_program(program, capabilities, package_root, fs_root) {
         return axiomc_backend_cranelift::compile_i64_exit_program(
             program,
             object_path,
@@ -307,7 +321,12 @@ pub fn compile_cranelift_hello_spike(
     )
 }
 
-fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitProgram> {
+fn lower_i64_exit_program(
+    program: &Program,
+    capabilities: &CapabilityConfig,
+    package_root: &Path,
+    fs_root: &Path,
+) -> Option<I64ExitProgram> {
     if !program.stmts.is_empty() {
         return None;
     }
@@ -325,7 +344,10 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .map(|struct_def| (struct_def.name.as_str(), struct_def))
         .collect::<HashMap<_, _>>();
     let mut static_bindings = lower_i64_static_bindings(&program.statics)?;
+    static_bindings.package_root = Some(package_root.to_path_buf());
     static_bindings.fs_root = Some(fs_root.to_path_buf());
+    static_bindings.env_allowed_names = capabilities.env_vars.iter().cloned().collect();
+    static_bindings.env_unrestricted = capabilities.env_unrestricted;
     static_bindings.process_status_wrappers = program
         .functions
         .iter()
@@ -345,6 +367,24 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .iter()
         .filter(|function| function.path == "<stdlib>/time.ax")
         .map(|function| function.name.clone())
+        .collect();
+    static_bindings.time_now_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "now"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.time_now_ms_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "now_ms"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.time_elapsed_ms_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "elapsed_ms"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
     static_bindings.time_duration_ms_wrappers = program
         .functions
@@ -383,11 +423,21 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_fs_shim_wrapper(function))
         .map(|function| function.name.clone())
         .collect();
+    static_bindings.has_fs_write_calls = program
+        .functions
+        .iter()
+        .any(|function| i64_stmts_have_fs_write_call(&function.body, &static_bindings));
     static_bindings.net_shim_wrappers = program
         .functions
         .iter()
         .filter(|function| is_i64_std_net_shim_wrapper(function))
         .map(|function| function.name.clone())
+        .collect();
+    static_bindings.net_resolve_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_net_wrapper(function, "resolve"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
     static_bindings.http_shim_wrappers = program
         .functions
@@ -559,6 +609,12 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_json_wrapper(function, "stringify_string"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
+    static_bindings.io_eprintln_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_io_wrapper(function, "eprintln"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
     static_bindings.log_wrappers = program
         .functions
         .iter()
@@ -601,6 +657,31 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         .filter(|function| is_i64_std_log_wrapper(function, "event"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
+    static_bindings.log_info_attrs_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_log_wrapper(function, "info_attrs"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    for (source_name, level) in [
+        ("debug", "debug"),
+        ("info", "info"),
+        ("warn", "warn"),
+        ("error", "error"),
+    ] {
+        for function in program
+            .functions
+            .iter()
+            .filter(|function| is_i64_std_log_wrapper(function, source_name))
+        {
+            static_bindings
+                .log_level_wrappers
+                .insert(function.name.clone(), level.to_string());
+            static_bindings
+                .log_level_wrappers
+                .insert(function.source_name.clone(), level.to_string());
+        }
+    }
     static_bindings.string_builder_wrappers = program
         .functions
         .iter()
@@ -873,6 +954,7 @@ fn lower_i64_exit_program(program: &Program, fs_root: &Path) -> Option<I64ExitPr
         &static_bindings,
         &struct_defs,
         true,
+        true,
     )?;
     Some(I64ExitProgram {
         functions,
@@ -967,6 +1049,7 @@ fn lower_i64_function(
         helper_signatures,
         static_bindings,
         struct_defs,
+        true,
         false,
     )?;
     Some(CraneliftI64Function {
@@ -1198,6 +1281,18 @@ fn lower_i64_aggregate_return_body(
             Stmt::Let { name, ty, expr, .. }
                 if is_i64_compatible_type(ty) && !seen_runtime_stmt =>
             {
+                if let Some(stmts) = lower_i64_eprintln_let_stmts(
+                    stmt,
+                    &mut locals,
+                    &mut local_indexes,
+                    &local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(stmts);
+                    seen_runtime_stmt = true;
+                    continue;
+                }
                 let local_expr = lower_i64_expr(
                     expr,
                     &local_indexes,
@@ -1219,7 +1314,7 @@ fn lower_i64_aggregate_return_body(
                     expr,
                     &mut locals,
                     &mut local_indexes,
-                    &local_conditions,
+                    &mut local_conditions,
                     helper_signatures,
                     &mut *static_bindings,
                 )?;
@@ -1422,7 +1517,37 @@ fn lower_i64_aggregate_return_body(
                 || is_i64_known_string_option_call_let_type(inner.as_ref()))
                 && !seen_runtime_stmt =>
             {
-                if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
+                if let Some(assigns) = lower_i64_env_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_fs_read_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_net_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -1636,9 +1761,14 @@ fn lower_i64_aggregate_return_body(
                     &mut local_conditions,
                     helper_signatures,
                     static_bindings,
+                    true,
                 )?);
             }
-            Stmt::Assign { .. } | Stmt::If { .. } | Stmt::While { .. } | Stmt::Match { .. } => {
+            Stmt::Assign { .. }
+            | Stmt::Print { .. }
+            | Stmt::If { .. }
+            | Stmt::While { .. }
+            | Stmt::Match { .. } => {
                 seen_runtime_stmt = true;
                 lowered_stmts.extend(lower_i64_runtime_stmt_stmts(
                     stmt,
@@ -1647,6 +1777,7 @@ fn lower_i64_aggregate_return_body(
                     local_conditions.clone(),
                     helper_signatures,
                     static_bindings,
+                    true,
                 )?);
             }
             _ => return None,
@@ -1685,6 +1816,7 @@ fn lower_i64_aggregate_return_body(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                true,
             )?,
             else_block: lower_i64_aggregate_return_block(
                 else_block,
@@ -1694,6 +1826,7 @@ fn lower_i64_aggregate_return_body(
                 local_conditions,
                 helper_signatures,
                 static_bindings,
+                true,
             )?,
         },
         _ => return None,
@@ -1709,6 +1842,7 @@ fn lower_i64_aggregate_return_block(
     mut local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<CraneliftI64ValueReturnBlock> {
     let (return_stmt, body_stmts) = stmts.split_last()?;
     let Stmt::Return { expr, .. } = return_stmt else {
@@ -1724,6 +1858,7 @@ fn lower_i64_aggregate_return_block(
                 &mut local_conditions,
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?);
         } else {
             stmts.extend(lower_i64_runtime_stmt_stmts(
@@ -1733,6 +1868,7 @@ fn lower_i64_aggregate_return_block(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?);
         }
     }
@@ -2253,6 +2389,7 @@ fn lower_i64_body(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     struct_defs: &I64StructDefs<'_>,
+    allow_stdio_effects: bool,
     allow_terminal_panic: bool,
 ) -> Option<(Vec<CraneliftI64Expr>, Vec<CraneliftI64Stmt>, I64ExitBody)> {
     let (return_stmt, body_stmts) = stmts.split_last()?;
@@ -2391,6 +2528,20 @@ fn lower_i64_body(
             Stmt::Let { name, ty, expr, .. }
                 if is_i64_compatible_type(ty) && !seen_runtime_stmt =>
             {
+                if allow_stdio_effects {
+                    if let Some(stmts) = lower_i64_eprintln_let_stmts(
+                        stmt,
+                        &mut locals,
+                        &mut local_indexes,
+                        &local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    ) {
+                        lowered_stmts.extend(stmts);
+                        seen_runtime_stmt = true;
+                        continue;
+                    }
+                }
                 let local_expr = lower_i64_expr(
                     expr,
                     &local_indexes,
@@ -2412,7 +2563,7 @@ fn lower_i64_body(
                     expr,
                     &mut locals,
                     &mut local_indexes,
-                    &local_conditions,
+                    &mut local_conditions,
                     helper_signatures,
                     &mut *static_bindings,
                 )?;
@@ -2615,7 +2766,37 @@ fn lower_i64_body(
                 || is_i64_known_string_option_call_let_type(inner.as_ref()))
                 && !seen_runtime_stmt =>
             {
-                if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
+                if let Some(assigns) = lower_i64_env_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_fs_read_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_net_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -2785,9 +2966,14 @@ fn lower_i64_body(
                     &mut local_conditions,
                     helper_signatures,
                     static_bindings,
+                    allow_stdio_effects,
                 )?);
             }
-            Stmt::Assign { .. } | Stmt::If { .. } | Stmt::While { .. } | Stmt::Match { .. } => {
+            Stmt::Assign { .. }
+            | Stmt::Print { .. }
+            | Stmt::If { .. }
+            | Stmt::While { .. }
+            | Stmt::Match { .. } => {
                 seen_runtime_stmt = true;
                 lowered_stmts.extend(lower_i64_runtime_stmt_stmts(
                     stmt,
@@ -2796,6 +2982,7 @@ fn lower_i64_body(
                     local_conditions.clone(),
                     helper_signatures,
                     static_bindings,
+                    allow_stdio_effects,
                 )?);
             }
             _ => return None,
@@ -2829,6 +3016,7 @@ fn lower_i64_body(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?;
             let else_block = lower_i64_return_block(
                 else_block,
@@ -2837,6 +3025,7 @@ fn lower_i64_body(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?;
             I64ExitBody::IfBlockReturn {
                 cond,
@@ -2863,6 +3052,7 @@ fn lower_i64_runtime_stmt_stmts(
     local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<Vec<CraneliftI64Stmt>> {
     if let Some(assigns) = lower_i64_option_assign_stmts(
         stmt,
@@ -2909,6 +3099,17 @@ fn lower_i64_runtime_stmt_stmts(
     ) {
         return Some(assigns);
     }
+    if allow_stdio_effects {
+        if let Some(stmts) = lower_i64_print_stmt_stmts(
+            stmt,
+            &local_indexes,
+            &local_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
+            return Some(stmts);
+        }
+    }
     Some(vec![lower_i64_runtime_stmt(
         stmt,
         locals,
@@ -2916,6 +3117,7 @@ fn lower_i64_runtime_stmt_stmts(
         local_conditions,
         helper_signatures,
         static_bindings,
+        allow_stdio_effects,
     )?])
 }
 
@@ -2926,16 +3128,28 @@ fn lower_i64_runtime_stmt(
     local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<CraneliftI64Stmt> {
     match stmt {
         Stmt::Match { .. } => {
-            if let Some(stmt) = lower_i64_option_match_stmt(
+            if let Some(stmt) = lower_i64_known_string_option_match_stmt(
                 stmt,
                 locals,
                 local_indexes.clone(),
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
+            ) {
+                Some(stmt)
+            } else if let Some(stmt) = lower_i64_option_match_stmt(
+                stmt,
+                locals,
+                local_indexes.clone(),
+                local_conditions.clone(),
+                helper_signatures,
+                static_bindings,
+                allow_stdio_effects,
             ) {
                 Some(stmt)
             } else if let Some(stmt) = lower_i64_result_match_stmt(
@@ -2945,6 +3159,7 @@ fn lower_i64_runtime_stmt(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             ) {
                 Some(stmt)
             } else {
@@ -2955,6 +3170,7 @@ fn lower_i64_runtime_stmt(
                     local_conditions,
                     helper_signatures,
                     static_bindings,
+                    allow_stdio_effects,
                 )
             }
         }
@@ -2985,6 +3201,7 @@ fn lower_i64_runtime_stmt(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?,
             else_body: lower_i64_runtime_stmts(
                 else_block.as_deref().unwrap_or(&[]),
@@ -2993,6 +3210,7 @@ fn lower_i64_runtime_stmt(
                 local_conditions,
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?,
         }),
         Stmt::While { cond, body, .. } => Some(CraneliftI64Stmt::While {
@@ -3010,9 +3228,63 @@ fn lower_i64_runtime_stmt(
                 local_conditions,
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?,
         }),
         _ => None,
+    }
+}
+
+fn lower_i64_known_string_option_match_stmt(
+    stmt: &Stmt,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: HashMap<String, usize>,
+    local_conditions: HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
+) -> Option<CraneliftI64Stmt> {
+    let Stmt::Match { expr, arms, .. } = stmt else {
+        return None;
+    };
+    let value = i64_string_option_text(expr, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_stmt_match_arms(arms)?;
+    match value {
+        Some(value) => {
+            let mut arm_static_bindings = static_bindings.clone();
+            if !some_arm.ignore_payloads
+                && let Some(binding) = some_arm.bindings.first()
+                && binding != "_"
+            {
+                arm_static_bindings.strings.insert(binding.clone(), value);
+            }
+            Some(CraneliftI64Stmt::If {
+                cond: CraneliftI64Condition::Literal(true),
+                then_body: lower_i64_runtime_stmts(
+                    &some_arm.body,
+                    locals,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    &arm_static_bindings,
+                    allow_stdio_effects,
+                )?,
+                else_body: Vec::new(),
+            })
+        }
+        None => Some(CraneliftI64Stmt::If {
+            cond: CraneliftI64Condition::Literal(false),
+            then_body: Vec::new(),
+            else_body: lower_i64_runtime_stmts(
+                &none_arm.body,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+                allow_stdio_effects,
+            )?,
+        }),
     }
 }
 
@@ -3023,6 +3295,7 @@ fn lower_i64_option_match_stmt(
     local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<CraneliftI64Stmt> {
     let Stmt::Match { expr, arms, .. } = stmt else {
         return None;
@@ -3044,6 +3317,7 @@ fn lower_i64_option_match_stmt(
             some_conditions,
             helper_signatures,
             static_bindings,
+            allow_stdio_effects,
         )?,
         else_body: lower_i64_runtime_stmts(
             &none_arm.body,
@@ -3052,6 +3326,7 @@ fn lower_i64_option_match_stmt(
             local_conditions,
             helper_signatures,
             static_bindings,
+            allow_stdio_effects,
         )?,
     })
 }
@@ -3063,6 +3338,7 @@ fn lower_i64_result_match_stmt(
     local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<CraneliftI64Stmt> {
     let Stmt::Match { expr, arms, .. } = stmt else {
         return None;
@@ -3084,6 +3360,7 @@ fn lower_i64_result_match_stmt(
             ok_conditions,
             helper_signatures,
             static_bindings,
+            allow_stdio_effects,
         )?,
         else_body: lower_i64_runtime_stmts(
             &err_arm.body,
@@ -3092,6 +3369,7 @@ fn lower_i64_result_match_stmt(
             err_conditions,
             helper_signatures,
             static_bindings,
+            allow_stdio_effects,
         )?,
     })
 }
@@ -3103,6 +3381,7 @@ fn lower_i64_enum_match_stmt(
     local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<CraneliftI64Stmt> {
     let Stmt::Match { expr, arms, .. } = stmt else {
         return None;
@@ -3158,6 +3437,7 @@ fn lower_i64_enum_match_stmt(
             arm_conditions,
             helper_signatures,
             static_bindings,
+            allow_stdio_effects,
         )?;
         lowered = Some(match lowered {
             None => body,
@@ -3183,10 +3463,16 @@ fn lower_i64_runtime_stmts(
     mut local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<Vec<CraneliftI64Stmt>> {
     let mut lowered = Vec::new();
+    let mut scoped_static_bindings = static_bindings.clone();
+    let static_bindings = &mut scoped_static_bindings;
     for stmt in stmts {
         if matches!(stmt, Stmt::Let { .. }) {
+            if record_i64_known_string_let(stmt, static_bindings).unwrap_or(false) {
+                continue;
+            }
             lowered.extend(lower_i64_runtime_let_stmts(
                 stmt,
                 locals,
@@ -3194,6 +3480,7 @@ fn lower_i64_runtime_stmts(
                 &mut local_conditions,
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?);
         } else {
             lowered.extend(lower_i64_runtime_stmt_stmts(
@@ -3203,6 +3490,7 @@ fn lower_i64_runtime_stmts(
                 local_conditions.clone(),
                 helper_signatures,
                 static_bindings,
+                allow_stdio_effects,
             )?);
         }
     }
@@ -3262,6 +3550,7 @@ fn lower_i64_runtime_let_stmts(
     local_conditions: &mut HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<Vec<CraneliftI64Stmt>> {
     if let Stmt::Let {
         name,
@@ -3290,6 +3579,18 @@ fn lower_i64_runtime_let_stmts(
     ) {
         return Some(assigns);
     }
+    if allow_stdio_effects {
+        if let Some(assigns) = lower_i64_eprintln_let_stmts(
+            stmt,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
+            return Some(assigns);
+        }
+    }
     if let Some(assigns) = lower_i64_runtime_projection_let_stmts(
         stmt,
         locals,
@@ -3298,6 +3599,57 @@ fn lower_i64_runtime_let_stmts(
         helper_signatures,
         static_bindings,
     ) {
+        return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr,
+        ..
+    } = stmt
+        && let Some(assigns) = lower_i64_env_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        )
+    {
+        return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr,
+        ..
+    } = stmt
+        && let Some(assigns) = lower_i64_fs_read_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        )
+    {
+        return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr,
+        ..
+    } = stmt
+        && let Some(assigns) = lower_i64_net_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        )
+    {
         return Some(assigns);
     }
     Some(vec![lower_i64_runtime_let(
@@ -3314,7 +3666,7 @@ fn lower_i64_runtime_string_len_let_stmts(
     stmt: &Stmt,
     locals: &mut Vec<CraneliftI64Expr>,
     local_indexes: &mut HashMap<String, usize>,
-    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<Vec<CraneliftI64Stmt>> {
@@ -3359,7 +3711,1020 @@ fn lower_i64_runtime_string_len_let_stmts(
             },
         ));
     }
+    assigns.extend(lower_i64_runtime_printable_string_alias_stmts(
+        name,
+        expr,
+        locals,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
     Some(assigns)
+}
+
+fn lower_i64_runtime_printable_string_alias_stmts(
+    name: &str,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Some((key, value, is_bool)) = lower_i64_printable_string_alias_parts(
+        name,
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) else {
+        return Some(Vec::new());
+    };
+    let local = local_indexes.len();
+    local_indexes.insert(key.clone(), local);
+    locals.push(CraneliftI64Expr::Literal(0));
+    if is_bool {
+        local_conditions.insert(key, i64_local_truthy_condition(local));
+    }
+    Some(vec![CraneliftI64Stmt::Assign(
+        axiomc_backend_cranelift::I64Assign { local, value },
+    )])
+}
+
+fn lower_i64_eprintln_let_stmts(
+    stmt: &Stmt,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Stmt::Let {
+        name,
+        ty,
+        expr: Expr::Call {
+            name: call_name,
+            args,
+            ..
+        },
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    if !is_i64_compatible_type(ty) || !is_i64_io_eprintln_name(call_name, static_bindings) {
+        if is_i64_log_info_attrs_name(call_name, static_bindings) {
+            let [message, attributes] = args.as_slice() else {
+                return None;
+            };
+            let (mut stmts, written) = lower_i64_log_event_output_stmts(
+                "info",
+                message,
+                Some(attributes),
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let local = local_indexes.len();
+            local_indexes.insert(name.clone(), local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            stmts.push(CraneliftI64Stmt::Assign(
+                axiomc_backend_cranelift::I64Assign {
+                    local,
+                    value: written,
+                },
+            ));
+            return Some(stmts);
+        }
+        if let Some(level) = i64_log_level_wrapper(call_name, static_bindings) {
+            let [message] = args.as_slice() else {
+                return None;
+            };
+            let (mut stmts, written) = lower_i64_log_event_output_stmts(
+                level,
+                message,
+                None,
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let local = local_indexes.len();
+            local_indexes.insert(name.clone(), local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            stmts.push(CraneliftI64Stmt::Assign(
+                axiomc_backend_cranelift::I64Assign {
+                    local,
+                    value: written,
+                },
+            ));
+            return Some(stmts);
+        }
+        return None;
+    }
+    let [message] = args.as_slice() else {
+        return None;
+    };
+    let (mut stmts, written) = lower_i64_eprintln_message_stmts(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let local = local_indexes.len();
+    local_indexes.insert(name.clone(), local);
+    locals.push(CraneliftI64Expr::Literal(0));
+    stmts.push(CraneliftI64Stmt::Assign(
+        axiomc_backend_cranelift::I64Assign {
+            local,
+            value: written,
+        },
+    ));
+    Some(stmts)
+}
+
+fn lower_i64_eprintln_message_stmts(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<(Vec<CraneliftI64Stmt>, CraneliftI64Expr)> {
+    if let Some(text) = i64_string_text(message, static_bindings) {
+        let written = i64::try_from(text.len()).ok()?.checked_add(1)?;
+        return Some((
+            vec![CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text,
+            }],
+            CraneliftI64Expr::Literal(written),
+        ));
+    }
+    if let Some((stmts, written)) = lower_i64_dynamic_known_string_line_stmts_with_written(
+        message,
+        OutputStream::Stderr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some((stmts, written));
+    }
+    if let Expr::VarRef {
+        name,
+        ty: Type::String | Type::Str,
+    } = message
+    {
+        if let Some(local) = local_indexes.get(i64_printable_i64_string_key(name).as_str()) {
+            let value = CraneliftI64Expr::Local(*local);
+            return Some((
+                vec![CraneliftI64Stmt::WriteI64Line {
+                    stream: OutputStream::Stderr,
+                    value: value.clone(),
+                }],
+                CraneliftI64Expr::Binary {
+                    op: CraneliftI64BinaryOp::Add,
+                    lhs: Box::new(i64_decimal_string_len_expr(value)),
+                    rhs: Box::new(CraneliftI64Expr::Literal(1)),
+                },
+            ));
+        }
+        if let Some(cond) = local_conditions
+            .get(i64_printable_bool_string_key(name).as_str())
+            .cloned()
+        {
+            return Some(lower_i64_eprintln_bool_message_stmts(cond));
+        }
+    }
+    if let Expr::Call { name, args, .. } = message {
+        if is_i64_log_event_name(name, static_bindings) {
+            let [level, message, attributes] = args.as_slice() else {
+                return None;
+            };
+            let level = i64_string_text(level, static_bindings)?;
+            return lower_i64_log_event_output_stmts(
+                &level,
+                message,
+                Some(attributes),
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+        if is_i64_json_stringify_int_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            let value = lower_i64_expr(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            return Some((
+                vec![CraneliftI64Stmt::WriteI64Line {
+                    stream: OutputStream::Stderr,
+                    value: value.clone(),
+                }],
+                CraneliftI64Expr::Binary {
+                    op: CraneliftI64BinaryOp::Add,
+                    lhs: Box::new(i64_decimal_string_len_expr(value)),
+                    rhs: Box::new(CraneliftI64Expr::Literal(1)),
+                },
+            ));
+        }
+        if is_i64_json_stringify_bool_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            let cond = lower_i64_condition(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            return Some(lower_i64_eprintln_bool_message_stmts(cond));
+        }
+        if is_i64_json_stringify_string_name(name, static_bindings) {
+            return lower_i64_json_stringify_string_line_stmts_with_written(
+                message,
+                OutputStream::Stderr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+    }
+    None
+}
+
+fn lower_i64_eprintln_bool_message_stmts(
+    cond: CraneliftI64Condition,
+) -> (Vec<CraneliftI64Stmt>, CraneliftI64Expr) {
+    (
+        vec![CraneliftI64Stmt::If {
+            cond: cond.clone(),
+            then_body: vec![CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text: String::from("true"),
+            }],
+            else_body: vec![CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text: String::from("false"),
+            }],
+        }],
+        CraneliftI64Expr::Select {
+            cond: Box::new(cond),
+            then_result: Box::new(CraneliftI64Expr::Literal(5)),
+            else_result: Box::new(CraneliftI64Expr::Literal(6)),
+        },
+    )
+}
+
+fn lower_i64_log_event_output_stmts(
+    level: &str,
+    message: &Expr,
+    attributes: Option<&Expr>,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<(Vec<CraneliftI64Stmt>, CraneliftI64Expr)> {
+    let level_text = json_escape_string(level);
+    let mut stmts = vec![
+        CraneliftI64Stmt::WriteText {
+            stream,
+            text: String::from("{\"level\":"),
+        },
+        CraneliftI64Stmt::WriteText {
+            stream,
+            text: level_text.clone(),
+        },
+        CraneliftI64Stmt::WriteText {
+            stream,
+            text: String::from(",\"message\":"),
+        },
+    ];
+    stmts.extend(lower_i64_log_json_string_value_stmts(
+        message,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
+    stmts.push(CraneliftI64Stmt::WriteText {
+        stream,
+        text: String::from(",\"attributes\":{"),
+    });
+    if let Some(attributes) = attributes {
+        stmts.extend(lower_i64_log_fields_output_stmts(
+            attributes,
+            stream,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?);
+    }
+    stmts.push(CraneliftI64Stmt::WriteLine {
+        stream,
+        text: String::from("}}"),
+    });
+
+    let prefix_len = i64::try_from("{\"level\":".len()).ok()?
+        + i64::try_from(level_text.len()).ok()?
+        + i64::try_from(",\"message\":".len()).ok()?;
+    let suffix_len =
+        i64::try_from(",\"attributes\":{".len()).ok()? + i64::try_from("}}".len()).ok()? + 1;
+    let message_len = lower_i64_json_escaped_string_len_expr(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let attributes_len = if let Some(attributes) = attributes {
+        lower_i64_string_len_expr(
+            attributes,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?
+    } else {
+        CraneliftI64Expr::Literal(0)
+    };
+    Some((
+        stmts,
+        CraneliftI64Expr::Binary {
+            op: CraneliftI64BinaryOp::Add,
+            lhs: Box::new(CraneliftI64Expr::Literal(prefix_len + suffix_len)),
+            rhs: Box::new(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(message_len),
+                rhs: Box::new(attributes_len),
+            }),
+        },
+    ))
+}
+
+fn lower_i64_log_json_string_value_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if let Some(text) = i64_string_text(expr, static_bindings) {
+        return Some(vec![CraneliftI64Stmt::WriteText {
+            stream,
+            text: json_escape_string(&text),
+        }]);
+    }
+    if let Some(stmts) = lower_i64_dynamic_known_string_text_stmts(
+        expr,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+        |value| json_escape_string(value),
+    ) {
+        return Some(stmts);
+    }
+    if let Expr::VarRef {
+        name,
+        ty: Type::String | Type::Str,
+    } = expr
+    {
+        if let Some(local) = local_indexes.get(i64_printable_i64_string_key(name).as_str()) {
+            return Some(vec![
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\""),
+                },
+                CraneliftI64Stmt::WriteI64Text {
+                    stream,
+                    value: CraneliftI64Expr::Local(*local),
+                },
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\""),
+                },
+            ]);
+        }
+        if let Some(cond) = local_conditions
+            .get(i64_printable_bool_string_key(name).as_str())
+            .cloned()
+        {
+            return Some(vec![CraneliftI64Stmt::If {
+                cond,
+                then_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\"true\""),
+                }],
+                else_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\"false\""),
+                }],
+            }]);
+        }
+    }
+    if let Expr::Call { name, args, .. } = expr {
+        if is_i64_json_stringify_int_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\""),
+                },
+                CraneliftI64Stmt::WriteI64Text {
+                    stream,
+                    value: lower_i64_expr(
+                        value,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?,
+                },
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\""),
+                },
+            ]);
+        }
+        if is_i64_json_stringify_bool_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            return Some(vec![CraneliftI64Stmt::If {
+                cond: lower_i64_condition(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+                then_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\"true\""),
+                }],
+                else_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\"false\""),
+                }],
+            }]);
+        }
+        if is_i64_json_stringify_string_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            let mut stmts = vec![CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from("\""),
+            }];
+            stmts.extend(lower_i64_log_json_string_content_stmts(
+                value,
+                stream,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?);
+            stmts.push(CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from("\""),
+            });
+            return Some(stmts);
+        }
+    }
+    None
+}
+
+fn lower_i64_log_fields_output_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if let Some(text) = i64_string_text(expr, static_bindings) {
+        return Some(vec![CraneliftI64Stmt::WriteText { stream, text }]);
+    }
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if is_i64_log_field_string_name(name, static_bindings) {
+        let [key, value] = args.as_slice() else {
+            return None;
+        };
+        let mut stmts = vec![
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: json_escape_string(&i64_string_text(key, static_bindings)?),
+            },
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(":"),
+            },
+        ];
+        stmts.extend(lower_i64_log_json_string_value_stmts(
+            value,
+            stream,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?);
+        return Some(stmts);
+    }
+    if is_i64_log_field_int_name(name, static_bindings) {
+        let [key, value] = args.as_slice() else {
+            return None;
+        };
+        return Some(vec![
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: json_escape_string(&i64_string_text(key, static_bindings)?),
+            },
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(":"),
+            },
+            CraneliftI64Stmt::WriteI64Text {
+                stream,
+                value: lower_i64_expr(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+            },
+        ]);
+    }
+    if is_i64_log_field_bool_name(name, static_bindings) {
+        let [key, value] = args.as_slice() else {
+            return None;
+        };
+        return Some(vec![
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: json_escape_string(&i64_string_text(key, static_bindings)?),
+            },
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(":"),
+            },
+            CraneliftI64Stmt::If {
+                cond: lower_i64_condition(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+                then_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("true"),
+                }],
+                else_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("false"),
+                }],
+            },
+        ]);
+    }
+    if is_i64_log_fields2_name(name, static_bindings)
+        || is_i64_log_fields3_name(name, static_bindings)
+    {
+        let mut iter = args.iter();
+        let first = iter.next()?;
+        let mut stmts = lower_i64_log_fields_output_stmts(
+            first,
+            stream,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        for field in iter {
+            stmts.push(CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(","),
+            });
+            stmts.extend(lower_i64_log_fields_output_stmts(
+                field,
+                stream,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?);
+        }
+        return Some(stmts);
+    }
+    None
+}
+
+fn lower_i64_print_stmt_stmts(
+    stmt: &Stmt,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Stmt::Print { expr, .. } = stmt else {
+        return None;
+    };
+    if let Some(text) = i64_string_text(expr, static_bindings) {
+        return Some(vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stdout,
+            text,
+        }]);
+    }
+    if let Some(stmts) = lower_i64_dynamic_known_string_line_stmts(
+        expr,
+        OutputStream::Stdout,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(stmts);
+    }
+    if let Expr::VarRef {
+        name,
+        ty: Type::String | Type::Str,
+    } = expr
+    {
+        if local_indexes.contains_key(i64_printable_i64_string_key(name).as_str()) {
+            return lower_i64_print_i64_line_stmts(
+                &Expr::VarRef {
+                    name: i64_printable_i64_string_key(name),
+                    ty: Type::Int,
+                },
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+        if local_conditions.contains_key(i64_printable_bool_string_key(name).as_str()) {
+            return lower_i64_print_bool_line_stmts(
+                &Expr::VarRef {
+                    name: i64_printable_bool_string_key(name),
+                    ty: Type::Bool,
+                },
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+    }
+    if let Expr::Call { name, args, .. } = expr {
+        if is_i64_log_event_name(name, static_bindings) {
+            let [level, message, attributes] = args.as_slice() else {
+                return None;
+            };
+            let level = i64_string_text(level, static_bindings)?;
+            let (stmts, _) = lower_i64_log_event_output_stmts(
+                &level,
+                message,
+                Some(attributes),
+                OutputStream::Stdout,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            return Some(stmts);
+        }
+        if is_i64_json_stringify_int_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            return lower_i64_print_i64_line_stmts(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+        if is_i64_json_stringify_bool_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            return lower_i64_print_bool_line_stmts(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+        if is_i64_json_stringify_string_name(name, static_bindings) {
+            return lower_i64_json_stringify_string_line_stmts(
+                expr,
+                OutputStream::Stdout,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            );
+        }
+    }
+    if matches!(expr.ty(), Type::Bool) {
+        return lower_i64_print_bool_line_stmts(
+            expr,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        );
+    }
+    let ty = expr.ty();
+    if !is_i64_compatible_type(&ty) {
+        return None;
+    }
+    lower_i64_print_i64_line_stmts(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+}
+
+fn lower_i64_print_i64_line_stmts(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    Some(vec![CraneliftI64Stmt::WriteI64Line {
+        stream: OutputStream::Stdout,
+        value: lower_i64_expr(
+            expr,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?,
+    }])
+}
+
+fn lower_i64_print_bool_line_stmts(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    Some(vec![CraneliftI64Stmt::If {
+        cond: lower_i64_condition(
+            expr,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?,
+        then_body: vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stdout,
+            text: String::from("true"),
+        }],
+        else_body: vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stdout,
+            text: String::from("false"),
+        }],
+    }])
+}
+
+fn lower_i64_json_stringify_string_line_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    lower_i64_json_stringify_string_line_stmts_with_written(
+        expr,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+    .map(|(stmts, _)| stmts)
+}
+
+fn lower_i64_json_stringify_string_line_stmts_with_written(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<(Vec<CraneliftI64Stmt>, CraneliftI64Expr)> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if !is_i64_json_stringify_string_name(name, static_bindings) {
+        return None;
+    }
+    let [value] = args.as_slice() else {
+        return None;
+    };
+    let mut stmts = lower_i64_log_json_string_value_stmts(
+        value,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    stmts.push(CraneliftI64Stmt::WriteLine {
+        stream,
+        text: String::new(),
+    });
+    Some((
+        stmts,
+        CraneliftI64Expr::Binary {
+            op: CraneliftI64BinaryOp::Add,
+            lhs: Box::new(lower_i64_json_escaped_string_len_expr(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?),
+            rhs: Box::new(CraneliftI64Expr::Literal(1)),
+        },
+    ))
+}
+
+fn lower_i64_dynamic_known_string_line_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    lower_i64_dynamic_known_string_line_stmts_with_written(
+        expr,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+    .map(|(stmts, _)| stmts)
+}
+
+fn lower_i64_dynamic_known_string_line_stmts_with_written(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<(Vec<CraneliftI64Stmt>, CraneliftI64Expr)> {
+    let (keys, index, transform) = i64_map_key_array_string_index_source(expr, static_bindings)?;
+    if keys.is_empty() {
+        return None;
+    }
+    if let Some(index) = lower_i64_literal_index(&index) {
+        let text = i64_map_key_text(keys.get(index)?, transform)?;
+        let written = i64_newline_byte_count(&text)?;
+        return Some((
+            vec![CraneliftI64Stmt::WriteLine { stream, text }],
+            CraneliftI64Expr::Literal(written),
+        ));
+    }
+    let index = lower_i64_expr(
+        &index,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let last = keys.len() - 1;
+    let fallback_text = i64_map_key_text(keys.get(last)?, transform)?;
+    let fallback_written = i64_newline_byte_count(&fallback_text)?;
+    let mut stmts = vec![CraneliftI64Stmt::WriteLine {
+        stream,
+        text: fallback_text,
+    }];
+    let mut written = CraneliftI64Expr::Literal(fallback_written);
+    for candidate in (0..last).rev() {
+        let text = i64_map_key_text(keys.get(candidate)?, transform)?;
+        let candidate_written = i64_newline_byte_count(&text)?;
+        let cond = CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Eq,
+            lhs: index.clone(),
+            rhs: CraneliftI64Expr::Literal(candidate as i64),
+        });
+        stmts = vec![CraneliftI64Stmt::If {
+            cond: cond.clone(),
+            then_body: vec![CraneliftI64Stmt::WriteLine { stream, text }],
+            else_body: stmts,
+        }];
+        written = CraneliftI64Expr::Select {
+            cond: Box::new(cond),
+            then_result: Box::new(CraneliftI64Expr::Literal(candidate_written)),
+            else_result: Box::new(written),
+        };
+    }
+    Some((stmts, written))
+}
+
+fn lower_i64_dynamic_known_string_text_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+    map_text: impl Fn(&str) -> String,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let (keys, index, transform) = i64_map_key_array_string_index_source(expr, static_bindings)?;
+    if keys.is_empty() {
+        return None;
+    }
+    if let Some(index) = lower_i64_literal_index(&index) {
+        let text = map_text(&i64_map_key_text(keys.get(index)?, transform)?);
+        return Some(vec![CraneliftI64Stmt::WriteText { stream, text }]);
+    }
+    let index = lower_i64_expr(
+        &index,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let last = keys.len() - 1;
+    let fallback_text = map_text(&i64_map_key_text(keys.get(last)?, transform)?);
+    let mut stmts = vec![CraneliftI64Stmt::WriteText {
+        stream,
+        text: fallback_text,
+    }];
+    for candidate in (0..last).rev() {
+        let text = map_text(&i64_map_key_text(keys.get(candidate)?, transform)?);
+        stmts = vec![CraneliftI64Stmt::If {
+            cond: CraneliftI64Condition::Compare(CraneliftI64Compare {
+                op: CraneliftI64CompareOp::Eq,
+                lhs: index.clone(),
+                rhs: CraneliftI64Expr::Literal(candidate as i64),
+            }),
+            then_body: vec![CraneliftI64Stmt::WriteText { stream, text }],
+            else_body: stmts,
+        }];
+    }
+    Some(stmts)
+}
+
+fn i64_map_key_text(key: &I64MapKey, transform: I64MapKeyArrayStringTransform) -> Option<String> {
+    match key {
+        I64MapKey::Text(value) => {
+            Some(i64_apply_map_key_array_string_transform(value, transform).to_string())
+        }
+        _ => None,
+    }
+}
+
+fn i64_newline_byte_count(text: &str) -> Option<i64> {
+    i64::try_from(text.len()).ok()?.checked_add(1)
+}
+
+fn i64_printable_i64_string_key(name: &str) -> String {
+    format!("{name}#print_i64_string")
+}
+
+fn i64_printable_bool_string_key(name: &str) -> String {
+    format!("{name}#print_bool_string")
 }
 
 fn lower_i64_runtime_projection_let_stmts(
@@ -3775,6 +5140,135 @@ fn lower_i64_known_string_option_call_let_stmts(
         .string_options
         .insert(name.to_string(), value);
     Some(Vec::new())
+}
+
+fn lower_i64_env_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !matches!(inner, Type::String | Type::Str) {
+        return None;
+    }
+    let key = i64_env_get_key(expr, static_bindings)?;
+    let env_len = i64_env_len_expr(&key, static_bindings)?;
+    let payload_local = local_indexes.len();
+    local_indexes.insert(i64_option_payload_slot_key(name, 0), payload_local);
+    local_indexes.insert(i64_option_payload_key(name), payload_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag_local = local_indexes.len();
+    local_indexes.insert(i64_option_tag_key(name), tag_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag = CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: CraneliftI64Expr::Local(payload_local),
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(CraneliftI64Expr::Literal(1)),
+        else_result: Box::new(CraneliftI64Expr::Literal(0)),
+    };
+    Some(vec![
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: payload_local,
+            value: env_len,
+        }),
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: tag_local,
+            value: tag,
+        }),
+    ])
+}
+
+fn lower_i64_fs_read_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !matches!(inner, Type::String | Type::Str) {
+        return None;
+    }
+    let path = i64_fs_read_path(expr, static_bindings)?;
+    let file_len = i64_fs_read_file_len_expr(&path.candidate, path.requested_len, static_bindings)?;
+    let payload_local = local_indexes.len();
+    local_indexes.insert(i64_option_payload_slot_key(name, 0), payload_local);
+    local_indexes.insert(i64_option_payload_key(name), payload_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag_local = local_indexes.len();
+    local_indexes.insert(i64_option_tag_key(name), tag_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag = CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: CraneliftI64Expr::Local(payload_local),
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(CraneliftI64Expr::Literal(1)),
+        else_result: Box::new(CraneliftI64Expr::Literal(0)),
+    };
+    Some(vec![
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: payload_local,
+            value: file_len,
+        }),
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: tag_local,
+            value: tag,
+        }),
+    ])
+}
+
+fn lower_i64_net_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !matches!(inner, Type::String | Type::Str) {
+        return None;
+    }
+    let host = i64_net_resolve_host(expr, static_bindings)?;
+    let net_len = i64_net_resolve_len_expr(&host, static_bindings)?;
+    let payload_local = local_indexes.len();
+    local_indexes.insert(i64_option_payload_slot_key(name, 0), payload_local);
+    local_indexes.insert(i64_option_payload_key(name), payload_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag_local = local_indexes.len();
+    local_indexes.insert(i64_option_tag_key(name), tag_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag = CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: CraneliftI64Expr::Local(payload_local),
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(CraneliftI64Expr::Literal(1)),
+        else_result: Box::new(CraneliftI64Expr::Literal(0)),
+    };
+    Some(vec![
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: payload_local,
+            value: net_len,
+        }),
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: tag_local,
+            value: tag,
+        }),
+    ])
 }
 
 fn lower_i64_result_literal_let_stmts(
@@ -4652,12 +6146,18 @@ fn lower_i64_return_block(
     mut local_conditions: HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
 ) -> Option<CraneliftI64ReturnBlock> {
     let (terminal_stmt, body_stmts) = stmts.split_last()?;
     let mut stmts = Vec::new();
+    let mut scoped_static_bindings = static_bindings.clone();
+    let static_bindings = &mut scoped_static_bindings;
     for stmt in body_stmts {
         match stmt {
             Stmt::Let { .. } => {
+                if record_i64_known_string_let(stmt, static_bindings).unwrap_or(false) {
+                    continue;
+                }
                 stmts.extend(lower_i64_runtime_let_stmts(
                     stmt,
                     locals,
@@ -4665,6 +6165,7 @@ fn lower_i64_return_block(
                     &mut local_conditions,
                     helper_signatures,
                     static_bindings,
+                    allow_stdio_effects,
                 )?);
             }
             _ => {
@@ -4675,6 +6176,7 @@ fn lower_i64_return_block(
                     local_conditions.clone(),
                     helper_signatures,
                     static_bindings,
+                    allow_stdio_effects,
                 )?);
             }
         }
@@ -4700,6 +6202,26 @@ fn lower_i64_return_block(
         _ => return None,
     };
     Some(CraneliftI64ReturnBlock { stmts, result })
+}
+
+fn record_i64_known_string_let(
+    stmt: &Stmt,
+    static_bindings: &mut I64StaticBindings,
+) -> Option<bool> {
+    let Stmt::Let {
+        name,
+        ty: Type::String | Type::Str,
+        expr,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    let Some(text) = i64_string_text(expr, static_bindings) else {
+        return Some(false);
+    };
+    static_bindings.strings.insert(name.clone(), text);
+    Some(true)
 }
 
 fn lower_i64_exit_return(
@@ -4772,13 +6294,556 @@ fn lower_i64_panic_exit_body(
 
 fn lower_i64_panic_report_stmts(
     message: &Expr,
-    _local_indexes: &HashMap<String, usize>,
-    _local_conditions: &HashMap<String, CraneliftI64Condition>,
-    _helper_signatures: &HashMap<&str, I64HelperSignature>,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<Vec<CraneliftI64Stmt>> {
-    let _message = i64_string_text(message, static_bindings)?;
-    Some(vec![])
+    if let Some(value) = lower_i64_panic_int_stringify_value(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(vec![
+            CraneliftI64Stmt::WriteText {
+                stream: OutputStream::Stderr,
+                text: String::from("{\"kind\":\"panic\",\"message\":"),
+            },
+            CraneliftI64Stmt::WriteI64Text {
+                stream: OutputStream::Stderr,
+                value,
+            },
+            CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text: String::from("}"),
+            },
+        ]);
+    }
+    if let Some(cond) = lower_i64_panic_bool_stringify_condition(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(vec![CraneliftI64Stmt::If {
+            cond,
+            then_body: vec![CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text: String::from("{\"kind\":\"panic\",\"message\":\"true\"}"),
+            }],
+            else_body: vec![CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text: String::from("{\"kind\":\"panic\",\"message\":\"false\"}"),
+            }],
+        }]);
+    }
+    if let Some(stmts) = lower_i64_panic_json_stringify_string_report_stmts(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(stmts);
+    }
+    if let Some(stmts) = lower_i64_log_event_panic_report_stmts(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(stmts);
+    }
+    if let Some(stmts) = lower_i64_dynamic_known_string_panic_report_stmts(
+        message,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(stmts);
+    }
+    let message = i64_string_text(message, static_bindings)?;
+    Some(vec![CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stderr,
+        text: format!(
+            "{{\"kind\":\"panic\",\"message\":{}}}",
+            json_escape_string(&message)
+        ),
+    }])
+}
+
+fn lower_i64_panic_json_stringify_string_report_stmts(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Expr::Call { name, args, .. } = message else {
+        return None;
+    };
+    if !is_i64_json_stringify_string_name(name, static_bindings) {
+        return None;
+    }
+    let [value] = args.as_slice() else {
+        return None;
+    };
+    let mut stmts = vec![CraneliftI64Stmt::WriteText {
+        stream: OutputStream::Stderr,
+        text: String::from("{\"kind\":\"panic\",\"message\":"),
+    }];
+    stmts.extend(lower_i64_log_json_string_value_stmts(
+        value,
+        OutputStream::Stderr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
+    stmts.push(CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stderr,
+        text: String::from("}"),
+    });
+    Some(stmts)
+}
+
+fn lower_i64_log_event_panic_report_stmts(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Expr::Call { name, args, .. } = message else {
+        return None;
+    };
+    if !is_i64_log_event_name(name, static_bindings) {
+        return None;
+    }
+    let [level, message, attributes] = args.as_slice() else {
+        return None;
+    };
+    let mut stmts = vec![
+        CraneliftI64Stmt::WriteText {
+            stream: OutputStream::Stderr,
+            text: String::from("{\"kind\":\"panic\",\"message\":\""),
+        },
+        CraneliftI64Stmt::WriteText {
+            stream: OutputStream::Stderr,
+            text: json_escape_string_content("{\"level\":"),
+        },
+        CraneliftI64Stmt::WriteText {
+            stream: OutputStream::Stderr,
+            text: json_escape_string_content(&json_escape_string(&i64_string_text(
+                level,
+                static_bindings,
+            )?)),
+        },
+        CraneliftI64Stmt::WriteText {
+            stream: OutputStream::Stderr,
+            text: json_escape_string_content(",\"message\":"),
+        },
+    ];
+    stmts.extend(lower_i64_log_json_string_content_stmts(
+        message,
+        OutputStream::Stderr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
+    stmts.push(CraneliftI64Stmt::WriteText {
+        stream: OutputStream::Stderr,
+        text: json_escape_string_content(",\"attributes\":{"),
+    });
+    stmts.extend(lower_i64_log_fields_content_stmts(
+        attributes,
+        OutputStream::Stderr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
+    stmts.push(CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stderr,
+        text: json_escape_string_content("}}") + "\"}",
+    });
+    Some(stmts)
+}
+
+fn lower_i64_log_json_string_content_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if let Some(text) = i64_string_text(expr, static_bindings) {
+        return Some(vec![CraneliftI64Stmt::WriteText {
+            stream,
+            text: json_escape_string_content(&json_escape_string(&text)),
+        }]);
+    }
+    if let Some(stmts) = lower_i64_dynamic_known_string_text_stmts(
+        expr,
+        stream,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+        |value| json_escape_string_content(&json_escape_string(value)),
+    ) {
+        return Some(stmts);
+    }
+    if let Expr::VarRef {
+        name,
+        ty: Type::String | Type::Str,
+    } = expr
+    {
+        if let Some(local) = local_indexes.get(i64_printable_i64_string_key(name).as_str()) {
+            return Some(vec![
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\""),
+                },
+                CraneliftI64Stmt::WriteI64Text {
+                    stream,
+                    value: CraneliftI64Expr::Local(*local),
+                },
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\""),
+                },
+            ]);
+        }
+        if let Some(cond) = local_conditions
+            .get(i64_printable_bool_string_key(name).as_str())
+            .cloned()
+        {
+            return Some(vec![CraneliftI64Stmt::If {
+                cond,
+                then_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\"true\\\""),
+                }],
+                else_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\"false\\\""),
+                }],
+            }]);
+        }
+    }
+    if let Expr::Call { name, args, .. } = expr {
+        if is_i64_json_stringify_int_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\""),
+                },
+                CraneliftI64Stmt::WriteI64Text {
+                    stream,
+                    value: lower_i64_expr(
+                        value,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?,
+                },
+                CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\""),
+                },
+            ]);
+        }
+        if is_i64_json_stringify_bool_name(name, static_bindings) {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            return Some(vec![CraneliftI64Stmt::If {
+                cond: lower_i64_condition(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+                then_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\"true\\\""),
+                }],
+                else_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("\\\"false\\\""),
+                }],
+            }]);
+        }
+    }
+    None
+}
+
+fn lower_i64_log_fields_content_stmts(
+    expr: &Expr,
+    stream: OutputStream,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if let Some(text) = i64_string_text(expr, static_bindings) {
+        return Some(vec![CraneliftI64Stmt::WriteText {
+            stream,
+            text: json_escape_string_content(&text),
+        }]);
+    }
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if is_i64_log_field_string_name(name, static_bindings) {
+        let [key, value] = args.as_slice() else {
+            return None;
+        };
+        let mut stmts = vec![
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: json_escape_string_content(&json_escape_string(&i64_string_text(
+                    key,
+                    static_bindings,
+                )?)),
+            },
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(":"),
+            },
+        ];
+        stmts.extend(lower_i64_log_json_string_content_stmts(
+            value,
+            stream,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?);
+        return Some(stmts);
+    }
+    if is_i64_log_field_int_name(name, static_bindings) {
+        let [key, value] = args.as_slice() else {
+            return None;
+        };
+        return Some(vec![
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: json_escape_string_content(&json_escape_string(&i64_string_text(
+                    key,
+                    static_bindings,
+                )?)),
+            },
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(":"),
+            },
+            CraneliftI64Stmt::WriteI64Text {
+                stream,
+                value: lower_i64_expr(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+            },
+        ]);
+    }
+    if is_i64_log_field_bool_name(name, static_bindings) {
+        let [key, value] = args.as_slice() else {
+            return None;
+        };
+        return Some(vec![
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: json_escape_string_content(&json_escape_string(&i64_string_text(
+                    key,
+                    static_bindings,
+                )?)),
+            },
+            CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(":"),
+            },
+            CraneliftI64Stmt::If {
+                cond: lower_i64_condition(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?,
+                then_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("true"),
+                }],
+                else_body: vec![CraneliftI64Stmt::WriteText {
+                    stream,
+                    text: String::from("false"),
+                }],
+            },
+        ]);
+    }
+    if is_i64_log_fields2_name(name, static_bindings)
+        || is_i64_log_fields3_name(name, static_bindings)
+    {
+        let mut iter = args.iter();
+        let first = iter.next()?;
+        let mut stmts = lower_i64_log_fields_content_stmts(
+            first,
+            stream,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        for field in iter {
+            stmts.push(CraneliftI64Stmt::WriteText {
+                stream,
+                text: String::from(","),
+            });
+            stmts.extend(lower_i64_log_fields_content_stmts(
+                field,
+                stream,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?);
+        }
+        return Some(stmts);
+    }
+    None
+}
+
+fn lower_i64_dynamic_known_string_panic_report_stmts(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let (keys, index, transform) = i64_map_key_array_string_index_source(message, static_bindings)?;
+    if keys.is_empty() {
+        return None;
+    }
+    if let Some(index) = lower_i64_literal_index(&index) {
+        let text = i64_panic_report_text(&i64_map_key_text(keys.get(index)?, transform)?);
+        return Some(vec![CraneliftI64Stmt::WriteLine {
+            stream: OutputStream::Stderr,
+            text,
+        }]);
+    }
+    let index = lower_i64_expr(
+        &index,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let last = keys.len() - 1;
+    let fallback_text = i64_panic_report_text(&i64_map_key_text(keys.get(last)?, transform)?);
+    let mut stmts = vec![CraneliftI64Stmt::WriteLine {
+        stream: OutputStream::Stderr,
+        text: fallback_text,
+    }];
+    for candidate in (0..last).rev() {
+        let text = i64_panic_report_text(&i64_map_key_text(keys.get(candidate)?, transform)?);
+        stmts = vec![CraneliftI64Stmt::If {
+            cond: CraneliftI64Condition::Compare(CraneliftI64Compare {
+                op: CraneliftI64CompareOp::Eq,
+                lhs: index.clone(),
+                rhs: CraneliftI64Expr::Literal(candidate as i64),
+            }),
+            then_body: vec![CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text,
+            }],
+            else_body: stmts,
+        }];
+    }
+    Some(stmts)
+}
+
+fn i64_panic_report_text(message: &str) -> String {
+    format!(
+        "{{\"kind\":\"panic\",\"message\":{}}}",
+        json_escape_string(message)
+    )
+}
+
+fn lower_i64_panic_int_stringify_value(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match message {
+        Expr::VarRef {
+            name,
+            ty: Type::String | Type::Str,
+        } => local_indexes
+            .get(i64_printable_i64_string_key(name).as_str())
+            .map(|local| CraneliftI64Expr::Local(*local)),
+        Expr::Call { name, args, .. } if is_i64_json_stringify_int_name(name, static_bindings) => {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            lower_i64_expr(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        _ => None,
+    }
+}
+
+fn lower_i64_panic_bool_stringify_condition(
+    message: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Condition> {
+    match message {
+        Expr::VarRef {
+            name,
+            ty: Type::String | Type::Str,
+        } => local_conditions
+            .get(i64_printable_bool_string_key(name).as_str())
+            .cloned(),
+        Expr::Call { name, args, .. } if is_i64_json_stringify_bool_name(name, static_bindings) => {
+            let [value] = args.as_slice() else {
+                return None;
+            };
+            lower_i64_condition(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        _ => None,
+    }
 }
 
 fn lower_i64_option_match_exit_return(
@@ -4800,6 +6865,33 @@ fn lower_i64_option_match_exit_return(
         return None;
     }
     if let Some(value) = lower_i64_known_scalar_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(I64ExitBody::Return(value));
+    }
+    if let Some(value) = lower_i64_env_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(I64ExitBody::Return(value));
+    }
+    if let Some(value) = lower_i64_fs_read_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(I64ExitBody::Return(value));
+    }
+    if let Some(value) = lower_i64_net_option_match_value_expr(
         expr,
         local_indexes,
         local_conditions,
@@ -4862,6 +6954,33 @@ fn lower_i64_option_match_value_expr(
         return None;
     }
     if let Some(value) = lower_i64_known_scalar_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(value);
+    }
+    if let Some(value) = lower_i64_env_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(value);
+    }
+    if let Some(value) = lower_i64_fs_read_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(value);
+    }
+    if let Some(value) = lower_i64_net_option_match_value_expr(
         expr,
         local_indexes,
         local_conditions,
@@ -4984,6 +7103,497 @@ fn lower_i64_known_scalar_option_match_value_expr(
     }
 }
 
+fn lower_i64_env_option_match_value_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Match {
+        expr: matched,
+        arms,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    if !is_i64_exit_type(ty) {
+        return None;
+    }
+    let Type::Option(inner) = matched.ty() else {
+        return None;
+    };
+    if !matches!(inner.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let key = i64_env_get_key(matched, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_match_arms(arms)?;
+    let binding = some_arm
+        .bindings
+        .first()
+        .filter(|binding| binding.as_str() != "_");
+    let env_len = i64_env_len_expr(&key, static_bindings)?;
+    let then_result = lower_i64_env_some_arm_expr(
+        &some_arm.expr,
+        binding.map(String::as_str),
+        &key,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let else_result = lower_i64_return_value_expr(
+        &none_arm.expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: env_len,
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(then_result),
+        else_result: Box::new(else_result),
+    })
+}
+
+fn lower_i64_env_some_arm_expr(
+    expr: &Expr,
+    binding: Option<&str>,
+    key: &str,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if let Some(binding) = binding
+        && let Expr::Call { name, args, .. } = expr
+        && name == "len"
+        && let [Expr::VarRef { name, .. }] = args.as_slice()
+        && name == binding
+    {
+        return i64_env_len_expr(key, static_bindings);
+    }
+    lower_i64_return_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+}
+
+fn i64_env_len_expr(key: &str, static_bindings: &I64StaticBindings) -> Option<CraneliftI64Expr> {
+    let result =
+        if static_bindings.env_unrestricted || static_bindings.env_allowed_names.contains(key) {
+            CraneliftI64Expr::EnvLen {
+                key: key.to_string(),
+            }
+        } else {
+            CraneliftI64Expr::Literal(-1)
+        };
+    i64_audited_env_expr(
+        "env_get",
+        key.len(),
+        result,
+        static_bindings,
+        CraneliftI64AuditSuccess::NonNegative,
+    )
+}
+
+fn i64_env_get_key(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<String> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if name != "env_get" && !static_bindings.env_get_wrappers.contains(name) {
+        return None;
+    }
+    let [key] = args.as_slice() else {
+        return None;
+    };
+    i64_string_text(key, static_bindings)
+}
+
+fn lower_i64_fs_read_option_match_value_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Match {
+        expr: matched,
+        arms,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    if !is_i64_exit_type(ty) {
+        return None;
+    }
+    let Type::Option(inner) = matched.ty() else {
+        return None;
+    };
+    if !matches!(inner.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let path = i64_fs_read_path(matched, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_match_arms(arms)?;
+    let binding = some_arm
+        .bindings
+        .first()
+        .filter(|binding| binding.as_str() != "_");
+    let file_len = i64_fs_read_file_len_expr(&path.candidate, path.requested_len, static_bindings)?;
+    let then_result = lower_i64_fs_read_some_arm_expr(
+        &some_arm.expr,
+        binding.map(String::as_str),
+        &path.candidate,
+        path.requested_len,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let else_result = lower_i64_return_value_expr(
+        &none_arm.expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: file_len,
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(then_result),
+        else_result: Box::new(else_result),
+    })
+}
+
+fn lower_i64_fs_read_some_arm_expr(
+    expr: &Expr,
+    binding: Option<&str>,
+    path: &str,
+    path_len: usize,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if let Some(binding) = binding
+        && let Expr::Call { name, args, .. } = expr
+        && name == "len"
+        && let [Expr::VarRef { name, .. }] = args.as_slice()
+        && name == binding
+    {
+        return i64_fs_read_file_len_expr(path, path_len, static_bindings);
+    }
+    lower_i64_return_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+}
+
+struct I64FsReadPath {
+    candidate: String,
+    requested_len: usize,
+}
+
+fn i64_fs_read_path(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<I64FsReadPath> {
+    if static_bindings.has_fs_write_calls {
+        return None;
+    }
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if name != "fs_read"
+        && name != "read_file"
+        && name != "std_fs_read_file"
+        && !static_bindings.fs_read_wrappers.contains(name)
+    {
+        return None;
+    }
+    let [path] = args.as_slice() else {
+        return None;
+    };
+    let fs_root = static_bindings.fs_root.as_deref()?;
+    let path = i64_string_text(path, static_bindings)?;
+    let requested_len = path.len();
+    spike_fs_write_candidate_for_root(fs_root, &path, false).map(|path| I64FsReadPath {
+        candidate: path.display().to_string(),
+        requested_len,
+    })
+}
+
+fn i64_fs_read_file_len_expr(
+    path: &str,
+    path_len: usize,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if static_bindings.has_fs_write_calls {
+        return None;
+    }
+    let fs_root = static_bindings.fs_root.as_deref()?;
+    let path = Path::new(path);
+    let guarded = i64_runtime_fs_guard_expr(
+        fs_root,
+        path,
+        i64_fs_runtime_parent_fallback(path)?.as_path(),
+        CraneliftI64Expr::FileLen {
+            path: path.display().to_string(),
+            max_bytes: SPIKE_MAX_FS_READ_BYTES,
+        },
+    )?;
+    i64_audited_fs_expr_with_success(
+        "fs_read",
+        path_len,
+        None,
+        guarded,
+        static_bindings,
+        CraneliftI64AuditSuccess::NonNegative,
+    )
+}
+
+fn lower_i64_net_option_match_value_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Match {
+        expr: matched,
+        arms,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    if !is_i64_exit_type(ty) {
+        return None;
+    }
+    let Type::Option(inner) = matched.ty() else {
+        return None;
+    };
+    if !matches!(inner.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let host = i64_net_resolve_host(matched, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_match_arms(arms)?;
+    let binding = some_arm
+        .bindings
+        .first()
+        .filter(|binding| binding.as_str() != "_");
+    let net_len = i64_net_resolve_len_expr(&host, static_bindings)?;
+    let then_result = lower_i64_net_some_arm_expr(
+        &some_arm.expr,
+        binding.map(String::as_str),
+        &host,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let else_result = lower_i64_return_value_expr(
+        &none_arm.expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: net_len,
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(then_result),
+        else_result: Box::new(else_result),
+    })
+}
+
+fn lower_i64_net_some_arm_expr(
+    expr: &Expr,
+    binding: Option<&str>,
+    host: &I64NetResolveHost,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if let Some(binding) = binding
+        && let Expr::Call { name, args, .. } = expr
+        && name == "len"
+        && let [Expr::VarRef { name, .. }] = args.as_slice()
+        && name == binding
+    {
+        return i64_net_resolve_len_expr(host, static_bindings);
+    }
+    lower_i64_return_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+}
+
+struct I64NetResolveHost {
+    host: String,
+    resolved_len: i64,
+}
+
+fn i64_net_resolve_host(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<I64NetResolveHost> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if !is_i64_net_resolve_name(name, static_bindings) {
+        return None;
+    }
+    let [host] = args.as_slice() else {
+        return None;
+    };
+    let host = i64_string_text(host, static_bindings)?;
+    let _addr: IpAddr = host.parse().ok()?;
+    Some(I64NetResolveHost {
+        resolved_len: i64::try_from(i64_net_resolve_text(&host)?.len()).ok()?,
+        host,
+    })
+}
+
+fn i64_net_resolve_len_expr(
+    host: &I64NetResolveHost,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    i64_audited_net_expr(
+        "net_resolve",
+        host.host.len(),
+        CraneliftI64Expr::NetResolveLen {
+            host: host.host.clone(),
+            resolved_len: host.resolved_len,
+        },
+        static_bindings,
+        CraneliftI64AuditSuccess::NonNegative,
+    )
+}
+
+fn i64_stmts_have_fs_write_call(stmts: &[Stmt], static_bindings: &I64StaticBindings) -> bool {
+    stmts
+        .iter()
+        .any(|stmt| i64_stmt_has_fs_write_call(stmt, static_bindings))
+}
+
+fn i64_stmt_has_fs_write_call(stmt: &Stmt, static_bindings: &I64StaticBindings) -> bool {
+    match stmt {
+        Stmt::Let { expr, .. }
+        | Stmt::Print { expr, .. }
+        | Stmt::Panic { message: expr, .. }
+        | Stmt::Defer { expr, .. }
+        | Stmt::Return { expr, .. } => i64_expr_has_fs_write_call(expr, static_bindings),
+        Stmt::Assign { target, expr, .. } => {
+            i64_expr_has_fs_write_call(target, static_bindings)
+                || i64_expr_has_fs_write_call(expr, static_bindings)
+        }
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            i64_expr_has_fs_write_call(cond, static_bindings)
+                || i64_stmts_have_fs_write_call(then_block, static_bindings)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|stmts| i64_stmts_have_fs_write_call(stmts, static_bindings))
+        }
+        Stmt::While { cond, body, .. } => {
+            i64_expr_has_fs_write_call(cond, static_bindings)
+                || i64_stmts_have_fs_write_call(body, static_bindings)
+        }
+        Stmt::Match { expr, arms, .. } => {
+            i64_expr_has_fs_write_call(expr, static_bindings)
+                || arms
+                    .iter()
+                    .any(|arm| i64_stmts_have_fs_write_call(&arm.body, static_bindings))
+        }
+    }
+}
+
+fn i64_expr_has_fs_write_call(expr: &Expr, static_bindings: &I64StaticBindings) -> bool {
+    match expr {
+        Expr::Call { name, args, .. } => {
+            i64_fs_write_intrinsic_name(name, static_bindings).is_some()
+                || args
+                    .iter()
+                    .any(|arg| i64_expr_has_fs_write_call(arg, static_bindings))
+        }
+        Expr::BinaryAdd { lhs, rhs, .. }
+        | Expr::BinaryCompare { lhs, rhs, .. }
+        | Expr::BinaryLogic { lhs, rhs, .. }
+        | Expr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            i64_expr_has_fs_write_call(lhs, static_bindings)
+                || i64_expr_has_fs_write_call(rhs, static_bindings)
+        }
+        Expr::Cast { expr, .. }
+        | Expr::MutBorrow { expr, .. }
+        | Expr::Deref { expr, .. }
+        | Expr::Try { expr, .. }
+        | Expr::Await { expr, .. }
+        | Expr::FieldAccess { base: expr, .. }
+        | Expr::TupleIndex { base: expr, .. }
+        | Expr::StringBorrow { expr, .. } => i64_expr_has_fs_write_call(expr, static_bindings),
+        Expr::StructLiteral { fields, .. } => fields
+            .iter()
+            .any(|field| i64_expr_has_fs_write_call(&field.expr, static_bindings)),
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => elements
+            .iter()
+            .any(|element| i64_expr_has_fs_write_call(element, static_bindings)),
+        Expr::MapLiteral { entries, .. } => entries.iter().any(|entry| {
+            i64_expr_has_fs_write_call(&entry.key, static_bindings)
+                || i64_expr_has_fs_write_call(&entry.value, static_bindings)
+        }),
+        Expr::EnumVariant { payloads, .. } => payloads
+            .iter()
+            .any(|payload| i64_expr_has_fs_write_call(payload, static_bindings)),
+        Expr::Closure { body, .. } => i64_expr_has_fs_write_call(body, static_bindings),
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            i64_expr_has_fs_write_call(base, static_bindings)
+                || start
+                    .as_ref()
+                    .is_some_and(|expr| i64_expr_has_fs_write_call(expr, static_bindings))
+                || end
+                    .as_ref()
+                    .is_some_and(|expr| i64_expr_has_fs_write_call(expr, static_bindings))
+        }
+        Expr::Match { expr, arms, .. } => {
+            i64_expr_has_fs_write_call(expr, static_bindings)
+                || arms
+                    .iter()
+                    .any(|arm| i64_expr_has_fs_write_call(&arm.expr, static_bindings))
+        }
+        Expr::Literal(_) | Expr::VarRef { .. } => false,
+    }
+}
+
 fn lower_i64_known_string_option_match_value_expr(
     expr: &Expr,
     local_indexes: &HashMap<String, usize>,
@@ -5045,11 +7655,18 @@ fn lower_i64_option_match_parts<'a>(
     else {
         return None;
     };
-    if !is_i64_option_local_payload_type_static(inner, static_bindings) {
+    let string_len_option = i64_string_len_option_local(name, inner.as_ref(), local_indexes);
+    if !is_i64_option_local_payload_type_static(inner, static_bindings)
+        && string_len_option.is_none()
+    {
         return None;
     }
     let tag = *local_indexes.get(i64_option_tag_key(name).as_str())?;
-    let payloads = i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?;
+    let payloads = if let Some(payloads) = string_len_option {
+        payloads
+    } else {
+        i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?
+    };
     let (some_arm, none_arm) = i64_option_match_arms(arms)?;
     let mut some_indexes = local_indexes.clone();
     let mut some_conditions = local_conditions.clone();
@@ -5094,11 +7711,18 @@ fn lower_i64_option_stmt_match_parts<'a>(
     else {
         return None;
     };
-    if !is_i64_option_local_payload_type_static(inner, static_bindings) {
+    let string_len_option = i64_string_len_option_local(name, inner.as_ref(), local_indexes);
+    if !is_i64_option_local_payload_type_static(inner, static_bindings)
+        && string_len_option.is_none()
+    {
         return None;
     }
     let tag = *local_indexes.get(i64_option_tag_key(name).as_str())?;
-    let payloads = i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?;
+    let payloads = if let Some(payloads) = string_len_option {
+        payloads
+    } else {
+        i64_option_payload_locals(name, inner.as_ref(), local_indexes, static_bindings)?
+    };
     let (some_arm, none_arm) = i64_option_stmt_match_arms(arms)?;
     let mut some_indexes = local_indexes.clone();
     let mut some_conditions = local_conditions.clone();
@@ -5254,6 +7878,12 @@ fn insert_i64_option_payload_binding(
                 return;
             };
             indexes.insert(binding.clone(), payload);
+        }
+        Type::String | Type::Str => {
+            let Some(payload) = payloads.first().copied() else {
+                return;
+            };
+            indexes.insert(i64_string_len_key(binding), payload);
         }
         _ => {}
     }
@@ -7937,53 +10567,60 @@ fn lower_i64_expr(
             .or_else(|| static_bindings.values.get(name).cloned()),
         Expr::VarRef { name, .. } => static_bindings.values.get(name).cloned(),
         Expr::Call { name, args, ty } if is_i64_compatible_type(ty) => {
-            lower_i64_clock_intrinsic_expr(name, args, static_bindings)
-                .or_else(|| lower_i64_process_intrinsic_expr(name, args, static_bindings))
-                .or_else(|| lower_i64_fs_write_intrinsic_expr(name, args, static_bindings))
-                .or_else(|| lower_i64_crypto_random_intrinsic_expr(name, args, static_bindings))
-                .or_else(|| {
-                    lower_i64_ffi_intrinsic_expr(
-                        name,
-                        args,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
-                .or_else(|| {
-                    lower_i64_map_get_or_default_expr(
-                        name,
-                        args,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
-                .or_else(|| {
-                    lower_i64_fixed_array_intrinsic_expr(
-                        name,
-                        args,
-                        ty,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
-                .or_else(|| i64_known_helper_call_i64_expr(name, args, static_bindings))
-                .or_else(|| {
-                    lower_i64_call_expr(
-                        name,
-                        args,
-                        false,
-                        local_indexes,
-                        local_conditions,
-                        helper_signatures,
-                        static_bindings,
-                    )
-                })
+            lower_i64_clock_intrinsic_expr(
+                name,
+                args,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+            .or_else(|| lower_i64_process_intrinsic_expr(name, args, static_bindings))
+            .or_else(|| lower_i64_fs_write_intrinsic_expr(name, args, static_bindings))
+            .or_else(|| lower_i64_crypto_random_intrinsic_expr(name, args, static_bindings))
+            .or_else(|| {
+                lower_i64_ffi_intrinsic_expr(
+                    name,
+                    args,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
+            .or_else(|| {
+                lower_i64_map_get_or_default_expr(
+                    name,
+                    args,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
+            .or_else(|| {
+                lower_i64_fixed_array_intrinsic_expr(
+                    name,
+                    args,
+                    ty,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
+            .or_else(|| i64_known_helper_call_i64_expr(name, args, static_bindings))
+            .or_else(|| {
+                lower_i64_call_expr(
+                    name,
+                    args,
+                    false,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            })
         }
         Expr::BinaryAdd { op, lhs, rhs, ty } if is_i64_compatible_type(ty) => {
             let op = match op {
@@ -9143,6 +11780,19 @@ fn i64_option_payload_locals(
         .collect()
 }
 
+fn i64_string_len_option_local(
+    name: &str,
+    payload_ty: &Type,
+    local_indexes: &HashMap<String, usize>,
+) -> Option<Vec<usize>> {
+    if !matches!(payload_ty, Type::String | Type::Str) {
+        return None;
+    }
+    Some(vec![
+        *local_indexes.get(i64_option_payload_slot_key(name, 0).as_str())?,
+    ])
+}
+
 fn i64_enum_tag_key(name: &str) -> String {
     format!("{name}#tag")
 }
@@ -9420,42 +12070,156 @@ fn lower_i64_array_literal_projection_index_expr(
 fn lower_i64_clock_intrinsic_expr(
     name: &str,
     args: &[Expr],
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     let milliseconds = match name {
+        "clock_now_ms" => {
+            let [] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockNowMs);
+        }
+        name if is_i64_time_now_ms_name(name, static_bindings) => {
+            let [] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockNowMs);
+        }
+        "clock_elapsed_ms" => {
+            let [start] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockElapsedMs {
+                start: Box::new(lower_i64_expr(
+                    start,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            });
+        }
+        name if is_i64_time_elapsed_ms_name(name, static_bindings) => {
+            let [start] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockElapsedMs {
+                start: Box::new(lower_i64_instant_ms_expr(
+                    start,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            });
+        }
         "clock_sleep_ms" => {
             let [milliseconds] = args else {
                 return None;
             };
-            i64_static_scalar_value(milliseconds, static_bindings)?
+            lower_i64_expr(
+                milliseconds,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?
         }
         name if is_i64_time_sleep_name(name, static_bindings) => {
             let [duration] = args else {
                 return None;
             };
-            lower_i64_duration_ms_value(duration, static_bindings)?
+            lower_i64_duration_ms_expr(
+                duration,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?
         }
         _ => return None,
     };
-    match milliseconds {
-        value if value < 0 => Some(CraneliftI64Expr::Literal(-1)),
-        0 => Some(CraneliftI64Expr::Literal(0)),
-        _ => None,
-    }
+    i64_audited_clock_expr(
+        "clock_sleep_ms",
+        "milliseconds",
+        CraneliftI64Expr::SleepMs {
+            milliseconds: Box::new(milliseconds),
+        },
+        static_bindings,
+        CraneliftI64AuditSuccess::ExitZero,
+    )
 }
 
-fn lower_i64_duration_ms_value(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<i64> {
+fn lower_i64_duration_ms_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
     match expr {
         Expr::Call { name, args, .. } if is_i64_time_duration_ms_name(name, static_bindings) => {
             let [milliseconds] = args.as_slice() else {
                 return None;
             };
-            i64_static_scalar_value(milliseconds, static_bindings)
+            lower_i64_expr(
+                milliseconds,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
         }
         Expr::StructLiteral { fields, .. } => fields
             .iter()
             .find(|field| field.name == "ms")
-            .and_then(|field| i64_static_scalar_value(&field.expr, static_bindings)),
+            .and_then(|field| {
+                lower_i64_expr(
+                    &field.expr,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            }),
+        _ => None,
+    }
+}
+
+fn lower_i64_instant_ms_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match expr {
+        Expr::VarRef { name, .. } => local_indexes
+            .get(i64_struct_projection_key(name, "ms").as_str())
+            .copied()
+            .map(CraneliftI64Expr::Local),
+        Expr::StructLiteral { fields, .. } => fields
+            .iter()
+            .find(|field| field.name == "ms")
+            .and_then(|field| {
+                lower_i64_expr(
+                    &field.expr,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            }),
+        Expr::Call { name, args, .. } if is_i64_time_now_name(name, static_bindings) => {
+            if args.is_empty() {
+                Some(CraneliftI64Expr::ClockNowMs)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -9471,10 +12235,17 @@ fn lower_i64_process_intrinsic_expr(
     let [command] = args else {
         return None;
     };
-    match i64_string_text(command, static_bindings)?.as_str() {
-        "/usr/bin/true" => Some(CraneliftI64Expr::Literal(0)),
-        "/usr/bin/false" => Some(CraneliftI64Expr::Literal(1)),
-        "__axiom_stage1_missing_binary__" => Some(CraneliftI64Expr::Literal(-1)),
+    let command = i64_string_text(command, static_bindings)?;
+    match command.as_str() {
+        "/usr/bin/true" | "/usr/bin/false" | "__axiom_stage1_missing_binary__" => {
+            i64_audited_process_expr(
+                "process_status",
+                command.len(),
+                CraneliftI64Expr::ProcessStatus { command },
+                static_bindings,
+                CraneliftI64AuditSuccess::NonNegative,
+            )
+        }
         _ => None,
     }
 }
@@ -9485,11 +12256,462 @@ fn lower_i64_fs_write_intrinsic_expr(
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     let name = i64_fs_write_intrinsic_name(name, static_bindings)?;
+    if name == "fs_write" {
+        let (path, content) = i64_fs_path_content(args, static_bindings)?;
+        let path_len = path.len();
+        let content_len = content.len();
+        if content.len() > SPIKE_MAX_FS_WRITE_BYTES {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        }
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            Some(content_len),
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::WriteFile {
+                    path: candidate.display().to_string(),
+                    content,
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_append" {
+        let (path, content) = i64_fs_path_content(args, static_bindings)?;
+        let path_len = path.len();
+        let content_len = content.len();
+        if content.len() > SPIKE_MAX_FS_WRITE_BYTES {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        }
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            Some(content_len),
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::AppendFile {
+                    path: candidate.display().to_string(),
+                    content,
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_replace" {
+        let (path, content) = i64_fs_path_content(args, static_bindings)?;
+        let path_len = path.len();
+        let content_len = content.len();
+        if content.len() > SPIKE_MAX_FS_WRITE_BYTES {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        }
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        let Some(parent) = candidate.parent() else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        let Some(file_name) = candidate.file_name() else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                Some(content_len),
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        let temp_path = parent.join(format!(
+            ".{}.axiom-replace.tmp",
+            file_name.to_string_lossy()
+        ));
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            Some(content_len),
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                parent,
+                CraneliftI64Expr::ReplaceFile {
+                    path: candidate.display().to_string(),
+                    temp_path: temp_path.display().to_string(),
+                    content,
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_create" {
+        let path = i64_fs_path(args, static_bindings)?;
+        let path_len = path.len();
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                None,
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            None,
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::CreateFile {
+                    path: candidate.display().to_string(),
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_mkdir" {
+        let path = i64_fs_path(args, static_bindings)?;
+        let path_len = path.len();
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                None,
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            None,
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::MakeDir {
+                    path: candidate.display().to_string(),
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_mkdir_all" {
+        let path = i64_fs_path(args, static_bindings)?;
+        let path_len = path.len();
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, true) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                None,
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            None,
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_existing_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::MakeDirAll {
+                    path: candidate.display().to_string(),
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_remove_file" {
+        let path = i64_fs_path(args, static_bindings)?;
+        let path_len = path.len();
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                None,
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            None,
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::RemoveFile {
+                    path: candidate.display().to_string(),
+                },
+            )?,
+            static_bindings,
+        );
+    }
+    if name == "fs_remove_dir" {
+        let path = i64_fs_path(args, static_bindings)?;
+        let path_len = path.len();
+        let fs_root = static_bindings.fs_root.as_deref()?;
+        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+            return i64_audited_fs_expr(
+                name,
+                path_len,
+                None,
+                CraneliftI64Expr::Literal(-1),
+                static_bindings,
+            );
+        };
+        return i64_audited_fs_expr(
+            name,
+            path_len,
+            None,
+            i64_runtime_fs_guard_expr(
+                fs_root,
+                &candidate,
+                i64_fs_runtime_parent_fallback(&candidate)?.as_path(),
+                CraneliftI64Expr::RemoveDir {
+                    path: candidate.display().to_string(),
+                },
+            )?,
+            static_bindings,
+        );
+    }
     Some(CraneliftI64Expr::Literal(i64_fs_write_result(
         name,
         args,
         static_bindings,
     )?))
+}
+
+fn i64_audited_fs_expr(
+    intrinsic: &str,
+    path_len: usize,
+    content_len: Option<usize>,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    i64_audited_fs_expr_with_success(
+        intrinsic,
+        path_len,
+        content_len,
+        result,
+        static_bindings,
+        CraneliftI64AuditSuccess::ExitZero,
+    )
+}
+
+fn i64_audited_fs_expr_with_success(
+    intrinsic: &str,
+    path_len: usize,
+    content_len: Option<usize>,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditFs {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        path_len,
+        content_len,
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_env_expr(
+    intrinsic: &str,
+    key_len: usize,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditEnv {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        key_len,
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_process_expr(
+    intrinsic: &str,
+    command_len: usize,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditProcess {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        command_len,
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_net_expr(
+    intrinsic: &str,
+    host_len: usize,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditNet {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        host_len,
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_clock_expr(
+    intrinsic: &str,
+    arg_name: &str,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditClock {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        arg_name: arg_name.to_string(),
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_ffi_expr(
+    intrinsic: &str,
+    library: &str,
+    symbol: &str,
+    arg_type: &str,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditFfi {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        library: library.to_string(),
+        symbol: symbol.to_string(),
+        arg_type: arg_type.to_string(),
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_audited_crypto_expr(
+    intrinsic: &str,
+    arg_name: &str,
+    arg_value: String,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditCrypto {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        arg_name: arg_name.to_string(),
+        arg_value,
+        success,
+        result: Box::new(result),
+    })
+}
+
+fn i64_runtime_fs_guard_expr(
+    fs_root: &Path,
+    path: &Path,
+    fallback_path: &Path,
+    result: CraneliftI64Expr,
+) -> Option<CraneliftI64Expr> {
+    let root = std::fs::canonicalize(fs_root).ok()?;
+    Some(CraneliftI64Expr::RuntimeFsGuard {
+        root: root.display().to_string(),
+        path: path.display().to_string(),
+        fallback_path: fallback_path.display().to_string(),
+        result: Box::new(result),
+    })
+}
+
+fn i64_fs_runtime_parent_fallback(path: &Path) -> Option<PathBuf> {
+    path.parent().map(Path::to_path_buf)
+}
+
+fn i64_fs_runtime_existing_fallback(path: &Path) -> Option<PathBuf> {
+    let mut candidate = path;
+    while !candidate.exists() {
+        candidate = candidate.parent()?;
+    }
+    Some(candidate.to_path_buf())
 }
 
 fn lower_i64_crypto_random_intrinsic_expr(
@@ -9500,8 +12722,11 @@ fn lower_i64_crypto_random_intrinsic_expr(
     if !is_i64_crypto_random_u64_name(name, static_bindings) || !args.is_empty() {
         return None;
     }
-    let bytes: [u8; 8] = crypto_random_bytes(8).ok()?.try_into().ok()?;
-    Some(CraneliftI64Expr::Literal(i64::from_ne_bytes(bytes)))
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::RandomU64 {
+        intrinsic: "crypto_rand_u64".to_string(),
+        package: package.display().to_string(),
+    })
 }
 
 fn lower_i64_crypto_random_bytes_len_expr(
@@ -9520,6 +12745,9 @@ fn lower_i64_crypto_random_bytes_len_expr(
     let [length] = args.as_slice() else {
         return None;
     };
+    let arg_value = i64_static_scalar_value(length, static_bindings)
+        .map(|length| format!("int:{length}"))
+        .unwrap_or_else(|| "int".to_string());
     let length = lower_i64_expr(
         length,
         local_indexes,
@@ -9527,9 +12755,16 @@ fn lower_i64_crypto_random_bytes_len_expr(
         helper_signatures,
         static_bindings,
     )?;
-    Some(CraneliftI64Expr::RandomBytesLen {
-        length: Box::new(length),
-    })
+    i64_audited_crypto_expr(
+        "crypto_rand_bytes",
+        "length",
+        arg_value,
+        CraneliftI64Expr::RandomBytesLen {
+            length: Box::new(length),
+        },
+        static_bindings,
+        CraneliftI64AuditSuccess::NonNegative,
+    )
 }
 
 fn lower_i64_ffi_intrinsic_expr(
@@ -9547,19 +12782,31 @@ fn lower_i64_ffi_intrinsic_expr(
         return None;
     };
     if let Some(text) = i64_string_text(value, static_bindings) {
-        let len = text
-            .as_bytes()
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(text.len());
-        return Some(CraneliftI64Expr::Literal(len as i64));
+        return i64_audited_ffi_expr(
+            "ffi_call",
+            "c",
+            "strlen",
+            "string",
+            CraneliftI64Expr::CStringLen { value: text },
+            static_bindings,
+            CraneliftI64AuditSuccess::NonNegative,
+        );
     }
-    lower_i64_string_len_expr(
+    let result = lower_i64_string_len_expr(
         value,
         local_indexes,
         local_conditions,
         helper_signatures,
         static_bindings,
+    )?;
+    i64_audited_ffi_expr(
+        "ffi_call",
+        "c",
+        "strlen",
+        "string",
+        result,
+        static_bindings,
+        CraneliftI64AuditSuccess::NonNegative,
     )
 }
 
@@ -9852,6 +13099,18 @@ fn is_i64_time_duration_ms_name(name: &str, static_bindings: &I64StaticBindings)
     static_bindings.time_duration_ms_wrappers.contains(name)
 }
 
+fn is_i64_time_now_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_now_wrappers.contains(name)
+}
+
+fn is_i64_time_now_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_now_ms_wrappers.contains(name)
+}
+
+fn is_i64_time_elapsed_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_elapsed_ms_wrappers.contains(name)
+}
+
 fn is_i64_time_sleep_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.time_sleep_wrappers.contains(name)
 }
@@ -9886,6 +13145,15 @@ fn is_i64_std_net_shim_wrapper(function: &Function) -> bool {
                 | "udp_send_recv"
         )
     )
+}
+
+fn is_i64_std_net_wrapper(function: &Function, source_name: &str) -> bool {
+    function.path == "<stdlib>/net.ax" && function.source_name == source_name
+}
+
+fn is_i64_net_resolve_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    matches!(name, "net_resolve" | "resolve" | "std_net_resolve")
+        || static_bindings.net_resolve_wrappers.contains(name)
 }
 
 fn is_i64_net_tcp_loopback_once_name(name: &str) -> bool {
@@ -10036,6 +13304,14 @@ fn is_i64_std_log_wrapper(function: &Function, source_name: &str) -> bool {
     function.path == "<stdlib>/log.ax" && function.source_name == source_name
 }
 
+fn is_i64_std_io_wrapper(function: &Function, source_name: &str) -> bool {
+    function.path == "<stdlib>/io.ax" && function.source_name == source_name
+}
+
+fn is_i64_io_eprintln_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "io_eprintln" || static_bindings.io_eprintln_wrappers.contains(name)
+}
+
 fn is_i64_log_field_string_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.log_field_string_wrappers.contains(name)
 }
@@ -10058,6 +13334,20 @@ fn is_i64_log_fields3_name(name: &str, static_bindings: &I64StaticBindings) -> b
 
 fn is_i64_log_event_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.log_event_wrappers.contains(name)
+}
+
+fn is_i64_log_info_attrs_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.log_info_attrs_wrappers.contains(name)
+}
+
+fn i64_log_level_wrapper<'a>(
+    name: &str,
+    static_bindings: &'a I64StaticBindings,
+) -> Option<&'a str> {
+    static_bindings
+        .log_level_wrappers
+        .get(name)
+        .map(String::as_str)
 }
 
 fn is_i64_std_string_builder_wrapper(function: &Function, source_name: &str) -> bool {
@@ -10266,7 +13556,7 @@ fn lower_i64_string_len_projection_local(
     expr: &Expr,
     locals: &mut Vec<CraneliftI64Expr>,
     local_indexes: &mut HashMap<String, usize>,
-    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &mut I64StaticBindings,
 ) -> Option<()> {
@@ -10299,6 +13589,15 @@ fn lower_i64_string_len_projection_local(
         local_indexes.insert(i64_json_safe_string_len_key(name), json_safe_local);
         locals.push(CraneliftI64Expr::Local(local));
     }
+    lower_i64_printable_string_alias_local(
+        name,
+        expr,
+        locals,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
     if let Some(text) = text {
         static_bindings.strings.insert(name.to_string(), text);
     }
@@ -10310,6 +13609,85 @@ fn lower_i64_string_len_projection_local(
     Some(())
 }
 
+fn lower_i64_printable_string_alias_local(
+    name: &str,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<()> {
+    let Some((key, value, is_bool)) = lower_i64_printable_string_alias_parts(
+        name,
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) else {
+        return Some(());
+    };
+    let local = local_indexes.len();
+    local_indexes.insert(key.clone(), local);
+    locals.push(value);
+    if is_bool {
+        local_conditions.insert(key, i64_local_truthy_condition(local));
+    }
+    Some(())
+}
+
+fn lower_i64_printable_string_alias_parts(
+    name: &str,
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<(String, CraneliftI64Expr, bool)> {
+    let Expr::Call {
+        name: call_name,
+        args,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if is_i64_json_stringify_int_name(call_name, static_bindings) {
+        let [value] = args.as_slice() else {
+            return None;
+        };
+        return Some((
+            i64_printable_i64_string_key(name),
+            lower_i64_expr(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?,
+            false,
+        ));
+    }
+    if is_i64_json_stringify_bool_name(call_name, static_bindings) {
+        let [value] = args.as_slice() else {
+            return None;
+        };
+        return Some((
+            i64_printable_bool_string_key(name),
+            lower_i64_bool_value_expr(
+                value,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?,
+            true,
+        ));
+    }
+    None
+}
+
 fn lower_i64_string_len_expr(
     expr: &Expr,
     local_indexes: &HashMap<String, usize>,
@@ -10317,10 +13695,93 @@ fn lower_i64_string_len_expr(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
-    if let Some(value) = i64_string_text(expr, static_bindings) {
-        return Some(CraneliftI64Expr::Literal(value.len() as i64));
+    let crypto_len_call = matches!(
+        expr,
+        Expr::Call { name, .. }
+            if is_i64_crypto_sha256_name(name, static_bindings)
+                || is_i64_crypto_hmac_sha256_name(name, static_bindings)
+                || is_i64_crypto_hmac_sha512_name(name, static_bindings)
+    );
+    if !crypto_len_call {
+        if let Some(value) = i64_string_text(expr, static_bindings) {
+            return Some(CraneliftI64Expr::Literal(value.len() as i64));
+        }
     }
     match expr {
+        Expr::Call { name, args, .. } if is_i64_crypto_sha256_name(name, static_bindings) => {
+            let [input] = args.as_slice() else {
+                return None;
+            };
+            let _ = lower_i64_string_len_expr(
+                input,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            i64_audited_crypto_expr(
+                "crypto_sha256",
+                "inputs",
+                "strings:1".to_string(),
+                CraneliftI64Expr::Literal(64),
+                static_bindings,
+                CraneliftI64AuditSuccess::NonNegative,
+            )
+        }
+        Expr::Call { name, args, .. } if is_i64_crypto_hmac_sha256_name(name, static_bindings) => {
+            let [key, message] = args.as_slice() else {
+                return None;
+            };
+            let _ = lower_i64_string_len_expr(
+                key,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let _ = lower_i64_string_len_expr(
+                message,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            i64_audited_crypto_expr(
+                "crypto_hmac_sha256",
+                "inputs",
+                "strings:2".to_string(),
+                CraneliftI64Expr::Literal(64),
+                static_bindings,
+                CraneliftI64AuditSuccess::NonNegative,
+            )
+        }
+        Expr::Call { name, args, .. } if is_i64_crypto_hmac_sha512_name(name, static_bindings) => {
+            let [key, message] = args.as_slice() else {
+                return None;
+            };
+            let _ = lower_i64_string_len_expr(
+                key,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let _ = lower_i64_string_len_expr(
+                message,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            i64_audited_crypto_expr(
+                "crypto_hmac_sha512",
+                "inputs",
+                "strings:2".to_string(),
+                CraneliftI64Expr::Literal(128),
+                static_bindings,
+                CraneliftI64AuditSuccess::NonNegative,
+            )
+        }
         Expr::BinaryAdd {
             op: ArithmeticOp::Add,
             lhs,
@@ -10372,59 +13833,6 @@ fn lower_i64_string_len_expr(
                 |value| value.len() as i64,
             )
         }
-        Expr::Call { name, args, .. } if is_i64_crypto_sha256_name(name, static_bindings) => {
-            let [input] = args.as_slice() else {
-                return None;
-            };
-            let _ = lower_i64_string_len_expr(
-                input,
-                local_indexes,
-                local_conditions,
-                helper_signatures,
-                static_bindings,
-            )?;
-            Some(CraneliftI64Expr::Literal(64))
-        }
-        Expr::Call { name, args, .. } if is_i64_crypto_hmac_sha256_name(name, static_bindings) => {
-            let [key, message] = args.as_slice() else {
-                return None;
-            };
-            let _ = lower_i64_string_len_expr(
-                key,
-                local_indexes,
-                local_conditions,
-                helper_signatures,
-                static_bindings,
-            )?;
-            let _ = lower_i64_string_len_expr(
-                message,
-                local_indexes,
-                local_conditions,
-                helper_signatures,
-                static_bindings,
-            )?;
-            Some(CraneliftI64Expr::Literal(64))
-        }
-        Expr::Call { name, args, .. } if is_i64_crypto_hmac_sha512_name(name, static_bindings) => {
-            let [key, message] = args.as_slice() else {
-                return None;
-            };
-            let _ = lower_i64_string_len_expr(
-                key,
-                local_indexes,
-                local_conditions,
-                helper_signatures,
-                static_bindings,
-            )?;
-            let _ = lower_i64_string_len_expr(
-                message,
-                local_indexes,
-                local_conditions,
-                helper_signatures,
-                static_bindings,
-            )?;
-            Some(CraneliftI64Expr::Literal(128))
-        }
         Expr::Call { name, args, .. } if is_i64_json_stringify_int_name(name, static_bindings) => {
             let [value] = args.as_slice() else {
                 return None;
@@ -10472,6 +13880,169 @@ fn lower_i64_string_len_expr(
                 rhs: Box::new(CraneliftI64Expr::Literal(2)),
             })
         }
+        Expr::Call { name, args, .. } if is_i64_log_field_string_name(name, static_bindings) => {
+            let [key, value] = args.as_slice() else {
+                return None;
+            };
+            let key_len =
+                i64::try_from(json_escape_string(&i64_string_text(key, static_bindings)?).len())
+                    .ok()?;
+            Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(CraneliftI64Expr::Literal(key_len + 1)),
+                rhs: Box::new(lower_i64_json_escaped_string_len_expr(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            })
+        }
+        Expr::Call { name, args, .. } if is_i64_log_field_int_name(name, static_bindings) => {
+            let [key, value] = args.as_slice() else {
+                return None;
+            };
+            let key_len =
+                i64::try_from(json_escape_string(&i64_string_text(key, static_bindings)?).len())
+                    .ok()?;
+            Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(CraneliftI64Expr::Literal(key_len + 1)),
+                rhs: Box::new(i64_decimal_string_len_expr(lower_i64_expr(
+                    value,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?)),
+            })
+        }
+        Expr::Call { name, args, .. } if is_i64_log_field_bool_name(name, static_bindings) => {
+            let [key, value] = args.as_slice() else {
+                return None;
+            };
+            let key_len =
+                i64::try_from(json_escape_string(&i64_string_text(key, static_bindings)?).len())
+                    .ok()?;
+            Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(CraneliftI64Expr::Literal(key_len + 1)),
+                rhs: Box::new(CraneliftI64Expr::Select {
+                    cond: Box::new(lower_i64_condition(
+                        value,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?),
+                    then_result: Box::new(CraneliftI64Expr::Literal(4)),
+                    else_result: Box::new(CraneliftI64Expr::Literal(5)),
+                }),
+            })
+        }
+        Expr::Call { name, args, .. } if is_i64_log_fields2_name(name, static_bindings) => {
+            let [first, second] = args.as_slice() else {
+                return None;
+            };
+            Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(CraneliftI64Expr::Binary {
+                    op: CraneliftI64BinaryOp::Add,
+                    lhs: Box::new(lower_i64_string_len_expr(
+                        first,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?),
+                    rhs: Box::new(CraneliftI64Expr::Literal(1)),
+                }),
+                rhs: Box::new(lower_i64_string_len_expr(
+                    second,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            })
+        }
+        Expr::Call { name, args, .. } if is_i64_log_fields3_name(name, static_bindings) => {
+            let [first, second, third] = args.as_slice() else {
+                return None;
+            };
+            Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(CraneliftI64Expr::Binary {
+                    op: CraneliftI64BinaryOp::Add,
+                    lhs: Box::new(lower_i64_string_len_expr(
+                        first,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?),
+                    rhs: Box::new(CraneliftI64Expr::Literal(1)),
+                }),
+                rhs: Box::new(CraneliftI64Expr::Binary {
+                    op: CraneliftI64BinaryOp::Add,
+                    lhs: Box::new(lower_i64_string_len_expr(
+                        second,
+                        local_indexes,
+                        local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )?),
+                    rhs: Box::new(CraneliftI64Expr::Binary {
+                        op: CraneliftI64BinaryOp::Add,
+                        lhs: Box::new(CraneliftI64Expr::Literal(1)),
+                        rhs: Box::new(lower_i64_string_len_expr(
+                            third,
+                            local_indexes,
+                            local_conditions,
+                            helper_signatures,
+                            static_bindings,
+                        )?),
+                    }),
+                }),
+            })
+        }
+        Expr::Call { name, args, .. } if is_i64_log_event_name(name, static_bindings) => {
+            let [level, message, attributes] = args.as_slice() else {
+                return None;
+            };
+            let prefix_len = i64::try_from("{\"level\":".len()).ok()?
+                + i64::try_from(
+                    json_escape_string(&i64_string_text(level, static_bindings)?).len(),
+                )
+                .ok()?
+                + i64::try_from(",\"message\":".len()).ok()?;
+            let suffix_len =
+                i64::try_from(",\"attributes\":{".len()).ok()? + i64::try_from("}}".len()).ok()?;
+            let attributes_len = lower_i64_string_len_expr(
+                attributes,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            let message_len = lower_i64_json_escaped_string_len_expr(
+                message,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?;
+            Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(CraneliftI64Expr::Binary {
+                    op: CraneliftI64BinaryOp::Add,
+                    lhs: Box::new(CraneliftI64Expr::Literal(prefix_len + suffix_len)),
+                    rhs: Box::new(attributes_len),
+                }),
+                rhs: Box::new(message_len),
+            })
+        }
         Expr::Literal(LiteralValue::String(_)) | Expr::Literal(LiteralValue::Str(_)) => {
             lower_i64_string_literal_len_expr(expr)
         }
@@ -10507,8 +14078,62 @@ fn lower_i64_string_len_expr(
             helper_signatures,
             static_bindings,
         ),
-        _ => None,
+        _ => i64_string_text(expr, static_bindings)
+            .map(|value| CraneliftI64Expr::Literal(value.len() as i64)),
     }
+}
+
+fn lower_i64_json_escaped_string_len_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if let Some(value) = i64_string_text(expr, static_bindings) {
+        return Some(CraneliftI64Expr::Literal(
+            json_escape_string(&value).len() as i64
+        ));
+    }
+    if let Expr::Call { name, args, .. } = expr {
+        if is_i64_json_stringify_string_name(name, static_bindings) {
+            let [text] = args.as_slice() else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::Binary {
+                op: CraneliftI64BinaryOp::Add,
+                lhs: Box::new(lower_i64_json_safe_string_len_expr(
+                    text,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+                rhs: Box::new(CraneliftI64Expr::Literal(4)),
+            });
+        }
+    }
+    lower_i64_map_key_array_string_index_mapped_i64_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+        |value| json_escape_string(value).len() as i64,
+    )
+    .or_else(|| {
+        Some(CraneliftI64Expr::Binary {
+            op: CraneliftI64BinaryOp::Add,
+            lhs: Box::new(lower_i64_json_safe_string_len_expr(
+                expr,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?),
+            rhs: Box::new(CraneliftI64Expr::Literal(2)),
+        })
+    })
 }
 
 fn lower_i64_map_key_array_string_index_len_expr(
@@ -10609,10 +14234,22 @@ fn lower_i64_json_safe_string_len_expr(
         Expr::VarRef {
             name,
             ty: Type::String | Type::Str,
-        } => local_indexes
-            .get(i64_json_safe_string_len_key(name).as_str())
-            .copied()
-            .map(CraneliftI64Expr::Local),
+        } => {
+            if let Some(local) = local_indexes.get(i64_json_safe_string_len_key(name).as_str()) {
+                return Some(CraneliftI64Expr::Local(*local));
+            }
+            if let Some(local) = local_indexes.get(i64_printable_i64_string_key(name).as_str()) {
+                return Some(i64_decimal_string_len_expr(CraneliftI64Expr::Local(*local)));
+            }
+            local_conditions
+                .get(i64_printable_bool_string_key(name).as_str())
+                .cloned()
+                .map(|cond| CraneliftI64Expr::Select {
+                    cond: Box::new(cond),
+                    then_result: Box::new(CraneliftI64Expr::Literal(4)),
+                    else_result: Box::new(CraneliftI64Expr::Literal(5)),
+                })
+        }
         Expr::BinaryAdd {
             op: ArithmeticOp::Add,
             lhs,
@@ -13316,6 +16953,15 @@ fn json_escape_string(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+fn json_escape_string_content(value: &str) -> String {
+    let escaped = json_escape_string(value);
+    escaped
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(escaped.as_str())
+        .to_string()
 }
 
 fn is_json_serdes_call(name: &str) -> bool {
@@ -16255,6 +19901,12 @@ fn spike_fs_write_candidate_for_root(
             .starts_with(canonical_root)
             .then_some(canonical_candidate);
     }
+    if matches!(
+        std::fs::symlink_metadata(&candidate),
+        Ok(metadata) if metadata.file_type().is_symlink()
+    ) {
+        return None;
+    }
     let parent = candidate.parent()?;
     if !allow_missing_ancestors {
         let Ok(canonical_parent) = std::fs::canonicalize(parent) else {
@@ -16754,9 +20406,13 @@ fn eval_clock_sleep_ms_call(
     if milliseconds == 0 {
         return Ok(SpikeValue::Int(0));
     }
-    Err(unsupported(
-        "nonzero clock_sleep_ms is not supported by the cranelift spike",
-    ))
+    if milliseconds > SPIKE_MAX_CLOCK_SLEEP_MS {
+        return Err(unsupported(&format!(
+            "clock_sleep_ms literals above {SPIKE_MAX_CLOCK_SLEEP_MS} ms are not supported by the cranelift spike"
+        )));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(milliseconds as u64));
+    Ok(SpikeValue::Int(0))
 }
 
 fn current_time_ms() -> Result<i64, Diagnostic> {
@@ -17821,5 +21477,60 @@ mod tests {
             ),
             Some(vec![I64MapKey::Int(2), I64MapKey::Int(1)])
         );
+    }
+
+    #[test]
+    fn fs_read_folding_is_disabled_when_program_writes() {
+        let mut static_bindings = I64StaticBindings::default();
+        static_bindings.fs_root = Some(PathBuf::from("."));
+        static_bindings.has_fs_write_calls = true;
+
+        assert_eq!(
+            i64_fs_read_file_len_expr("fixture.txt", "fixture.txt".len(), &static_bindings),
+            None
+        );
+    }
+
+    #[test]
+    fn write_candidate_rejects_dangling_symlink_leaf() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let target = root.join("target.txt");
+        let link = root.join("dangling.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).expect("create dangling symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&target, &link).expect("create dangling symlink");
+
+        assert_eq!(
+            spike_fs_write_candidate_for_root(root, "dangling.txt", false),
+            None
+        );
+    }
+
+    #[test]
+    fn i64_net_resolve_text_normalizes_ipv6_literals() {
+        assert_eq!(
+            super::i64_net_resolve_text("0:0:0:0:0:0:0:1").as_deref(),
+            Some("::1")
+        );
+    }
+
+    #[test]
+    fn i64_net_resolve_host_uses_canonical_ipv6_length() {
+        let expr = Expr::Call {
+            name: String::from("net_resolve"),
+            args: vec![Expr::Literal(LiteralValue::String(String::from(
+                "0:0:0:0:0:0:0:1",
+            )))],
+            ty: Type::Option(Box::new(Type::String)),
+        };
+
+        let host = super::i64_net_resolve_host(&expr, &I64StaticBindings::default())
+            .expect("numeric IPv6 host should lower");
+
+        assert_eq!(host.host, "0:0:0:0:0:0:0:1");
+        assert_eq!(host.resolved_len, 3);
+        assert_ne!(host.resolved_len, host.host.len() as i64);
     }
 }
