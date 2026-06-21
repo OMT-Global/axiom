@@ -3452,6 +3452,12 @@ fn lower_i64_runtime_stmts(
             if record_i64_known_string_let(stmt, static_bindings).unwrap_or(false) {
                 continue;
             }
+            if record_i64_known_map_let(stmt, static_bindings).unwrap_or(false) {
+                continue;
+            }
+            if record_i64_known_map_key_array_let(stmt, static_bindings).unwrap_or(false) {
+                continue;
+            }
             lowered.extend(lower_i64_runtime_let_stmts(
                 stmt,
                 locals,
@@ -6137,6 +6143,12 @@ fn lower_i64_return_block(
                 if record_i64_known_string_let(stmt, static_bindings).unwrap_or(false) {
                     continue;
                 }
+                if record_i64_known_map_let(stmt, static_bindings).unwrap_or(false) {
+                    continue;
+                }
+                if record_i64_known_map_key_array_let(stmt, static_bindings).unwrap_or(false) {
+                    continue;
+                }
                 stmts.extend(lower_i64_runtime_let_stmts(
                     stmt,
                     locals,
@@ -6200,6 +6212,42 @@ fn record_i64_known_string_let(
         return Some(false);
     };
     static_bindings.strings.insert(name.clone(), text);
+    Some(true)
+}
+
+fn record_i64_known_map_let(stmt: &Stmt, static_bindings: &mut I64StaticBindings) -> Option<bool> {
+    let Stmt::Let {
+        name,
+        ty: Type::Map(_, _),
+        expr: Expr::MapLiteral { entries, .. },
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    static_bindings
+        .map_literals
+        .insert(name.clone(), entries.clone());
+    Some(true)
+}
+
+fn record_i64_known_map_key_array_let(
+    stmt: &Stmt,
+    static_bindings: &mut I64StaticBindings,
+) -> Option<bool> {
+    let Stmt::Let {
+        name,
+        ty: Type::Array(_, None),
+        expr,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    let Some(keys) = i64_map_keys_expr(expr, static_bindings) else {
+        return Some(false);
+    };
+    static_bindings.map_key_arrays.insert(name.clone(), keys);
     Some(true)
 }
 
