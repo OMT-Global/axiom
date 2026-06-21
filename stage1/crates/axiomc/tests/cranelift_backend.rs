@@ -11236,12 +11236,11 @@ let _written: int = await send_text(stream, received)
 return close(stream)
 }
 
-let listener: TcpListener = await listen("127.0.0.1:0")
-let port: int = local_port(listener)
+let listener: TcpListener = await listen("127.0.0.1:41001")
 let first_handler: JoinHandle<int> = spawn<int>(echo_once(listener))
 let second_handler: JoinHandle<int> = spawn<int>(echo_once(listener))
-let first_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", port, "alpha", 1000))
-let second_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", port, "beta", 1000))
+let first_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", 41001, "alpha", 1000))
+let second_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", 41001, "beta", 1000))
 
 match await join<Option<string>>(first_client) {
 Some(reply) {
