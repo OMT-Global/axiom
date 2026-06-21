@@ -4217,7 +4217,8 @@ fn emit_i64_clock_now_ms_expr(
     builder.seal_block(success_block);
     // Preserve millisecond precision by lowering C11 timespec_get(TIME_UTC)
     // directly: tv_sec contributes epoch seconds, tv_nsec contributes the
-    // subsecond millisecond portion. This path must not fall back to time().
+    // subsecond millisecond portion. This path must not fall back to the
+    // second-resolution host clock import.
     let timespec_seconds =
         builder
             .ins()
@@ -5420,7 +5421,7 @@ mod tests {
             !imported_symbols
                 .iter()
                 .any(|symbol| *symbol == "time" || *symbol == "_time"),
-            "clock object should not import time(), got:\n{symbols}"
+            "clock object should not import the second-resolution host clock symbol, got:\n{symbols}"
         );
     }
 

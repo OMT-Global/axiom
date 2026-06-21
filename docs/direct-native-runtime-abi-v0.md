@@ -1030,10 +1030,11 @@ including `elapsed_ms(now())`, now lower to native scalar values backed by the
 object backend's host `timespec_get` import and can feed direct-native
 comparisons and process exit status without generated Rust. The backend symbol
 regression asserts the generated object imports `timespec_get` and does not
-import `time`, the deterministic backend lowering-boundary regression links the
-generated object against a `timespec_get` shim returning `7s + 456ms` and asserts
-`clock_now_ms()` observes `7456ms`, and the public runtime smoke requires a
-10 ms sleep to report a positive elapsed value below one second. Imported public
+import the second-resolution host clock symbol, the deterministic backend
+lowering-boundary regression links the generated object against a `timespec_get`
+shim returning `7s + 456ms` and asserts `clock_now_ms()` observes `7456ms`, and
+the public runtime smoke requires a 10 ms sleep to report a positive elapsed
+value below one second. Imported public
 `std/time.ax` `sleep(duration_ms(...))` wrappers now alias that same
 deterministic path for literal, static scalar, and runtime scalar durations in
 runtime-exit programs.
