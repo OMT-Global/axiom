@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 #[cfg(not(windows))]
 #[test]
@@ -5027,42 +5027,61 @@ fn cranelift_backend_builds_std_async_net_tcp_binary() {
     }
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("std-async-net-tcp");
-    let Some(port) = reserve_loopback_port() else {
-        return;
-    };
-    write_std_async_net_tcp_project(&project, port);
+    let mut bind_race_reports = Vec::new();
+    for attempt in 1..=5 {
+        let project = temp.path().join(format!("std-async-net-tcp-{attempt}"));
+        let Some(port) = reserve_loopback_port() else {
+            return;
+        };
+        write_std_async_net_tcp_project(&project, port);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-    assert!(
-        output.status.success(),
-        "cranelift std async net TCP build failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+        let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+            .args([
+                "build",
+                project.to_str().expect("project path"),
+                "--backend",
+                "cranelift",
+                "--json",
+            ])
+            .output()
+            .expect("run axiomc build --backend cranelift");
+        assert!(
+            output.status.success(),
+            "cranelift std async net TCP build failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
 
-    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
-    assert_eq!(payload["backend"], "cranelift");
-    assert_eq!(payload["generated_rust"], Value::Null);
-    let binary = payload["binary"].as_str().expect("binary path");
-    let run = Command::new(binary)
-        .output()
-        .expect("run cranelift std async net TCP binary");
-    assert!(
-        run.status.success(),
-        "cranelift std async net TCP binary failed: stderr={}",
-        String::from_utf8_lossy(&run.stderr)
+        let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+        assert_eq!(payload["backend"], "cranelift");
+        assert_eq!(payload["generated_rust"], Value::Null);
+        let binary = payload["binary"].as_str().expect("binary path");
+        let run = Command::new(binary)
+            .output()
+            .expect("run cranelift std async net TCP binary");
+        if run.status.success() {
+            assert_eq!(String::from_utf8_lossy(&run.stdout), "alpha\nbeta\n");
+            return;
+        }
+        if !std_async_net_tcp_bind_race(&run) {
+            panic!(
+                "cranelift std async net TCP binary failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&run.stdout),
+                String::from_utf8_lossy(&run.stderr)
+            );
+        }
+        bind_race_reports.push(String::from_utf8_lossy(&run.stderr).into_owned());
+    }
+
+    panic!(
+        "cranelift std async net TCP binary exhausted literal-port retries after bind races: {}",
+        bind_race_reports.join("\n--- retry ---\n")
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "alpha\nbeta\n");
+}
+
+#[cfg(not(windows))]
+fn std_async_net_tcp_bind_race(run: &Output) -> bool {
+    String::from_utf8_lossy(&run.stderr).contains("\"message\":\"net_tcp_listen failed\"")
 }
 
 #[cfg(not(windows))]
