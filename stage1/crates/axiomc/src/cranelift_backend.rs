@@ -15223,6 +15223,29 @@ fn i64_static_slice_return_width_for_stmts(
     None
 }
 
+fn i64_static_slice_call_return_width(
+    expr: &Expr,
+    functions: &HashMap<&str, &Function>,
+    slots: &HashMap<String, Vec<Option<usize>>>,
+    static_bindings: &I64StaticBindings,
+) -> Option<usize> {
+    let Expr::Call { name, .. } = expr else {
+        return None;
+    };
+    let function = *functions.get(name.as_str())?;
+    if !is_i64_slice_param_type(&function.return_ty) {
+        return None;
+    }
+    i64_function_static_slice_return_width(
+        function,
+        slots
+            .get(function.name.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+        static_bindings,
+    )
+}
+
 fn collect_i64_helper_slice_param_slots_stmt(
     stmt: &Stmt,
     functions: &HashMap<&str, &Function>,
@@ -15242,8 +15265,14 @@ fn collect_i64_helper_slice_param_slots_stmt(
                 static_bindings,
             );
             if matches!(ty, Type::Slice(_) | Type::MutSlice(_))
-                && let Some(width) =
-                    i64_static_slice_arg_width(expr, local_slice_widths, static_bindings)
+                && let Some(width) = i64_static_slice_arg_width(
+                    expr,
+                    local_slice_widths,
+                    static_bindings,
+                )
+                .or_else(|| {
+                    i64_static_slice_call_return_width(expr, functions, &*slots, static_bindings)
+                })
             {
                 local_slice_widths.insert(name.clone(), width);
             }
