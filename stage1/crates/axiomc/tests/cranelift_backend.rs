@@ -2999,7 +2999,10 @@ fn cranelift_backend_builds_array_helpers_binary() {
         "cranelift array-helpers binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n10\n30\n40\n");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "3\n10\n30\n40\n3\n10\n30\n40\n"
+    );
 }
 
 #[cfg(not(windows))]
@@ -9424,7 +9427,7 @@ fn write_array_helpers_project(project: &Path) {
     .expect("write array-helpers lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "let values: [int; 3] = [10, 20, 30]\nprint len(values)\nprint first(values)\nprint last(values)\nprint first(values) + last(values)\n",
+        "fn make_values(): [int; 3] {\nreturn [10, 20, 30]\n}\n\nlet values: [int; 3] = [10, 20, 30]\nlet returned: [int; 3] = make_values()\nprint len(values)\nprint first(values)\nprint last(values)\nprint first(values) + last(values)\nprint len(returned)\nprint first(returned)\nprint last(returned)\nprint first(returned) + last(returned)\n",
     )
     .expect("write array-helpers source");
 }
@@ -13340,6 +13343,15 @@ source = "path"
 static PRESENT_ENV: string = "AXIOM_CRANELIFT_ENV_READ"
 static MISSING_ENV: string = "__AXIOM_CRANELIFT_ENV_MISSING__"
 
+fn helper_present_len(): int {
+return match get_env(PRESENT_ENV) { Some(value) => len(value), None => 0 }
+}
+
+fn helper_missing_len(): int {
+let stored: Option<string> = env_get(MISSING_ENV)
+return match stored { Some(value) => len(value), None => 38 }
+}
+
 fn main(): int {
 let present: int = match env_get(PRESENT_ENV) { Some(value) => len(value), None => 0 }
 let missing: int = match get_env(MISSING_ENV) { Some(value) => len(value), None => 38 }
@@ -13357,7 +13369,9 @@ None {
 statement_present_len = 1
 }
 }
-if present == 11 && missing == 38 && stored_present_len == 11 && stored_missing_len == 38 && statement_present_len == 11 {
+let helper_present: int = helper_present_len()
+let helper_missing: int = helper_missing_len()
+if present == 11 && missing == 38 && stored_present_len == 11 && stored_missing_len == 38 && statement_present_len == 11 && helper_present == 11 && helper_missing == 38 {
 return statement_present_len + 37
 } else {
 return 1

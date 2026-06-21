@@ -252,10 +252,12 @@ helper returns using the same element-slot ABI, including inside runtime loop
 blocks. Fixed-array `len`, `first`, and `last` over scalar and bool element
 arrays also lower through the same projected element-slot representation for
 local arrays, inline literals, helper parameters, and helper-returned arrays
-feeding a direct-native process exit status. The row remains partial because
-direct-native codegen still does not provide a general array ABI, array storage
-for non-scalar elements, full dynamic indexing semantics, bounds diagnostics,
-or a complete aggregate value passing contract.
+feeding a direct-native process exit status. The public array helper smoke also
+prints `len`, `first`, `last`, and a first-plus-last sum for both a local fixed
+array and a helper-returned fixed array while asserting `generated_rust: null`.
+The row remains partial because direct-native codegen still does not provide a
+general array ABI, array storage for non-scalar elements, full dynamic indexing
+semantics, bounds diagnostics, or a complete aggregate value passing contract.
 
 The `tuple` row now has narrow direct-native runtime evidence for immediate
 tuple-literal scalar indexing and scalar projection from local tuple bindings.
@@ -726,6 +728,9 @@ runtime, returning the `None` arm for non-allowlisted keys even when those names
 exist in the host process. The same runtime env lookup can now be stored in a
 local `Option<string>` and matched later for supported `len(value)` expression
 and statement matches without capturing the compiler process environment.
+Helper-local present and missing env lookups over static keys also lower through
+the same native runtime environment path and return through direct-native helper
+calls.
 Broader runtime environment binding, stored string value materialization beyond
 length projection, and dynamic-key allowlist handling remain open under #1001.
 
