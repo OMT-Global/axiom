@@ -839,7 +839,7 @@ projection smoke to this row, covering finite map-key selection through public
 `std/log.ax` length projection without generated Rust.
 The focused evidence manifest now also links the float-key rejection smoke to
 this row, covering the unsupported map-key boundary alongside supported
-scalar/string/tuple key lowering.
+scalar/string/bool/tuple key lowering.
 Broader map ownership, runtime map storage, general payload lookup bindings
 beyond the evidenced scalar/bool/known-string pure helper direct-match and
 helper-local binding paths, map helper parameters outside compile-time-known
