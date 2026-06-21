@@ -810,13 +810,15 @@ also feed inline and pre-runtime map lookup, contains, and get-or-default
 lowering. Static scalar tuple keys can also feed inline-map-literal
 `get_or_default(...)`, `map_contains_key(...)`, `get(...)`, direct indexing,
 duplicate-key replacement, and statically initialized component lookups without
-generated Rust. Imported public `std/collections.ax` `contains`, `get`, and
-`get_or_default` map wrappers now alias the same direct-native i64 lowering for
-static string-, int-, bool-, and tuple-keyed map-local cases, and `keys` wrapper
-calls cover static string-, int-, and bool-keyed map-local key-array counts plus
-literal and dynamic key projections for supported scalar/bool keys. The focused
-evidence manifest now links the wrapper runtime-exit smoke to this row. Imported
-public `std/collections.ax` `keys` wrappers over static tuple-keyed maps can
+generated Rust. Imported public `std/collections.ax` `contains`, `get`,
+`get_or_default`, and `keys` map wrappers now alias the same direct-native i64
+lowering for static string/int map-local cases, and the focused evidence
+manifest now links the wrapper runtime-exit smoke to this row. A dedicated
+bool-key wrapper runtime-exit smoke now also proves public `contains`, `get`,
+`get_or_default`, and `keys` wrapper lowering over static bool-keyed maps.
+Imported public `std/collections.ax` tuple-keyed `contains`, `get`, and
+`get_or_default` map wrappers can also feed the same direct-native i64 lowering
+without generated Rust, and `keys` wrappers over static tuple-keyed maps can
 also feed literal and dynamic scalar/bool component projections from
 `keys(...)[index].field` without materializing a general tuple key-array value.
 The focused evidence manifest now also links the broader
@@ -848,7 +850,7 @@ projection smoke to this row, covering finite map-key selection through public
 `std/log.ax` length projection without generated Rust.
 The focused evidence manifest now also links the float-key rejection smoke to
 this row, covering the unsupported map-key boundary alongside supported
-scalar/string/tuple key lowering.
+scalar/string/bool/tuple key lowering.
 Broader map ownership, runtime map storage, general payload lookup bindings
 beyond the evidenced scalar/bool/known-string pure helper direct-match and
 helper-local binding paths, map helper parameters outside compile-time-known
