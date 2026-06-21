@@ -9638,7 +9638,7 @@ fn write_slice_helper_returns_main_exit_project(project: &Path) {
     .expect("write slice helper returns main exit lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn identity(values: &[int]): &[int] {\nreturn values\n}\n\nfn main(): int {\nlet values: [int; 4] = [1, 20, 26, 9]\nlet window: &[int] = values[1:3]\nlet pick_index: int = 1\nlet returned: &[int] = identity(window)\nif len(returned) + first(returned) + last(returned) == 48 && returned[pick_index] + 22 == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "fn identity(values: &[int]): &[int] {\nreturn values\n}\n\nfn main(): int {\nlet values: [int; 4] = [1, 20, 26, 9]\nlet window: &[int] = values[1:3]\nlet pick_index: int = 1\nif pick_index == 1 {\nlet returned: &[int] = identity(window)\nlet code: int = len(returned) + first(returned) + last(returned)\nreturn code + returned[pick_index] - 26\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write slice helper returns main exit source");
 }

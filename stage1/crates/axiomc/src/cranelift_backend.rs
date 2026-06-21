@@ -3831,6 +3831,28 @@ fn lower_i64_runtime_let_stmts(
     if let Stmt::Let {
         name,
         ty: Type::Slice(_) | Type::MutSlice(_),
+        expr: Expr::Call {
+            name: call_name,
+            args,
+            ..
+        },
+        ..
+    } = stmt
+    {
+        return lower_i64_slice_call_let_stmts(
+            name,
+            call_name,
+            args,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        );
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Slice(_) | Type::MutSlice(_),
         expr,
         ..
     } = stmt
