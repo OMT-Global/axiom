@@ -6635,6 +6635,7 @@ fn invalidate_i64_assigned_string_facts(stmt: &Stmt, static_bindings: &mut I64St
     collect_i64_assigned_string_locals(stmt, &mut names);
     for name in names {
         static_bindings.strings.remove(&name);
+        static_bindings.map_key_arrays.remove(&name);
         static_bindings.map_key_array_string_indexes.remove(&name);
     }
 }
