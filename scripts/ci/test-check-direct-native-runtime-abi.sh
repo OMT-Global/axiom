@@ -154,7 +154,7 @@ contract["value_features"][0]["status"] = "implemented"
 contract["value_features"][0]["runtime_evidence"] = [
     "stage1/crates/axiomc/tests/cranelift_backend.rs"
 ]
-contract["value_features"][0]["blockers"] = [1001]
+contract["value_features"][0]["blockers"] = [1124]
 
 with open(sys.argv[2], "w", encoding="utf-8") as handle:
     json.dump(contract, handle)
