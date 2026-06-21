@@ -15183,7 +15183,7 @@ fn i64_static_slice_return_width_for_stmts(
     mut local_slice_widths: HashMap<String, usize>,
     static_bindings: &I64StaticBindings,
 ) -> Option<usize> {
-    for stmt in stmts {
+    for (index, stmt) in stmts.iter().enumerate() {
         match stmt {
             Stmt::Let {
                 name,
@@ -15202,6 +15202,9 @@ fn i64_static_slice_return_width_for_stmts(
                 else_block: Some(else_block),
                 ..
             } => {
+                if index + 1 != stmts.len() {
+                    return None;
+                }
                 let then_width = i64_static_slice_return_width_for_stmts(
                     then_block,
                     local_slice_widths.clone(),
@@ -22806,6 +22809,43 @@ mod tests {
                 &static_bindings
             ),
             Some(CraneliftI64Expr::Literal(20))
+        );
+    }
+
+    #[test]
+    fn static_slice_return_width_rejects_nonterminal_branch_return() {
+        let span = crate::mir::SourceSpan { line: 1, column: 1 };
+        let slice_ty = Type::Slice(Box::new(Type::Int));
+        let var_ref = |name: &str| Expr::VarRef {
+            name: String::from(name),
+            ty: slice_ty.clone(),
+        };
+        let return_var = |name: &str| Stmt::Return {
+            expr: var_ref(name),
+            span,
+        };
+        let stmts = vec![
+            Stmt::If {
+                cond: Expr::Literal(LiteralValue::Bool(true)),
+                then_block: vec![return_var("left")],
+                else_block: Some(vec![return_var("right")]),
+                span,
+            },
+            return_var("fallback"),
+        ];
+        let local_slice_widths = HashMap::from([
+            (String::from("left"), 1),
+            (String::from("right"), 1),
+            (String::from("fallback"), 2),
+        ]);
+
+        assert_eq!(
+            i64_static_slice_return_width_for_stmts(
+                &stmts,
+                local_slice_widths,
+                &I64StaticBindings::default()
+            ),
+            None
         );
     }
 
