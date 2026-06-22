@@ -2234,16 +2234,81 @@ fn write_provenance_artifact(
     backend: NativeBackendKind,
 ) -> Result<(), Diagnostic> {
     let path = provenance_path(package_root, &analyzed.manifest);
+    ensure_output_path_stays_inside_package(package_root, &path, "provenance output")?;
     ensure_writable_output_parent(&path, "provenance output")?;
     let report = provenance_report(package_root, analyzed, generated_rust, binary, backend)?;
     let content = serde_json::to_string_pretty(&report)
         .map_err(|err| Diagnostic::new("build", format!("failed to render provenance: {err}")))?;
-    fs::write(&path, format!("{content}\n")).map_err(|err| {
+    write_output_file_no_follow(&path, format!("{content}\n").as_bytes()).map_err(|err| {
         Diagnostic::new(
             "build",
             format!("failed to write {}: {err}", path.display()),
         )
     })
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "ios",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+fn write_output_file_no_follow(path: &Path, content: &[u8]) -> io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "ios",
+        target_os = "macos",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    const O_NOFOLLOW: i32 = 0x0000_0100;
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)?;
+    file.write_all(content)
+}
+
+#[cfg(any(
+    not(unix),
+    all(
+        unix,
+        not(any(
+            target_os = "android",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "netbsd",
+            target_os = "openbsd",
+        ))
+    )
+))]
+fn write_output_file_no_follow(path: &Path, content: &[u8]) -> io::Result<()> {
+    if fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "refusing to write through symlink",
+        ));
+    }
+    fs::write(path, content)
 }
 
 fn ensure_writable_output_parent(path: &Path, description: &str) -> Result<(), Diagnostic> {
@@ -7991,6 +8056,115 @@ mod tests {
             relationship.kind == "emits"
                 && relationship.to == "axiom://package/demo/artifact/generated-rust"
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provenance_artifact_rejects_symlinked_metadata_dir_outside_package() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = &dir.path().join("package");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(
+            root.join("axiom.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            root.join("axiom.lock"),
+            crate::lockfile::render_lockfile(&package_manifest()).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(root.join("src/main.ax"), "fn main(): int {\nreturn 0\n}\n")
+            .expect("write source");
+
+        let graph = load_package_graph(root).expect("load graph");
+        let package_root =
+            canonicalize_existing_path(root, "project root").expect("canonical root");
+        let analyzed = analyze_package(&graph, &package_root).expect("analyze package");
+        let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
+        let binary = binary_path_for_target(&package_root, &analyzed.manifest, None);
+        fs::create_dir_all(generated_rust.parent().expect("generated parent"))
+            .expect("create dist");
+        fs::write(&generated_rust, "fn main() {}\n").expect("write generated rust");
+        fs::write(&binary, b"binary").expect("write binary");
+
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&outside).expect("create outside");
+        std::os::unix::fs::symlink(&outside, root.join("dist/.axiom"))
+            .unwrap_or_else(|err| panic!("symlink metadata dir: {err}"));
+
+        let error = match write_provenance_artifact(
+            &package_root,
+            &analyzed,
+            &generated_rust,
+            &binary,
+            NativeBackendKind::GeneratedRust,
+        ) {
+            Ok(()) => panic!("symlinked provenance metadata dir was accepted"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "build");
+        assert_eq!(
+            error.message,
+            "provenance output resolves outside the package"
+        );
+        assert!(!outside.join("provenance.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provenance_artifact_rejects_symlinked_final_file() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = &dir.path().join("package");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(
+            root.join("axiom.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            root.join("axiom.lock"),
+            crate::lockfile::render_lockfile(&package_manifest()).expect("render lockfile"),
+        )
+        .expect("write lockfile");
+        fs::write(root.join("src/main.ax"), "fn main(): int {\nreturn 0\n}\n")
+            .expect("write source");
+
+        let graph = load_package_graph(root).expect("load graph");
+        let package_root =
+            canonicalize_existing_path(root, "project root").expect("canonical root");
+        let analyzed = analyze_package(&graph, &package_root).expect("analyze package");
+        let generated_rust = generated_rust_path(&package_root, &analyzed.manifest);
+        let binary = binary_path_for_target(&package_root, &analyzed.manifest, None);
+        fs::create_dir_all(generated_rust.parent().expect("generated parent"))
+            .expect("create dist");
+        fs::write(&generated_rust, "fn main() {}\n").expect("write generated rust");
+        fs::write(&binary, b"binary").expect("write binary");
+
+        let outside = dir.path().join("outside.json");
+        fs::write(&outside, "sentinel\n").expect("write sentinel");
+        fs::create_dir_all(root.join("dist/.axiom")).expect("create metadata dir");
+        std::os::unix::fs::symlink(&outside, root.join("dist/.axiom/provenance.json"))
+            .unwrap_or_else(|err| panic!("symlink provenance file: {err}"));
+
+        let error = match write_provenance_artifact(
+            &package_root,
+            &analyzed,
+            &generated_rust,
+            &binary,
+            NativeBackendKind::GeneratedRust,
+        ) {
+            Ok(()) => panic!("symlinked provenance file was accepted"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "build");
+        assert!(error.message.contains("failed to write"));
+        assert_eq!(
+            fs::read_to_string(&outside).expect("read outside sentinel"),
+            "sentinel\n"
+        );
     }
 
     #[test]
