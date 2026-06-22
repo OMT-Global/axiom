@@ -1,33 +1,32 @@
 use axiomc::codegen::NativeBackendKind;
 use axiomc::dap;
-use axiomc::diagnostic_catalog::{DiagnosticCodeInfo, diagnostic_code_info};
+use axiomc::diagnostic_catalog::{diagnostic_code_info, DiagnosticCodeInfo};
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lockfile::{expected_lockfile_for_project, validate_lockfile};
 use axiomc::lsp;
 use axiomc::manifest::{
-    CapabilityDescriptor, TestKind, binary_path, entry_path, generated_rust_path, load_manifest,
-    lockfile_path, manifest_path, out_dir_path,
+    binary_path, entry_path, generated_rust_path, load_manifest, lockfile_path, manifest_path,
+    out_dir_path, CapabilityDescriptor, TestKind,
 };
 #[cfg(test)]
 use axiomc::new_project::create_project;
-use axiomc::new_project::{WorkloadTemplate, create_project_with_template};
+use axiomc::new_project::{create_project_with_template, WorkloadTemplate};
 use axiomc::project::{
-    BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, TestOutput,
     build_project_with_options, capability_sbom, check_project_with_options,
     list_project_tests_with_options, package_graph_metadata, project_capabilities,
     run_project_report_with_options, run_project_tests_with_options, run_project_with_options,
-    trace_provenance,
+    trace_provenance, BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, TestOutput,
 };
 use axiomc::registry::{
-    PublishOptions, RegistryServeOptions, load_registry_index, publish_package,
-    render_registry_index, serve_registry, verify_registry_index_integrity,
+    load_registry_index, publish_package, render_registry_index, serve_registry,
+    verify_registry_index_integrity, PublishOptions, RegistryServeOptions,
 };
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -3593,9 +3592,8 @@ fn generate_openapi(project: &Path, out: &Path) -> Result<GenerateOpenApiReport,
     })?;
     let package_id = package_node_for_path(project);
     let artifact = openapi_artifact(project, &output_path, &package_id, "generated");
-    let diagnostics =
-        if routes.is_empty() {
-            vec![Diagnostic::new(
+    let diagnostics = if routes.is_empty() {
+        vec![Diagnostic::new(
             "openapi",
             "no HTTP-serving routes discovered for OpenAPI generation",
         )
@@ -3603,9 +3601,9 @@ fn generate_openapi(project: &Path, out: &Path) -> Result<GenerateOpenApiReport,
             "The generated document is valid and intentionally contains an empty paths object.",
         )
         .normalized_for_json()]
-        } else {
-            Vec::new()
-        };
+    } else {
+        Vec::new()
+    };
     Ok(GenerateOpenApiReport {
         schema_version: OPENAPI_SCHEMA_VERSION,
         ok: true,
@@ -4320,7 +4318,8 @@ fn policy_target_contract(artifact: GeneratedArtifact) -> TargetContract {
     TargetContract {
         id: POLICY_TARGET_ID,
         target_class: POLICY_ARTIFACT_KIND,
-        description: "Stage 1 policy bundle generator for manifest capabilities and effect allowlists.",
+        description:
+            "Stage 1 policy bundle generator for manifest capabilities and effect allowlists.",
         status: "experimental",
         input_node_kinds: vec!["Package", "Capability", "Effect"],
         supported_effect_kinds: policy_known_effect_kinds(),
@@ -5242,7 +5241,8 @@ fn runbook_target_contract(artifact: GeneratedArtifact) -> TargetContract {
     TargetContract {
         id: RUNBOOK_TARGET_ID,
         target_class: RUNBOOK_ARTIFACT_KIND,
-        description: "Stage 1 operator runbook generator for capabilities, effects, evidence, and artifacts.",
+        description:
+            "Stage 1 operator runbook generator for capabilities, effects, evidence, and artifacts.",
         status: "experimental",
         input_node_kinds: vec![
             "Package",
@@ -5543,7 +5543,11 @@ fn runbook_evidence_refs(evidence: &[EvidenceItem]) -> String {
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 fn markdown_cell(value: &str) -> String {
@@ -6141,30 +6145,22 @@ fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOut
             format!("no .ax files found under {}", path.display()),
         ));
     }
+    ensure_no_symlink_components(out_dir)?;
     fs::create_dir_all(out_dir).map_err(|err| {
         Diagnostic::new(
             "doc",
             format!("failed to create {}: {err}", out_dir.display()),
         )
     })?;
+    ensure_no_symlink_components(out_dir)?;
     let items = extract_doc_items(&files)?;
     let markdown = render_markdown_docs(&items);
     let markdown_path = out_dir.join("index.md");
     let html_path = out_dir.join("index.html");
-    fs::write(&markdown_path, &markdown).map_err(|err| {
-        Diagnostic::new(
-            "doc",
-            format!("failed to write {}: {err}", markdown_path.display()),
-        )
-    })?;
+    write_doc_file(&markdown_path, markdown.as_bytes())?;
     if write_html {
         let html = render_html_docs(&markdown);
-        fs::write(&html_path, html).map_err(|err| {
-            Diagnostic::new(
-                "doc",
-                format!("failed to write {}: {err}", html_path.display()),
-            )
-        })?;
+        write_doc_file(&html_path, html.as_bytes())?;
     } else if html_path.exists() {
         fs::remove_file(&html_path).map_err(|err| {
             Diagnostic::new(
@@ -6195,6 +6191,94 @@ fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOut
         items,
         capabilities,
     })
+}
+
+fn ensure_no_symlink_components(path: &Path) -> Result<(), Diagnostic> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!(
+                        "refusing to write documentation through symlink {}",
+                        current.display()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("failed to inspect {}: {error}", current.display()),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_doc_file(path: &Path, contents: &[u8]) -> Result<(), Diagnostic> {
+    if fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(Diagnostic::new(
+            "doc",
+            format!("refusing to replace symlink {}", path.display()),
+        ));
+    }
+
+    let pid = std::process::id();
+    let mut last_error = None;
+    for attempt in 0..16 {
+        let temp_path = path.with_extension(format!("tmp-{pid}-{attempt}"));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(contents) {
+                    let _ = fs::remove_file(&temp_path);
+                    return Err(Diagnostic::new(
+                        "doc",
+                        format!("failed to write {}: {error}", path.display()),
+                    ));
+                }
+                if let Err(error) = fs::rename(&temp_path, path) {
+                    let _ = fs::remove_file(&temp_path);
+                    return Err(Diagnostic::new(
+                        "doc",
+                        format!("failed to write {}: {error}", path.display()),
+                    ));
+                }
+                return Ok(());
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => {
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("failed to write {}: {error}", path.display()),
+                ));
+            }
+        }
+    }
+
+    Err(Diagnostic::new(
+        "doc",
+        format!(
+            "failed to write {}: {}",
+            path.display(),
+            last_error
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| String::from("temporary file collision"))
+        ),
+    ))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -6590,7 +6674,11 @@ fn function_name_from_source_line(line: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() { None } else { Some(name) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 fn recommended_fixture_name(file: &str, function: &str) -> String {
@@ -7668,6 +7756,48 @@ return "ok"
         assert_eq!(generated_files, vec![String::from("index.md")]);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn doc_generation_rejects_symlinked_markdown_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("doc-symlink-output");
+        fs::create_dir_all(project.join("src")).expect("mkdir");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "doc-symlink-output"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+"#,
+        )
+        .expect("write manifest");
+        fs::write(project.join("axiom.lock"), "version = 1\n").expect("write lock");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"/// Attacker-controlled docs.
+pub fn route(path: string): string {
+return "ok"
+}
+"#,
+        )
+        .expect("write source");
+
+        fs::create_dir_all(project.join("dist/docs")).expect("mkdir docs dir");
+        let victim = dir.path().join("victim.txt");
+        fs::write(&victim, "keep me").expect("write victim");
+        std::os::unix::fs::symlink(&victim, project.join("dist/docs/index.md"))
+            .expect("symlink markdown output");
+
+        let error = generate_docs(&project, &project.join("dist/docs"), false)
+            .expect_err("symlinked markdown output is rejected");
+
+        assert!(error.message.contains("refusing to replace symlink"));
+        assert_eq!(fs::read_to_string(&victim).expect("read victim"), "keep me");
+    }
+
     #[test]
     fn registry_validate_cli_parses_integrity_options() {
         let cli = Cli::parse_from([
@@ -8423,18 +8553,14 @@ return "ok"
             .find(|symbol| symbol.name == "slice_time")
             .expect("slice_time symbol");
         assert_eq!(slice_time.capabilities, vec!["clock"]);
-        assert!(
-            report
-                .symbols
-                .iter()
-                .any(|symbol| symbol.name == "exported")
-        );
-        assert!(
-            !report
-                .symbols
-                .iter()
-                .any(|symbol| symbol.name == "private_helper")
-        );
+        assert!(report
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "exported"));
+        assert!(!report
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "private_helper"));
     }
 
     #[test]
@@ -8483,12 +8609,10 @@ return "ok"
         assert_eq!(report.tasks[0].reason, "missing_evidence");
         assert_eq!(report.tasks[0].required_evidence, vec!["unit_test"]);
         assert!(report.tasks[0].diagnostics.is_empty());
-        assert!(
-            report.tasks[0]
-                .allowed_files
-                .iter()
-                .any(|path| path.ends_with("src/main.ax"))
-        );
+        assert!(report.tasks[0]
+            .allowed_files
+            .iter()
+            .any(|path| path.ends_with("src/main.ax")));
     }
 
     #[test]
@@ -8512,24 +8636,20 @@ return "ok"
             .find(|axiom| axiom.name == "VerifiedInvariant")
             .expect("verified axiom");
         assert_eq!(verified.status, "verified");
-        assert!(
-            verified
-                .backing_evidence
-                .iter()
-                .any(|evidence| evidence.status == "passing")
-        );
+        assert!(verified
+            .backing_evidence
+            .iter()
+            .any(|evidence| evidence.status == "passing"));
         let target = report
             .target_contracts
             .iter()
             .find(|target| target.target_id == "axiom://target/semantic-verifier/runbook")
             .expect("target verification");
         assert_eq!(target.status, "unverified");
-        assert!(
-            target
-                .requirements
-                .iter()
-                .any(|requirement| requirement.status == "failing")
-        );
+        assert!(target
+            .requirements
+            .iter()
+            .any(|requirement| requirement.status == "failing"));
     }
 
     #[test]
@@ -8598,12 +8718,10 @@ return "ok"
             serde_json::to_value(&edge_drift).expect("serialize edge semantic diff");
         validate_schema(&edge_drift_payload, "axiom-semantic-diff-v0.schema.json");
         assert_eq!(edge_drift.summary.breaking, 4);
-        assert!(
-            edge_drift
-                .changes
-                .iter()
-                .all(|change| change.node_kind == "Edge")
-        );
+        assert!(edge_drift
+            .changes
+            .iter()
+            .all(|change| change.node_kind == "Edge"));
         assert!(edge_drift.changes.iter().any(|change| {
             change.change == "added"
                 && change.edge_kind.as_deref() == Some("requires")
@@ -8831,11 +8949,9 @@ return "ok"
         assert_eq!(report.lockfile_status, "valid");
         assert_eq!(report.workspace_graph.len(), 1);
         assert!(report.target_triple.is_some());
-        assert!(
-            report
-                .known_unsupported_features
-                .contains(&"package registry resolution")
-        );
+        assert!(report
+            .known_unsupported_features
+            .contains(&"package registry resolution"));
     }
 
     #[test]
@@ -8915,12 +9031,10 @@ return "ok"
             .iter()
             .find(|import| import.path == "core/math.ax")
             .expect("dependency import");
-        assert!(
-            dependency_import
-                .resolved
-                .as_deref()
-                .is_some_and(|path| path.ends_with("deps/core/src/math.ax"))
-        );
+        assert!(dependency_import
+            .resolved
+            .as_deref()
+            .is_some_and(|path| path.ends_with("deps/core/src/math.ax")));
         let math = report
             .modules
             .iter()
@@ -8931,11 +9045,10 @@ return "ok"
                     .any(|function| function.name == "value")
             })
             .expect("math module");
-        assert!(
-            math.functions
-                .iter()
-                .any(|function| function.name == "value")
-        );
+        assert!(math
+            .functions
+            .iter()
+            .any(|function| function.name == "value"));
         assert!(math.type_refs.contains(&String::from("int")));
     }
 
@@ -8991,18 +9104,14 @@ return "ok"
 
         let evidence = inspect_evidence(&project).expect("inspect evidence");
         assert_eq!(evidence.command, "inspect evidence");
-        assert!(
-            evidence
-                .evidence
-                .iter()
-                .any(|item| item.kind == "lockfile" && item.status == "valid")
-        );
-        assert!(
-            evidence
-                .evidence
-                .iter()
-                .any(|item| item.kind == "test" && item.name.ends_with("src/main_test"))
-        );
+        assert!(evidence
+            .evidence
+            .iter()
+            .any(|item| item.kind == "lockfile" && item.status == "valid"));
+        assert!(evidence
+            .evidence
+            .iter()
+            .any(|item| item.kind == "test" && item.name.ends_with("src/main_test")));
 
         fs::create_dir_all(project.join("dist")).expect("create dist");
         fs::write(
@@ -9012,24 +9121,18 @@ return "ok"
         .expect("write generated artifact");
         let artifacts = inspect_artifacts(&project).expect("inspect artifacts");
         assert_eq!(artifacts.command, "inspect artifacts");
-        assert!(
-            artifacts
-                .artifacts
-                .iter()
-                .any(|artifact| artifact.kind == "build_entry" && artifact.exists)
-        );
-        assert!(
-            artifacts
-                .artifacts
-                .iter()
-                .any(|artifact| artifact.kind == "generated_rust" && artifact.exists)
-        );
-        assert!(
-            artifacts
-                .artifacts
-                .iter()
-                .any(|artifact| artifact.kind == "test_entry" && artifact.exists)
-        );
+        assert!(artifacts
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.kind == "build_entry" && artifact.exists));
+        assert!(artifacts
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.kind == "generated_rust" && artifact.exists));
+        assert!(artifacts
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.kind == "test_entry" && artifact.exists));
         assert!(artifacts.artifacts.iter().any(|artifact| {
             artifact.kind == OPENAPI_ARTIFACT_KIND
                 && artifact.source == "target_contract"
@@ -9105,8 +9208,8 @@ return "ok"
         assert_eq!(spec["info"]["title"], "openapi-service");
         assert_eq!(spec["paths"]["/ready"]["get"]["operationId"], "get_ready");
         assert_eq!(
-            spec["paths"]["/ready"]["get"]["responses"]["200"]["content"]["text/plain; charset=utf-8"]
-                ["schema"]["type"],
+            spec["paths"]["/ready"]["get"]["responses"]["200"]["content"]
+                ["text/plain; charset=utf-8"]["schema"]["type"],
             "string"
         );
         let responses = spec["paths"]["/ready"]["get"]["responses"]
@@ -9170,11 +9273,9 @@ return "ok"
 
         assert_eq!(report.routes.len(), 0);
         assert_eq!(report.diagnostics.len(), 1);
-        assert!(
-            report.diagnostics[0]
-                .message
-                .contains("no HTTP-serving routes")
-        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("no HTTP-serving routes"));
         let spec: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(project.join("dist/openapi.json")).expect("read spec"),
         )
@@ -9525,17 +9626,13 @@ print serve("127.0.0.1:0", selected_route, 1)
         let error = generate_sql(&project, Path::new("dist/sql")).expect_err("schema should fail");
 
         assert_eq!(error.kind, "sql");
-        assert!(
-            error
-                .message
-                .contains("requires complete schema structs with supported fields")
-        );
+        assert!(error
+            .message
+            .contains("requires complete schema structs with supported fields"));
         assert_eq!(error.related.len(), 1);
-        assert!(
-            error.related[0]
-                .message
-                .contains("field Customer.metadata uses unsupported SQL migration type")
-        );
+        assert!(error.related[0]
+            .message
+            .contains("field Customer.metadata uses unsupported SQL migration type"));
         assert!(!project.join("dist/sql/001_schema_forward.sql").exists());
     }
 
@@ -9554,11 +9651,9 @@ print serve("127.0.0.1:0", selected_route, 1)
 
         assert_eq!(error.kind, "sql");
         assert_eq!(error.related.len(), 1);
-        assert!(
-            error.related[0]
-                .message
-                .contains("schema table customer has no `id: int` primary key field")
-        );
+        assert!(error.related[0]
+            .message
+            .contains("schema table customer has no `id: int` primary key field"));
         assert!(!project.join("dist/sql/schema.snapshot.json").exists());
     }
 
@@ -9725,12 +9820,10 @@ print serve("127.0.0.1:0", selected_route, 1)
         assert_eq!(report.changed, 1);
         assert_eq!(report.files.len(), 1);
         assert!(report.files[0].changed);
-        assert!(
-            report.files[0]
-                .edits
-                .iter()
-                .any(|edit| edit.action == "replace_line" && edit.line == 1)
-        );
+        assert!(report.files[0]
+            .edits
+            .iter()
+            .any(|edit| edit.action == "replace_line" && edit.line == 1));
         assert_eq!(
             fs::read_to_string(&source).expect("read source"),
             "fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n"
@@ -9901,12 +9994,10 @@ print serve("127.0.0.1:0", selected_route, 1)
             output.functions[0].examples,
             vec![String::from("route(\"/health\")")]
         );
-        assert!(
-            output
-                .capabilities
-                .iter()
-                .any(|capability| capability.name == "env")
-        );
+        assert!(output
+            .capabilities
+            .iter()
+            .any(|capability| capability.name == "env"));
     }
 
     #[test]
