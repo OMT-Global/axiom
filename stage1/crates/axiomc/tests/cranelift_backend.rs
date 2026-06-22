@@ -1542,7 +1542,10 @@ fn cranelift_backend_lowers_tuple_returning_helper_to_runtime_exit_code() {
         .output()
         .expect("run cranelift tuple-returning helper main binary");
     assert_eq!(run.status.code(), Some(48));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "48\ntrue\n48\ntrue\n48\ntrue\n42\ntrue\n42\ntrue\n48\ntrue\n1\nfalse\n"
+    );
 }
 
 #[cfg(not(windows))]
@@ -5031,7 +5034,10 @@ fn cranelift_backend_builds_std_async_net_tcp_binary() {
 
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("std-async-net-tcp");
-    write_std_async_net_tcp_project(&project);
+    let Some(port) = reserve_loopback_port() else {
+        return;
+    };
+    write_std_async_net_tcp_project(&project, port);
 
     let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
         .args([
@@ -6387,7 +6393,7 @@ fn cranelift_backend_builds_crypto_signature_binary() {
         "cranelift crypto signature binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "true\ntrue\n64\n32\n");
 }
 
 #[test]
@@ -6676,12 +6682,15 @@ fn cranelift_backend_lowers_ffi_strlen_to_runtime_exit_code() {
     assert!(audit.contains("\"library\":\"c\""), "{audit}");
     assert!(audit.contains("\"symbol\":\"strlen\""), "{audit}");
     assert!(audit.contains("\"value\":\"string\""), "{audit}");
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 7, "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 10, "{audit}");
     assert!(
         !audit.contains("hello")
             && !audit.contains("direct-native")
+            && !audit.contains("static-ffi")
+            && !audit.contains("known-concat")
             && !audit.contains("helper")
             && !audit.contains("helper-local")
+            && !audit.contains("helper-concat")
             && !audit.contains("build")
             && !audit.contains("deploy"),
         "audit log should not contain FFI string argument values: {audit}"
@@ -8079,7 +8088,7 @@ fn write_tuple_returning_helper_main_exit_project(project: &Path) {
     .expect("write tuple returning helper main exit lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn make_pair(base: int, enabled: bool): (int, bool) {\nreturn (base + 6, enabled)\n}\n\nfn make_local_pair(base: int): (int, bool) {\nlet pair: (int, bool) = (base + 6, true)\nreturn pair\n}\n\nfn forward_pair(pair: (int, bool)): (int, bool) {\nreturn pair\n}\n\nfn make_typed_pair(seed: u8): (u8, bool) {\nreturn (seed + 1u8, seed == 41u8)\n}\n\nfn forward_typed_pair(pair: (u8, bool)): (u8, bool) {\nreturn pair\n}\n\nfn choose_pair(flag: bool, base: int): (int, bool) {\nlet offset: int = 6\nlet ready: bool = base == 42\nif flag {\nlet value: int = base + offset\nreturn (value, ready)\n} else {\nlet fallback: int = 1\nreturn (fallback, false)\n}\n}\n\nfn main(): int {\nlet pair: (int, bool) = make_pair(42, true)\nlet local_pair: (int, bool) = make_local_pair(42)\nlet pair_to_forward: (int, bool) = make_pair(42, true)\nlet forwarded_pair: (int, bool) = forward_pair(pair_to_forward)\nlet typed: (u8, bool) = make_typed_pair(41u8)\nlet typed_to_forward: (u8, bool) = make_typed_pair(41u8)\nlet forwarded_typed: (u8, bool) = forward_typed_pair(typed_to_forward)\nlet branch_pair: (int, bool) = choose_pair(true, 42)\nlet blocked_pair: (int, bool) = choose_pair(false, 42)\nlet value: int = pair.0\nlet enabled: bool = pair.1\nlet local_value: int = local_pair.0\nlet local_enabled: bool = local_pair.1\nlet forwarded_value: int = forwarded_pair.0\nlet forwarded_enabled: bool = forwarded_pair.1\nlet typed_value: int = typed.0 as int\nlet typed_enabled: bool = typed.1\nlet forwarded_typed_value: int = forwarded_typed.0 as int\nlet forwarded_typed_enabled: bool = forwarded_typed.1\nlet branch_value: int = branch_pair.0\nlet branch_enabled: bool = branch_pair.1\nlet blocked_value: int = blocked_pair.0\nlet blocked_enabled: bool = blocked_pair.1\nif enabled && local_enabled && forwarded_enabled && typed_enabled && forwarded_typed_enabled && branch_enabled && blocked_enabled == false && value == 48 && local_value == 48 && forwarded_value == 48 && typed_value == 42 && forwarded_typed_value == 42 && branch_value == 48 && blocked_value == 1 {\nreturn value\n} else {\nreturn 1\n}\n}\n",
+        "fn make_pair(base: int, enabled: bool): (int, bool) {\nreturn (base + 6, enabled)\n}\n\nfn make_local_pair(base: int): (int, bool) {\nlet pair: (int, bool) = (base + 6, true)\nreturn pair\n}\n\nfn forward_pair(pair: (int, bool)): (int, bool) {\nreturn pair\n}\n\nfn make_typed_pair(seed: u8): (u8, bool) {\nreturn (seed + 1u8, seed == 41u8)\n}\n\nfn forward_typed_pair(pair: (u8, bool)): (u8, bool) {\nreturn pair\n}\n\nfn choose_pair(flag: bool, base: int): (int, bool) {\nlet offset: int = 6\nlet ready: bool = base == 42\nif flag {\nlet value: int = base + offset\nreturn (value, ready)\n} else {\nlet fallback: int = 1\nreturn (fallback, false)\n}\n}\n\nfn main(): int {\nlet pair: (int, bool) = make_pair(42, true)\nlet local_pair: (int, bool) = make_local_pair(42)\nlet pair_to_forward: (int, bool) = make_pair(42, true)\nlet forwarded_pair: (int, bool) = forward_pair(pair_to_forward)\nlet typed: (u8, bool) = make_typed_pair(41u8)\nlet typed_to_forward: (u8, bool) = make_typed_pair(41u8)\nlet forwarded_typed: (u8, bool) = forward_typed_pair(typed_to_forward)\nlet branch_pair: (int, bool) = choose_pair(true, 42)\nlet blocked_pair: (int, bool) = choose_pair(false, 42)\nlet value: int = pair.0\nlet enabled: bool = pair.1\nlet local_value: int = local_pair.0\nlet local_enabled: bool = local_pair.1\nlet forwarded_value: int = forwarded_pair.0\nlet forwarded_enabled: bool = forwarded_pair.1\nlet typed_value: int = typed.0 as int\nlet typed_enabled: bool = typed.1\nlet forwarded_typed_value: int = forwarded_typed.0 as int\nlet forwarded_typed_enabled: bool = forwarded_typed.1\nlet branch_value: int = branch_pair.0\nlet branch_enabled: bool = branch_pair.1\nlet blocked_value: int = blocked_pair.0\nlet blocked_enabled: bool = blocked_pair.1\nprint value\nprint enabled\nprint local_value\nprint local_enabled\nprint forwarded_value\nprint forwarded_enabled\nprint typed_value\nprint typed_enabled\nprint forwarded_typed_value\nprint forwarded_typed_enabled\nprint branch_value\nprint branch_enabled\nprint blocked_value\nprint blocked_enabled\nif enabled && local_enabled && forwarded_enabled && typed_enabled && forwarded_typed_enabled && branch_enabled && blocked_enabled == false && value == 48 && local_value == 48 && forwarded_value == 48 && typed_value == 42 && forwarded_typed_value == 42 && branch_value == 48 && blocked_value == 1 {\nreturn value\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write tuple returning helper main exit source");
 }
@@ -10819,7 +10828,7 @@ fn write_crypto_signature_project(project: &Path, crypto: bool) {
     .expect("write crypto signature lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/crypto_sign.ax\"\nlet message: [u8] = [104u8, 101u8, 108u8, 108u8, 111u8]\nlet keys: ([u8], [u8]) = ed25519_keygen()\nlet public_key: [u8] = keys.0\nlet secret_key: [u8] = keys.1\nlet signature: [u8] = ed25519_sign(secret_key[:], message[:])\nprint ed25519_verify(public_key[:], message[:], signature[:])\n",
+        "import \"std/crypto_sign.ax\"\n\nfn signature_ok(public_key: &[u8], message: &[u8], signature: &[u8]): bool {\nreturn ed25519_verify(public_key, message, signature)\n}\n\nfn signature_len(secret_key: &[u8], message: &[u8]): int {\nreturn len(ed25519_sign(secret_key, message))\n}\n\nfn public_key_len(public_key: &[u8]): int {\nreturn len(public_key)\n}\n\nlet message: [u8] = [104u8, 101u8, 108u8, 108u8, 111u8]\nlet keys: ([u8], [u8]) = ed25519_keygen()\nlet public_key: [u8] = keys.0\nlet secret_key: [u8] = keys.1\nlet signature: [u8] = ed25519_sign(secret_key[:], message[:])\nprint ed25519_verify(public_key[:], message[:], signature[:])\nprint signature_ok(public_key[:], message[:], signature[:])\nprint signature_len(secret_key[:], message[:])\nprint public_key_len(public_key[:])\n",
     )
     .expect("write crypto signature source");
 }
@@ -11018,11 +11027,12 @@ print "none"
     .expect("write std async source");
 }
 
-fn write_std_async_net_tcp_project(project: &Path) {
+fn write_std_async_net_tcp_project(project: &Path, port: u16) {
     fs::create_dir_all(project.join("src")).expect("create std async net TCP project src");
     fs::write(
         project.join("axiom.toml"),
-        r#"[package]
+        format!(
+            r#"[package]
 name = "cranelift-std-async-net-tcp"
 version = "0.1.0"
 
@@ -11033,7 +11043,7 @@ out_dir = "dist"
 [capabilities]
 fs = false
 "fs:write" = false
-net = true
+net = {{ hosts = ["127.0.0.1"], ports = [{port}] }}
 process = false
 env = false
 clock = false
@@ -11045,6 +11055,7 @@ async = true
 net = "Cranelift ABI regression covers compiler-side std/async_net.ax loopback TCP evaluation for issue 928."
 async = "Cranelift ABI regression covers compiler-side std/async_net.ax loopback TCP evaluation for issue 928."
 "#,
+        ),
     )
     .expect("write std async net TCP manifest");
     fs::write(
@@ -11060,45 +11071,46 @@ source = "path"
     .expect("write std async net TCP lockfile");
     fs::write(
         project.join("src/main.ax"),
-        r#"import "std/async.ax"
+        format!(
+            r#"import "std/async.ax"
 import "std/async_net.ax"
 
-async fn echo_once(listener: TcpListener): int {
+async fn echo_once(listener: TcpListener): int {{
 let stream: TcpStream = await accept(listener)
 let received: string = await recv_text(stream, 64)
 let _written: int = await send_text(stream, received)
 return close(stream)
-}
+}}
 
-let listener: TcpListener = await listen("127.0.0.1:0")
-let port: int = local_port(listener)
+let listener: TcpListener = await listen("127.0.0.1:{port}")
 let first_handler: JoinHandle<int> = spawn<int>(echo_once(listener))
 let second_handler: JoinHandle<int> = spawn<int>(echo_once(listener))
-let first_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", port, "alpha", 1000))
-let second_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", port, "beta", 1000))
+let first_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", {port}, "alpha", 1000))
+let second_client: JoinHandle<Option<string>> = spawn<Option<string>>(tcp_dial("127.0.0.1", {port}, "beta", 1000))
 
-match await join<Option<string>>(first_client) {
-Some(reply) {
+match await join<Option<string>>(first_client) {{
+Some(reply) {{
 print reply
-}
-None {
+}}
+None {{
 print "first none"
-}
-}
+}}
+}}
 
-match await join<Option<string>>(second_client) {
-Some(reply) {
+match await join<Option<string>>(second_client) {{
+Some(reply) {{
 print reply
-}
-None {
+}}
+None {{
 print "second none"
-}
-}
+}}
+}}
 
 let _first_done: int = await join<int>(first_handler)
 let _second_done: int = await join<int>(second_handler)
 let _listener_closed: int = close_listener(listener)
 "#,
+        ),
     )
     .expect("write std async net TCP source");
 }
@@ -13339,6 +13351,13 @@ source = "path"
 
 static PRESENT_ENV: string = "AXIOM_CRANELIFT_ENV_READ"
 static MISSING_ENV: string = "__AXIOM_CRANELIFT_ENV_MISSING__"
+static ENV_PREFIX: string = "AXIOM_CRANELIFT_ENV_"
+static READ_SUFFIX: string = "READ"
+
+fn helper_env_len(): int {
+let suffix: string = "READ"
+return match get_env(ENV_PREFIX + suffix) { Some(value) => len(value), None => 0 }
+}
 
 fn helper_present_len(): int {
 return match get_env(PRESENT_ENV) { Some(value) => len(value), None => 0 }
@@ -13351,12 +13370,17 @@ return match stored { Some(value) => len(value), None => 38 }
 
 fn main(): int {
 let present: int = match env_get(PRESENT_ENV) { Some(value) => len(value), None => 0 }
+let concat_key: string = ENV_PREFIX + READ_SUFFIX
+let concat_present: int = match env_get(concat_key) { Some(value) => len(value), None => 0 }
 let missing: int = match get_env(MISSING_ENV) { Some(value) => len(value), None => 38 }
 let stored_present: Option<string> = get_env(PRESENT_ENV)
+let stored_concat: Option<string> = get_env(ENV_PREFIX + READ_SUFFIX)
 let stored_missing: Option<string> = env_get(MISSING_ENV)
 let stored_present_for_statement: Option<string> = get_env(PRESENT_ENV)
 let stored_present_len: int = match stored_present { Some(value) => len(value), None => 0 }
+let stored_concat_len: int = match stored_concat { Some(value) => len(value), None => 0 }
 let stored_missing_len: int = match stored_missing { Some(value) => len(value), None => 38 }
+let helper_len: int = helper_env_len()
 let statement_present_len: int = 0
 match stored_present_for_statement {
 Some(value) {
@@ -13368,7 +13392,7 @@ statement_present_len = 1
 }
 let helper_present: int = helper_present_len()
 let helper_missing: int = helper_missing_len()
-if present == 11 && missing == 38 && stored_present_len == 11 && stored_missing_len == 38 && statement_present_len == 11 && helper_present == 11 && helper_missing == 38 {
+if present == 11 && concat_present == 11 && missing == 38 && stored_present_len == 11 && stored_concat_len == 11 && stored_missing_len == 38 && helper_len == 11 && statement_present_len == 11 && helper_present == 11 && helper_missing == 38 {
 return statement_present_len + 37
 } else {
 return 1
@@ -13610,6 +13634,9 @@ source = "path"
         project.join("src/main.ax"),
         r#"extern fn strlen(value: string): int from "c"
 
+static STATIC_TEXT: string = "static-ffi"
+static CONCAT_PREFIX: string = "known-"
+
 fn literal_probe(): int {
 return strlen("helper")
 }
@@ -13617,6 +13644,11 @@ return strlen("helper")
 fn local_probe(): int {
 let text: string = "helper-local"
 return strlen(text)
+}
+
+fn concat_probe(): int {
+let suffix: string = "concat"
+return strlen("helper-" + suffix)
 }
 
 fn selected_probe(): int {
@@ -13631,14 +13663,18 @@ let literal_len: int = strlen("hello")
 let empty_len: int = strlen("")
 let text: string = "direct-native"
 let local_len: int = strlen(text)
+let static_len: int = strlen(STATIC_TEXT)
+let concat_suffix: string = "concat"
+let concat_len: int = strlen(CONCAT_PREFIX + concat_suffix)
 let scores: {string: int} = {"build": 7, "deploy": 9}
 let names: [string] = keys<string, int>(scores)
 let selected_index: int = 1
 let selected_len: int = strlen(names[selected_index])
 let helper_literal_len: int = literal_probe()
 let helper_local_len: int = local_probe()
+let helper_concat_len: int = concat_probe()
 let helper_selected_len: int = selected_probe()
-if literal_len == 5 && empty_len == 0 && local_len == 13 && selected_len == 6 && helper_literal_len == 6 && helper_local_len == 12 && helper_selected_len == 5 {
+if literal_len == 5 && empty_len == 0 && local_len == 13 && static_len == 10 && concat_len == 12 && selected_len == 6 && helper_literal_len == 6 && helper_local_len == 12 && helper_concat_len == 13 && helper_selected_len == 5 {
 return 48
 } else {
 return 1

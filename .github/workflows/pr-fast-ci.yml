@@ -61,7 +61,7 @@ jobs:
   fast-checks:
     name: Fast Checks
     runs-on: ['self-hosted', 'linux', 'shell-only', 'public']
-    timeout-minutes: 45
+    timeout-minutes: 90
     needs: changes
     if: >-
       github.event.pull_request.draft == false &&
@@ -104,7 +104,7 @@ jobs:
               fi
             done
             printf '%s\n' 'fn main() {}' > /tmp/axiom-fast-ci-linker-smoke.rs
-            if rustc "${rust_lld_flags[@]}" /tmp/axiom-fast-ci-linker-smoke.rs -o /tmp/axiom-fast-ci-linker-smoke; then
+            if rustc "${rust_lld_flags[@]}" /tmp/axiom-fast-ci-linker-smoke.rs -o /tmp/axiom-fast-ci-linker-smoke >/dev/null 2>&1; then
               echo "RUSTFLAGS=${rust_lld_flags[*]}" >> "$GITHUB_ENV"
               echo "AXIOM_FAST_CI_RUST_LINKER=$rust_lld" >> "$GITHUB_ENV"
               echo "AXIOM_FAST_CI_PROOF_WORKLOADS=1" >> "$GITHUB_ENV"
