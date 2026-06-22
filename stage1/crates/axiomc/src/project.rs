@@ -4277,30 +4277,65 @@ fn validate_module_capabilities(
     graph: &PackageGraph,
     modules: &[LoadedModule],
 ) -> Result<(), Diagnostic> {
+    let mut package_extern_functions: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+    for module in modules {
+        let extern_functions = package_extern_functions
+            .entry(module.package_root.clone())
+            .or_default();
+        extern_functions.extend(extern_function_names(&module.program));
+    }
+
+    let empty_extern_functions = HashSet::new();
     for module in modules {
         let package = graph.context(&module.package_root)?;
+        let extern_functions = package_extern_functions
+            .get(&module.package_root)
+            .unwrap_or(&empty_extern_functions);
         validate_program_capabilities(
             &module.path,
             &module.program,
             &package.manifest.capabilities,
+            extern_functions,
         )?;
     }
     Ok(())
+}
+
+fn extern_function_names(program: &syntax::Program) -> HashSet<String> {
+    program
+        .functions
+        .iter()
+        .filter(|function| function.is_extern)
+        .map(|function| function.name.clone())
+        .collect()
 }
 
 fn validate_program_capabilities(
     module_path: &Path,
     program: &syntax::Program,
     capabilities: &CapabilityConfig,
+    extern_functions: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
     let known_strings = syntax_program_known_strings(program);
     for function in &program.functions {
         for stmt in &function.body {
-            validate_stmt_capabilities(module_path, stmt, capabilities, &known_strings)?;
+            validate_stmt_capabilities(
+                module_path,
+                stmt,
+                capabilities,
+                &known_strings,
+                extern_functions,
+            )?;
         }
     }
     for stmt in &program.stmts {
-        validate_stmt_capabilities(module_path, stmt, capabilities, &known_strings)?;
+        validate_stmt_capabilities(
+            module_path,
+            stmt,
+            capabilities,
+            &known_strings,
+            extern_functions,
+        )?;
     }
     Ok(())
 }
@@ -4310,20 +4345,45 @@ fn validate_stmt_capabilities(
     stmt: &syntax::Stmt,
     capabilities: &CapabilityConfig,
     known_strings: &HashMap<String, String>,
+    extern_functions: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
     match stmt {
         syntax::Stmt::Let { expr, .. } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                expr,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
         }
         syntax::Stmt::Print { expr, .. }
         | syntax::Stmt::Panic { expr, .. }
         | syntax::Stmt::Defer { expr, .. }
         | syntax::Stmt::Return { expr, .. } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                expr,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
         }
         syntax::Stmt::Assign { target, expr, .. } => {
-            validate_expr_capabilities(module_path, target, capabilities, known_strings)?;
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                target,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
+            validate_expr_capabilities(
+                module_path,
+                expr,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
         }
         syntax::Stmt::If {
             cond,
@@ -4331,13 +4391,31 @@ fn validate_stmt_capabilities(
             else_block,
             ..
         } => {
-            validate_expr_capabilities(module_path, cond, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                cond,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             for stmt in then_block {
-                validate_stmt_capabilities(module_path, stmt, capabilities, known_strings)?;
+                validate_stmt_capabilities(
+                    module_path,
+                    stmt,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             if let Some(else_block) = else_block {
                 for stmt in else_block {
-                    validate_stmt_capabilities(module_path, stmt, capabilities, known_strings)?;
+                    validate_stmt_capabilities(
+                        module_path,
+                        stmt,
+                        capabilities,
+                        known_strings,
+                        extern_functions,
+                    )?;
                 }
             }
         }
@@ -4347,27 +4425,69 @@ fn validate_stmt_capabilities(
             else_block,
             ..
         } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                expr,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             for stmt in then_block {
-                validate_stmt_capabilities(module_path, stmt, capabilities, known_strings)?;
+                validate_stmt_capabilities(
+                    module_path,
+                    stmt,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             if let Some(else_block) = else_block {
                 for stmt in else_block {
-                    validate_stmt_capabilities(module_path, stmt, capabilities, known_strings)?;
+                    validate_stmt_capabilities(
+                        module_path,
+                        stmt,
+                        capabilities,
+                        known_strings,
+                        extern_functions,
+                    )?;
                 }
             }
         }
         syntax::Stmt::While { cond, body, .. } => {
-            validate_expr_capabilities(module_path, cond, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                cond,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             for stmt in body {
-                validate_stmt_capabilities(module_path, stmt, capabilities, known_strings)?;
+                validate_stmt_capabilities(
+                    module_path,
+                    stmt,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
         }
         syntax::Stmt::Match { expr, arms, .. } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                expr,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             for arm in arms {
                 for stmt in &arm.body {
-                    validate_stmt_capabilities(module_path, stmt, capabilities, known_strings)?;
+                    validate_stmt_capabilities(
+                        module_path,
+                        stmt,
+                        capabilities,
+                        known_strings,
+                        extern_functions,
+                    )?;
                 }
             }
         }
@@ -4380,6 +4500,7 @@ fn validate_expr_capabilities(
     expr: &syntax::Expr,
     capabilities: &CapabilityConfig,
     known_strings: &HashMap<String, String>,
+    extern_functions: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
     match expr {
         syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => Ok(()),
@@ -4390,6 +4511,14 @@ fn validate_expr_capabilities(
             line,
             column,
         } => {
+            if extern_functions.contains(name) && !capabilities.enabled(CapabilityKind::Ffi) {
+                return Err(Diagnostic::new(
+                    "capability",
+                    format!("call to {name:?} requires [capabilities].ffi = true"),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(*line, *column));
+            }
             if let Some(kind) = intrinsic_capability(name)
                 && !capabilities.enabled(kind)
             {
@@ -4419,78 +4548,192 @@ fn validate_expr_capabilities(
                 )?;
             }
             for arg in args {
-                validate_expr_capabilities(module_path, arg, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    arg,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
         syntax::Expr::MethodCall { base, args, .. } => {
-            validate_expr_capabilities(module_path, base, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                base,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             for arg in args {
-                validate_expr_capabilities(module_path, arg, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    arg,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
         syntax::Expr::BinaryAdd { lhs, rhs, .. }
         | syntax::Expr::BinaryCompare { lhs, rhs, .. }
         | syntax::Expr::BinaryLogic { lhs, rhs, .. } => {
-            validate_expr_capabilities(module_path, lhs, capabilities, known_strings)?;
-            validate_expr_capabilities(module_path, rhs, capabilities, known_strings)
+            validate_expr_capabilities(
+                module_path,
+                lhs,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
+            validate_expr_capabilities(
+                module_path,
+                rhs,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )
         }
-        syntax::Expr::Cast { expr, .. } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)
-        }
+        syntax::Expr::Cast { expr, .. } => validate_expr_capabilities(
+            module_path,
+            expr,
+            capabilities,
+            known_strings,
+            extern_functions,
+        ),
         syntax::Expr::Try { expr, .. }
         | syntax::Expr::Await { expr, .. }
         | syntax::Expr::MutBorrow { expr, .. }
-        | syntax::Expr::Deref { expr, .. } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)
-        }
+        | syntax::Expr::Deref { expr, .. } => validate_expr_capabilities(
+            module_path,
+            expr,
+            capabilities,
+            known_strings,
+            extern_functions,
+        ),
         syntax::Expr::StructLiteral { fields, .. } => {
             for field in fields {
-                validate_expr_capabilities(module_path, &field.expr, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    &field.expr,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
         syntax::Expr::FieldAccess { base, .. } | syntax::Expr::TupleIndex { base, .. } => {
-            validate_expr_capabilities(module_path, base, capabilities, known_strings)
+            validate_expr_capabilities(
+                module_path,
+                base,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )
         }
         syntax::Expr::TupleLiteral { elements, .. }
         | syntax::Expr::ArrayLiteral { elements, .. } => {
             for element in elements {
-                validate_expr_capabilities(module_path, element, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    element,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
         syntax::Expr::MapLiteral { entries, .. } => {
             for entry in entries {
-                validate_expr_capabilities(module_path, &entry.key, capabilities, known_strings)?;
-                validate_expr_capabilities(module_path, &entry.value, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    &entry.key,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
+                validate_expr_capabilities(
+                    module_path,
+                    &entry.value,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
         syntax::Expr::Slice {
             base, start, end, ..
         } => {
-            validate_expr_capabilities(module_path, base, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                base,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             if let Some(start) = start {
-                validate_expr_capabilities(module_path, start, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    start,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             if let Some(end) = end {
-                validate_expr_capabilities(module_path, end, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    end,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
         syntax::Expr::Index { base, index, .. } => {
-            validate_expr_capabilities(module_path, base, capabilities, known_strings)?;
-            validate_expr_capabilities(module_path, index, capabilities, known_strings)
+            validate_expr_capabilities(
+                module_path,
+                base,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
+            validate_expr_capabilities(
+                module_path,
+                index,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )
         }
-        syntax::Expr::Closure { body, .. } => {
-            validate_expr_capabilities(module_path, body, capabilities, known_strings)
-        }
+        syntax::Expr::Closure { body, .. } => validate_expr_capabilities(
+            module_path,
+            body,
+            capabilities,
+            known_strings,
+            extern_functions,
+        ),
         syntax::Expr::Match { expr, arms, .. } => {
-            validate_expr_capabilities(module_path, expr, capabilities, known_strings)?;
+            validate_expr_capabilities(
+                module_path,
+                expr,
+                capabilities,
+                known_strings,
+                extern_functions,
+            )?;
             for arm in arms {
-                validate_expr_capabilities(module_path, &arm.expr, capabilities, known_strings)?;
+                validate_expr_capabilities(
+                    module_path,
+                    &arm.expr,
+                    capabilities,
+                    known_strings,
+                    extern_functions,
+                )?;
             }
             Ok(())
         }
@@ -8232,6 +8475,52 @@ mod tests {
         assert_eq!(output.cases.len(), 1);
         assert_eq!(output.cases[0].kind, TestKind::Property);
         assert!(output.cases[0].generated_rust.is_some());
+    }
+
+    #[test]
+    fn module_capability_validation_rejects_extern_calls_without_ffi() {
+        let program = syntax::parse_program(
+            "extern fn strlen(value: string): int from \"c\"\nfn run(): int {\nreturn strlen(\"hello\")\n}\n",
+            Path::new("dep/src/lib.ax"),
+        )
+        .expect("parse program");
+        let extern_functions = extern_function_names(&program);
+
+        let error = validate_program_capabilities(
+            Path::new("dep/src/lib.ax"),
+            &program,
+            &CapabilityConfig::default(),
+            &extern_functions,
+        )
+        .expect_err("extern call should require ffi capability");
+
+        assert_eq!(error.kind, "capability");
+        assert_eq!(
+            error.message,
+            "call to \"strlen\" requires [capabilities].ffi = true"
+        );
+    }
+
+    #[test]
+    fn module_capability_validation_allows_extern_calls_with_ffi() {
+        let program = syntax::parse_program(
+            "extern fn strlen(value: string): int from \"c\"\nfn run(): int {\nreturn strlen(\"hello\")\n}\n",
+            Path::new("dep/src/lib.ax"),
+        )
+        .expect("parse program");
+        let extern_functions = extern_function_names(&program);
+        let capabilities = CapabilityConfig {
+            ffi: true,
+            ..CapabilityConfig::default()
+        };
+
+        validate_program_capabilities(
+            Path::new("dep/src/lib.ax"),
+            &program,
+            &capabilities,
+            &extern_functions,
+        )
+        .expect("ffi capability should allow extern call");
     }
 
     #[test]
