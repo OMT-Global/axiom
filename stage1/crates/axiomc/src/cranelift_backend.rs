@@ -19478,6 +19478,11 @@ fn net_tcp_close_listener(listener: i64) -> i64 {
 
 fn net_tcp_registered_loopback_echo(host: &str, port: i64, message: &str) -> Option<String> {
     net_loopback_socket_addr(host, port)?;
+    let listeners = spike_tcp_listeners().lock().ok()?;
+    if listeners.values().any(|listener| listener.port == port) {
+        return Some(message.to_string());
+    }
+    drop(listeners);
     if let Some(response) = spike_tcp_streams()
         .lock()
         .ok()?
@@ -19487,11 +19492,7 @@ fn net_tcp_registered_loopback_echo(host: &str, port: i64, message: &str) -> Opt
     {
         return Some(response);
     }
-    let listeners = spike_tcp_listeners().lock().ok()?;
-    listeners
-        .values()
-        .any(|listener| listener.port == port)
-        .then(|| message.to_string())
+    None
 }
 
 fn net_tcp_listen_loopback_once(response: String, timeout: std::time::Duration) -> Option<i64> {
