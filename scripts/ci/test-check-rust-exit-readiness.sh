@@ -40,14 +40,51 @@ MAKE
 cat >"$temp_dir/partial-issues.txt" <<'ISSUES'
 927 CLOSED
 929 CLOSED
-693 CLOSED
-694 CLOSED
+1191 CLOSED
+1001 OPEN
 930 CLOSED
 931 CLOSED
 562 CLOSED
 563 CLOSED
 564 CLOSED
 ISSUES
+
+python3 - "$case_dir/stage1/runtime-abi/direct-native-v0.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    contract = json.load(handle)
+
+contract["status"] = "partial"
+for row in contract["value_features"] + contract["capability_shims"]:
+    row["status"] = "partial"
+    row["blockers"] = [1001]
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(contract, handle)
+PY
+
+python3 - "$case_dir/docs/rust-exit-readiness.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+payload["blockingIssues"].append(
+    {
+        "issue": 1001,
+        "lane": "backend",
+        "check": "Direct-native runtime ABI remains partial for regression coverage.",
+    }
+)
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle)
+PY
 
 (
   cd "$case_dir"
@@ -68,6 +105,8 @@ assert "34 incomplete rows (12 value, 22 capability)" in details[
 ]
 PY
 )
+
+cp "$repo_root/docs/rust-exit-readiness.json" "$case_dir/docs/rust-exit-readiness.json"
 
 python3 - "$case_dir/stage1/runtime-abi/direct-native-v0.json" <<'PY'
 import json
