@@ -6475,7 +6475,7 @@ fn cranelift_backend_builds_crypto_aead_binary() {
         "cranelift crypto AEAD binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n21\n5\n21\n");
 }
 
 #[test]
@@ -10849,7 +10849,7 @@ fn write_crypto_aead_project(project: &Path, crypto: bool) {
     .expect("write crypto AEAD lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "import \"std/crypto_aead.ax\"\nlet key: [u8] = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8, 12u8, 13u8, 14u8, 15u8, 16u8, 17u8, 18u8, 19u8, 20u8, 21u8, 22u8, 23u8, 24u8, 25u8, 26u8, 27u8, 28u8, 29u8, 30u8, 31u8]\nlet nonce: [u8] = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8]\nlet aad: [u8] = [97u8, 97u8, 100u8]\nlet plaintext: [u8] = [104u8, 101u8, 108u8, 108u8, 111u8]\nlet ciphertext: [u8] = aead_seal(Aes256Gcm, key[:], nonce[:], aad[:], plaintext[:])\nmatch aead_open(Aes256Gcm, key[:], nonce[:], aad[:], ciphertext[:]) {\nSome(opened) {\nprint len(opened)\n}\nNone {\nprint 0\n}\n}\n",
+        "import \"std/crypto_aead.ax\"\n\nfn sealed_len(key: &[u8], nonce: &[u8], aad: &[u8], plaintext: &[u8]): int {\nreturn len(aead_seal(Aes256Gcm, key, nonce, aad, plaintext))\n}\n\nfn opened_len(key: &[u8], nonce: &[u8], aad: &[u8], ciphertext: &[u8]): int {\nreturn match aead_open(Aes256Gcm, key, nonce, aad, ciphertext) { Some(opened) => len(opened), None => 0 }\n}\n\nlet key: [u8] = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8, 12u8, 13u8, 14u8, 15u8, 16u8, 17u8, 18u8, 19u8, 20u8, 21u8, 22u8, 23u8, 24u8, 25u8, 26u8, 27u8, 28u8, 29u8, 30u8, 31u8]\nlet nonce: [u8] = [0u8, 1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8]\nlet aad: [u8] = [97u8, 97u8, 100u8]\nlet plaintext: [u8] = [104u8, 101u8, 108u8, 108u8, 111u8]\nlet ciphertext: [u8] = aead_seal(Aes256Gcm, key[:], nonce[:], aad[:], plaintext[:])\nmatch aead_open(Aes256Gcm, key[:], nonce[:], aad[:], ciphertext[:]) {\nSome(opened) {\nprint len(opened)\n}\nNone {\nprint 0\n}\n}\nprint len(ciphertext)\nprint opened_len(key[:], nonce[:], aad[:], ciphertext[:])\nprint sealed_len(key[:], nonce[:], aad[:], plaintext[:])\n",
     )
     .expect("write crypto AEAD source");
 }
