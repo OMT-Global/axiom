@@ -4288,6 +4288,301 @@ fn validate_module_capabilities(
     Ok(())
 }
 
+fn validate_stdlib_wrapper_capabilities(
+    module_path: &Path,
+    program: &syntax::Program,
+    capabilities: &CapabilityConfig,
+    wrappers: &HashMap<String, CapabilityKind>,
+) -> Result<(), Diagnostic> {
+    if wrappers.is_empty() {
+        return Ok(());
+    }
+    for function in &program.functions {
+        for stmt in &function.body {
+            validate_stmt_stdlib_wrapper_capabilities(module_path, stmt, capabilities, wrappers)?;
+        }
+    }
+    for stmt in &program.stmts {
+        validate_stmt_stdlib_wrapper_capabilities(module_path, stmt, capabilities, wrappers)?;
+    }
+    Ok(())
+}
+
+fn validate_stmt_stdlib_wrapper_capabilities(
+    module_path: &Path,
+    stmt: &syntax::Stmt,
+    capabilities: &CapabilityConfig,
+    wrappers: &HashMap<String, CapabilityKind>,
+) -> Result<(), Diagnostic> {
+    match stmt {
+        syntax::Stmt::Let { expr, .. }
+        | syntax::Stmt::Print { expr, .. }
+        | syntax::Stmt::Panic { expr, .. }
+        | syntax::Stmt::Defer { expr, .. }
+        | syntax::Stmt::Return { expr, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, expr, capabilities, wrappers)
+        }
+        syntax::Stmt::Assign { target, expr, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, target, capabilities, wrappers)?;
+            validate_expr_stdlib_wrapper_capabilities(module_path, expr, capabilities, wrappers)
+        }
+        syntax::Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, cond, capabilities, wrappers)?;
+            for stmt in then_block {
+                validate_stmt_stdlib_wrapper_capabilities(
+                    module_path,
+                    stmt,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    validate_stmt_stdlib_wrapper_capabilities(
+                        module_path,
+                        stmt,
+                        capabilities,
+                        wrappers,
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        syntax::Stmt::IfLet {
+            expr,
+            then_block,
+            else_block,
+            ..
+        } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, expr, capabilities, wrappers)?;
+            for stmt in then_block {
+                validate_stmt_stdlib_wrapper_capabilities(
+                    module_path,
+                    stmt,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            if let Some(else_block) = else_block {
+                for stmt in else_block {
+                    validate_stmt_stdlib_wrapper_capabilities(
+                        module_path,
+                        stmt,
+                        capabilities,
+                        wrappers,
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        syntax::Stmt::While { cond, body, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, cond, capabilities, wrappers)?;
+            for stmt in body {
+                validate_stmt_stdlib_wrapper_capabilities(
+                    module_path,
+                    stmt,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Stmt::Match { expr, arms, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, expr, capabilities, wrappers)?;
+            for arm in arms {
+                for stmt in &arm.body {
+                    validate_stmt_stdlib_wrapper_capabilities(
+                        module_path,
+                        stmt,
+                        capabilities,
+                        wrappers,
+                    )?;
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_expr_stdlib_wrapper_capabilities(
+    module_path: &Path,
+    expr: &syntax::Expr,
+    capabilities: &CapabilityConfig,
+    wrappers: &HashMap<String, CapabilityKind>,
+) -> Result<(), Diagnostic> {
+    match expr {
+        syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => Ok(()),
+        syntax::Expr::Call {
+            name,
+            args,
+            line,
+            column,
+            ..
+        } => {
+            if let Some(kind) = wrappers.get(name).copied()
+                && !capabilities.enabled(kind)
+            {
+                return Err(Diagnostic::new(
+                    "capability",
+                    format!(
+                        "call to stdlib wrapper {name:?} requires [capabilities].{} = true",
+                        kind.name()
+                    ),
+                )
+                .with_path(module_path.display().to_string())
+                .with_span(*line, *column));
+            }
+            for arg in args {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    arg,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Expr::MethodCall { base, args, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, base, capabilities, wrappers)?;
+            for arg in args {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    arg,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Expr::BinaryAdd { lhs, rhs, .. }
+        | syntax::Expr::BinaryCompare { lhs, rhs, .. }
+        | syntax::Expr::BinaryLogic { lhs, rhs, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, lhs, capabilities, wrappers)?;
+            validate_expr_stdlib_wrapper_capabilities(module_path, rhs, capabilities, wrappers)
+        }
+        syntax::Expr::Cast { expr, .. }
+        | syntax::Expr::Try { expr, .. }
+        | syntax::Expr::Await { expr, .. }
+        | syntax::Expr::MutBorrow { expr, .. }
+        | syntax::Expr::Deref { expr, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, expr, capabilities, wrappers)
+        }
+        syntax::Expr::StructLiteral { fields, .. } => {
+            for field in fields {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    &field.expr,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Expr::FieldAccess { base, .. } | syntax::Expr::TupleIndex { base, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, base, capabilities, wrappers)
+        }
+        syntax::Expr::TupleLiteral { elements, .. }
+        | syntax::Expr::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    element,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Expr::MapLiteral { entries, .. } => {
+            for entry in entries {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    &entry.key,
+                    capabilities,
+                    wrappers,
+                )?;
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    &entry.value,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Expr::Index { base, index, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, base, capabilities, wrappers)?;
+            validate_expr_stdlib_wrapper_capabilities(module_path, index, capabilities, wrappers)
+        }
+        syntax::Expr::Slice {
+            base, start, end, ..
+        } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, base, capabilities, wrappers)?;
+            if let Some(start) = start {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    start,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            if let Some(end) = end {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    end,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+        syntax::Expr::Closure { body, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, body, capabilities, wrappers)
+        }
+        syntax::Expr::Match { expr, arms, .. } => {
+            validate_expr_stdlib_wrapper_capabilities(module_path, expr, capabilities, wrappers)?;
+            for arm in arms {
+                validate_expr_stdlib_wrapper_capabilities(
+                    module_path,
+                    &arm.expr,
+                    capabilities,
+                    wrappers,
+                )?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn stdlib_wrapper_capability(module_path: &Path, function_name: &str) -> Option<CapabilityKind> {
+    let module = module_path.to_string_lossy();
+    match (module.as_ref(), function_name) {
+        ("<stdlib>/net.ax", _)
+        | ("<stdlib>/net_tcp.ax", _)
+        | ("<stdlib>/net_udp.ax", _)
+        | ("<stdlib>/http.ax", _)
+        | ("<stdlib>/async_net.ax", _) => Some(CapabilityKind::Net),
+        ("<stdlib>/time.ax", "now_ms" | "now" | "elapsed_ms" | "sleep")
+        | ("<stdlib>/async_time.ax", _) => Some(CapabilityKind::Clock),
+        ("<stdlib>/env.ax", "get_env") => Some(CapabilityKind::Env),
+        ("<stdlib>/fs.ax", "read_file") => Some(CapabilityKind::Fs),
+        ("<stdlib>/fs.ax", _) => Some(CapabilityKind::FsWrite),
+        ("<stdlib>/process.ax", "run_status") => Some(CapabilityKind::Process),
+        ("<stdlib>/crypto_hash.ax", _)
+        | ("<stdlib>/crypto_mac.ax", _)
+        | ("<stdlib>/crypto_rand.ax", _)
+        | ("<stdlib>/crypto_aead.ax", _)
+        | ("<stdlib>/crypto_sign.ax", _)
+        | ("<stdlib>/crypto.ax", _) => Some(CapabilityKind::Crypto),
+        _ => None,
+    }
+}
+
 fn validate_program_capabilities(
     module_path: &Path,
     program: &syntax::Program,
@@ -4670,6 +4965,7 @@ fn flatten_modules(
         let mut private_imported = HashSet::new();
         let mut private_imported_consts = HashSet::new();
         let mut private_imported_types = HashSet::new();
+        let mut capability_wrappers = HashMap::new();
         for import in &module.program.imports {
             let (import_package_root, import_path) =
                 resolve_import_path(graph, &module.package_root, &module.path, import)?;
@@ -4709,6 +5005,9 @@ fn flatten_modules(
                     .with_span(import.line, import.column));
                 }
                 visible_functions.insert(export_name.clone(), internal_name.clone());
+                if let Some(kind) = stdlib_wrapper_capability(&import_path, export_name) {
+                    capability_wrappers.insert(export_name.clone(), kind);
+                }
             }
             if same_package {
                 for (export_name, internal_name) in &imported_symbols.package_functions {
@@ -5014,6 +5313,14 @@ fn flatten_modules(
                 &module.path,
             )?);
         }
+
+        let package = graph.context(&module.package_root)?;
+        validate_stdlib_wrapper_capabilities(
+            &module.path,
+            &module.program,
+            &package.manifest.capabilities,
+            &capability_wrappers,
+        )?;
 
         for struct_decl in &module.program.structs {
             flattened_structs.push(rewrite_struct(
@@ -7875,6 +8182,106 @@ mod tests {
             tests: Vec::new(),
             capabilities: CapabilityConfig::default(),
         }
+    }
+
+    #[test]
+    fn dependency_without_net_cannot_use_stdlib_net_wrapper() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path().join("app");
+        let dep = root.join("deps/evil");
+        fs::create_dir_all(root.join("src")).expect("create app src");
+        fs::create_dir_all(dep.join("src")).expect("create dep src");
+        fs::write(
+            root.join("axiom.toml"),
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.evil]
+path = "deps/evil"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write app manifest");
+        fs::write(
+            dep.join("axiom.toml"),
+            r#"[package]
+name = "evil"
+version = "0.1.0"
+
+[build]
+entry = "src/lib.ax"
+out_dir = "dist"
+
+[capabilities]
+net = false
+"#,
+        )
+        .expect("write dep manifest");
+        fs::write(
+            root.join("src/main.ax"),
+            r#"import "evil/leak.ax"
+print leak("localhost")
+"#,
+        )
+        .expect("write app source");
+        fs::write(
+            dep.join("src/leak.ax"),
+            r#"import "std/net.ax"
+pub fn leak(host: string): bool {
+return resolve(host).is_some()
+}
+"#,
+        )
+        .expect("write dep source");
+        fs::write(
+            dep.join("src/lib.ax"),
+            r#"print "dep"
+"#,
+        )
+        .expect("write dep entry");
+        let app_manifest = load_manifest(&root).expect("load app manifest");
+        let dep_manifest = load_manifest(&dep).expect("load dep manifest");
+        fs::write(
+            root.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&root, &app_manifest)
+                .expect("render app lockfile"),
+        )
+        .expect("write app lockfile");
+        fs::write(
+            dep.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&dep, &dep_manifest)
+                .expect("render dep lockfile"),
+        )
+        .expect("write dep lockfile");
+
+        let graph = load_package_graph(&root).expect("load graph");
+        let package_root =
+            canonicalize_existing_path(&root, "project root").expect("canonical root");
+        let error = match analyze_package(&graph, &package_root) {
+            Ok(_) => panic!("net wrapper denied"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .message
+                .contains(r#"call to stdlib wrapper "resolve" requires [capabilities].net = true"#),
+            "unexpected diagnostic: {error:?}"
+        );
+        assert!(
+            error
+                .path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("deps/evil/src/leak.ax")),
+            "unexpected diagnostic path: {error:?}"
+        );
     }
 
     #[test]
