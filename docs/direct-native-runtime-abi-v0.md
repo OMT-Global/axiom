@@ -664,7 +664,8 @@ The borrowed-slice row has partial direct-native evidence: the Cranelift spike
 evaluates array-backed borrowed slices through `len`, `first`, `last`, indexing,
 and function returns. The public borrowed-slice smoke asserts `generated_rust:
 null` while printing `len`, `first`, `last`, and index projections from both
-direct local borrowed slices and helper-returned borrowed slices. The
+direct local borrowed slices and helper-returned borrowed slices, so the row now
+has explicit helper-output proof rather than only local-slice coverage. The
 direct-native runtime path now also lowers narrow static-range fixed-array
 slices using literal or static scalar bounds such as `values[1:]`,
 `values[START:]`, `values[:2]`, and `values[:END]` through `len`, `first`, and
