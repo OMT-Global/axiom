@@ -273,12 +273,15 @@ helpers now lower across direct-native function-call boundaries as one return
 slot per tuple element, with caller-side projection locals populated from the
 multi-slot return; this includes helpers whose final return is selected by
 branch blocks with branch-local scalar values, helpers returning local tuple
-bindings, and helpers forwarding tuple parameters. Existing tuple locals can
-now be reassigned from tuple helper returns using the same tuple-element ABI,
-including inside runtime loop blocks. The row remains partial because
-direct-native codegen still does not provide a general tuple ABI, tuple storage
-for non-scalar elements, tuple return expressions beyond the scalar/bool local,
-literal, and parameter slice, or a complete aggregate value passing contract.
+bindings, and helpers forwarding tuple parameters. The public tuple-returning
+helper smoke also asserts `generated_rust: null` while printing caller-side
+scalar and boolean projections from literal, local-binding, forwarded, typed,
+branch-selected, and fallback tuple returns. Existing tuple locals can now be
+reassigned from tuple helper returns using the same tuple-element ABI, including
+inside runtime loop blocks. The row remains partial because direct-native
+codegen still does not provide a general tuple ABI, tuple storage for non-scalar
+elements, tuple return expressions beyond the scalar/bool local, literal, and
+parameter slice, or a complete aggregate value passing contract.
 
 The `struct.field` row now has narrow direct-native runtime evidence for
 immediate struct-literal scalar field access and scalar projection from local
