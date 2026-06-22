@@ -3432,6 +3432,8 @@ fn run_http_fixture_case(
             }
         }
     };
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
 
     let path = if fixture.path.starts_with('/') {
         fixture.path.clone()
