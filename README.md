@@ -141,9 +141,8 @@ expectations.
 ## Repo Map
 
 - `stage1/crates/axiomc/`: Rust compiler, CLI, manifest, diagnostics, HIR/MIR,
-  stdlib, direct-native backend, and the current generated-Rust compatibility
-  backend. Removing generated Rust from the supported toolchain is tracked by
-  #1191.
+  stdlib, direct-native backend, and the generated-Rust compatibility backend.
+  Removing generated Rust from the supported toolchain is tracked by #1191.
 - `stage1/examples/`: checked-in package examples for language, package,
   workspace, stdlib, and capability behavior.
 - `stage1/conformance/`: Rust-run pass/fail conformance fixtures.

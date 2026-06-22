@@ -370,10 +370,11 @@ still far from the stated 1.0 target for service and agent workloads.
   a debug manifest sidecar that ties the native binary to the generated Rust,
   the source map, and the hashed `.ax` source files. `docs/stage1-debug-map.md`
   documents how LLDB/GDB helpers translate generated Rust frame lines through
-  the sidecar map. The manifest is an explicit generated-Rust bridge: current
-  DWARF still points at generated Rust, and rustc path remapping cannot
-  represent Axiom span rows or multiple imported source files, so full
-  Axiom-native debugger stepping remains a direct-backend follow-on.
+  the sidecar map. The manifest is an explicit generated-Rust bridge: DWARF
+  for compatibility-backend builds still points at generated Rust, and rustc
+  path remapping cannot represent Axiom span rows or multiple imported source
+  files, so full Axiom-native debugger stepping remains a direct-backend
+  follow-on.
 - `axiomc fmt`, `axiomc bench`, `axiomc doc`, the stage1 scratch `repl`, and a
   bounded `axiomc lsp` analyzer now exist as bootstrap-grade toolchain
   commands. The LSP endpoint currently serves compiler-backed diagnostics over
