@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 #[cfg(not(windows))]
 #[test]
@@ -1423,6 +1423,32 @@ fn cranelift_backend_lowers_aggregate_helper_reassignment_to_runtime_exit_code()
         .expect("run cranelift aggregate helper reassignment binary");
     assert_eq!(run.status.code(), Some(48));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[test]
+fn cranelift_backend_rejects_nested_enum_payload_reassignment_before_lowering() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("nested-enum-payload-reassignment");
+    write_nested_enum_payload_reassignment_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args(["check", project.to_str().expect("project path"), "--json"])
+        .output()
+        .expect("run axiomc check --json");
+    assert!(
+        !output.status.success(),
+        "nested enum payload reassignment unexpectedly checked: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse check JSON");
+    assert_eq!(payload["ok"], Value::Bool(false));
+    let message = payload["error"]["message"].as_str().expect("error message");
+    assert!(
+        message.contains("assignment target must be a scalar local"),
+        "unexpected nested enum payload reassignment error: {message}"
+    );
 }
 
 #[cfg(not(windows))]
@@ -5033,42 +5059,61 @@ fn cranelift_backend_builds_std_async_net_tcp_binary() {
     }
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("std-async-net-tcp");
-    let Some(port) = reserve_loopback_port() else {
-        return;
-    };
-    write_std_async_net_tcp_project(&project, port);
+    let mut bind_race_reports = Vec::new();
+    for attempt in 1..=5 {
+        let project = temp.path().join(format!("std-async-net-tcp-{attempt}"));
+        let Some(port) = reserve_loopback_port() else {
+            return;
+        };
+        write_std_async_net_tcp_project(&project, port);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
-        .args([
-            "build",
-            project.to_str().expect("project path"),
-            "--backend",
-            "cranelift",
-            "--json",
-        ])
-        .output()
-        .expect("run axiomc build --backend cranelift");
-    assert!(
-        output.status.success(),
-        "cranelift std async net TCP build failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+        let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+            .args([
+                "build",
+                project.to_str().expect("project path"),
+                "--backend",
+                "cranelift",
+                "--json",
+            ])
+            .output()
+            .expect("run axiomc build --backend cranelift");
+        assert!(
+            output.status.success(),
+            "cranelift std async net TCP build failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
 
-    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
-    assert_eq!(payload["backend"], "cranelift");
-    assert_eq!(payload["generated_rust"], Value::Null);
-    let binary = payload["binary"].as_str().expect("binary path");
-    let run = Command::new(binary)
-        .output()
-        .expect("run cranelift std async net TCP binary");
-    assert!(
-        run.status.success(),
-        "cranelift std async net TCP binary failed: stderr={}",
-        String::from_utf8_lossy(&run.stderr)
+        let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+        assert_eq!(payload["backend"], "cranelift");
+        assert_eq!(payload["generated_rust"], Value::Null);
+        let binary = payload["binary"].as_str().expect("binary path");
+        let run = Command::new(binary)
+            .output()
+            .expect("run cranelift std async net TCP binary");
+        if run.status.success() {
+            assert_eq!(String::from_utf8_lossy(&run.stdout), "alpha\nbeta\n");
+            return;
+        }
+        if !std_async_net_tcp_bind_race(&run) {
+            panic!(
+                "cranelift std async net TCP binary failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&run.stdout),
+                String::from_utf8_lossy(&run.stderr)
+            );
+        }
+        bind_race_reports.push(String::from_utf8_lossy(&run.stderr).into_owned());
+    }
+
+    panic!(
+        "cranelift std async net TCP binary exhausted literal-port retries after bind races: {}",
+        bind_race_reports.join("\n--- retry ---\n")
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "alpha\nbeta\n");
+}
+
+#[cfg(not(windows))]
+fn std_async_net_tcp_bind_race(run: &Output) -> bool {
+    String::from_utf8_lossy(&run.stderr).contains("\"message\":\"net_tcp_listen failed\"")
 }
 
 #[cfg(not(windows))]
@@ -8036,6 +8081,26 @@ fn write_aggregate_helper_reassignment_main_exit_project(project: &Path) {
         "struct Step {\nvalue: int\nenabled: bool\nsmall: u8\n}\n\nenum Choice {\nReady { step: Step }\nOff\n}\n\nfn make_pair(): (int, bool) {\nreturn (48, true)\n}\n\nfn make_values(): [int; 2] {\nreturn [20, 28]\n}\n\nfn make_step(): Step {\nreturn Step { value: 48, enabled: true, small: 2u8 }\n}\n\nfn make_option(): Option<Step> {\nreturn Some(Step { value: 48, enabled: true, small: 2u8 })\n}\n\nfn make_result(): Result<Step, Step> {\nreturn Ok(Step { value: 48, enabled: true, small: 2u8 })\n}\n\nfn make_choice(): Choice {\nreturn Ready { step: Step { value: 48, enabled: true, small: 2u8 } }\n}\n\nfn score_option(value: Option<Step>): int {\nreturn match value { Some(step) => step.value, None => 1 }\n}\n\nfn score_result(value: Result<Step, Step>): int {\nreturn match value { Ok(step) => step.value, Err(error) => error.value }\n}\n\nfn score_choice(value: Choice): int {\nreturn match value { Ready { step } => step.value, Off => 1 }\n}\n\nfn main(): int {\nlet pair: (int, bool) = (0, false)\nlet values: [int; 2] = [0, 0]\nlet step: Step = Step { value: 0, enabled: false, small: 0u8 }\nlet maybe: Option<Step> = None\nlet outcome: Result<Step, Step> = Err(Step { value: 1, enabled: false, small: 0u8 })\nlet choice: Choice = Off\nlet index: int = 0\nwhile index < 1 {\npair = make_pair()\nvalues = make_values()\nindex = index + 1\n}\nif pair.1 {\nstep = make_step()\nmaybe = make_option()\noutcome = make_result()\nchoice = make_choice()\n} else {\nstep = Step { value: 1, enabled: false, small: 0u8 }\nmaybe = None\noutcome = Err(Step { value: 1, enabled: false, small: 0u8 })\nchoice = Off\n}\nlet pair_code: int = pair.0\nlet pair_enabled: bool = pair.1\nlet array_code: int = values[0] + values[1]\nlet step_code: int = step.value\nlet step_enabled: bool = step.enabled\nlet option_code: int = score_option(maybe)\nlet result_code: int = score_result(outcome)\nlet choice_code: int = score_choice(choice)\nif pair_enabled && step_enabled && pair_code == 48 && array_code == 48 && step_code == 48 && option_code == 48 && result_code == 48 && choice_code == 48 {\nreturn pair_code\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write aggregate helper reassignment main exit source");
+}
+
+fn write_nested_enum_payload_reassignment_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create nested enum payload reassignment project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"nested-enum-payload-reassignment\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write nested enum payload reassignment manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"nested-enum-payload-reassignment\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write nested enum payload reassignment lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "enum Choice {\nReady { value: int }\nOff\n}\n\nfn choose(): Option<Choice> {\nreturn Some(Ready { value: 48 })\n}\n\nfn main(): int {\nlet maybe: Option<Choice> = None\nmaybe = choose()\nreturn 0\n}\n",
+    )
+    .expect("write nested enum payload reassignment source");
 }
 
 fn write_bool_returning_main_exit_project(project: &Path) {
@@ -11066,7 +11131,7 @@ async = true
 [unsafe_rationale]
 net = "Cranelift ABI regression covers compiler-side std/async_net.ax loopback TCP evaluation for issue 928."
 async = "Cranelift ABI regression covers compiler-side std/async_net.ax loopback TCP evaluation for issue 928."
-"#,
+"#
         ),
     )
     .expect("write std async net TCP manifest");
@@ -11121,7 +11186,7 @@ print "second none"
 let _first_done: int = await join<int>(first_handler)
 let _second_done: int = await join<int>(second_handler)
 let _listener_closed: int = close_listener(listener)
-"#,
+"#
         ),
     )
     .expect("write std async net TCP source");
