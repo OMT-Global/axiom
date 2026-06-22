@@ -14,6 +14,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const I64_REALPATH_BUFFER_BYTES: u32 = 4096;
+const I64_TIMESPEC_BYTES: u32 = 16;
+const I64_TIMESPEC_SECONDS_OFFSET: i32 = 0;
+const I64_TIMESPEC_NANOS_OFFSET: i32 = 8;
+const I64_TIME_UTC_BASE: i64 = 1;
 
 #[derive(Debug)]
 pub struct CraneliftBackendError {
@@ -45,6 +49,7 @@ struct I64RuntimeRefs {
     write: FuncRef,
     read: FuncRef,
     sleep: FuncRef,
+    timespec_get: FuncRef,
     getenv: FuncRef,
     strlen: FuncRef,
     atoll: FuncRef,
@@ -65,6 +70,8 @@ struct I64RuntimeRefs {
     closedir: FuncRef,
     realpath: FuncRef,
     strncmp: FuncRef,
+    getaddrinfo: Option<FuncRef>,
+    freeaddrinfo: Option<FuncRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +113,10 @@ pub enum I64AuditSuccess {
 pub enum I64Expr {
     Literal(i64),
     Local(usize),
+    ClockNowMs,
+    ClockElapsedMs {
+        start: Box<I64Expr>,
+    },
     SleepMs {
         milliseconds: Box<I64Expr>,
     },
@@ -150,7 +161,7 @@ pub enum I64Expr {
         package: String,
     },
     RandomBytesLen {
-        length: i64,
+        length: Box<I64Expr>,
     },
     AuditCrypto {
         intrinsic: String,
@@ -208,6 +219,17 @@ pub enum I64Expr {
     },
     ProcessStatus {
         command: String,
+    },
+    NetResolveLen {
+        host: String,
+        resolved_len: i64,
+    },
+    AuditNet {
+        intrinsic: String,
+        package: String,
+        host_len: usize,
+        success: I64AuditSuccess,
+        result: Box<I64Expr>,
     },
     ConditionValue(Box<I64Condition>),
     Cast {
@@ -558,6 +580,15 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare usleep import: {message}"))
         })?;
+    let mut timespec_get_sig = module.make_signature();
+    timespec_get_sig.params.push(AbiParam::new(pointer_type));
+    timespec_get_sig.params.push(AbiParam::new(types::I32));
+    timespec_get_sig.returns.push(AbiParam::new(types::I32));
+    let timespec_get_id = module
+        .declare_function("timespec_get", Linkage::Import, &timespec_get_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare timespec_get import: {message}"))
+        })?;
     let mut getenv_sig = module.make_signature();
     getenv_sig.params.push(AbiParam::new(pointer_type));
     getenv_sig.returns.push(AbiParam::new(pointer_type));
@@ -730,16 +761,83 @@ fn emit_i64_exit_object(
         .map_err(|message| {
             CraneliftBackendError::new(format!("declare strncmp import: {message}"))
         })?;
+    #[cfg(not(windows))]
+    let mut getaddrinfo_sig = module.make_signature();
+    #[cfg(not(windows))]
+    getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
+    getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
+    getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
+    getaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
+    getaddrinfo_sig.returns.push(AbiParam::new(types::I32));
+    #[cfg(not(windows))]
+    let getaddrinfo_id = module
+        .declare_function("getaddrinfo", Linkage::Import, &getaddrinfo_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare getaddrinfo import: {message}"))
+        })?;
+    #[cfg(not(windows))]
+    let mut freeaddrinfo_sig = module.make_signature();
+    #[cfg(not(windows))]
+    freeaddrinfo_sig.params.push(AbiParam::new(pointer_type));
+    #[cfg(not(windows))]
+    let freeaddrinfo_id = module
+        .declare_function("freeaddrinfo", Linkage::Import, &freeaddrinfo_sig)
+        .map_err(|message| {
+            CraneliftBackendError::new(format!("declare freeaddrinfo import: {message}"))
+        })?;
     let output_data_ids = declare_i64_output_data(&mut module, &program)?;
     let function_ids = declare_i64_functions(&mut module, &program.functions)?;
 
     for (index, function) in program.functions.iter().enumerate() {
+        #[cfg(not(windows))]
+        {
+            define_i64_function(
+                &mut module,
+                &function_ids,
+                write_id,
+                read_id,
+                sleep_id,
+                timespec_get_id,
+                getenv_id,
+                strlen_id,
+                atoll_id,
+                open_id,
+                creat_id,
+                lseek_id,
+                close_id,
+                access_id,
+                system_id,
+                fopen_id,
+                fwrite_id,
+                fclose_id,
+                unlink_id,
+                rename_id,
+                mkdir_id,
+                rmdir_id,
+                opendir_id,
+                closedir_id,
+                realpath_id,
+                strncmp_id,
+                getaddrinfo_id,
+                freeaddrinfo_id,
+                &output_data_ids,
+                index,
+                function,
+            )?;
+            continue;
+        }
+        #[cfg(windows)]
         define_i64_function(
             &mut module,
             &function_ids,
             write_id,
             read_id,
             sleep_id,
+            timespec_get_id,
             getenv_id,
             strlen_id,
             atoll_id,
@@ -785,6 +883,7 @@ fn emit_i64_exit_object(
         let write_ref = module.declare_func_in_func(write_id, builder.func);
         let read_ref = module.declare_func_in_func(read_id, builder.func);
         let sleep_ref = module.declare_func_in_func(sleep_id, builder.func);
+        let timespec_get_ref = module.declare_func_in_func(timespec_get_id, builder.func);
         let getenv_ref = module.declare_func_in_func(getenv_id, builder.func);
         let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
         let atoll_ref = module.declare_func_in_func(atoll_id, builder.func);
@@ -805,10 +904,15 @@ fn emit_i64_exit_object(
         let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
         let realpath_ref = module.declare_func_in_func(realpath_id, builder.func);
         let strncmp_ref = module.declare_func_in_func(strncmp_id, builder.func);
+        #[cfg(not(windows))]
+        let getaddrinfo_ref = module.declare_func_in_func(getaddrinfo_id, builder.func);
+        #[cfg(not(windows))]
+        let freeaddrinfo_ref = module.declare_func_in_func(freeaddrinfo_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             read: read_ref,
             sleep: sleep_ref,
+            timespec_get: timespec_get_ref,
             getenv: getenv_ref,
             strlen: strlen_ref,
             atoll: atoll_ref,
@@ -829,6 +933,26 @@ fn emit_i64_exit_object(
             closedir: closedir_ref,
             realpath: realpath_ref,
             strncmp: strncmp_ref,
+            getaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(getaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
+            freeaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(freeaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
         };
         let mut locals = Vec::new();
         for local_expr in &program.locals {
@@ -1016,6 +1140,7 @@ fn define_i64_function(
     write_id: FuncId,
     read_id: FuncId,
     sleep_id: FuncId,
+    timespec_get_id: FuncId,
     getenv_id: FuncId,
     strlen_id: FuncId,
     atoll_id: FuncId,
@@ -1036,6 +1161,8 @@ fn define_i64_function(
     closedir_id: FuncId,
     realpath_id: FuncId,
     strncmp_id: FuncId,
+    #[cfg(not(windows))] getaddrinfo_id: FuncId,
+    #[cfg(not(windows))] freeaddrinfo_id: FuncId,
     output_data_ids: &[I64OutputData],
     index: usize,
     function: &I64Function,
@@ -1069,6 +1196,7 @@ fn define_i64_function(
         let write_ref = module.declare_func_in_func(write_id, builder.func);
         let read_ref = module.declare_func_in_func(read_id, builder.func);
         let sleep_ref = module.declare_func_in_func(sleep_id, builder.func);
+        let timespec_get_ref = module.declare_func_in_func(timespec_get_id, builder.func);
         let getenv_ref = module.declare_func_in_func(getenv_id, builder.func);
         let strlen_ref = module.declare_func_in_func(strlen_id, builder.func);
         let atoll_ref = module.declare_func_in_func(atoll_id, builder.func);
@@ -1089,10 +1217,15 @@ fn define_i64_function(
         let closedir_ref = module.declare_func_in_func(closedir_id, builder.func);
         let realpath_ref = module.declare_func_in_func(realpath_id, builder.func);
         let strncmp_ref = module.declare_func_in_func(strncmp_id, builder.func);
+        #[cfg(not(windows))]
+        let getaddrinfo_ref = module.declare_func_in_func(getaddrinfo_id, builder.func);
+        #[cfg(not(windows))]
+        let freeaddrinfo_ref = module.declare_func_in_func(freeaddrinfo_id, builder.func);
         let runtime_refs = I64RuntimeRefs {
             write: write_ref,
             read: read_ref,
             sleep: sleep_ref,
+            timespec_get: timespec_get_ref,
             getenv: getenv_ref,
             strlen: strlen_ref,
             atoll: atoll_ref,
@@ -1113,6 +1246,26 @@ fn define_i64_function(
             closedir: closedir_ref,
             realpath: realpath_ref,
             strncmp: strncmp_ref,
+            getaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(getaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
+            freeaddrinfo: {
+                #[cfg(not(windows))]
+                {
+                    Some(freeaddrinfo_ref)
+                }
+                #[cfg(windows)]
+                {
+                    None
+                }
+            },
         };
         let mut locals = Vec::new();
         for param in builder.block_params(block).to_vec() {
@@ -2054,6 +2207,10 @@ fn emit_i64_expr(
             })?;
             Ok(builder.use_var(local))
         }
+        I64Expr::ClockNowMs => Ok(emit_i64_clock_now_ms_expr(builder, runtime_refs)),
+        I64Expr::ClockElapsedMs { start } => {
+            emit_i64_clock_elapsed_ms_expr(builder, locals, function_refs, runtime_refs, start)
+        }
         I64Expr::SleepMs { milliseconds } => {
             emit_i64_sleep_ms_expr(builder, locals, function_refs, runtime_refs, milliseconds)
         }
@@ -2137,7 +2294,7 @@ fn emit_i64_expr(
             emit_i64_random_u64_expr(builder, runtime_refs, intrinsic, package)
         }
         I64Expr::RandomBytesLen { length } => {
-            emit_i64_random_bytes_len_expr(builder, runtime_refs, *length)
+            emit_i64_random_bytes_len_expr(builder, locals, function_refs, runtime_refs, length)
         }
         I64Expr::AuditCrypto {
             intrinsic,
@@ -2214,6 +2371,26 @@ fn emit_i64_expr(
         I64Expr::ProcessStatus { command } => {
             emit_i64_process_status_expr(builder, runtime_refs, command)
         }
+        I64Expr::NetResolveLen { host, resolved_len } => {
+            emit_i64_net_resolve_len_expr(builder, runtime_refs, host, *resolved_len)
+        }
+        I64Expr::AuditNet {
+            intrinsic,
+            package,
+            host_len,
+            success,
+            result,
+        } => emit_i64_audit_net_expr(
+            builder,
+            locals,
+            function_refs,
+            runtime_refs,
+            intrinsic,
+            package,
+            *host_len,
+            *success,
+            result,
+        ),
         I64Expr::ConditionValue(cond) => {
             let cond = emit_i64_condition(builder, locals, function_refs, runtime_refs, cond)?;
             Ok(emit_i64_bool_value(builder, cond))
@@ -2469,29 +2646,46 @@ fn emit_i64_random_u64_expr(
 
 fn emit_i64_random_bytes_len_expr(
     builder: &mut FunctionBuilder<'_>,
+    locals: &[Variable],
+    function_refs: &[FuncRef],
     runtime_refs: I64RuntimeRefs,
-    length: i64,
+    length: &I64Expr,
 ) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
-    if !(0..=65_536).contains(&length) {
-        return Ok(builder.ins().iconst(types::I64, -1));
-    }
-    if length == 0 {
-        return Ok(builder.ins().iconst(types::I64, 0));
-    }
-
-    let hook_key_ptr = emit_i64_path_ptr(builder, "AXIOM_TEST_RANDOM_BYTES")?;
-    let hook_call = builder.ins().call(runtime_refs.getenv, &[hook_key_ptr]);
-    let hook_ptr = builder.inst_results(hook_call)[0];
-
+    let length = emit_i64_expr(builder, locals, function_refs, runtime_refs, length)?;
+    let failed_block = builder.create_block();
+    let success_block = builder.create_block();
+    let nonzero_block = builder.create_block();
+    let hook_check_block = builder.create_block();
     let hook_len_block = builder.create_block();
     let os_open_block = builder.create_block();
-    let failed_block = builder.create_block();
     let read_block = builder.create_block();
-    let success_block = builder.create_block();
     let merge_block = builder.create_block();
     builder.append_block_param(read_block, types::I32);
     builder.append_block_param(merge_block, types::I64);
 
+    let min_valid = builder
+        .ins()
+        .icmp_imm(IntCC::SignedGreaterThanOrEqual, length, 0);
+    let max_valid = builder
+        .ins()
+        .icmp_imm(IntCC::SignedLessThanOrEqual, length, 65_536);
+    let valid_length = builder.ins().band(min_valid, max_valid);
+    builder
+        .ins()
+        .brif(valid_length, nonzero_block, &[], failed_block, &[]);
+
+    builder.switch_to_block(nonzero_block);
+    builder.seal_block(nonzero_block);
+    let zero_length = builder.ins().icmp_imm(IntCC::Equal, length, 0);
+    builder
+        .ins()
+        .brif(zero_length, success_block, &[], hook_check_block, &[]);
+
+    builder.switch_to_block(hook_check_block);
+    builder.seal_block(hook_check_block);
+    let hook_key_ptr = emit_i64_path_ptr(builder, "AXIOM_TEST_RANDOM_BYTES")?;
+    let hook_call = builder.ins().call(runtime_refs.getenv, &[hook_key_ptr]);
+    let hook_ptr = builder.inst_results(hook_call)[0];
     let missing_hook = builder.ins().icmp_imm(IntCC::Equal, hook_ptr, 0);
     builder
         .ins()
@@ -2503,20 +2697,15 @@ fn emit_i64_random_bytes_len_expr(
     let hook_len = builder.inst_results(hook_len_call)[0];
     let hook_has_bytes = builder
         .ins()
-        .icmp_imm(IntCC::SignedGreaterThanOrEqual, hook_len, length);
+        .icmp(IntCC::SignedGreaterThanOrEqual, hook_len, length);
     builder
         .ins()
         .brif(hook_has_bytes, success_block, &[], failed_block, &[]);
 
     builder.switch_to_block(os_open_block);
     builder.seal_block(os_open_block);
-    let slot_len = u32::try_from(length)
-        .map_err(|_| CraneliftBackendError::new("crypto random length is too large"))?;
-    let bytes_slot = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        slot_len,
-        0,
-    ));
+    let bytes_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 65_536, 0));
     let bytes_ptr = builder.ins().stack_addr(types::I64, bytes_slot, 0);
     let source_ptr = emit_i64_path_ptr(builder, "/dev/urandom")?;
     let open_flags = builder.ins().iconst(types::I32, 0);
@@ -2536,21 +2725,19 @@ fn emit_i64_random_bytes_len_expr(
     builder.switch_to_block(read_block);
     builder.seal_block(read_block);
     let fd = builder.block_params(read_block)[0];
-    let requested = builder.ins().iconst(types::I64, length);
     let read_call = builder
         .ins()
-        .call(runtime_refs.read, &[fd, bytes_ptr, requested]);
+        .call(runtime_refs.read, &[fd, bytes_ptr, length]);
     let bytes_read = builder.inst_results(read_call)[0];
     builder.ins().call(runtime_refs.close, &[fd]);
-    let read_complete = builder.ins().icmp(IntCC::Equal, bytes_read, requested);
+    let read_complete = builder.ins().icmp(IntCC::Equal, bytes_read, length);
     builder
         .ins()
         .brif(read_complete, success_block, &[], failed_block, &[]);
 
     builder.switch_to_block(success_block);
     builder.seal_block(success_block);
-    let success = builder.ins().iconst(types::I64, length);
-    builder.ins().jump(merge_block, &[BlockArg::Value(success)]);
+    builder.ins().jump(merge_block, &[BlockArg::Value(length)]);
 
     builder.switch_to_block(failed_block);
     builder.seal_block(failed_block);
@@ -2754,6 +2941,15 @@ fn i64_process_audit_line(
 ) -> String {
     format!(
         "{{\"package\":\"{}\",\"intrinsic\":\"{}\",\"args\":{{\"command\":\"string:{command_len}\"}},\"outcome\":\"{}\"}}\n",
+        i64_json_escape(package),
+        i64_json_escape(intrinsic),
+        i64_json_escape(outcome)
+    )
+}
+
+fn i64_net_audit_line(intrinsic: &str, package: &str, host_len: usize, outcome: &str) -> String {
+    format!(
+        "{{\"package\":\"{}\",\"intrinsic\":\"{}\",\"args\":{{\"host\":\"string:{host_len}\"}},\"outcome\":\"{}\"}}\n",
         i64_json_escape(package),
         i64_json_escape(intrinsic),
         i64_json_escape(outcome)
@@ -2984,6 +3180,51 @@ fn emit_i64_audit_process_expr(
     let status = emit_i64_expr(builder, locals, function_refs, runtime_refs, result)?;
     let ok_line = i64_process_audit_line(intrinsic, package, command_len, "ok");
     let denied_line = i64_process_audit_line(intrinsic, package, command_len, "denied");
+
+    let ok_block = builder.create_block();
+    let denied_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let ok = match success {
+        I64AuditSuccess::ExitZero => builder.ins().icmp_imm(IntCC::Equal, status, 0),
+        I64AuditSuccess::NonNegative => {
+            builder
+                .ins()
+                .icmp_imm(IntCC::SignedGreaterThanOrEqual, status, 0)
+        }
+    };
+    builder.ins().brif(ok, ok_block, &[], denied_block, &[]);
+
+    builder.switch_to_block(ok_block);
+    builder.seal_block(ok_block);
+    emit_i64_host_audit_line(builder, runtime_refs, &ok_line)?;
+    builder.ins().jump(merge_block, &[BlockArg::Value(status)]);
+
+    builder.switch_to_block(denied_block);
+    builder.seal_block(denied_block);
+    emit_i64_host_audit_line(builder, runtime_refs, &denied_line)?;
+    builder.ins().jump(merge_block, &[BlockArg::Value(status)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_audit_net_expr(
+    builder: &mut FunctionBuilder<'_>,
+    locals: &[Variable],
+    function_refs: &[FuncRef],
+    runtime_refs: I64RuntimeRefs,
+    intrinsic: &str,
+    package: &str,
+    host_len: usize,
+    success: I64AuditSuccess,
+    result: &I64Expr,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let status = emit_i64_expr(builder, locals, function_refs, runtime_refs, result)?;
+    let ok_line = i64_net_audit_line(intrinsic, package, host_len, "ok");
+    let denied_line = i64_net_audit_line(intrinsic, package, host_len, "denied");
 
     let ok_block = builder.create_block();
     let denied_block = builder.create_block();
@@ -3809,6 +4050,87 @@ fn emit_i64_process_status_expr(
     Ok(builder.block_params(merge_block)[0])
 }
 
+#[cfg(not(windows))]
+fn emit_i64_net_resolve_len_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+    host: &str,
+    resolved_len: i64,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    if host.as_bytes().contains(&0) {
+        return Err(CraneliftBackendError::new(
+            "network host contains an interior null byte",
+        ));
+    }
+    let host_ptr = emit_i64_path_ptr(builder, host)?;
+    let null_ptr = builder.ins().iconst(types::I64, 0);
+    let result_slot =
+        builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 0));
+    builder.ins().stack_store(null_ptr, result_slot, 0);
+    let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+    #[cfg(not(windows))]
+    let call = builder.ins().call(
+        runtime_refs
+            .getaddrinfo
+            .expect("getaddrinfo import missing"),
+        &[host_ptr, null_ptr, null_ptr, result_ptr],
+    );
+    #[cfg(not(windows))]
+    let status = builder.inst_results(call)[0];
+
+    let success_block = builder.create_block();
+    let free_block = builder.create_block();
+    let failed_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let status_ok = builder.ins().icmp_imm(IntCC::Equal, status, 0);
+    builder
+        .ins()
+        .brif(status_ok, success_block, &[], failed_block, &[]);
+
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+    let result_head = builder.ins().stack_load(types::I64, result_slot, 0);
+    let result_missing = builder.ins().icmp_imm(IntCC::Equal, result_head, 0);
+    builder
+        .ins()
+        .brif(result_missing, failed_block, &[], free_block, &[]);
+
+    builder.switch_to_block(free_block);
+    builder.seal_block(free_block);
+    #[cfg(not(windows))]
+    builder.ins().call(
+        runtime_refs
+            .freeaddrinfo
+            .expect("freeaddrinfo import missing"),
+        &[result_head],
+    );
+    let len = builder.ins().iconst(types::I64, resolved_len);
+    builder.ins().jump(merge_block, &[BlockArg::Value(len)]);
+
+    builder.switch_to_block(failed_block);
+    builder.seal_block(failed_block);
+    let failed = builder.ins().iconst(types::I64, -1);
+    builder.ins().jump(merge_block, &[BlockArg::Value(failed)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    Ok(builder.block_params(merge_block)[0])
+}
+
+#[cfg(windows)]
+fn emit_i64_net_resolve_len_expr(
+    _builder: &mut FunctionBuilder<'_>,
+    _runtime_refs: I64RuntimeRefs,
+    _host: &str,
+    _resolved_len: i64,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    Err(CraneliftBackendError::new(
+        "numeric native DNS lowering is unsupported on windows",
+    ))
+}
+
 fn emit_i64_sleep_ms_expr(
     builder: &mut FunctionBuilder<'_>,
     locals: &[Variable],
@@ -3864,6 +4186,81 @@ fn emit_i64_sleep_ms_expr(
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
     Ok(builder.block_params(merge_block)[0])
+}
+
+fn emit_i64_clock_now_ms_expr(
+    builder: &mut FunctionBuilder<'_>,
+    runtime_refs: I64RuntimeRefs,
+) -> cranelift_codegen::ir::Value {
+    let timespec_slot = builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        I64_TIMESPEC_BYTES,
+        0,
+    ));
+    let timespec_ptr = builder.ins().stack_addr(types::I64, timespec_slot, 0);
+    let time_utc = builder.ins().iconst(types::I32, I64_TIME_UTC_BASE);
+    let call = builder
+        .ins()
+        .call(runtime_refs.timespec_get, &[timespec_ptr, time_utc]);
+    let status = builder.inst_results(call)[0];
+    let success_block = builder.create_block();
+    let denied_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, types::I64);
+
+    let ok = builder.ins().icmp_imm(IntCC::Equal, status, 1);
+    builder
+        .ins()
+        .brif(ok, success_block, &[], denied_block, &[]);
+
+    builder.switch_to_block(success_block);
+    builder.seal_block(success_block);
+    // Preserve millisecond precision by lowering C11 timespec_get(TIME_UTC)
+    // directly: tv_sec contributes epoch seconds, tv_nsec contributes the
+    // subsecond millisecond portion. This path must not fall back to the
+    // second-resolution host clock import.
+    let timespec_seconds =
+        builder
+            .ins()
+            .stack_load(types::I64, timespec_slot, I64_TIMESPEC_SECONDS_OFFSET);
+    let timespec_nanos =
+        builder
+            .ins()
+            .stack_load(types::I64, timespec_slot, I64_TIMESPEC_NANOS_OFFSET);
+    let millis_factor = builder.ins().iconst(types::I64, 1_000);
+    let epoch_millis_from_seconds = builder.ins().imul(timespec_seconds, millis_factor);
+    let nanos_divisor = builder.ins().iconst(types::I64, 1_000_000);
+    let subsecond_millis_from_nanos = builder.ins().sdiv(timespec_nanos, nanos_divisor);
+    let epoch_millis = builder
+        .ins()
+        .iadd(epoch_millis_from_seconds, subsecond_millis_from_nanos);
+    builder
+        .ins()
+        .jump(merge_block, &[BlockArg::Value(epoch_millis)]);
+
+    builder.switch_to_block(denied_block);
+    builder.seal_block(denied_block);
+    let denied = builder.ins().iconst(types::I64, -1);
+    builder.ins().jump(merge_block, &[BlockArg::Value(denied)]);
+
+    builder.switch_to_block(merge_block);
+    builder.seal_block(merge_block);
+    builder.block_params(merge_block)[0]
+}
+
+fn emit_i64_clock_elapsed_ms_expr(
+    builder: &mut FunctionBuilder<'_>,
+    locals: &[Variable],
+    function_refs: &[FuncRef],
+    runtime_refs: I64RuntimeRefs,
+    start: &I64Expr,
+) -> Result<cranelift_codegen::ir::Value, CraneliftBackendError> {
+    let start = emit_i64_expr(builder, locals, function_refs, runtime_refs, start)?;
+    let now = emit_i64_clock_now_ms_expr(builder, runtime_refs);
+    let elapsed = builder.ins().isub(now, start);
+    let moved_backwards = builder.ins().icmp(IntCC::SignedLessThan, now, start);
+    let denied = builder.ins().iconst(types::I64, -1);
+    Ok(builder.ins().select(moved_backwards, denied, elapsed))
 }
 
 fn emit_i64_cast(
@@ -4966,6 +5363,194 @@ mod tests {
         .expect("compile i64 division exit program");
         let output = Command::new(&binary).output().expect("run binary");
         assert_eq!(output.status.code(), Some(42));
+    }
+
+    #[test]
+    fn clock_now_ms_imports_timespec_get_without_time_fallback() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        if Command::new("nm").arg("--version").output().is_err()
+            && Command::new("nm").arg("-V").output().is_err()
+        {
+            eprintln!("skipping cranelift symbol test because nm is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-clock-now.o");
+        let binary = temp.path().join("i64-exit-clock-now");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::Return(I64Expr::ClockNowMs),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 clock now exit program");
+
+        let output = Command::new("nm")
+            .arg("-u")
+            .arg(&object)
+            .output()
+            .expect("inspect clock object symbols");
+        assert!(
+            output.status.success(),
+            "nm failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let symbols = String::from_utf8_lossy(&output.stdout);
+        let imported_symbols = symbols
+            .lines()
+            .filter_map(|line| line.split_whitespace().last())
+            .collect::<Vec<_>>();
+        assert!(
+            imported_symbols
+                .iter()
+                .any(|symbol| *symbol == "timespec_get" || *symbol == "_timespec_get"),
+            "clock object should import timespec_get, got:\n{symbols}"
+        );
+        assert!(
+            !imported_symbols
+                .iter()
+                .any(|symbol| *symbol == "time" || *symbol == "_time"),
+            "clock object should not import the second-resolution host clock symbol, got:\n{symbols}"
+        );
+    }
+
+    #[test]
+    fn clock_now_ms_reads_timespec_nanoseconds_at_lowering_boundary() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-clock-now-shim.o");
+        let binary = temp.path().join("i64-exit-clock-now-shim");
+        let shim = temp.path().join("timespec_get_shim.c");
+        fs::write(
+            &shim,
+            r#"#include <time.h>
+
+#ifndef TIME_UTC
+#define TIME_UTC 1
+#endif
+
+int timespec_get(struct timespec *ts, int base) {
+    if (base != TIME_UTC) {
+        return 0;
+    }
+    ts->tv_sec = 7;
+    ts->tv_nsec = 456000000L;
+    return TIME_UTC;
+}
+"#,
+        )
+        .expect("write deterministic timespec_get shim");
+        emit_i64_exit_object(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: Vec::new(),
+                body: I64ExitBody::IfReturn {
+                    cond: I64Condition::Compare(I64Compare {
+                        op: I64CompareOp::Eq,
+                        lhs: I64Expr::ClockNowMs,
+                        rhs: I64Expr::Literal(7_456),
+                    }),
+                    then_result: I64Expr::Literal(48),
+                    else_result: I64Expr::Literal(1),
+                },
+            },
+            &object,
+        )
+        .expect("emit i64 clock now exit object");
+        let link = Command::new("cc")
+            .arg(&object)
+            .arg(&shim)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .expect("link clock shim binary");
+        assert!(
+            link.status.success(),
+            "cc failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&link.stdout),
+            String::from_utf8_lossy(&link.stderr)
+        );
+        let output = Command::new(&binary)
+            .output()
+            .expect("run clock shim binary");
+        assert_eq!(output.status.code(), Some(48));
+    }
+
+    #[test]
+    fn clock_now_ms_tracks_subsecond_elapsed_after_sleep() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-exit-clock-precision.o");
+        let binary = temp.path().join("i64-exit-clock-precision");
+        let elapsed_ms = || I64Expr::ClockElapsedMs {
+            start: Box::new(I64Expr::Local(0)),
+        };
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: vec![I64Expr::ClockNowMs, I64Expr::Literal(-1)],
+                stmts: vec![I64Stmt::Assign(I64Assign {
+                    local: 1,
+                    value: I64Expr::SleepMs {
+                        milliseconds: Box::new(I64Expr::Literal(10)),
+                    },
+                })],
+                body: I64ExitBody::IfReturn {
+                    cond: I64Condition::And {
+                        lhs: Box::new(I64Condition::Compare(I64Compare {
+                            op: I64CompareOp::Eq,
+                            lhs: I64Expr::Local(1),
+                            rhs: I64Expr::Literal(0),
+                        })),
+                        rhs: Box::new(I64Condition::And {
+                            lhs: Box::new(I64Condition::Compare(I64Compare {
+                                op: I64CompareOp::Gt,
+                                lhs: elapsed_ms(),
+                                rhs: I64Expr::Literal(0),
+                            })),
+                            rhs: Box::new(I64Condition::Compare(I64Compare {
+                                op: I64CompareOp::Lt,
+                                lhs: elapsed_ms(),
+                                rhs: I64Expr::Literal(1_000),
+                            })),
+                        }),
+                    },
+                    then_result: I64Expr::Literal(48),
+                    else_result: I64Expr::Literal(1),
+                },
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 clock precision exit program");
+        let output = Command::new(&binary)
+            .output()
+            .expect("run clock precision binary");
+        assert_eq!(output.status.code(), Some(48));
     }
 
     #[test]

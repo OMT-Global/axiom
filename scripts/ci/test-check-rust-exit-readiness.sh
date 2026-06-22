@@ -12,37 +12,20 @@ mkdir -p \
   "$case_dir/scripts/ci" \
   "$case_dir/stage1/runtime-abi" \
   "$case_dir/stage1/compiler-contracts/snapshots" \
+  "$case_dir/stage1/crates/axiomc/src" \
   "$case_dir/stage1/crates/axiomc/tests" \
   "$case_dir/stage1/crates/axiomc-backend-cranelift/src"
 cp "$script" "$case_dir/scripts/ci/check-rust-exit-readiness.sh"
 cp "$repo_root/scripts/ci/check-direct-native-runtime-abi.py" "$case_dir/scripts/ci/check-direct-native-runtime-abi.py"
-cp "$repo_root/scripts/ci/run-direct-native-example-smoke.sh" "$case_dir/scripts/ci/run-direct-native-example-smoke.sh"
+cp "$repo_root/scripts/ci/run-direct-native-runtime-abi-evidence.sh" "$case_dir/scripts/ci/run-direct-native-runtime-abi-evidence.sh"
 cp "$repo_root/docs/rust-exit-readiness.md" "$case_dir/docs/rust-exit-readiness.md"
 cp "$repo_root/docs/rust-exit-readiness.json" "$case_dir/docs/rust-exit-readiness.json"
 cp "$repo_root/stage1/runtime-abi/direct-native-v0.json" "$case_dir/stage1/runtime-abi/direct-native-v0.json"
 cp "$repo_root/stage1/compiler-contracts/snapshots/command-lsp.json" "$case_dir/stage1/compiler-contracts/snapshots/command-lsp.json"
 cp "$repo_root/stage1/compiler-contracts/snapshots/mir-backend.json" "$case_dir/stage1/compiler-contracts/snapshots/mir-backend.json"
+cp "$repo_root/stage1/crates/axiomc/src/cranelift_backend.rs" "$case_dir/stage1/crates/axiomc/src/cranelift_backend.rs"
 cp "$repo_root/stage1/crates/axiomc/tests/cranelift_backend.rs" "$case_dir/stage1/crates/axiomc/tests/cranelift_backend.rs"
 cp "$repo_root/stage1/crates/axiomc-backend-cranelift/src/lib.rs" "$case_dir/stage1/crates/axiomc-backend-cranelift/src/lib.rs"
-python3 - "$case_dir/stage1/runtime-abi/direct-native-v0.json" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as handle:
-    contract = json.load(handle)
-
-contract["status"] = "implemented"
-for group_name in ("value_features", "capability_shims"):
-    for row in contract[group_name]:
-        row["status"] = "implemented"
-        row.pop("blockers", None)
-        row["evidence"] = ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
-        row["runtime_evidence"] = ["stage1/crates/axiomc/tests/cranelift_backend.rs"]
-
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(contract, handle)
-PY
 cat >"$case_dir/Makefile" <<'MAKE'
 rust-exit-readiness:
 	bash scripts/ci/check-rust-exit-readiness.sh --json
@@ -53,6 +36,38 @@ rust-exit-readiness-github:
 rust-exit-readiness-test:
 	bash scripts/ci/test-check-rust-exit-readiness.sh
 MAKE
+
+cat >"$temp_dir/partial-issues.txt" <<'ISSUES'
+927 CLOSED
+929 CLOSED
+693 CLOSED
+694 CLOSED
+930 CLOSED
+931 CLOSED
+562 CLOSED
+563 CLOSED
+564 CLOSED
+ISSUES
+
+(
+  cd "$case_dir"
+  if bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/partial-issues.txt" >"$temp_dir/partial-abi.json" 2>"$temp_dir/partial-abi.err"; then
+    echo "expected readiness check to fail while direct-native runtime ABI remains partial" >&2
+    exit 1
+  fi
+  python3 - "$temp_dir/partial-abi.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+details = {check["name"]: check["detail"] for check in payload["checks"]}
+assert "34 incomplete rows (12 value, 22 capability)" in details[
+    "direct_native_runtime_abi_ready"
+]
+PY
+)
 
 python3 - "$case_dir/stage1/runtime-abi/direct-native-v0.json" <<'PY'
 import json
@@ -74,9 +89,9 @@ PY
 
 cat >"$temp_dir/open-issues.txt" <<'ISSUES'
 927 OPEN
+1001 OPEN
 929 OPEN
-693 OPEN
-694 OPEN
+1191 OPEN
 930 OPEN
 931 OPEN
 562 OPEN
@@ -111,9 +126,9 @@ PY
 
 cat >"$temp_dir/issues.txt" <<'ISSUES'
 927 CLOSED
+1001 CLOSED
 929 CLOSED
-693 CLOSED
-694 CLOSED
+1191 CLOSED
 930 CLOSED
 931 CLOSED
 562 CLOSED
@@ -124,8 +139,7 @@ ISSUES
 (
   cd "$case_dir"
   if ! bash scripts/ci/check-rust-exit-readiness.sh --json --issue-state-file "$temp_dir/issues.txt" >"$temp_dir/ready.json" 2>"$temp_dir/ready.err"; then
-    cat "$temp_dir/ready.err" >&2
-    echo "expected readiness check to pass when blockers are closed and the runtime ABI is ready" >&2
+    echo "expected readiness check to pass once blocking issues are closed and the ABI report is ready" >&2
     exit 1
   fi
   python3 - "$temp_dir/ready.json" <<'PY'
@@ -139,6 +153,7 @@ assert payload["ready"] is True
 statuses = {check["name"]: check["status"] for check in payload["checks"]}
 assert statuses["readiness_blockers_closed"] == "pass"
 assert statuses["rust_exit_issue_927_closed"] == "pass"
+assert statuses["rust_exit_issue_1001_closed"] == "pass"
 assert statuses["rust_exit_issue_564_closed"] == "pass"
 assert statuses["direct_native_runtime_abi_ready"] == "pass"
 assert statuses["command_lsp_release_boundary"] == "pass"

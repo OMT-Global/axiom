@@ -17,7 +17,7 @@ use axiomc_backend_cranelift::{
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -46,6 +46,9 @@ struct I64StaticBindings {
     env_allowed_names: HashSet<String>,
     env_unrestricted: bool,
     time_wrappers: HashSet<String>,
+    time_now_wrappers: HashSet<String>,
+    time_now_ms_wrappers: HashSet<String>,
+    time_elapsed_ms_wrappers: HashSet<String>,
     time_duration_ms_wrappers: HashSet<String>,
     time_sleep_wrappers: HashSet<String>,
     fs_read_wrappers: HashSet<String>,
@@ -53,6 +56,7 @@ struct I64StaticBindings {
     has_fs_write_calls: bool,
     fs_shim_wrappers: HashSet<String>,
     net_shim_wrappers: HashSet<String>,
+    net_resolve_wrappers: HashSet<String>,
     http_shim_wrappers: HashSet<String>,
     http_get_wrappers: HashSet<String>,
     http_serve_once_wrappers: HashSet<String>,
@@ -364,6 +368,24 @@ fn lower_i64_exit_program(
         .filter(|function| function.path == "<stdlib>/time.ax")
         .map(|function| function.name.clone())
         .collect();
+    static_bindings.time_now_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "now"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.time_now_ms_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "now_ms"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.time_elapsed_ms_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "elapsed_ms"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
     static_bindings.time_duration_ms_wrappers = program
         .functions
         .iter()
@@ -410,6 +432,12 @@ fn lower_i64_exit_program(
         .iter()
         .filter(|function| is_i64_std_net_shim_wrapper(function))
         .map(|function| function.name.clone())
+        .collect();
+    static_bindings.net_resolve_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_net_wrapper(function, "resolve"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
     static_bindings.http_shim_wrappers = program
         .functions
@@ -1500,6 +1528,16 @@ fn lower_i64_aggregate_return_body(
                     lowered_stmts.extend(assigns);
                     seen_runtime_stmt = true;
                 } else if let Some(assigns) = lower_i64_fs_read_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_net_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -2748,6 +2786,16 @@ fn lower_i64_body(
                 ) {
                     lowered_stmts.extend(assigns);
                     seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_net_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
                 } else if let Some(assigns) = lower_i64_known_string_option_call_let_stmts(
                     name,
                     inner.as_ref(),
@@ -3577,6 +3625,23 @@ fn lower_i64_runtime_let_stmts(
         ..
     } = stmt
         && let Some(assigns) = lower_i64_fs_read_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        )
+    {
+        return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr,
+        ..
+    } = stmt
+        && let Some(assigns) = lower_i64_net_option_call_let_stmts(
             name,
             inner.as_ref(),
             expr,
@@ -5155,6 +5220,49 @@ fn lower_i64_fs_read_option_call_let_stmts(
         CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
             local: payload_local,
             value: file_len,
+        }),
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: tag_local,
+            value: tag,
+        }),
+    ])
+}
+
+fn lower_i64_net_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !matches!(inner, Type::String | Type::Str) {
+        return None;
+    }
+    let host = i64_net_resolve_host(expr, static_bindings)?;
+    let net_len = i64_net_resolve_len_expr(&host, static_bindings)?;
+    let payload_local = local_indexes.len();
+    local_indexes.insert(i64_option_payload_slot_key(name, 0), payload_local);
+    local_indexes.insert(i64_option_payload_key(name), payload_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag_local = local_indexes.len();
+    local_indexes.insert(i64_option_tag_key(name), tag_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag = CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: CraneliftI64Expr::Local(payload_local),
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(CraneliftI64Expr::Literal(1)),
+        else_result: Box::new(CraneliftI64Expr::Literal(0)),
+    };
+    Some(vec![
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: payload_local,
+            value: net_len,
         }),
         CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
             local: tag_local,
@@ -6783,6 +6891,15 @@ fn lower_i64_option_match_exit_return(
     ) {
         return Some(I64ExitBody::Return(value));
     }
+    if let Some(value) = lower_i64_net_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(I64ExitBody::Return(value));
+    }
     if let Some(value) = lower_i64_known_string_option_match_value_expr(
         expr,
         local_indexes,
@@ -6855,6 +6972,15 @@ fn lower_i64_option_match_value_expr(
         return Some(value);
     }
     if let Some(value) = lower_i64_fs_read_option_match_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(value);
+    }
+    if let Some(value) = lower_i64_net_option_match_value_expr(
         expr,
         local_indexes,
         local_conditions,
@@ -7233,6 +7359,132 @@ fn i64_fs_read_file_len_expr(
         path_len,
         None,
         guarded,
+        static_bindings,
+        CraneliftI64AuditSuccess::NonNegative,
+    )
+}
+
+fn lower_i64_net_option_match_value_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    let Expr::Match {
+        expr: matched,
+        arms,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    if !is_i64_exit_type(ty) {
+        return None;
+    }
+    let Type::Option(inner) = matched.ty() else {
+        return None;
+    };
+    if !matches!(inner.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let host = i64_net_resolve_host(matched, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_match_arms(arms)?;
+    let binding = some_arm
+        .bindings
+        .first()
+        .filter(|binding| binding.as_str() != "_");
+    let net_len = i64_net_resolve_len_expr(&host, static_bindings)?;
+    let then_result = lower_i64_net_some_arm_expr(
+        &some_arm.expr,
+        binding.map(String::as_str),
+        &host,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let else_result = lower_i64_return_value_expr(
+        &none_arm.expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: net_len,
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(then_result),
+        else_result: Box::new(else_result),
+    })
+}
+
+fn lower_i64_net_some_arm_expr(
+    expr: &Expr,
+    binding: Option<&str>,
+    host: &I64NetResolveHost,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    if let Some(binding) = binding
+        && let Expr::Call { name, args, .. } = expr
+        && name == "len"
+        && let [Expr::VarRef { name, .. }] = args.as_slice()
+        && name == binding
+    {
+        return i64_net_resolve_len_expr(host, static_bindings);
+    }
+    lower_i64_return_value_expr(
+        expr,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )
+}
+
+struct I64NetResolveHost {
+    host: String,
+    resolved_len: i64,
+}
+
+fn i64_net_resolve_host(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<I64NetResolveHost> {
+    let Expr::Call { name, args, .. } = expr else {
+        return None;
+    };
+    if !is_i64_net_resolve_name(name, static_bindings) {
+        return None;
+    }
+    let [host] = args.as_slice() else {
+        return None;
+    };
+    let host = i64_string_text(host, static_bindings)?;
+    let _addr: IpAddr = host.parse().ok()?;
+    Some(I64NetResolveHost {
+        resolved_len: i64::try_from(i64_net_resolve_text(&host)?.len()).ok()?,
+        host,
+    })
+}
+
+fn i64_net_resolve_len_expr(
+    host: &I64NetResolveHost,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    i64_audited_net_expr(
+        "net_resolve",
+        host.host.len(),
+        CraneliftI64Expr::NetResolveLen {
+            host: host.host.clone(),
+            resolved_len: host.resolved_len,
+        },
         static_bindings,
         CraneliftI64AuditSuccess::NonNegative,
     )
@@ -8507,9 +8759,14 @@ fn lower_i64_condition(
             args,
             ty: Type::Bool,
         } => {
-            if let Some(condition) =
-                lower_i64_map_contains_key_condition(name, args, static_bindings)
-            {
+            if let Some(condition) = lower_i64_map_contains_key_condition(
+                name,
+                args,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
                 return Some(condition);
             }
             if let Some(condition) = lower_i64_known_bool_intrinsic_condition(
@@ -11819,6 +12076,46 @@ fn lower_i64_clock_intrinsic_expr(
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     let milliseconds = match name {
+        "clock_now_ms" => {
+            let [] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockNowMs);
+        }
+        name if is_i64_time_now_ms_name(name, static_bindings) => {
+            let [] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockNowMs);
+        }
+        "clock_elapsed_ms" => {
+            let [start] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockElapsedMs {
+                start: Box::new(lower_i64_expr(
+                    start,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            });
+        }
+        name if is_i64_time_elapsed_ms_name(name, static_bindings) => {
+            let [start] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockElapsedMs {
+                start: Box::new(lower_i64_instant_ms_expr(
+                    start,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            });
+        }
         "clock_sleep_ms" => {
             let [milliseconds] = args else {
                 return None;
@@ -11888,6 +12185,41 @@ fn lower_i64_duration_ms_expr(
                     static_bindings,
                 )
             }),
+        _ => None,
+    }
+}
+
+fn lower_i64_instant_ms_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match expr {
+        Expr::VarRef { name, .. } => local_indexes
+            .get(i64_struct_projection_key(name, "ms").as_str())
+            .copied()
+            .map(CraneliftI64Expr::Local),
+        Expr::StructLiteral { fields, .. } => fields
+            .iter()
+            .find(|field| field.name == "ms")
+            .and_then(|field| {
+                lower_i64_expr(
+                    &field.expr,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            }),
+        Expr::Call { name, args, .. } if is_i64_time_now_name(name, static_bindings) => {
+            if args.is_empty() {
+                Some(CraneliftI64Expr::ClockNowMs)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -12281,6 +12613,23 @@ fn i64_audited_process_expr(
     })
 }
 
+fn i64_audited_net_expr(
+    intrinsic: &str,
+    host_len: usize,
+    result: CraneliftI64Expr,
+    static_bindings: &I64StaticBindings,
+    success: CraneliftI64AuditSuccess,
+) -> Option<CraneliftI64Expr> {
+    let package = static_bindings.package_root.as_deref()?;
+    Some(CraneliftI64Expr::AuditNet {
+        intrinsic: intrinsic.to_string(),
+        package: package.display().to_string(),
+        host_len,
+        success,
+        result: Box::new(result),
+    })
+}
+
 fn i64_audited_clock_expr(
     intrinsic: &str,
     arg_name: &str,
@@ -12382,6 +12731,9 @@ fn lower_i64_crypto_random_intrinsic_expr(
 
 fn lower_i64_crypto_random_bytes_len_expr(
     expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     let Expr::Call { name, args, .. } = expr else {
@@ -12393,15 +12745,23 @@ fn lower_i64_crypto_random_bytes_len_expr(
     let [length] = args.as_slice() else {
         return None;
     };
-    let length = i64_static_scalar_value(length, static_bindings)?;
-    if !(0..=65_536).contains(&length) {
-        return None;
-    }
+    let arg_value = i64_static_scalar_value(length, static_bindings)
+        .map(|length| format!("int:{length}"))
+        .unwrap_or_else(|| "int".to_string());
+    let length = lower_i64_expr(
+        length,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
     i64_audited_crypto_expr(
         "crypto_rand_bytes",
         "length",
-        format!("int:{length}"),
-        CraneliftI64Expr::RandomBytesLen { length },
+        arg_value,
+        CraneliftI64Expr::RandomBytesLen {
+            length: Box::new(length),
+        },
         static_bindings,
         CraneliftI64AuditSuccess::NonNegative,
     )
@@ -12469,21 +12829,53 @@ fn lower_i64_map_get_or_default_expr(
         return None;
     };
     let entries = i64_map_literal_entries(map, static_bindings)?;
-    let key = lower_i64_map_key_expr(key, static_bindings)?;
-    let mut selected = None;
-    for entry in entries.iter().rev() {
-        if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
-            selected = Some(&entry.value);
-            break;
+    if let Some(key) = lower_i64_map_key_expr(key, static_bindings) {
+        let mut selected = None;
+        for entry in entries.iter().rev() {
+            if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
+                selected = Some(&entry.value);
+                break;
+            }
         }
+        return lower_i64_expr(
+            selected.unwrap_or(default),
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        );
     }
-    lower_i64_expr(
-        selected.unwrap_or(default),
+    let mut result = lower_i64_expr(
+        default,
         local_indexes,
         local_conditions,
         helper_signatures,
         static_bindings,
-    )
+    )?;
+    for entry in entries {
+        let candidate = lower_i64_map_key_expr(&entry.key, static_bindings)?;
+        let cond = lower_i64_map_key_match_condition(
+            key,
+            &candidate,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        let value = lower_i64_expr(
+            &entry.value,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        result = CraneliftI64Expr::Select {
+            cond: Box::new(cond),
+            then_result: Box::new(value),
+            else_result: Box::new(result),
+        };
+    }
+    Some(result)
 }
 
 fn i64_map_get_value_expr<'a>(
@@ -12511,6 +12903,9 @@ fn i64_map_get_value_expr<'a>(
 fn lower_i64_map_contains_key_condition(
     name: &str,
     args: &[Expr],
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Condition> {
     if name != "map_contains_key"
@@ -12523,13 +12918,60 @@ fn lower_i64_map_contains_key_condition(
         return None;
     };
     let entries = i64_map_literal_entries(map, static_bindings)?;
-    let key = lower_i64_map_key_expr(key, static_bindings)?;
-    for entry in entries.iter().rev() {
-        if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
-            return Some(CraneliftI64Condition::Literal(true));
+    if let Some(key) = lower_i64_map_key_expr(key, static_bindings) {
+        for entry in entries.iter().rev() {
+            if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
+                return Some(CraneliftI64Condition::Literal(true));
+            }
         }
+        return Some(CraneliftI64Condition::Literal(false));
     }
-    Some(CraneliftI64Condition::Literal(false))
+    let mut result = CraneliftI64Condition::Literal(false);
+    for entry in entries {
+        let candidate = lower_i64_map_key_expr(&entry.key, static_bindings)?;
+        let cond = lower_i64_map_key_match_condition(
+            key,
+            &candidate,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        result = CraneliftI64Condition::Or {
+            lhs: Box::new(cond),
+            rhs: Box::new(result),
+        };
+    }
+    Some(result)
+}
+
+fn lower_i64_map_key_match_condition(
+    key: &Expr,
+    candidate: &I64MapKey,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Condition> {
+    if let Some(key) = lower_i64_map_key_expr(key, static_bindings) {
+        return Some(CraneliftI64Condition::Literal(key == *candidate));
+    }
+    let I64MapKey::Text(candidate) = candidate else {
+        return None;
+    };
+    let selected = lower_i64_map_key_array_string_index_match_expr(
+        key,
+        candidate,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Condition::Compare(CraneliftI64Compare {
+        op: CraneliftI64CompareOp::Eq,
+        lhs: selected,
+        rhs: CraneliftI64Expr::Literal(1),
+    }))
 }
 
 fn lower_i64_map_keys_len_expr(
@@ -12657,6 +13099,18 @@ fn is_i64_time_duration_ms_name(name: &str, static_bindings: &I64StaticBindings)
     static_bindings.time_duration_ms_wrappers.contains(name)
 }
 
+fn is_i64_time_now_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_now_wrappers.contains(name)
+}
+
+fn is_i64_time_now_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_now_ms_wrappers.contains(name)
+}
+
+fn is_i64_time_elapsed_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_elapsed_ms_wrappers.contains(name)
+}
+
 fn is_i64_time_sleep_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.time_sleep_wrappers.contains(name)
 }
@@ -12691,6 +13145,15 @@ fn is_i64_std_net_shim_wrapper(function: &Function) -> bool {
                 | "udp_send_recv"
         )
     )
+}
+
+fn is_i64_std_net_wrapper(function: &Function, source_name: &str) -> bool {
+    function.path == "<stdlib>/net.ax" && function.source_name == source_name
+}
+
+fn is_i64_net_resolve_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    matches!(name, "net_resolve" | "resolve" | "std_net_resolve")
+        || static_bindings.net_resolve_wrappers.contains(name)
 }
 
 fn is_i64_net_tcp_loopback_once_name(name: &str) -> bool {
@@ -13047,7 +13510,13 @@ fn lower_i64_fixed_array_intrinsic_expr(
         ) {
             return Some(length);
         }
-        if let Some(length) = lower_i64_crypto_random_bytes_len_expr(arg, static_bindings) {
+        if let Some(length) = lower_i64_crypto_random_bytes_len_expr(
+            arg,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
             return Some(length);
         }
         if let Some(length) = lower_i64_map_keys_len_expr(arg, static_bindings) {
@@ -20943,13 +21412,23 @@ mod tests {
             Some(Some(&expected_value))
         );
         assert_eq!(
-            lower_i64_map_contains_key_condition("contains", &args, &static_bindings),
+            lower_i64_map_contains_key_condition(
+                "contains",
+                &args,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &static_bindings
+            ),
             Some(CraneliftI64Condition::Literal(true))
         );
         assert_eq!(
             lower_i64_map_contains_key_condition(
                 "contains",
                 &[map.clone(), missing_key],
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
                 &static_bindings
             ),
             Some(CraneliftI64Condition::Literal(false))
@@ -21027,5 +21506,31 @@ mod tests {
             spike_fs_write_candidate_for_root(root, "dangling.txt", false),
             None
         );
+    }
+
+    #[test]
+    fn i64_net_resolve_text_normalizes_ipv6_literals() {
+        assert_eq!(
+            super::i64_net_resolve_text("0:0:0:0:0:0:0:1").as_deref(),
+            Some("::1")
+        );
+    }
+
+    #[test]
+    fn i64_net_resolve_host_uses_canonical_ipv6_length() {
+        let expr = Expr::Call {
+            name: String::from("net_resolve"),
+            args: vec![Expr::Literal(LiteralValue::String(String::from(
+                "0:0:0:0:0:0:0:1",
+            )))],
+            ty: Type::Option(Box::new(Type::String)),
+        };
+
+        let host = super::i64_net_resolve_host(&expr, &I64StaticBindings::default())
+            .expect("numeric IPv6 host should lower");
+
+        assert_eq!(host.host, "0:0:0:0:0:0:0:1");
+        assert_eq!(host.resolved_len, 3);
+        assert_ne!(host.resolved_len, host.host.len() as i64);
     }
 }
