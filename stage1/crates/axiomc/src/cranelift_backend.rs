@@ -3735,6 +3735,15 @@ fn lower_i64_runtime_let_stmts(
     ) {
         return Some(assigns);
     }
+    if let Some(assigns) = lower_i64_aggregate_local_let_stmts(
+        stmt,
+        locals,
+        local_indexes,
+        local_conditions,
+        static_bindings,
+    ) {
+        return Some(assigns);
+    }
     if let Stmt::Let {
         name,
         ty: Type::Option(inner),
@@ -3794,6 +3803,175 @@ fn lower_i64_runtime_let_stmts(
         helper_signatures,
         static_bindings,
     )?])
+}
+
+fn lower_i64_aggregate_local_let_stmts(
+    stmt: &Stmt,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Stmt::Let {
+        name,
+        ty: target_ty,
+        expr: Expr::VarRef {
+            name: source,
+            ty: source_ty,
+        },
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    if target_ty != source_ty {
+        return None;
+    }
+    let slot_pairs = match target_ty {
+        Type::Struct(struct_name) => {
+            let struct_def = i64_scalar_static_struct_def(struct_name, static_bindings)?;
+            let mut slots = Vec::new();
+            for field in &struct_def.fields {
+                let local = local_indexes.len();
+                let key = i64_struct_projection_key(name, &field.name);
+                local_indexes.insert(key.clone(), local);
+                locals.push(CraneliftI64Expr::Literal(0));
+                if matches!(field.ty, Type::Bool) {
+                    local_conditions.insert(key, i64_local_truthy_condition(local));
+                }
+                slots.push((
+                    local,
+                    *local_indexes.get(i64_struct_projection_key(source, &field.name).as_str())?,
+                ));
+            }
+            slots
+        }
+        Type::Tuple(elements) if is_i64_tuple_param_type(elements) => {
+            let mut slots = Vec::new();
+            for (index, element) in elements.iter().enumerate() {
+                let local = local_indexes.len();
+                let key = i64_tuple_projection_key(name, index);
+                local_indexes.insert(key.clone(), local);
+                locals.push(CraneliftI64Expr::Literal(0));
+                if matches!(element, Type::Bool) {
+                    local_conditions.insert(key, i64_local_truthy_condition(local));
+                }
+                slots.push((
+                    local,
+                    *local_indexes.get(i64_tuple_projection_key(source, index).as_str())?,
+                ));
+            }
+            slots
+        }
+        Type::Array(element, Some(size)) if is_i64_array_param_element_type(element) => {
+            let mut slots = Vec::new();
+            for index in 0..*size {
+                let local = local_indexes.len();
+                let key = i64_array_projection_key(name, index);
+                local_indexes.insert(key.clone(), local);
+                locals.push(CraneliftI64Expr::Literal(0));
+                if matches!(element.as_ref(), Type::Bool) {
+                    local_conditions.insert(key, i64_local_truthy_condition(local));
+                }
+                slots.push((
+                    local,
+                    *local_indexes.get(i64_array_projection_key(source, index).as_str())?,
+                ));
+            }
+            slots
+        }
+        Type::Option(inner) if is_i64_option_local_payload_type_static(inner, static_bindings) => {
+            let mut slots = Vec::new();
+            let tag_local = local_indexes.len();
+            local_indexes.insert(i64_option_tag_key(name), tag_local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            slots.push((
+                tag_local,
+                *local_indexes.get(i64_option_tag_key(source).as_str())?,
+            ));
+            for (index, source_local) in
+                i64_option_payload_locals(source, inner.as_ref(), local_indexes, static_bindings)?
+                    .into_iter()
+                    .enumerate()
+            {
+                let payload_local = local_indexes.len();
+                local_indexes.insert(i64_option_payload_slot_key(name, index), payload_local);
+                if index == 0 {
+                    local_indexes.insert(i64_option_payload_key(name), payload_local);
+                }
+                locals.push(CraneliftI64Expr::Literal(0));
+                slots.push((payload_local, source_local));
+            }
+            slots
+        }
+        Type::Result(ok, err)
+            if is_i64_result_local_payload_type_static(ok, err, static_bindings) =>
+        {
+            let mut slots = Vec::new();
+            let tag_local = local_indexes.len();
+            local_indexes.insert(i64_result_tag_key(name), tag_local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            slots.push((
+                tag_local,
+                *local_indexes.get(i64_result_tag_key(source).as_str())?,
+            ));
+            for (index, source_local) in i64_result_payload_locals(
+                source,
+                ok.as_ref(),
+                err.as_ref(),
+                local_indexes,
+                static_bindings,
+            )?
+            .into_iter()
+            .enumerate()
+            {
+                let payload_local = local_indexes.len();
+                local_indexes.insert(i64_result_payload_slot_key(name, index), payload_local);
+                if index == 0 {
+                    local_indexes.insert(i64_result_payload_key(name), payload_local);
+                }
+                locals.push(CraneliftI64Expr::Literal(0));
+                slots.push((payload_local, source_local));
+            }
+            slots
+        }
+        Type::Enum(enum_name) if is_i64_enum_payload_type(enum_name, static_bindings) => {
+            let mut slots = Vec::new();
+            let tag_local = local_indexes.len();
+            local_indexes.insert(i64_enum_tag_key(name), tag_local);
+            locals.push(CraneliftI64Expr::Literal(0));
+            slots.push((
+                tag_local,
+                *local_indexes.get(i64_enum_tag_key(source).as_str())?,
+            ));
+            for (index, source_local) in
+                i64_enum_payload_locals(source, enum_name, static_bindings, local_indexes)?
+                    .into_iter()
+                    .enumerate()
+            {
+                let payload_local = local_indexes.len();
+                local_indexes.insert(i64_enum_payload_slot_key(name, index), payload_local);
+                if index == 0 {
+                    local_indexes.insert(i64_enum_payload_key(name), payload_local);
+                }
+                locals.push(CraneliftI64Expr::Literal(0));
+                slots.push((payload_local, source_local));
+            }
+            slots
+        }
+        _ => return None,
+    };
+    Some(
+        slot_pairs
+            .into_iter()
+            .map(|(target, source)| {
+                CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+                    local: target,
+                    value: CraneliftI64Expr::Local(source),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn lower_i64_runtime_string_len_let_stmts(
