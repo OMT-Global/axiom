@@ -710,7 +710,9 @@ Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots
 and direct helper-call slice bases materialized in entrypoint or helper-function
-bodies.
+bodies. Indexed projections over direct helper-call slice bases can also feed
+scalar and boolean helper-call arguments through the same materialized slot
+representation.
 The public borrowed-slice smoke also prints `len`, `first`, `last`, and indexed
 projection output for both a local slice and a helper-returned slice while
 asserting `generated_rust: null`. Broader borrowed-slice aliasing, dynamic

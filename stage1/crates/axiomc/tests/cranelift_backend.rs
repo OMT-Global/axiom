@@ -8656,6 +8656,10 @@ fn make_prefix_values(): [int; 3] {
 return [20, 26, 1]
 }
 
+fn make_flags(): [bool; 3] {
+return [false, true, true]
+}
+
 fn tail_pick(index: int): int {
 let value: int = make_tail_values()[TAIL_START:][index]
 return value
@@ -8666,6 +8670,14 @@ let value: int = make_prefix_values()[:PREFIX_END][index]
 return value
 }
 
+fn add_pair(left: int, right: int): int {
+return left + right
+}
+
+fn both(left: bool, right: bool): bool {
+return left && right
+}
+
 fn main(): int {
 let runtime_index: int = 1
 let literal_tail: int = make_tail_values()[TAIL_START:][0]
@@ -8674,7 +8686,10 @@ let literal_prefix: int = make_prefix_values()[:PREFIX_END][0]
 let runtime_prefix: int = make_prefix_values()[:PREFIX_END][runtime_index]
 let helper_tail: int = tail_pick(runtime_index)
 let helper_prefix: int = prefix_pick(runtime_index)
-if literal_tail == 20 && runtime_tail == 26 && literal_prefix == 20 && runtime_prefix == 26 && helper_tail == 26 && helper_prefix == 26 {
+let literal_arg_sum: int = add_pair(make_tail_values()[TAIL_START:][0], make_prefix_values()[:PREFIX_END][runtime_index])
+let runtime_arg_sum: int = add_pair(make_tail_values()[TAIL_START:][runtime_index], make_prefix_values()[:PREFIX_END][0])
+let bool_arg_gate: bool = both(make_flags()[TAIL_START:][0], make_flags()[TAIL_START:][runtime_index])
+if literal_tail == 20 && runtime_tail == 26 && literal_prefix == 20 && runtime_prefix == 26 && helper_tail == 26 && helper_prefix == 26 && literal_arg_sum == 46 && runtime_arg_sum == 46 && bool_arg_gate {
 return 48
 } else {
 return 1
