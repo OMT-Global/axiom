@@ -8345,6 +8345,23 @@ fn make_step(): Step {
 return Step { value: 48, enabled: true, small: 2u8 }
 }
 
+enum Choice {
+Ready { step: Step }
+Off
+}
+
+fn make_option(): Option<Step> {
+return Some(Step { value: 48, enabled: true, small: 2u8 })
+}
+
+fn make_result(): Result<Step, Step> {
+return Ok(Step { value: 48, enabled: true, small: 2u8 })
+}
+
+fn make_choice(): Choice {
+return Ready { step: Step { value: 48, enabled: true, small: 2u8 } }
+}
+
 fn choose_pair(score: int, enabled: bool): (int, bool) {
 if enabled {
 return (score, true)
@@ -8361,16 +8378,46 @@ fn choose_step(value: int, enabled: bool, small: u8): Step {
 return Step { value: value, enabled: enabled, small: small }
 }
 
+fn forward_option(value: Option<Step>): Option<Step> {
+return value
+}
+
+fn forward_result(value: Result<Step, Step>): Result<Step, Step> {
+return value
+}
+
+fn forward_choice(value: Choice): Choice {
+return value
+}
+
+fn score_option(value: Option<Step>): int {
+return match value { Some(step) => step.value, None => 1 }
+}
+
+fn score_result(value: Result<Step, Step>): int {
+return match value { Ok(step) => step.value, Err(error) => error.value }
+}
+
+fn score_choice(value: Choice): int {
+return match value { Ready { step } => step.value, Off => 1 }
+}
+
 fn main(): int {
 let pair: (int, bool) = (0, false)
 let values: [int; 2] = [0, 0]
 let step: Step = Step { value: 0, enabled: false, small: 0u8 }
+let maybe: Option<Step> = None
+let outcome: Result<Step, Step> = Err(Step { value: 1, enabled: false, small: 0u8 })
+let choice: Choice = Off
 let first_index: int = 0
 let second_index: int = 1
 pair = choose_pair(make_pair().0, make_flags()[first_index])
 values = choose_values(make_values()[first_index], make_values()[second_index])
 step = choose_step(make_step().value, make_step().enabled, make_step().small)
-if pair.1 && step.enabled && pair.0 == 48 && values[0] + values[1] == 48 && step.value == 48 && (step.small as int) == 2 {
+maybe = forward_option(make_option())
+outcome = forward_result(make_result())
+choice = forward_choice(make_choice())
+if pair.1 && step.enabled && pair.0 == 48 && values[0] + values[1] == 48 && step.value == 48 && (step.small as int) == 2 && score_option(maybe) == 48 && score_result(outcome) == 48 && score_choice(choice) == 48 {
 return 48
 } else {
 return 1

@@ -380,6 +380,8 @@ Narrow option helper returns can also feed nested option helper arguments by
 materializing hidden tag/payload locals before the outer call, and
 `Option<Step>` helpers can forward a final helper-call return through the same
 tag/payload slot representation.
+Aggregate helper-call reassignments can also use direct `Option<Step>` helper
+returns as aggregate arguments after materializing hidden tag/payload locals.
 The direct-native path also has narrow evidence for nested
 `Option<Option<int>>` construction, matching, helper parameters, helper returns,
 forwarded helper values, and inline `Some(Some(...))`, `Some(None)`, and outer
@@ -909,7 +911,10 @@ or moved between existing locals using the same tag/payload slots, including
 inside runtime branch blocks. Narrow result helper returns can also feed nested
 result helper arguments by materializing hidden tag/payload locals before the
 outer call, and `Result<Step, Step>` helpers can forward a final helper-call
-return through the same tag/payload slot representation. The nested option
+return through the same tag/payload slot representation. Aggregate helper-call
+reassignments can also use direct `Result<Step, Step>` helper returns as
+aggregate arguments after materializing hidden tag/payload locals. The nested
+option
 payload slice now also has
 narrow direct-native evidence for
 `Result<Option<int>, int>` construction,
@@ -948,7 +953,9 @@ slots, including inside runtime branch blocks. Narrow custom enum helper returns
 can also feed nested enum helper arguments by materializing hidden tag/payload
 locals before the outer call, and custom enum helpers with scalar struct
 payload variants can forward a final helper-call return through the same
-tag/payload slot representation. The same
+tag/payload slot representation. Aggregate helper-call reassignments can also
+use direct custom enum helper returns as aggregate arguments after materializing
+hidden tag/payload locals. The same
 representation now has narrow evidence for positional custom enum payloads
 carrying nested `Option<Result<int, int>>` and `Result<Option<int>, int>` values,
 including runtime-scope literal construction, reassignment, value-producing
