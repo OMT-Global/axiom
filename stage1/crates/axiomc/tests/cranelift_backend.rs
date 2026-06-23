@@ -8724,6 +8724,10 @@ fn make_bytes(): [u8; 3] {
 return [1u8, 20u8, 28u8]
 }
 
+fn make_exit_values(): [int; 3] {
+return [1, 2, 48]
+}
+
 fn tail_pick(index: int): int {
 let value: int = make_tail_values()[TAIL_START:][index]
 return value
@@ -8732,6 +8736,22 @@ return value
 fn prefix_pick(index: int): int {
 let value: int = make_prefix_values()[:PREFIX_END][index]
 return value
+}
+
+fn direct_tail_return(index: int): int {
+return make_tail_values()[TAIL_START:][index]
+}
+
+fn direct_prefix_return(index: int): int {
+return make_prefix_values()[:PREFIX_END][index]
+}
+
+fn direct_typed_tail_return(index: int): int {
+return make_bytes()[TAIL_START:][index] as int
+}
+
+fn direct_slice_bool_return(index: int): bool {
+return make_flags()[TAIL_START:][index]
 }
 
 fn add_pair(left: int, right: int): int {
@@ -8755,8 +8775,12 @@ let runtime_arg_sum: int = add_pair(make_tail_values()[TAIL_START:][runtime_inde
 let bool_arg_gate: bool = both(make_flags()[TAIL_START:][0], make_flags()[TAIL_START:][runtime_index])
 let cast_slice_local: int = make_bytes()[TAIL_START:][0] as int
 let cast_slice_arg_sum: int = add_pair(make_bytes()[TAIL_START:][0] as int, make_bytes()[TAIL_START:][runtime_index] as int)
-if literal_tail == 20 && runtime_tail == 26 && literal_prefix == 20 && runtime_prefix == 26 && helper_tail == 26 && helper_prefix == 26 && literal_arg_sum == 46 && runtime_arg_sum == 46 && bool_arg_gate && cast_slice_local == 20 && cast_slice_arg_sum == 48 {
-return 48
+let direct_tail_value: int = direct_tail_return(runtime_index)
+let direct_prefix_value: int = direct_prefix_return(runtime_index)
+let direct_typed_tail_value: int = direct_typed_tail_return(runtime_index)
+let direct_slice_gate: bool = direct_slice_bool_return(runtime_index)
+if literal_tail == 20 && runtime_tail == 26 && literal_prefix == 20 && runtime_prefix == 26 && helper_tail == 26 && helper_prefix == 26 && literal_arg_sum == 46 && runtime_arg_sum == 46 && bool_arg_gate && direct_slice_gate && cast_slice_local == 20 && cast_slice_arg_sum == 48 && direct_tail_value == 26 && direct_prefix_value == 26 && direct_typed_tail_value == 28 {
+return make_exit_values()[TAIL_START:][runtime_index]
 } else {
 return 1
 }

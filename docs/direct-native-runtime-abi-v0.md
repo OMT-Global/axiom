@@ -734,7 +734,9 @@ scalar and boolean helper-call arguments through the same materialized slot
 representation.
 Numeric indexed projections over direct helper-call slice bases can now be
 cast into compatible scalar locals and helper-call arguments without requiring
-a source-level array temporary.
+a source-level array temporary. The same materialization path now supports
+scalar, numeric-casted, and boolean direct helper returns plus final branch
+returns from direct helper-call slice indexes.
 The public borrowed-slice smoke also prints `len`, `first`, `last`, and indexed
 projection output for both a local slice and a helper-returned slice while
 asserting `generated_rust: null`. Broader borrowed-slice aliasing, dynamic
