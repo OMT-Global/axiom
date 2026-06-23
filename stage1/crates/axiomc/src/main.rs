@@ -1,33 +1,39 @@
 use axiomc::codegen::NativeBackendKind;
 use axiomc::dap;
-use axiomc::diagnostic_catalog::{diagnostic_code_info, DiagnosticCodeInfo};
+use axiomc::diagnostic_catalog::{DiagnosticCodeInfo, diagnostic_code_info};
 use axiomc::diagnostics::Diagnostic;
 use axiomc::json_contract;
 use axiomc::lockfile::{expected_lockfile_for_project, validate_lockfile};
 use axiomc::lsp;
 use axiomc::manifest::{
-    binary_path, entry_path, generated_rust_path, load_manifest, lockfile_path, manifest_path,
-    out_dir_path, CapabilityDescriptor, TestKind,
+    CapabilityDescriptor, TestKind, binary_path, entry_path, generated_rust_path, load_manifest,
+    lockfile_path, manifest_path, out_dir_path,
 };
 #[cfg(test)]
 use axiomc::new_project::create_project;
-use axiomc::new_project::{create_project_with_template, WorkloadTemplate};
+use axiomc::new_project::{WorkloadTemplate, create_project_with_template};
 use axiomc::project::{
+    BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, TestOutput,
     build_project_with_options, capability_sbom, check_project_with_options,
     list_project_tests_with_options, package_graph_metadata, project_capabilities,
     run_project_report_with_options, run_project_tests_with_options, run_project_with_options,
-    trace_provenance, BuildOptions, BuildOutput, CheckOptions, RunOptions, TestOptions, TestOutput,
+    trace_provenance,
 };
 use axiomc::registry::{
-    load_registry_index, publish_package, render_registry_index, serve_registry,
-    verify_registry_index_integrity, PublishOptions, RegistryServeOptions,
+    PublishOptions, RegistryServeOptions, load_registry_index, publish_package,
+    render_registry_index, serve_registry, verify_registry_index_integrity,
 };
 use axiomc::syntax::parse_program;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs::{self, OpenOptions};
+use std::ffi::CString;
+use std::fs::{self, File};
 use std::io::{self, BufRead, Write};
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::Instant;
@@ -3592,8 +3598,9 @@ fn generate_openapi(project: &Path, out: &Path) -> Result<GenerateOpenApiReport,
     })?;
     let package_id = package_node_for_path(project);
     let artifact = openapi_artifact(project, &output_path, &package_id, "generated");
-    let diagnostics = if routes.is_empty() {
-        vec![Diagnostic::new(
+    let diagnostics =
+        if routes.is_empty() {
+            vec![Diagnostic::new(
             "openapi",
             "no HTTP-serving routes discovered for OpenAPI generation",
         )
@@ -3601,9 +3608,9 @@ fn generate_openapi(project: &Path, out: &Path) -> Result<GenerateOpenApiReport,
             "The generated document is valid and intentionally contains an empty paths object.",
         )
         .normalized_for_json()]
-    } else {
-        Vec::new()
-    };
+        } else {
+            Vec::new()
+        };
     Ok(GenerateOpenApiReport {
         schema_version: OPENAPI_SCHEMA_VERSION,
         ok: true,
@@ -4318,8 +4325,7 @@ fn policy_target_contract(artifact: GeneratedArtifact) -> TargetContract {
     TargetContract {
         id: POLICY_TARGET_ID,
         target_class: POLICY_ARTIFACT_KIND,
-        description:
-            "Stage 1 policy bundle generator for manifest capabilities and effect allowlists.",
+        description: "Stage 1 policy bundle generator for manifest capabilities and effect allowlists.",
         status: "experimental",
         input_node_kinds: vec!["Package", "Capability", "Effect"],
         supported_effect_kinds: policy_known_effect_kinds(),
@@ -5241,8 +5247,7 @@ fn runbook_target_contract(artifact: GeneratedArtifact) -> TargetContract {
     TargetContract {
         id: RUNBOOK_TARGET_ID,
         target_class: RUNBOOK_ARTIFACT_KIND,
-        description:
-            "Stage 1 operator runbook generator for capabilities, effects, evidence, and artifacts.",
+        description: "Stage 1 operator runbook generator for capabilities, effects, evidence, and artifacts.",
         status: "experimental",
         input_node_kinds: vec![
             "Package",
@@ -5543,11 +5548,7 @@ fn runbook_evidence_refs(evidence: &[EvidenceItem]) -> String {
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
-    }
+    if value { "yes" } else { "no" }
 }
 
 fn markdown_cell(value: &str) -> String {
@@ -6145,29 +6146,17 @@ fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOut
             format!("no .ax files found under {}", path.display()),
         ));
     }
-    ensure_no_symlink_components(out_dir)?;
-    fs::create_dir_all(out_dir).map_err(|err| {
-        Diagnostic::new(
-            "doc",
-            format!("failed to create {}: {err}", out_dir.display()),
-        )
-    })?;
-    ensure_no_symlink_components(out_dir)?;
+    let doc_dir = open_doc_output_dir(out_dir)?;
     let items = extract_doc_items(&files)?;
     let markdown = render_markdown_docs(&items);
     let markdown_path = out_dir.join("index.md");
     let html_path = out_dir.join("index.html");
-    write_doc_file(&markdown_path, markdown.as_bytes())?;
+    doc_dir.write_file("index.md", markdown.as_bytes(), &markdown_path)?;
     if write_html {
         let html = render_html_docs(&markdown);
-        write_doc_file(&html_path, html.as_bytes())?;
-    } else if html_path.exists() {
-        fs::remove_file(&html_path).map_err(|err| {
-            Diagnostic::new(
-                "doc",
-                format!("failed to remove {}: {err}", html_path.display()),
-            )
-        })?;
+        doc_dir.write_file("index.html", html.as_bytes(), &html_path)?;
+    } else {
+        doc_dir.remove_file_if_exists("index.html", &html_path)?;
     }
     let capabilities = project_capabilities(path).unwrap_or_default();
     let functions = items
@@ -6193,6 +6182,319 @@ fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOut
     })
 }
 
+struct DocOutputDir {
+    #[cfg(unix)]
+    dir: File,
+    #[cfg(not(unix))]
+    path: PathBuf,
+}
+
+fn open_doc_output_dir(path: &Path) -> Result<DocOutputDir, Diagnostic> {
+    open_doc_output_dir_impl(path)
+}
+
+#[cfg(not(unix))]
+fn open_doc_output_dir_impl(path: &Path) -> Result<DocOutputDir, Diagnostic> {
+    ensure_no_symlink_components(path)?;
+    fs::create_dir_all(path).map_err(|err| {
+        Diagnostic::new("doc", format!("failed to create {}: {err}", path.display()))
+    })?;
+    ensure_no_symlink_components(path)?;
+    Ok(DocOutputDir {
+        path: path.to_path_buf(),
+    })
+}
+
+#[cfg(unix)]
+fn open_doc_output_dir_impl(path: &Path) -> Result<DocOutputDir, Diagnostic> {
+    let mut dir = if path.is_absolute() {
+        File::open(Path::new("/")).map_err(|error| {
+            Diagnostic::new("doc", format!("failed to open / for doc output: {error}"))
+        })?
+    } else {
+        File::open(Path::new(".")).map_err(|error| {
+            Diagnostic::new("doc", format!("failed to open . for doc output: {error}"))
+        })?
+    };
+
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => continue,
+            std::path::Component::ParentDir => {
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!(
+                        "refusing to write documentation through parent component {}",
+                        path.display()
+                    ),
+                ));
+            }
+            std::path::Component::Prefix(_) => {
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("unsupported documentation output path {}", path.display()),
+                ));
+            }
+            std::path::Component::Normal(name) => {
+                dir = open_or_create_doc_dir_component(&dir, name, path)?;
+            }
+        }
+    }
+
+    Ok(DocOutputDir { dir })
+}
+
+#[cfg(unix)]
+fn open_or_create_doc_dir_component(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    full_path: &Path,
+) -> Result<File, Diagnostic> {
+    let name = cstring_component(name, full_path)?;
+    let mkdir_result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o777) };
+    if mkdir_result != 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::AlreadyExists {
+            return Err(Diagnostic::new(
+                "doc",
+                format!("failed to create {}: {error}", full_path.display()),
+            ));
+        }
+    }
+
+    let fd = unsafe {
+        libc::openat(
+            parent.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+        )
+    };
+    if fd < 0 {
+        let error = io::Error::last_os_error();
+        return Err(Diagnostic::new(
+            "doc",
+            format!(
+                "refusing to write documentation through symlink or non-directory {}: {error}",
+                full_path.display()
+            ),
+        ));
+    }
+
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+impl DocOutputDir {
+    fn write_file(
+        &self,
+        name: &str,
+        contents: &[u8],
+        display_path: &Path,
+    ) -> Result<(), Diagnostic> {
+        self.write_file_impl(name, contents, display_path)
+    }
+
+    fn remove_file_if_exists(&self, name: &str, display_path: &Path) -> Result<(), Diagnostic> {
+        self.remove_file_if_exists_impl(name, display_path)
+    }
+}
+
+#[cfg(not(unix))]
+impl DocOutputDir {
+    fn write_file_impl(
+        &self,
+        name: &str,
+        contents: &[u8],
+        display_path: &Path,
+    ) -> Result<(), Diagnostic> {
+        write_doc_file_fallback(&self.path.join(name), contents, display_path)
+    }
+
+    fn remove_file_if_exists_impl(
+        &self,
+        name: &str,
+        display_path: &Path,
+    ) -> Result<(), Diagnostic> {
+        let path = self.path.join(name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(|err| {
+                Diagnostic::new(
+                    "doc",
+                    format!("failed to remove {}: {err}", display_path.display()),
+                )
+            })?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl DocOutputDir {
+    fn write_file_impl(
+        &self,
+        name: &str,
+        contents: &[u8],
+        display_path: &Path,
+    ) -> Result<(), Diagnostic> {
+        let c_name = cstring_name(name)?;
+        reject_symlink_child(&self.dir, &c_name, display_path)?;
+
+        let pid = std::process::id();
+        let mut last_error = None;
+        for attempt in 0..16 {
+            let temp_name = cstring_name(&format!(".{name}.tmp-{pid}-{attempt}"))?;
+            let fd = unsafe {
+                libc::openat(
+                    self.dir.as_raw_fd(),
+                    temp_name.as_ptr(),
+                    libc::O_WRONLY
+                        | libc::O_CREAT
+                        | libc::O_EXCL
+                        | libc::O_CLOEXEC
+                        | libc::O_NOFOLLOW,
+                    0o666,
+                )
+            };
+            if fd < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::AlreadyExists {
+                    last_error = Some(error);
+                    continue;
+                }
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("failed to write {}: {error}", display_path.display()),
+                ));
+            }
+
+            let mut file = unsafe { File::from_raw_fd(fd) };
+            if let Err(error) = file.write_all(contents) {
+                drop(file);
+                let _ = unlinkat_child(&self.dir, &temp_name);
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("failed to write {}: {error}", display_path.display()),
+                ));
+            }
+            if let Err(error) = file.sync_all() {
+                drop(file);
+                let _ = unlinkat_child(&self.dir, &temp_name);
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("failed to write {}: {error}", display_path.display()),
+                ));
+            }
+            drop(file);
+
+            let renamed = unsafe {
+                libc::renameat(
+                    self.dir.as_raw_fd(),
+                    temp_name.as_ptr(),
+                    self.dir.as_raw_fd(),
+                    c_name.as_ptr(),
+                )
+            };
+            if renamed != 0 {
+                let error = io::Error::last_os_error();
+                let _ = unlinkat_child(&self.dir, &temp_name);
+                return Err(Diagnostic::new(
+                    "doc",
+                    format!("failed to write {}: {error}", display_path.display()),
+                ));
+            }
+            return Ok(());
+        }
+
+        Err(Diagnostic::new(
+            "doc",
+            format!(
+                "failed to write {}: {}",
+                display_path.display(),
+                last_error
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| String::from("temporary file collision"))
+            ),
+        ))
+    }
+
+    fn remove_file_if_exists_impl(
+        &self,
+        name: &str,
+        display_path: &Path,
+    ) -> Result<(), Diagnostic> {
+        let name = cstring_name(name)?;
+        reject_symlink_child(&self.dir, &name, display_path)?;
+        match unlinkat_child(&self.dir, &name) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(Diagnostic::new(
+                "doc",
+                format!("failed to remove {}: {error}", display_path.display()),
+            )),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn reject_symlink_child(dir: &File, name: &CString, display_path: &Path) -> Result<(), Diagnostic> {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let result = unsafe {
+        libc::fstatat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            stat.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result != 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::NotFound {
+            return Ok(());
+        }
+        return Err(Diagnostic::new(
+            "doc",
+            format!("failed to inspect {}: {error}", display_path.display()),
+        ));
+    }
+    let stat = unsafe { stat.assume_init() };
+    if (stat.st_mode & libc::S_IFMT) == libc::S_IFLNK {
+        return Err(Diagnostic::new(
+            "doc",
+            format!("refusing to replace symlink {}", display_path.display()),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn unlinkat_child(dir: &File, name: &CString) -> io::Result<()> {
+    let result = unsafe { libc::unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn cstring_component(name: &std::ffi::OsStr, full_path: &Path) -> Result<CString, Diagnostic> {
+    CString::new(name.as_bytes()).map_err(|_| {
+        Diagnostic::new(
+            "doc",
+            format!(
+                "unsupported documentation output path {}",
+                full_path.display()
+            ),
+        )
+    })
+}
+
+#[cfg(unix)]
+fn cstring_name(name: &str) -> Result<CString, Diagnostic> {
+    CString::new(name)
+        .map_err(|_| Diagnostic::new("doc", "unsupported documentation output file name"))
+}
+
+#[cfg(not(unix))]
 fn ensure_no_symlink_components(path: &Path) -> Result<(), Diagnostic> {
     let mut current = PathBuf::new();
     for component in path.components() {
@@ -6220,14 +6522,19 @@ fn ensure_no_symlink_components(path: &Path) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-fn write_doc_file(path: &Path, contents: &[u8]) -> Result<(), Diagnostic> {
+#[cfg(not(unix))]
+fn write_doc_file_fallback(
+    path: &Path,
+    contents: &[u8],
+    display_path: &Path,
+) -> Result<(), Diagnostic> {
     if fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_symlink())
         .unwrap_or(false)
     {
         return Err(Diagnostic::new(
             "doc",
-            format!("refusing to replace symlink {}", path.display()),
+            format!("refusing to replace symlink {}", display_path.display()),
         ));
     }
 
@@ -6235,7 +6542,7 @@ fn write_doc_file(path: &Path, contents: &[u8]) -> Result<(), Diagnostic> {
     let mut last_error = None;
     for attempt in 0..16 {
         let temp_path = path.with_extension(format!("tmp-{pid}-{attempt}"));
-        match OpenOptions::new()
+        match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp_path)
@@ -6245,14 +6552,14 @@ fn write_doc_file(path: &Path, contents: &[u8]) -> Result<(), Diagnostic> {
                     let _ = fs::remove_file(&temp_path);
                     return Err(Diagnostic::new(
                         "doc",
-                        format!("failed to write {}: {error}", path.display()),
+                        format!("failed to write {}: {error}", display_path.display()),
                     ));
                 }
                 if let Err(error) = fs::rename(&temp_path, path) {
                     let _ = fs::remove_file(&temp_path);
                     return Err(Diagnostic::new(
                         "doc",
-                        format!("failed to write {}: {error}", path.display()),
+                        format!("failed to write {}: {error}", display_path.display()),
                     ));
                 }
                 return Ok(());
@@ -6263,7 +6570,7 @@ fn write_doc_file(path: &Path, contents: &[u8]) -> Result<(), Diagnostic> {
             Err(error) => {
                 return Err(Diagnostic::new(
                     "doc",
-                    format!("failed to write {}: {error}", path.display()),
+                    format!("failed to write {}: {error}", display_path.display()),
                 ));
             }
         }
@@ -6273,7 +6580,7 @@ fn write_doc_file(path: &Path, contents: &[u8]) -> Result<(), Diagnostic> {
         "doc",
         format!(
             "failed to write {}: {}",
-            path.display(),
+            display_path.display(),
             last_error
                 .map(|error| error.to_string())
                 .unwrap_or_else(|| String::from("temporary file collision"))
@@ -6674,11 +6981,7 @@ fn function_name_from_source_line(line: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 fn recommended_fixture_name(file: &str, function: &str) -> String {
@@ -7798,6 +8101,48 @@ return "ok"
         assert_eq!(fs::read_to_string(&victim).expect("read victim"), "keep me");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn doc_generation_rejects_symlinked_output_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("doc-symlink-dir");
+        fs::create_dir_all(project.join("src")).expect("mkdir");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "doc-symlink-dir"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+"#,
+        )
+        .expect("write manifest");
+        fs::write(project.join("axiom.lock"), "version = 1\n").expect("write lock");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"/// Attacker-controlled docs directory.
+pub fn route(path: string): string {
+return "ok"
+}
+"#,
+        )
+        .expect("write source");
+
+        fs::create_dir_all(project.join("dist")).expect("mkdir dist");
+        let victim_dir = dir.path().join("victim-docs");
+        fs::create_dir_all(&victim_dir).expect("mkdir victim docs");
+        std::os::unix::fs::symlink(&victim_dir, project.join("dist/docs"))
+            .expect("symlink docs dir");
+
+        let error = generate_docs(&project, &project.join("dist/docs"), false)
+            .expect_err("symlinked docs directory is rejected");
+
+        assert!(error.message.contains("refusing to write documentation"));
+        assert!(!victim_dir.join("index.md").exists());
+    }
+
     #[test]
     fn registry_validate_cli_parses_integrity_options() {
         let cli = Cli::parse_from([
@@ -8553,14 +8898,18 @@ return "ok"
             .find(|symbol| symbol.name == "slice_time")
             .expect("slice_time symbol");
         assert_eq!(slice_time.capabilities, vec!["clock"]);
-        assert!(report
-            .symbols
-            .iter()
-            .any(|symbol| symbol.name == "exported"));
-        assert!(!report
-            .symbols
-            .iter()
-            .any(|symbol| symbol.name == "private_helper"));
+        assert!(
+            report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "exported")
+        );
+        assert!(
+            !report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "private_helper")
+        );
     }
 
     #[test]
@@ -8609,10 +8958,12 @@ return "ok"
         assert_eq!(report.tasks[0].reason, "missing_evidence");
         assert_eq!(report.tasks[0].required_evidence, vec!["unit_test"]);
         assert!(report.tasks[0].diagnostics.is_empty());
-        assert!(report.tasks[0]
-            .allowed_files
-            .iter()
-            .any(|path| path.ends_with("src/main.ax")));
+        assert!(
+            report.tasks[0]
+                .allowed_files
+                .iter()
+                .any(|path| path.ends_with("src/main.ax"))
+        );
     }
 
     #[test]
@@ -8636,20 +8987,24 @@ return "ok"
             .find(|axiom| axiom.name == "VerifiedInvariant")
             .expect("verified axiom");
         assert_eq!(verified.status, "verified");
-        assert!(verified
-            .backing_evidence
-            .iter()
-            .any(|evidence| evidence.status == "passing"));
+        assert!(
+            verified
+                .backing_evidence
+                .iter()
+                .any(|evidence| evidence.status == "passing")
+        );
         let target = report
             .target_contracts
             .iter()
             .find(|target| target.target_id == "axiom://target/semantic-verifier/runbook")
             .expect("target verification");
         assert_eq!(target.status, "unverified");
-        assert!(target
-            .requirements
-            .iter()
-            .any(|requirement| requirement.status == "failing"));
+        assert!(
+            target
+                .requirements
+                .iter()
+                .any(|requirement| requirement.status == "failing")
+        );
     }
 
     #[test]
@@ -8718,10 +9073,12 @@ return "ok"
             serde_json::to_value(&edge_drift).expect("serialize edge semantic diff");
         validate_schema(&edge_drift_payload, "axiom-semantic-diff-v0.schema.json");
         assert_eq!(edge_drift.summary.breaking, 4);
-        assert!(edge_drift
-            .changes
-            .iter()
-            .all(|change| change.node_kind == "Edge"));
+        assert!(
+            edge_drift
+                .changes
+                .iter()
+                .all(|change| change.node_kind == "Edge")
+        );
         assert!(edge_drift.changes.iter().any(|change| {
             change.change == "added"
                 && change.edge_kind.as_deref() == Some("requires")
@@ -8949,9 +9306,11 @@ return "ok"
         assert_eq!(report.lockfile_status, "valid");
         assert_eq!(report.workspace_graph.len(), 1);
         assert!(report.target_triple.is_some());
-        assert!(report
-            .known_unsupported_features
-            .contains(&"package registry resolution"));
+        assert!(
+            report
+                .known_unsupported_features
+                .contains(&"package registry resolution")
+        );
     }
 
     #[test]
@@ -9031,10 +9390,12 @@ return "ok"
             .iter()
             .find(|import| import.path == "core/math.ax")
             .expect("dependency import");
-        assert!(dependency_import
-            .resolved
-            .as_deref()
-            .is_some_and(|path| path.ends_with("deps/core/src/math.ax")));
+        assert!(
+            dependency_import
+                .resolved
+                .as_deref()
+                .is_some_and(|path| path.ends_with("deps/core/src/math.ax"))
+        );
         let math = report
             .modules
             .iter()
@@ -9045,10 +9406,11 @@ return "ok"
                     .any(|function| function.name == "value")
             })
             .expect("math module");
-        assert!(math
-            .functions
-            .iter()
-            .any(|function| function.name == "value"));
+        assert!(
+            math.functions
+                .iter()
+                .any(|function| function.name == "value")
+        );
         assert!(math.type_refs.contains(&String::from("int")));
     }
 
@@ -9104,14 +9466,18 @@ return "ok"
 
         let evidence = inspect_evidence(&project).expect("inspect evidence");
         assert_eq!(evidence.command, "inspect evidence");
-        assert!(evidence
-            .evidence
-            .iter()
-            .any(|item| item.kind == "lockfile" && item.status == "valid"));
-        assert!(evidence
-            .evidence
-            .iter()
-            .any(|item| item.kind == "test" && item.name.ends_with("src/main_test")));
+        assert!(
+            evidence
+                .evidence
+                .iter()
+                .any(|item| item.kind == "lockfile" && item.status == "valid")
+        );
+        assert!(
+            evidence
+                .evidence
+                .iter()
+                .any(|item| item.kind == "test" && item.name.ends_with("src/main_test"))
+        );
 
         fs::create_dir_all(project.join("dist")).expect("create dist");
         fs::write(
@@ -9121,18 +9487,24 @@ return "ok"
         .expect("write generated artifact");
         let artifacts = inspect_artifacts(&project).expect("inspect artifacts");
         assert_eq!(artifacts.command, "inspect artifacts");
-        assert!(artifacts
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.kind == "build_entry" && artifact.exists));
-        assert!(artifacts
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.kind == "generated_rust" && artifact.exists));
-        assert!(artifacts
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.kind == "test_entry" && artifact.exists));
+        assert!(
+            artifacts
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == "build_entry" && artifact.exists)
+        );
+        assert!(
+            artifacts
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == "generated_rust" && artifact.exists)
+        );
+        assert!(
+            artifacts
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.kind == "test_entry" && artifact.exists)
+        );
         assert!(artifacts.artifacts.iter().any(|artifact| {
             artifact.kind == OPENAPI_ARTIFACT_KIND
                 && artifact.source == "target_contract"
@@ -9208,8 +9580,8 @@ return "ok"
         assert_eq!(spec["info"]["title"], "openapi-service");
         assert_eq!(spec["paths"]["/ready"]["get"]["operationId"], "get_ready");
         assert_eq!(
-            spec["paths"]["/ready"]["get"]["responses"]["200"]["content"]
-                ["text/plain; charset=utf-8"]["schema"]["type"],
+            spec["paths"]["/ready"]["get"]["responses"]["200"]["content"]["text/plain; charset=utf-8"]
+                ["schema"]["type"],
             "string"
         );
         let responses = spec["paths"]["/ready"]["get"]["responses"]
@@ -9273,9 +9645,11 @@ return "ok"
 
         assert_eq!(report.routes.len(), 0);
         assert_eq!(report.diagnostics.len(), 1);
-        assert!(report.diagnostics[0]
-            .message
-            .contains("no HTTP-serving routes"));
+        assert!(
+            report.diagnostics[0]
+                .message
+                .contains("no HTTP-serving routes")
+        );
         let spec: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(project.join("dist/openapi.json")).expect("read spec"),
         )
@@ -9626,13 +10000,17 @@ print serve("127.0.0.1:0", selected_route, 1)
         let error = generate_sql(&project, Path::new("dist/sql")).expect_err("schema should fail");
 
         assert_eq!(error.kind, "sql");
-        assert!(error
-            .message
-            .contains("requires complete schema structs with supported fields"));
+        assert!(
+            error
+                .message
+                .contains("requires complete schema structs with supported fields")
+        );
         assert_eq!(error.related.len(), 1);
-        assert!(error.related[0]
-            .message
-            .contains("field Customer.metadata uses unsupported SQL migration type"));
+        assert!(
+            error.related[0]
+                .message
+                .contains("field Customer.metadata uses unsupported SQL migration type")
+        );
         assert!(!project.join("dist/sql/001_schema_forward.sql").exists());
     }
 
@@ -9651,9 +10029,11 @@ print serve("127.0.0.1:0", selected_route, 1)
 
         assert_eq!(error.kind, "sql");
         assert_eq!(error.related.len(), 1);
-        assert!(error.related[0]
-            .message
-            .contains("schema table customer has no `id: int` primary key field"));
+        assert!(
+            error.related[0]
+                .message
+                .contains("schema table customer has no `id: int` primary key field")
+        );
         assert!(!project.join("dist/sql/schema.snapshot.json").exists());
     }
 
@@ -9820,10 +10200,12 @@ print serve("127.0.0.1:0", selected_route, 1)
         assert_eq!(report.changed, 1);
         assert_eq!(report.files.len(), 1);
         assert!(report.files[0].changed);
-        assert!(report.files[0]
-            .edits
-            .iter()
-            .any(|edit| edit.action == "replace_line" && edit.line == 1));
+        assert!(
+            report.files[0]
+                .edits
+                .iter()
+                .any(|edit| edit.action == "replace_line" && edit.line == 1)
+        );
         assert_eq!(
             fs::read_to_string(&source).expect("read source"),
             "fn main() {   \n\tprint \"hi\"  \n\n\n}\n\n"
@@ -9994,10 +10376,12 @@ print serve("127.0.0.1:0", selected_route, 1)
             output.functions[0].examples,
             vec![String::from("route(\"/health\")")]
         );
-        assert!(output
-            .capabilities
-            .iter()
-            .any(|capability| capability.name == "env"));
+        assert!(
+            output
+                .capabilities
+                .iter()
+                .any(|capability| capability.name == "env")
+        );
     }
 
     #[test]
