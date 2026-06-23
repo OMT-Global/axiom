@@ -1425,6 +1425,48 @@ fn cranelift_backend_lowers_aggregate_helper_reassignment_to_runtime_exit_code()
     assert_eq!(String::from_utf8_lossy(&run.stdout), "");
 }
 
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_lowers_aggregate_helper_reassignment_nested_args_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp
+        .path()
+        .join("aggregate-helper-reassignment-nested-args-main-exit");
+    write_aggregate_helper_reassignment_nested_args_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift aggregate helper reassignment nested args build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift aggregate helper reassignment nested args binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
 #[test]
 fn cranelift_backend_rejects_nested_enum_payload_reassignment_before_lowering() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -8243,6 +8285,100 @@ fn write_aggregate_helper_reassignment_main_exit_project(project: &Path) {
         "struct Step {\nvalue: int\nenabled: bool\nsmall: u8\n}\n\nenum Choice {\nReady { step: Step }\nOff\n}\n\nfn make_pair(): (int, bool) {\nreturn (48, true)\n}\n\nfn make_values(): [int; 2] {\nreturn [20, 28]\n}\n\nfn make_step(): Step {\nreturn Step { value: 48, enabled: true, small: 2u8 }\n}\n\nfn make_option(): Option<Step> {\nreturn Some(Step { value: 48, enabled: true, small: 2u8 })\n}\n\nfn make_result(): Result<Step, Step> {\nreturn Ok(Step { value: 48, enabled: true, small: 2u8 })\n}\n\nfn make_choice(): Choice {\nreturn Ready { step: Step { value: 48, enabled: true, small: 2u8 } }\n}\n\nfn score_pair(value: (int, bool)): int {\nif value.1 {\nreturn value.0\n} else {\nreturn 1\n}\n}\n\nfn score_values(value: [int; 2]): int {\nreturn value[0] + value[1]\n}\n\nfn score_step(value: Step): int {\nif value.enabled {\nreturn value.value\n} else {\nreturn 1\n}\n}\n\nfn score_option(value: Option<Step>): int {\nreturn match value { Some(step) => step.value, None => 1 }\n}\n\nfn score_result(value: Result<Step, Step>): int {\nreturn match value { Ok(step) => step.value, Err(error) => error.value }\n}\n\nfn score_choice(value: Choice): int {\nreturn match value { Ready { step } => step.value, Off => 1 }\n}\n\nfn main(): int {\nlet pair: (int, bool) = (0, false)\nlet values: [int; 2] = [0, 0]\nlet step: Step = Step { value: 0, enabled: false, small: 0u8 }\nlet maybe: Option<Step> = None\nlet outcome: Result<Step, Step> = Err(Step { value: 1, enabled: false, small: 0u8 })\nlet choice: Choice = Off\nlet pair_assigned: (int, bool) = (0, false)\nlet index: int = 0\nwhile index < 1 {\npair = make_pair()\nvalues = make_values()\nindex = index + 1\n}\nif pair.1 {\nstep = make_step()\nmaybe = make_option()\noutcome = make_result()\nchoice = make_choice()\n} else {\nstep = Step { value: 1, enabled: false, small: 0u8 }\nmaybe = None\noutcome = Err(Step { value: 1, enabled: false, small: 0u8 })\nchoice = Off\n}\npair_assigned = pair\nlet values_moved: [int; 2] = values\nlet step_moved: Step = step\nlet maybe_moved: Option<Step> = maybe\nlet outcome_moved: Result<Step, Step> = outcome\nlet choice_moved: Choice = choice\nlet moved_pair_code: int = pair_assigned.0\nlet moved_pair_enabled: bool = pair_assigned.1\nlet moved_array_code: int = values_moved[0] + values_moved[1]\nlet moved_step_code: int = step_moved.value\nlet moved_step_enabled: bool = step_moved.enabled\nlet moved_option_code: int = score_option(maybe_moved)\nlet moved_result_code: int = score_result(outcome_moved)\nlet moved_choice_code: int = score_choice(choice_moved)\nlet nested_pair_code: int = score_pair(make_pair())\nlet nested_array_code: int = score_values(make_values())\nlet nested_step_code: int = score_step(make_step())\nlet nested_option_code: int = score_option(make_option())\nlet nested_result_code: int = score_result(make_result())\nlet nested_choice_code: int = score_choice(make_choice())\nif moved_pair_enabled && moved_step_enabled && moved_pair_code == 48 && moved_array_code == 48 && moved_step_code == 48 && moved_option_code == 48 && moved_result_code == 48 && moved_choice_code == 48 && nested_pair_code == 48 && nested_array_code == 48 && nested_step_code == 48 && nested_option_code == 48 && nested_result_code == 48 && nested_choice_code == 48 {\nreturn moved_pair_code\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write aggregate helper reassignment main exit source");
+}
+
+fn write_aggregate_helper_reassignment_nested_args_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create aggregate helper reassignment nested args main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        r#"[package]
+name = "cranelift-aggregate-helper-reassignment-nested-args-main-exit"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+fs = false
+net = false
+process = false
+env = false
+clock = false
+crypto = false
+"#,
+    )
+    .expect("write aggregate helper reassignment nested args main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        r#"version = 1
+
+[[package]]
+name = "cranelift-aggregate-helper-reassignment-nested-args-main-exit"
+version = "0.1.0"
+source = "path"
+"#,
+    )
+    .expect("write aggregate helper reassignment nested args main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        r#"struct Step {
+value: int
+enabled: bool
+small: u8
+}
+
+fn make_pair(): (int, bool) {
+return (48, true)
+}
+
+fn make_flags(): [bool; 2] {
+return [true, false]
+}
+
+fn make_values(): [int; 2] {
+return [20, 28]
+}
+
+fn make_step(): Step {
+return Step { value: 48, enabled: true, small: 2u8 }
+}
+
+fn choose_pair(score: int, enabled: bool): (int, bool) {
+if enabled {
+return (score, true)
+} else {
+return (1, false)
+}
+}
+
+fn choose_values(first: int, second: int): [int; 2] {
+return [first, second]
+}
+
+fn choose_step(value: int, enabled: bool, small: u8): Step {
+return Step { value: value, enabled: enabled, small: small }
+}
+
+fn main(): int {
+let pair: (int, bool) = (0, false)
+let values: [int; 2] = [0, 0]
+let step: Step = Step { value: 0, enabled: false, small: 0u8 }
+let first_index: int = 0
+let second_index: int = 1
+pair = choose_pair(make_pair().0, make_flags()[first_index])
+values = choose_values(make_values()[first_index], make_values()[second_index])
+step = choose_step(make_step().value, make_step().enabled, make_step().small)
+if pair.1 && step.enabled && pair.0 == 48 && values[0] + values[1] == 48 && step.value == 48 && (step.small as int) == 2 {
+return 48
+} else {
+return 1
+}
+}
+"#,
+    )
+    .expect("write aggregate helper reassignment nested args main exit source");
 }
 
 fn write_nested_enum_payload_reassignment_project(project: &Path) {

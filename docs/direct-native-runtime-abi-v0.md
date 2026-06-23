@@ -254,6 +254,8 @@ helper returns, initialized from another local fixed array, or moved between
 existing locals using the same element-slot ABI, including inside runtime loop
 blocks. Fixed-array helper returns can also feed nested fixed-array helper
 arguments by materializing hidden element-slot locals before the outer call.
+Aggregate helper-call reassignments can also use direct fixed-array helper-call
+indexes as scalar arguments after materializing hidden element-slot locals.
 Direct indexes over fixed-array helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden element-slot locals before indexing, including numeric
@@ -293,6 +295,9 @@ reassigned from tuple helper returns, initialized from another local tuple, or
 moved between existing locals using the same tuple-element ABI, including inside
 runtime loop blocks. Tuple helper returns can also feed nested tuple helper
 arguments by materializing hidden tuple-element locals before the outer call.
+Aggregate helper-call reassignments can also use direct tuple helper-call
+projections as scalar and boolean arguments after materializing hidden
+tuple-element locals.
 Direct tuple projections from helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden tuple-element locals before projection, including
@@ -334,6 +339,9 @@ struct, or moved between existing locals using the declared-field slot ABI,
 including inside runtime branch blocks. Struct helper returns can also feed
 nested struct helper arguments by materializing hidden declared-field locals
 before the outer call.
+Aggregate helper-call reassignments can also use direct struct helper-call field
+projections as scalar and boolean arguments after materializing hidden
+declared-field locals.
 Direct struct field projections from helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden declared-field locals before projection, including

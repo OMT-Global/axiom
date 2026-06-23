@@ -3366,6 +3366,7 @@ fn lower_i64_runtime_stmt_stmts(
     }
     if let Some(assigns) = lower_i64_aggregate_call_assign_stmts(
         stmt,
+        locals,
         &local_indexes,
         &local_conditions,
         helper_signatures,
@@ -7666,6 +7667,7 @@ fn lower_i64_result_assign_stmts(
 
 fn lower_i64_aggregate_call_assign_stmts(
     stmt: &Stmt,
+    locals: &mut Vec<CraneliftI64Expr>,
     local_indexes: &HashMap<String, usize>,
     local_conditions: &HashMap<String, CraneliftI64Condition>,
     helper_signatures: &HashMap<&str, I64HelperSignature>,
@@ -7790,7 +7792,37 @@ fn lower_i64_aggregate_call_assign_stmts(
     if args.len() != signature.params {
         return None;
     }
-    Some(vec![CraneliftI64Stmt::CallAssign {
+
+    let mut rewritten_args = Vec::with_capacity(args.len());
+    let mut setup = Vec::new();
+    let mut trial_locals = locals.clone();
+    let mut trial_indexes = local_indexes.clone();
+    let mut trial_conditions = local_conditions.clone();
+    let mut rewrote_any_arg = false;
+    for (index, arg) in args.iter().enumerate() {
+        if let Some((rewritten, mut assigns)) = rewrite_i64_nested_aggregate_call_arg(
+            arg,
+            index,
+            &mut trial_locals,
+            &mut trial_indexes,
+            &mut trial_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
+            setup.append(&mut assigns);
+            rewritten_args.push(rewritten);
+            rewrote_any_arg = true;
+            continue;
+        }
+        rewritten_args.push(arg.clone());
+    }
+    let (args, local_indexes, local_conditions) = if rewrote_any_arg {
+        *locals = trial_locals;
+        (rewritten_args.as_slice(), &trial_indexes, &trial_conditions)
+    } else {
+        (args.as_slice(), local_indexes, local_conditions)
+    };
+    setup.push(CraneliftI64Stmt::CallAssign {
         locals: assign_locals,
         function: signature.function,
         args: lower_i64_flat_call_args(
@@ -7801,7 +7833,8 @@ fn lower_i64_aggregate_call_assign_stmts(
             helper_signatures,
             static_bindings,
         )?,
-    }])
+    });
+    Some(setup)
 }
 
 fn lower_i64_enum_assign_stmts(
