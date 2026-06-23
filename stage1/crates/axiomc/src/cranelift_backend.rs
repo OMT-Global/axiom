@@ -4183,7 +4183,7 @@ fn lower_i64_helper_call_projection_let_stmts(
     let mut trial_locals = locals.clone();
     let mut trial_indexes = local_indexes.clone();
     let mut trial_conditions = local_conditions.clone();
-    let (temp_prefix, base, projection) = match expr {
+    let (temp_prefix, base, projection, cast_ty) = match expr {
         Expr::TupleIndex {
             base,
             index,
@@ -4195,6 +4195,7 @@ fn lower_i64_helper_call_projection_let_stmts(
                 index: *index,
                 ty: index_ty.clone(),
             },
+            None,
         ),
         Expr::FieldAccess {
             base,
@@ -4207,7 +4208,40 @@ fn lower_i64_helper_call_projection_let_stmts(
                 field: field.clone(),
                 ty: field_ty.clone(),
             },
+            None,
         ),
+        Expr::Cast {
+            expr: cast_expr,
+            ty: cast_ty,
+        } if is_i64_compatible_type(cast_ty) => match cast_expr.as_ref() {
+            Expr::TupleIndex {
+                base,
+                index,
+                ty: index_ty,
+            } if matches!(base.as_ref(), Expr::Call { .. }) => (
+                "__axiom_i64_tuple_projection",
+                base,
+                HelperCallProjection::Tuple {
+                    index: *index,
+                    ty: index_ty.clone(),
+                },
+                Some(cast_ty.clone()),
+            ),
+            Expr::FieldAccess {
+                base,
+                field,
+                ty: field_ty,
+            } if matches!(base.as_ref(), Expr::Call { .. }) => (
+                "__axiom_i64_struct_projection",
+                base,
+                HelperCallProjection::Field {
+                    field: field.clone(),
+                    ty: field_ty.clone(),
+                },
+                Some(cast_ty.clone()),
+            ),
+            _ => return None,
+        },
         _ => return None,
     };
     let temp_name = format!("{}_{}", temp_prefix, trial_indexes.len());
@@ -4238,6 +4272,14 @@ fn lower_i64_helper_call_projection_let_stmts(
             ty,
         },
     };
+    let rewritten_expr = if let Some(cast_ty) = cast_ty {
+        Expr::Cast {
+            expr: Box::new(rewritten_expr),
+            ty: cast_ty,
+        }
+    } else {
+        rewritten_expr
+    };
     let rewritten = Stmt::Let {
         name: name.clone(),
         ty: ty.clone(),
@@ -4259,11 +4301,13 @@ fn lower_i64_helper_call_projection_let_stmts(
 }
 
 fn i64_is_helper_call_projection_expr(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::TupleIndex { base, .. } | Expr::FieldAccess { base, .. }
-            if matches!(base.as_ref(), Expr::Call { .. })
-    )
+    match expr {
+        Expr::TupleIndex { base, .. } | Expr::FieldAccess { base, .. } => {
+            matches!(base.as_ref(), Expr::Call { .. })
+        }
+        Expr::Cast { expr, .. } => i64_is_helper_call_projection_expr(expr),
+        _ => false,
+    }
 }
 
 fn i64_has_helper_call_projection_arg(args: &[Expr]) -> bool {
@@ -4588,6 +4632,27 @@ fn rewrite_i64_nested_aggregate_call_arg(
                 }),
                 index: index.clone(),
                 ty: index_ty.clone(),
+            },
+            assigns,
+        ));
+    }
+
+    if let Expr::Cast { expr, ty: cast_ty } = arg
+        && is_i64_compatible_type(cast_ty)
+        && let Some((rewritten, assigns)) = rewrite_i64_nested_aggregate_call_arg(
+            expr,
+            arg_index,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )
+    {
+        return Some((
+            Expr::Cast {
+                expr: Box::new(rewritten),
+                ty: cast_ty.clone(),
             },
             assigns,
         ));
