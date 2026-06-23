@@ -8378,6 +8378,18 @@ fn choose_step(value: int, enabled: bool, small: u8): Step {
 return Step { value: value, enabled: enabled, small: small }
 }
 
+fn forward_pair(value: (int, bool)): (int, bool) {
+return value
+}
+
+fn forward_values(value: [int; 2]): [int; 2] {
+return value
+}
+
+fn forward_step(value: Step): Step {
+return value
+}
+
 fn forward_option(value: Option<Step>): Option<Step> {
 return value
 }
@@ -8414,6 +8426,9 @@ let second_index: int = 1
 pair = choose_pair(make_pair().0, make_flags()[first_index])
 values = choose_values(make_values()[first_index], make_values()[second_index])
 step = choose_step(make_step().value, make_step().enabled, make_step().small)
+pair = forward_pair(make_pair())
+values = forward_values(make_values())
+step = forward_step(make_step())
 maybe = forward_option(make_option())
 outcome = forward_result(make_result())
 choice = forward_choice(make_choice())

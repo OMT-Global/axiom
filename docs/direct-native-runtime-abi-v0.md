@@ -256,6 +256,8 @@ blocks. Fixed-array helper returns can also feed nested fixed-array helper
 arguments by materializing hidden element-slot locals before the outer call.
 Aggregate helper-call reassignments can also use direct fixed-array helper-call
 indexes as scalar arguments after materializing hidden element-slot locals.
+They can also use direct fixed-array helper returns as aggregate arguments after
+the same element-slot materialization.
 Direct indexes over fixed-array helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden element-slot locals before indexing, including numeric
@@ -297,7 +299,8 @@ runtime loop blocks. Tuple helper returns can also feed nested tuple helper
 arguments by materializing hidden tuple-element locals before the outer call.
 Aggregate helper-call reassignments can also use direct tuple helper-call
 projections as scalar and boolean arguments after materializing hidden
-tuple-element locals.
+tuple-element locals. They can also use direct tuple helper returns as aggregate
+arguments after the same tuple-element materialization.
 Direct tuple projections from helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden tuple-element locals before projection, including
@@ -341,7 +344,8 @@ nested struct helper arguments by materializing hidden declared-field locals
 before the outer call.
 Aggregate helper-call reassignments can also use direct struct helper-call field
 projections as scalar and boolean arguments after materializing hidden
-declared-field locals.
+declared-field locals. They can also use direct struct helper returns as
+aggregate arguments after the same declared-field materialization.
 Direct struct field projections from helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden declared-field locals before projection, including
