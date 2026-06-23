@@ -4297,6 +4297,14 @@ fn validate_stdlib_wrapper_capabilities(
     if wrappers.is_empty() {
         return Ok(());
     }
+    for const_decl in &program.consts {
+        validate_expr_stdlib_wrapper_capabilities(
+            module_path,
+            &const_decl.expr,
+            capabilities,
+            wrappers,
+        )?;
+    }
     for function in &program.functions {
         for stmt in &function.body {
             validate_stmt_stdlib_wrapper_capabilities(module_path, stmt, capabilities, wrappers)?;
@@ -5272,6 +5280,14 @@ fn flatten_modules(
             }
         }
 
+        let package = graph.context(&module.package_root)?;
+        validate_stdlib_wrapper_capabilities(
+            &module.path,
+            &module.program,
+            &package.manifest.capabilities,
+            &capability_wrappers,
+        )?;
+
         let visible_types = merge_visible_types(
             &visible_aliases,
             &visible_structs,
@@ -5313,14 +5329,6 @@ fn flatten_modules(
                 &module.path,
             )?);
         }
-
-        let package = graph.context(&module.package_root)?;
-        validate_stdlib_wrapper_capabilities(
-            &module.path,
-            &module.program,
-            &package.manifest.capabilities,
-            &capability_wrappers,
-        )?;
 
         for struct_decl in &module.program.structs {
             flattened_structs.push(rewrite_struct(
@@ -8236,6 +8244,107 @@ print leak("localhost")
             r#"import "std/net.ax"
 pub fn leak(host: string): bool {
 return resolve(host).is_some()
+}
+"#,
+        )
+        .expect("write dep source");
+        fs::write(
+            dep.join("src/lib.ax"),
+            r#"print "dep"
+"#,
+        )
+        .expect("write dep entry");
+        let app_manifest = load_manifest(&root).expect("load app manifest");
+        let dep_manifest = load_manifest(&dep).expect("load dep manifest");
+        fs::write(
+            root.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&root, &app_manifest)
+                .expect("render app lockfile"),
+        )
+        .expect("write app lockfile");
+        fs::write(
+            dep.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&dep, &dep_manifest)
+                .expect("render dep lockfile"),
+        )
+        .expect("write dep lockfile");
+
+        let graph = load_package_graph(&root).expect("load graph");
+        let package_root =
+            canonicalize_existing_path(&root, "project root").expect("canonical root");
+        let error = match analyze_package(&graph, &package_root) {
+            Ok(_) => panic!("net wrapper denied"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .message
+                .contains(r#"call to stdlib wrapper "resolve" requires [capabilities].net = true"#),
+            "unexpected diagnostic: {error:?}"
+        );
+        assert!(
+            error
+                .path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("deps/evil/src/leak.ax")),
+            "unexpected diagnostic path: {error:?}"
+        );
+    }
+
+    #[test]
+    fn dependency_without_net_cannot_use_stdlib_net_wrapper_in_const_initializer() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path().join("app");
+        let dep = root.join("deps/evil");
+        fs::create_dir_all(root.join("src")).expect("create app src");
+        fs::create_dir_all(dep.join("src")).expect("create dep src");
+        fs::write(
+            root.join("axiom.toml"),
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.evil]
+path = "deps/evil"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+"#,
+        )
+        .expect("write app manifest");
+        fs::write(
+            dep.join("axiom.toml"),
+            r#"[package]
+name = "evil"
+version = "0.1.0"
+
+[build]
+entry = "src/lib.ax"
+out_dir = "dist"
+
+[capabilities]
+net = false
+"#,
+        )
+        .expect("write dep manifest");
+        fs::write(
+            root.join("src/main.ax"),
+            r#"import "evil/leak.ax"
+print leak()
+"#,
+        )
+        .expect("write app source");
+        fs::write(
+            dep.join("src/leak.ax"),
+            r#"import "std/net.ax"
+const LEAKED: bool = resolve("localhost").is_some()
+pub fn leak(): bool {
+return LEAKED
 }
 "#,
         )
