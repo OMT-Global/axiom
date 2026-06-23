@@ -5993,6 +5993,19 @@ fn lower_i64_struct_call_let_stmts(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<Vec<CraneliftI64Stmt>> {
+    if let Some(stmts) = lower_i64_time_struct_call_let_stmts(
+        name,
+        struct_name,
+        call_name,
+        args,
+        locals,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(stmts);
+    }
     let signature = helper_signatures.get(call_name)?;
     let struct_def = i64_scalar_static_struct_def(struct_name, static_bindings)?;
     if args.len() != signature.params
@@ -6032,6 +6045,51 @@ fn lower_i64_struct_call_let_stmts(
         function: signature.function,
         args: lowered_args,
     }])
+}
+
+fn lower_i64_time_struct_call_let_stmts(
+    name: &str,
+    struct_name: &str,
+    call_name: &str,
+    args: &[Expr],
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let struct_def = i64_scalar_static_struct_def(struct_name, static_bindings)?;
+    let [field] = struct_def.fields.as_slice() else {
+        return None;
+    };
+    if field.name != "ms" || !is_i64_compatible_type(&field.ty) {
+        return None;
+    }
+    let value = if is_i64_time_now_name(call_name, static_bindings) {
+        let [] = args else {
+            return None;
+        };
+        CraneliftI64Expr::ClockNowMs
+    } else if is_i64_time_duration_ms_name(call_name, static_bindings) {
+        let [milliseconds] = args else {
+            return None;
+        };
+        lower_i64_expr(
+            milliseconds,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?
+    } else {
+        return None;
+    };
+    let local = local_indexes.len();
+    local_indexes.insert(i64_struct_projection_key(name, "ms"), local);
+    locals.push(CraneliftI64Expr::Literal(0));
+    Some(vec![CraneliftI64Stmt::Assign(
+        axiomc_backend_cranelift::I64Assign { local, value },
+    )])
 }
 
 fn lower_i64_option_call_let_stmts(
@@ -12718,6 +12776,10 @@ fn lower_i64_duration_ms_expr(
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     match expr {
+        Expr::VarRef { name, .. } => local_indexes
+            .get(i64_struct_projection_key(name, "ms").as_str())
+            .copied()
+            .map(CraneliftI64Expr::Local),
         Expr::Call { name, args, .. } if is_i64_time_duration_ms_name(name, static_bindings) => {
             let [milliseconds] = args.as_slice() else {
                 return None;

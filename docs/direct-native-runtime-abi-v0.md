@@ -1100,14 +1100,15 @@ shim returning `7s + 456ms` and asserts `clock_now_ms()` observes `7456ms`, and
 the public runtime smoke requires a 10 ms sleep to report a positive elapsed
 value below one second. Imported public
 `std/time.ax` `sleep(duration_ms(...))` wrappers now alias that same
-deterministic path for literal, static scalar, and runtime scalar durations in
-runtime-exit programs.
+deterministic path for literal, static scalar, runtime scalar, and stored
+`Duration` aggregate durations in runtime-exit programs. Public `std/time.ax`
+`now()` calls can now initialize stored `Instant` aggregate locals whose moved
+values feed `elapsed_ms(...)` without generated Rust.
 Those sleep paths now append host audit JSONL entries when
 `AXIOM_HOST_AUDIT_LOG` is set, recording only the integer argument type and the
-`ok`/`denied` outcome without recording duration values. Stored `Instant`
-aggregate locals, timer scheduling, async clock integration,
-monotonic/high-resolution clock policy, and broader positive-duration sleep
-policy remain open under #1001.
+`ok`/`denied` outcome without recording duration values. Timer scheduling, async
+clock integration, monotonic/high-resolution clock policy, and broader
+positive-duration sleep policy remain open under #1001.
 
 
 

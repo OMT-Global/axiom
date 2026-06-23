@@ -5797,7 +5797,7 @@ fn cranelift_backend_lowers_std_time_sleep_wrappers_to_runtime_exit_code() {
         audit.contains("\"args\":{\"milliseconds\":\"int\"}"),
         "{audit}"
     );
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 5, "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 6, "{audit}");
     assert_eq!(
         audit.matches("\"outcome\":\"denied\"").count(),
         2,
@@ -12137,6 +12137,9 @@ let helper: int = pause_zero()
 let negative: int = pause_negative()
 let dynamic_ms: int = 1
 let positive: int = sleep(duration_ms(dynamic_ms))
+let stored_duration: Duration = duration_ms(dynamic_ms)
+let moved_duration: Duration = stored_duration
+let stored_positive: int = sleep(moved_duration)
 let direct_positive: int = clock_sleep_ms(dynamic_ms)
 let capped: int = sleep(duration_ms(1001))
 let primitive_start: int = clock_now_ms()
@@ -12144,10 +12147,13 @@ let primitive_elapsed: int = clock_elapsed_ms(primitive_start)
 let public_start: int = now_ms()
 let public_elapsed: int = elapsed_ms(Instant { ms: public_start })
 let inline_elapsed: int = elapsed_ms(now())
+let stored_start: Instant = now()
+let moved_start: Instant = stored_start
+let stored_elapsed: int = elapsed_ms(moved_start)
 let precision_start: int = clock_now_ms()
 let precision_sleep: int = clock_sleep_ms(10)
 let precision_elapsed: int = clock_elapsed_ms(precision_start)
-if direct == 0 && helper == 0 && negative == -1 && positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 && precision_sleep == 0 && precision_elapsed > 0 && precision_elapsed < 1000 {
+if direct == 0 && helper == 0 && negative == -1 && positive == 0 && stored_positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 && stored_elapsed >= 0 && precision_sleep == 0 && precision_elapsed > 0 && precision_elapsed < 1000 {
 return 48
 } else {
 return 1
