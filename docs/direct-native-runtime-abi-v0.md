@@ -702,7 +702,9 @@ static-range fixed-array slices using literal or static scalar bounds such as
 fixed-array slots, including helper-parameter arrays feeding a direct-native
 process exit status. Helper-returned fixed arrays can also be materialized into
 projected element locals before being sliced through the same static-range
-borrowed-slice path. Static-range fixed-array slices also support narrow literal
+borrowed-slice path, and fixed-array-returning helper calls can now be used
+directly as static borrowed-slice bases without a source-level temporary.
+Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots.
 The public borrowed-slice smoke also prints `len`, `first`, `last`, and indexed

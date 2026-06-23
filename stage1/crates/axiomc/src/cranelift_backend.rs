@@ -1468,15 +1468,18 @@ fn lower_i64_aggregate_return_body(
                 expr,
                 ..
             } if !seen_runtime_stmt => {
-                lower_i64_slice_projection_aliases(
+                let assigns = lower_i64_slice_projection_aliases(
                     name,
                     expr,
                     &mut locals,
                     &mut local_indexes,
                     &mut local_conditions,
+                    helper_signatures,
                     static_bindings,
                     false,
                 )?;
+                seen_runtime_stmt = !assigns.is_empty();
+                lowered_stmts.extend(assigns);
             }
             Stmt::Let {
                 name,
@@ -2822,15 +2825,18 @@ fn lower_i64_body(
                 expr,
                 ..
             } if !seen_runtime_stmt => {
-                lower_i64_slice_projection_aliases(
+                let assigns = lower_i64_slice_projection_aliases(
                     name,
                     expr,
                     &mut locals,
                     &mut local_indexes,
                     &mut local_conditions,
+                    helper_signatures,
                     static_bindings,
                     false,
                 )?;
+                seen_runtime_stmt = !assigns.is_empty();
+                lowered_stmts.extend(assigns);
             }
             Stmt::Let {
                 name,
@@ -3804,6 +3810,7 @@ fn lower_i64_runtime_let_stmts(
             locals,
             local_indexes,
             local_conditions,
+            helper_signatures,
             static_bindings,
             true,
         );
@@ -11549,6 +11556,7 @@ fn lower_i64_slice_projection_aliases(
     locals: &mut Vec<CraneliftI64Expr>,
     local_indexes: &mut HashMap<String, usize>,
     local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
     runtime: bool,
 ) -> Option<Vec<CraneliftI64Stmt>> {
@@ -11558,25 +11566,41 @@ fn lower_i64_slice_projection_aliases(
     else {
         return None;
     };
-    let Expr::VarRef {
-        name: base_name,
-        ty: Type::Array(_, Some(base_size)),
-    } = base.as_ref()
-    else {
-        return None;
-    };
-    let (start, end) = i64_static_slice_range(
-        *base_size,
-        start.as_deref(),
-        end.as_deref(),
-        static_bindings,
-    )?;
     let mut assigns = Vec::new();
+    let (base_name, base_size, copy_aliases) = match base.as_ref() {
+        Expr::VarRef {
+            name: base_name,
+            ty: Type::Array(_, Some(base_size)),
+        } => (base_name.clone(), *base_size, runtime),
+        Expr::Call {
+            name: call_name,
+            args,
+            ty: Type::Array(element, Some(base_size)),
+        } if is_i64_array_param_element_type(element) => {
+            let temp_name = format!("__axiom_i64_slice_base_{}", local_indexes.len());
+            assigns.extend(lower_i64_array_call_let_stmts(
+                &temp_name,
+                element.as_ref(),
+                *base_size,
+                call_name,
+                args,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )?);
+            (temp_name, *base_size, true)
+        }
+        _ => return None,
+    };
+    let (start, end) =
+        i64_static_slice_range(base_size, start.as_deref(), end.as_deref(), static_bindings)?;
     for (slice_index, base_index) in (start..end).enumerate() {
-        let base_key = i64_array_projection_key(base_name, base_index);
+        let base_key = i64_array_projection_key(&base_name, base_index);
         let base_local = *local_indexes.get(base_key.as_str())?;
         let local = locals.len();
-        if runtime {
+        if copy_aliases {
             locals.push(CraneliftI64Expr::Literal(0));
             assigns.push(CraneliftI64Stmt::Assign(
                 axiomc_backend_cranelift::I64Assign {

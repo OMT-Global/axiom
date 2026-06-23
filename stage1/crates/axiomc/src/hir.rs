@@ -14639,6 +14639,10 @@ fn is_borrowable_slice_base(expr: &Expr) -> bool {
         Expr::FieldAccess { base, .. } => is_borrowable_slice_base(base),
         Expr::TupleIndex { base, .. } => is_borrowable_slice_base(base),
         Expr::Slice { .. } => true,
+        Expr::Call {
+            ty: Type::Array(_, Some(_)),
+            ..
+        } => true,
         _ => false,
     }
 }
