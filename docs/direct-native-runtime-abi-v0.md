@@ -220,6 +220,10 @@ struct-literal bool field access, and bool projection from local struct
 bindings for bool locals, helper returns, and boolean conditions. The focused
 evidence manifest now links a boolean aggregate projection runtime-exit smoke to
 this row so fixed-array and struct bool projections are counted explicitly. The
+focused evidence manifest also links the JSON scalar stringify stdout smoke to
+this row, proving dynamic boolean comparisons can flow through public
+`std/json.ax` `stringify_bool(...)`, direct-native string locals, reassignment,
+native stdout, and process exit status without generated Rust.
 backend crate has narrow object-link evidence for composed `&&`/`||` comparison
 conditions, condition-to-i64 value lowering for helper-call arguments, and bool
 local assignment through a branch inside a loop after a scoped runtime bool `let`.
@@ -248,6 +252,10 @@ locals for reassigned known literals, known-text helper returns, known-text
 string intrinsic results, supported known-text concatenations, and supported
 runtime scalar/bool stringify projections without materializing a general string
 value.
+The focused evidence manifest now links the JSON scalar stringify stdout smoke
+to this row, proving public `std/json.ax` scalar stringify results can flow
+through direct-native string locals, reassignment, quoting, native stdout, and
+process exit status without generated Rust.
 String concatenation length also lowers for supported string length projection
 inputs by adding the operand byte lengths without materializing the concatenated
 runtime string.
@@ -794,12 +802,20 @@ lowering, and
 `len(keys(...))`/`len(map_keys(...))` can count static map keys without
 materializing a runtime key array. Static scalar integer and boolean keys can
 also feed inline and pre-runtime map lookup, contains, and get-or-default
-lowering. Imported public `std/collections.ax` `contains`, `get`,
+lowering. Static scalar tuple keys can also feed inline-map-literal
+`get_or_default(...)`, `map_contains_key(...)`, `get(...)`, direct indexing,
+duplicate-key replacement, and statically initialized component lookups without
+generated Rust. Imported public `std/collections.ax` `contains`, `get`,
 `get_or_default`, and `keys` map wrappers now alias the same direct-native i64
 lowering for static string/int map-local cases, and the focused evidence
 manifest now links the wrapper runtime-exit smoke to this row. A dedicated
 bool-key wrapper runtime-exit smoke now also proves public `contains`, `get`,
 `get_or_default`, and `keys` wrapper lowering over static bool-keyed maps.
+Imported public `std/collections.ax` tuple-keyed `contains`, `get`, and
+`get_or_default` map wrappers can also feed the same direct-native i64 lowering
+without generated Rust, and `keys` wrappers over static tuple-keyed maps can
+also feed literal and dynamic scalar/bool component projections from
+`keys(...)[index].field` without materializing a general tuple key-array value.
 Literal indexes into static string key arrays can also feed
 known string length lowering, and non-literal scalar indexes into those static
 string key arrays can select among known key byte lengths. Dynamic key-array value
@@ -825,13 +841,14 @@ projection smoke to this row, covering finite map-key selection through public
 `std/log.ax` length projection without generated Rust.
 The focused evidence manifest now also links the float-key rejection smoke to
 this row, covering the unsupported map-key boundary alongside supported
-scalar/string/bool key lowering.
+scalar/string/bool/tuple key lowering.
 Broader map ownership, runtime map storage, general payload lookup bindings
 beyond the evidenced scalar/bool/known-string pure helper direct-match and
 helper-local binding paths, map helper parameters outside compile-time-known
 local and inline map facts, map key/value shapes beyond the evidenced
-string/int/bool key and scalar/bool/known-string value slice, runtime key
-array value projection beyond static known-key arrays, and host-boundary
+string/int/bool/tuple key and scalar/bool/known-string value slice, runtime key
+array value projection beyond static known-key arrays, full tuple key-array
+value materialization, and host-boundary
 representation remain tracked by issue #1124.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
