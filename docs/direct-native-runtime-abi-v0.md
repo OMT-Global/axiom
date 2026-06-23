@@ -286,6 +286,9 @@ reassigned from tuple helper returns, initialized from another local tuple, or
 moved between existing locals using the same tuple-element ABI, including inside
 runtime loop blocks. Tuple helper returns can also feed nested tuple helper
 arguments by materializing hidden tuple-element locals before the outer call.
+Direct tuple projections from helper-call results can now feed scalar and
+boolean locals and scalar or boolean helper-call arguments by materializing the
+helper return into hidden tuple-element locals before projection.
 The row remains partial because direct-native
 codegen still does not provide a general tuple ABI, tuple storage for non-scalar
 elements, broader tuple return expressions beyond the evidenced scalar/bool
@@ -320,7 +323,11 @@ can now be reassigned from struct helper returns, initialized from another local
 struct, or moved between existing locals using the declared-field slot ABI,
 including inside runtime branch blocks. Struct helper returns can also feed
 nested struct helper arguments by materializing hidden declared-field locals
-before the outer call. The row remains partial because
+before the outer call.
+Direct struct field projections from helper-call results can now feed scalar and
+boolean locals and scalar or boolean helper-call arguments by materializing the
+helper return into hidden declared-field locals before projection.
+The row remains partial because
 direct-native codegen still does not provide a general struct ABI, struct
 storage for non-scalar fields, owned field projection, field mutation, struct
 return expressions beyond the evidenced scalar/bool local, literal, parameter,
