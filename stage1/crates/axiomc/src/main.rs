@@ -6132,10 +6132,23 @@ fn resolve_doc_out_dir(path: &Path, out_dir: Option<PathBuf>, markdown_only: boo
         return out_dir;
     }
     if markdown_only {
-        path.join("dist/docs")
+        default_markdown_doc_out_dir(path)
     } else {
         PathBuf::from("docs/axiom")
     }
+}
+
+fn default_markdown_doc_out_dir(path: &Path) -> PathBuf {
+    let project_root = fs::symlink_metadata(path)
+        .map(|metadata| {
+            if metadata.file_type().is_symlink() {
+                fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+            } else {
+                path.to_path_buf()
+            }
+        })
+        .unwrap_or_else(|_| path.to_path_buf());
+    project_root.join("dist/docs")
 }
 
 fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOutput, Diagnostic> {
@@ -8141,6 +8154,50 @@ return "ok"
 
         assert!(error.message.contains("refusing to write documentation"));
         assert!(!victim_dir.join("index.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn doc_generation_allows_symlinked_project_root_default_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("doc-real-project");
+        fs::create_dir_all(project.join("src")).expect("mkdir");
+        fs::write(
+            project.join("axiom.toml"),
+            r#"[package]
+name = "doc-real-project"
+version = "0.1.0"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+"#,
+        )
+        .expect("write manifest");
+        fs::write(project.join("axiom.lock"), "version = 1\n").expect("write lock");
+        fs::write(
+            project.join("src/main.ax"),
+            r#"/// Documentation through a symlinked checkout.
+pub fn route(path: string): string {
+return "ok"
+}
+"#,
+        )
+        .expect("write source");
+
+        let project_link = dir.path().join("doc-project-link");
+        std::os::unix::fs::symlink(&project, &project_link).expect("symlink project root");
+        let out_dir = resolve_doc_out_dir(&project_link, None, true);
+
+        let output = generate_docs(&project_link, &out_dir, false)
+            .expect("generate docs through symlinked project root");
+
+        assert_eq!(out_dir, project.join("dist/docs"));
+        assert_eq!(output.markdown, project.join("dist/docs/index.md"));
+        assert!(
+            project.join("dist/docs/index.md").exists(),
+            "default output should be rooted in the canonical project directory"
+        );
     }
 
     #[cfg(unix)]
