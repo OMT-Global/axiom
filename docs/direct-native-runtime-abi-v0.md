@@ -295,7 +295,9 @@ arguments by materializing hidden tuple-element locals before the outer call.
 Direct tuple projections from helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden tuple-element locals before projection, including
-numeric projections cast to wider scalar helper-call arguments.
+numeric projections cast to wider scalar helper-call arguments. The same
+materialization path now supports scalar, numeric-casted, and boolean direct
+helper returns plus final branch returns.
 The row remains partial because direct-native
 codegen still does not provide a general tuple ABI, tuple storage for non-scalar
 elements, broader tuple return expressions beyond the evidenced scalar/bool
@@ -334,7 +336,9 @@ before the outer call.
 Direct struct field projections from helper-call results can now feed scalar and
 boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden declared-field locals before projection, including
-numeric field projections cast to wider scalar helper-call arguments.
+numeric field projections cast to wider scalar helper-call arguments. The same
+materialization path now supports scalar, numeric-casted, and boolean direct
+helper returns plus final branch returns.
 The row remains partial because
 direct-native codegen still does not provide a general struct ABI, struct
 storage for non-scalar fields, owned field projection, field mutation, struct

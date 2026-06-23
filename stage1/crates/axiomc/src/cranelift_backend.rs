@@ -7694,6 +7694,16 @@ fn lower_i64_return_block(
             ) {
                 stmts.extend(block.stmts);
                 block.result
+            } else if let Some(block) = lower_i64_helper_call_projection_return_block(
+                expr,
+                locals,
+                &local_indexes,
+                &local_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
+                stmts.extend(block.stmts);
+                block.result
             } else {
                 lower_i64_return_value_expr(
                     expr,
@@ -7814,6 +7824,135 @@ fn lower_i64_helper_call_array_index_return_block(
     Some(CraneliftI64ReturnBlock { stmts, result })
 }
 
+fn lower_i64_helper_call_projection_return_block(
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64ReturnBlock> {
+    if !i64_is_helper_call_projection_expr(expr) {
+        return None;
+    }
+
+    enum HelperCallProjection {
+        Tuple { index: usize, ty: Type },
+        Field { field: String, ty: Type },
+    }
+
+    let (temp_prefix, base, projection, cast_ty) = match expr {
+        Expr::TupleIndex {
+            base,
+            index,
+            ty: index_ty,
+        } if matches!(base.as_ref(), Expr::Call { .. }) => (
+            "__axiom_i64_tuple_projection_return",
+            base,
+            HelperCallProjection::Tuple {
+                index: *index,
+                ty: index_ty.clone(),
+            },
+            None,
+        ),
+        Expr::FieldAccess {
+            base,
+            field,
+            ty: field_ty,
+        } if matches!(base.as_ref(), Expr::Call { .. }) => (
+            "__axiom_i64_struct_projection_return",
+            base,
+            HelperCallProjection::Field {
+                field: field.clone(),
+                ty: field_ty.clone(),
+            },
+            None,
+        ),
+        Expr::Cast {
+            expr: cast_expr,
+            ty: cast_ty,
+        } if is_i64_compatible_type(cast_ty) => match cast_expr.as_ref() {
+            Expr::TupleIndex {
+                base,
+                index,
+                ty: index_ty,
+            } if matches!(base.as_ref(), Expr::Call { .. }) => (
+                "__axiom_i64_tuple_projection_return",
+                base,
+                HelperCallProjection::Tuple {
+                    index: *index,
+                    ty: index_ty.clone(),
+                },
+                Some(cast_ty.clone()),
+            ),
+            Expr::FieldAccess {
+                base,
+                field,
+                ty: field_ty,
+            } if matches!(base.as_ref(), Expr::Call { .. }) => (
+                "__axiom_i64_struct_projection_return",
+                base,
+                HelperCallProjection::Field {
+                    field: field.clone(),
+                    ty: field_ty.clone(),
+                },
+                Some(cast_ty.clone()),
+            ),
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    let mut trial_locals = locals.clone();
+    let mut trial_indexes = local_indexes.clone();
+    let mut trial_conditions = local_conditions.clone();
+    let temp_name = format!("{}_{}", temp_prefix, trial_indexes.len());
+    let base_ty = base.ty();
+    let stmts = lower_i64_aggregate_call_to_local_stmts(
+        &temp_name,
+        &base_ty,
+        base.as_ref(),
+        &mut trial_locals,
+        &mut trial_indexes,
+        &mut trial_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let rewritten_base = Box::new(Expr::VarRef {
+        name: temp_name,
+        ty: base_ty,
+    });
+    let rewritten_expr = match projection {
+        HelperCallProjection::Tuple { index, ty } => Expr::TupleIndex {
+            base: rewritten_base,
+            index,
+            ty,
+        },
+        HelperCallProjection::Field { field, ty } => Expr::FieldAccess {
+            base: rewritten_base,
+            field,
+            ty,
+        },
+    };
+    let rewritten_expr = if let Some(cast_ty) = cast_ty {
+        Expr::Cast {
+            expr: Box::new(rewritten_expr),
+            ty: cast_ty,
+        }
+    } else {
+        rewritten_expr
+    };
+    let result = lower_i64_return_value_expr(
+        &rewritten_expr,
+        &trial_indexes,
+        &trial_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    *locals = trial_locals;
+    Some(CraneliftI64ReturnBlock { stmts, result })
+}
+
 fn lower_i64_exit_return(
     expr: &Expr,
     locals: &mut Vec<CraneliftI64Expr>,
@@ -7823,6 +7962,16 @@ fn lower_i64_exit_return(
     static_bindings: &I64StaticBindings,
 ) -> Option<I64ExitBody> {
     if let Some(block) = lower_i64_helper_call_array_index_return_block(
+        expr,
+        locals,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(I64ExitBody::BlockReturn(block));
+    }
+    if let Some(block) = lower_i64_helper_call_projection_return_block(
         expr,
         locals,
         local_indexes,
