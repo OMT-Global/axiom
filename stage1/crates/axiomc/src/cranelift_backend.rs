@@ -3725,6 +3725,16 @@ fn lower_i64_runtime_let_stmts(
             return Some(assigns);
         }
     }
+    if let Some(assigns) = lower_i64_nested_aggregate_call_let_stmts(
+        stmt,
+        locals,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        return Some(assigns);
+    }
     if let Some(assigns) = lower_i64_runtime_projection_let_stmts(
         stmt,
         locals,
@@ -3972,6 +3982,193 @@ fn lower_i64_aggregate_local_let_stmts(
             })
             .collect(),
     )
+}
+
+fn lower_i64_nested_aggregate_call_let_stmts(
+    stmt: &Stmt,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Stmt::Let {
+        name,
+        ty,
+        expr:
+            Expr::Call {
+                name: call_name,
+                args,
+                ty: call_ty,
+            },
+        span,
+    } = stmt
+    else {
+        return None;
+    };
+    if !matches!(ty, Type::Bool) && !is_i64_compatible_type(ty) {
+        return None;
+    }
+
+    let mut trial_locals = locals.clone();
+    let mut trial_indexes = local_indexes.clone();
+    let mut trial_conditions = local_conditions.clone();
+    let mut lowered = Vec::new();
+    let mut rewritten_args = Vec::with_capacity(args.len());
+    let mut rewrote_any_arg = false;
+    for (index, arg) in args.iter().enumerate() {
+        if matches!(arg, Expr::Call { .. }) {
+            let temp_name = format!("__axiom_i64_arg_{}_{}", trial_indexes.len(), index);
+            if let Some(mut assigns) = lower_i64_aggregate_call_to_local_stmts(
+                &temp_name,
+                &arg.ty(),
+                arg,
+                &mut trial_locals,
+                &mut trial_indexes,
+                &mut trial_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
+                lowered.append(&mut assigns);
+                rewritten_args.push(Expr::VarRef {
+                    name: temp_name,
+                    ty: arg.ty(),
+                });
+                rewrote_any_arg = true;
+                continue;
+            }
+        }
+        rewritten_args.push(arg.clone());
+    }
+    if !rewrote_any_arg {
+        return None;
+    }
+
+    let rewritten = Stmt::Let {
+        name: name.clone(),
+        ty: ty.clone(),
+        expr: Expr::Call {
+            name: call_name.clone(),
+            args: rewritten_args,
+            ty: call_ty.clone(),
+        },
+        span: *span,
+    };
+    lowered.push(lower_i64_runtime_let(
+        &rewritten,
+        &mut trial_locals,
+        &mut trial_indexes,
+        &mut trial_conditions,
+        helper_signatures,
+        static_bindings,
+    )?);
+    *locals = trial_locals;
+    *local_indexes = trial_indexes;
+    *local_conditions = trial_conditions;
+    Some(lowered)
+}
+
+fn lower_i64_aggregate_call_to_local_stmts(
+    name: &str,
+    ty: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    local_conditions: &mut HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    let Expr::Call {
+        name: call_name,
+        args,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    match ty {
+        Type::Struct(struct_name) => lower_i64_struct_call_let_stmts(
+            name,
+            struct_name,
+            call_name,
+            args,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ),
+        Type::Tuple(elements) if is_i64_tuple_param_type(elements) => {
+            lower_i64_tuple_call_let_stmts(
+                name,
+                elements,
+                call_name,
+                args,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        Type::Array(element, Some(size)) if is_i64_array_param_element_type(element) => {
+            lower_i64_array_call_let_stmts(
+                name,
+                element.as_ref(),
+                *size,
+                call_name,
+                args,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        Type::Option(inner) if is_i64_option_local_payload_type_static(inner, static_bindings) => {
+            lower_i64_option_call_let_stmts(
+                name,
+                inner.as_ref(),
+                call_name,
+                args,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        Type::Result(ok, err)
+            if is_i64_result_local_payload_type_static(ok, err, static_bindings) =>
+        {
+            lower_i64_result_call_let_stmts(
+                name,
+                ok.as_ref(),
+                err.as_ref(),
+                call_name,
+                args,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        Type::Enum(enum_name) if is_i64_enum_payload_type(enum_name, static_bindings) => {
+            lower_i64_enum_call_let_stmts(
+                name,
+                enum_name,
+                call_name,
+                args,
+                locals,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
+        _ => None,
+    }
 }
 
 fn lower_i64_runtime_string_len_let_stmts(

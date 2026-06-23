@@ -252,7 +252,9 @@ tag/payload matches, helper parameters, helper returns, and forwarded helper
 values. Existing fixed-array locals can now be reassigned from fixed-array
 helper returns, initialized from another local fixed array, or moved between
 existing locals using the same element-slot ABI, including inside runtime loop
-blocks. Fixed-array `len`,
+blocks. Fixed-array helper returns can also feed nested fixed-array helper
+arguments by materializing hidden element-slot locals before the outer call.
+Fixed-array `len`,
 `first`, and `last` over scalar and bool element
 arrays also lower through the same projected element-slot representation for
 local arrays, inline literals, helper parameters, and helper-returned arrays
@@ -281,7 +283,9 @@ scalar and boolean projections from literal, local-binding, forwarded, typed,
 branch-selected, and fallback tuple returns. Existing tuple locals can now be
 reassigned from tuple helper returns, initialized from another local tuple, or
 moved between existing locals using the same tuple-element ABI, including inside
-runtime loop blocks. The row remains partial because direct-native
+runtime loop blocks. Tuple helper returns can also feed nested tuple helper
+arguments by materializing hidden tuple-element locals before the outer call.
+The row remains partial because direct-native
 codegen still does not provide a general tuple ABI, tuple storage for non-scalar
 elements, tuple return expressions beyond the scalar/bool local, literal, and
 parameter slice, or a complete aggregate value passing contract.
@@ -311,7 +315,9 @@ helper values, and inline `Some(Step { ... })`/`None` and
 `Ok(Step { ... })`/`Err(Step { ... })` helper arguments. Existing struct locals
 can now be reassigned from struct helper returns, initialized from another local
 struct, or moved between existing locals using the declared-field slot ABI,
-including inside runtime branch blocks. The row remains partial because
+including inside runtime branch blocks. Struct helper returns can also feed
+nested struct helper arguments by materializing hidden declared-field locals
+before the outer call. The row remains partial because
 direct-native codegen still does not provide a general struct ABI, struct
 storage for non-scalar fields, owned field projection, field mutation, struct
 return expressions beyond the scalar/bool local, literal, and parameter slice,
@@ -338,6 +344,8 @@ helper parameters, helper returns, forwarded helper values, and inline
 slots. Existing narrow `Option<Step>` locals can now be reassigned from option
 helper returns, initialized from another local option, or moved between existing
 locals using the same tag/payload slots, including inside runtime branch blocks.
+Narrow option helper returns can also feed nested option helper arguments by
+materializing hidden tag/payload locals before the outer call.
 The direct-native path also has narrow evidence for nested
 `Option<Option<int>>` construction, matching, helper parameters, helper returns,
 forwarded helper values, and inline `Some(Some(...))`, `Some(None)`, and outer
@@ -845,7 +853,9 @@ parameters, helper returns, forwarded helper values, and inline
 field-order payload slots. Existing narrow `Result<Step, Step>` locals can now
 be reassigned from result helper returns, initialized from another local result,
 or moved between existing locals using the same tag/payload slots, including
-inside runtime branch blocks. The nested option payload slice now also has
+inside runtime branch blocks. Narrow result helper returns can also feed nested
+result helper arguments by materializing hidden tag/payload locals before the
+outer call. The nested option payload slice now also has
 narrow direct-native evidence for
 `Result<Option<int>, int>` construction,
 matching, helper parameters, helper returns, forwarded helper values, and inline
@@ -875,7 +885,9 @@ returns and forwarded local or parameter values also lower through the same
 tag/payload slots for scalar struct payload variants. Existing narrow custom
 enum locals can now be reassigned from enum helper returns, initialized from
 another local enum, or moved between existing locals using the same tag/payload
-slots, including inside runtime branch blocks. The same
+slots, including inside runtime branch blocks. Narrow custom enum helper returns
+can also feed nested enum helper arguments by materializing hidden tag/payload
+locals before the outer call. The same
 representation now has narrow evidence for positional custom enum payloads
 carrying nested `Option<Result<int, int>>` and `Result<Option<int>, int>` values,
 including runtime-scope literal construction, reassignment, value-producing
