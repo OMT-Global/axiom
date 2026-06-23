@@ -2197,6 +2197,23 @@ fn lower_i64_aggregate_return_values(
             })
             .collect(),
         (
+            I64AggregateReturnShape::Struct { name, .. },
+            Expr::Call {
+                name: call_name,
+                args,
+                ty: Type::Struct(expr_name),
+            },
+        ) if expr_name == name => lower_i64_time_struct_call_ms_expr(
+            name,
+            call_name,
+            args,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )
+        .map(|value| vec![value]),
+        (
             I64AggregateReturnShape::Option {
                 inner,
                 payload_slots,
@@ -6058,6 +6075,32 @@ fn lower_i64_time_struct_call_let_stmts(
     helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<Vec<CraneliftI64Stmt>> {
+    let value = lower_i64_time_struct_call_ms_expr(
+        struct_name,
+        call_name,
+        args,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let local = local_indexes.len();
+    local_indexes.insert(i64_struct_projection_key(name, "ms"), local);
+    locals.push(CraneliftI64Expr::Literal(0));
+    Some(vec![CraneliftI64Stmt::Assign(
+        axiomc_backend_cranelift::I64Assign { local, value },
+    )])
+}
+
+fn lower_i64_time_struct_call_ms_expr(
+    struct_name: &str,
+    call_name: &str,
+    args: &[Expr],
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
     let struct_def = i64_scalar_static_struct_def(struct_name, static_bindings)?;
     let [field] = struct_def.fields.as_slice() else {
         return None;
@@ -6084,12 +6127,7 @@ fn lower_i64_time_struct_call_let_stmts(
     } else {
         return None;
     };
-    let local = local_indexes.len();
-    local_indexes.insert(i64_struct_projection_key(name, "ms"), local);
-    locals.push(CraneliftI64Expr::Literal(0));
-    Some(vec![CraneliftI64Stmt::Assign(
-        axiomc_backend_cranelift::I64Assign { local, value },
-    )])
+    Some(value)
 }
 
 fn lower_i64_option_call_let_stmts(

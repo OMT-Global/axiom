@@ -5797,7 +5797,7 @@ fn cranelift_backend_lowers_std_time_sleep_wrappers_to_runtime_exit_code() {
         audit.contains("\"args\":{\"milliseconds\":\"int\"}"),
         "{audit}"
     );
-    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 6, "{audit}");
+    assert_eq!(audit.matches("\"outcome\":\"ok\"").count(), 7, "{audit}");
     assert_eq!(
         audit.matches("\"outcome\":\"denied\"").count(),
         2,
@@ -12131,6 +12131,14 @@ fn pause_negative(): int {
 return sleep(duration_ms(NEGATIVE_MS))
 }
 
+fn captured_now(): Instant {
+return now()
+}
+
+fn delay_for(ms: int): Duration {
+return duration_ms(ms)
+}
+
 fn main(): int {
 let direct: int = sleep(duration_ms(ZERO_MS))
 let helper: int = pause_zero()
@@ -12150,10 +12158,14 @@ let inline_elapsed: int = elapsed_ms(now())
 let stored_start: Instant = now()
 let moved_start: Instant = stored_start
 let stored_elapsed: int = elapsed_ms(moved_start)
+let helper_duration: Duration = delay_for(dynamic_ms)
+let helper_positive: int = sleep(helper_duration)
+let helper_start: Instant = captured_now()
+let helper_elapsed: int = elapsed_ms(helper_start)
 let precision_start: int = clock_now_ms()
 let precision_sleep: int = clock_sleep_ms(10)
 let precision_elapsed: int = clock_elapsed_ms(precision_start)
-if direct == 0 && helper == 0 && negative == -1 && positive == 0 && stored_positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 && stored_elapsed >= 0 && precision_sleep == 0 && precision_elapsed > 0 && precision_elapsed < 1000 {
+if direct == 0 && helper == 0 && negative == -1 && positive == 0 && stored_positive == 0 && direct_positive == 0 && capped == -1 && primitive_start > 0 && primitive_elapsed >= 0 && public_start > 0 && public_elapsed >= 0 && inline_elapsed >= 0 && stored_elapsed >= 0 && helper_positive == 0 && helper_elapsed >= 0 && precision_sleep == 0 && precision_elapsed > 0 && precision_elapsed < 1000 {
 return 48
 } else {
 return 1

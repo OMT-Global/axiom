@@ -1103,7 +1103,9 @@ value below one second. Imported public
 deterministic path for literal, static scalar, runtime scalar, and stored
 `Duration` aggregate durations in runtime-exit programs. Public `std/time.ax`
 `now()` calls can now initialize stored `Instant` aggregate locals whose moved
-values feed `elapsed_ms(...)` without generated Rust.
+values feed `elapsed_ms(...)` without generated Rust. User helpers can also
+return `Instant` from `now()` and `Duration` from `duration_ms(...)` through the
+same direct-native aggregate return slots.
 Those sleep paths now append host audit JSONL entries when
 `AXIOM_HOST_AUDIT_LOG` is set, recording only the integer argument type and the
 `ok`/`denied` outcome without recording duration values. Timer scheduling, async
