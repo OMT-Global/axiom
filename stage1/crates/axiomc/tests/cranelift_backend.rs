@@ -8720,6 +8720,10 @@ fn make_flags(): [bool; 3] {
 return [false, true, true]
 }
 
+fn make_bytes(): [u8; 3] {
+return [1u8, 20u8, 28u8]
+}
+
 fn tail_pick(index: int): int {
 let value: int = make_tail_values()[TAIL_START:][index]
 return value
@@ -8749,7 +8753,9 @@ let helper_prefix: int = prefix_pick(runtime_index)
 let literal_arg_sum: int = add_pair(make_tail_values()[TAIL_START:][0], make_prefix_values()[:PREFIX_END][runtime_index])
 let runtime_arg_sum: int = add_pair(make_tail_values()[TAIL_START:][runtime_index], make_prefix_values()[:PREFIX_END][0])
 let bool_arg_gate: bool = both(make_flags()[TAIL_START:][0], make_flags()[TAIL_START:][runtime_index])
-if literal_tail == 20 && runtime_tail == 26 && literal_prefix == 20 && runtime_prefix == 26 && helper_tail == 26 && helper_prefix == 26 && literal_arg_sum == 46 && runtime_arg_sum == 46 && bool_arg_gate {
+let cast_slice_local: int = make_bytes()[TAIL_START:][0] as int
+let cast_slice_arg_sum: int = add_pair(make_bytes()[TAIL_START:][0] as int, make_bytes()[TAIL_START:][runtime_index] as int)
+if literal_tail == 20 && runtime_tail == 26 && literal_prefix == 20 && runtime_prefix == 26 && helper_tail == 26 && helper_prefix == 26 && literal_arg_sum == 46 && runtime_arg_sum == 46 && bool_arg_gate && cast_slice_local == 20 && cast_slice_arg_sum == 48 {
 return 48
 } else {
 return 1

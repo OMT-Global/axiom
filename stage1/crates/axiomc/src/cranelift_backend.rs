@@ -4062,11 +4062,7 @@ fn lower_i64_helper_call_slice_index_let_stmts(
     let Stmt::Let {
         name,
         ty,
-        expr: Expr::Index {
-            base,
-            index,
-            ty: index_ty,
-        },
+        expr,
         span,
     } = stmt
     else {
@@ -4075,6 +4071,25 @@ fn lower_i64_helper_call_slice_index_let_stmts(
     if !matches!(ty, Type::Bool) && !is_i64_compatible_type(ty) {
         return None;
     }
+    let (base, index, index_ty, cast_ty) = match expr {
+        Expr::Index {
+            base,
+            index,
+            ty: index_ty,
+        } => (base, index, index_ty, None),
+        Expr::Cast {
+            expr: cast_expr,
+            ty: cast_ty,
+        } if is_i64_compatible_type(cast_ty) => match cast_expr.as_ref() {
+            Expr::Index {
+                base,
+                index,
+                ty: index_ty,
+            } => (base, index, index_ty, Some(cast_ty.clone())),
+            _ => return None,
+        },
+        _ => return None,
+    };
     let Expr::Slice {
         base: slice_base,
         start,
@@ -4103,22 +4118,31 @@ fn lower_i64_helper_call_slice_index_let_stmts(
         helper_signatures,
         static_bindings,
     )?;
+    let rewritten_expr = Expr::Index {
+        base: Box::new(Expr::Slice {
+            base: Box::new(Expr::VarRef {
+                name: temp_name,
+                ty: base_ty,
+            }),
+            start: start.clone(),
+            end: end.clone(),
+            ty: slice_ty.clone(),
+        }),
+        index: index.clone(),
+        ty: index_ty.clone(),
+    };
+    let rewritten_expr = if let Some(cast_ty) = cast_ty {
+        Expr::Cast {
+            expr: Box::new(rewritten_expr),
+            ty: cast_ty,
+        }
+    } else {
+        rewritten_expr
+    };
     let rewritten = Stmt::Let {
         name: name.clone(),
         ty: ty.clone(),
-        expr: Expr::Index {
-            base: Box::new(Expr::Slice {
-                base: Box::new(Expr::VarRef {
-                    name: temp_name,
-                    ty: base_ty,
-                }),
-                start: start.clone(),
-                end: end.clone(),
-                ty: slice_ty.clone(),
-            }),
-            index: index.clone(),
-            ty: index_ty.clone(),
-        },
+        expr: rewritten_expr,
         span: *span,
     };
     lowered.push(lower_i64_runtime_let(
@@ -4143,10 +4167,11 @@ fn i64_is_helper_call_slice_expr(expr: &Expr) -> bool {
 }
 
 fn i64_is_helper_call_slice_index_expr(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::Index { base, .. } if i64_is_helper_call_slice_expr(base.as_ref())
-    )
+    match expr {
+        Expr::Index { base, .. } => i64_is_helper_call_slice_expr(base.as_ref()),
+        Expr::Cast { expr, .. } => i64_is_helper_call_slice_index_expr(expr),
+        _ => false,
+    }
 }
 
 fn i64_has_helper_call_slice_index_arg(args: &[Expr]) -> bool {
