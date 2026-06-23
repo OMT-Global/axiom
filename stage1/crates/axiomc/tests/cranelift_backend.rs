@@ -8283,6 +8283,12 @@ ready: bool
 small: u8
 }
 
+enum Choice {
+Ready { step: Step }
+Fallback { step: Step }
+Off
+}
+
 fn make_values(): [int; 3] {
 return [20, 3, 25]
 }
@@ -8387,6 +8393,26 @@ fn score_step_result(value: Result<Step, Step>): int {
 return match value { Ok(step) => step.value + (step.small as int), Err(error) => error.value }
 }
 
+fn make_choice(): Choice {
+return Ready { step: Step { value: 46, ready: true, small: 2u8 } }
+}
+
+fn forward_choice(): Choice {
+return make_choice()
+}
+
+fn choose_choice(flag: bool): Choice {
+if flag {
+return make_choice()
+} else {
+return Fallback { step: Step { value: 1, ready: false, small: 0u8 } }
+}
+}
+
+fn score_choice(value: Choice): int {
+return match value { Ready { step } => step.value + (step.small as int), Fallback { step } => step.value, Off => 1 }
+}
+
 fn main(): int {
 let forwarded: [int; 3] = forward_values()
 let chosen: [int; 3] = choose_values(true)
@@ -8400,6 +8426,8 @@ let forwarded_optional_step: Option<Step> = forward_optional_step()
 let chosen_optional_step: Option<Step> = choose_optional_step(true)
 let forwarded_step_result: Result<Step, Step> = forward_step_result()
 let chosen_step_result: Result<Step, Step> = choose_step_result(true)
+let forwarded_choice: Choice = forward_choice()
+let chosen_choice: Choice = choose_choice(true)
 let forwarded_score: int = len(forwarded) + first(forwarded) + last(forwarded)
 let chosen_score: int = len(chosen) + first(chosen) + last(chosen)
 let forwarded_gate: bool = first(forwarded_flags) && last(forwarded_flags) == false
@@ -8412,7 +8440,9 @@ let optional_score: int = score_optional_step(forwarded_optional_step)
 let chosen_optional_score: int = score_optional_step(chosen_optional_step)
 let result_score: int = score_step_result(forwarded_step_result)
 let chosen_result_score: int = score_step_result(chosen_step_result)
-if forwarded_gate && chosen_gate && pair_gate && struct_gate && forwarded_score == 48 && chosen_score == 48 && forwarded_pair.0 == 48 && chosen_pair.0 == 48 && struct_score == 48 && chosen_struct_score == 48 && optional_score == 48 && chosen_optional_score == 48 && result_score == 48 && chosen_result_score == 48 {
+let choice_score: int = score_choice(forwarded_choice)
+let chosen_choice_score: int = score_choice(chosen_choice)
+if forwarded_gate && chosen_gate && pair_gate && struct_gate && forwarded_score == 48 && chosen_score == 48 && forwarded_pair.0 == 48 && chosen_pair.0 == 48 && struct_score == 48 && chosen_struct_score == 48 && optional_score == 48 && chosen_optional_score == 48 && result_score == 48 && chosen_result_score == 48 && choice_score == 48 && chosen_choice_score == 48 {
 return 48
 } else {
 return 1

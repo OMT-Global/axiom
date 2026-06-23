@@ -895,7 +895,9 @@ enum locals can now be reassigned from enum helper returns, initialized from
 another local enum, or moved between existing locals using the same tag/payload
 slots, including inside runtime branch blocks. Narrow custom enum helper returns
 can also feed nested enum helper arguments by materializing hidden tag/payload
-locals before the outer call. The same
+locals before the outer call, and custom enum helpers with scalar struct
+payload variants can forward a final helper-call return through the same
+tag/payload slot representation. The same
 representation now has narrow evidence for positional custom enum payloads
 carrying nested `Option<Result<int, int>>` and `Result<Option<int>, int>` values,
 including runtime-scope literal construction, reassignment, value-producing
