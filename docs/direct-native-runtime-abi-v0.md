@@ -794,8 +794,10 @@ The focused evidence manifest now also links borrowed-slice helper-parameter
 runtime-exit evidence for scalar and bool slices whose helper ABI width is
 statically witnessed by call sites. Static-width borrowed-slice helper returns
 can also flow back through the same multi-slot ABI when the returned borrowed
-parameter width is statically witnessed by call sites. Broader dynamic slice
-bounds, unconstrained helper-parameter or helper-return widths,
+parameter width is statically witnessed by call sites, including same-origin,
+same-width branch-selected returns whose branch arms return statically
+witnessed borrowed slices. Broader dynamic slice bounds, unconstrained
+helper-parameter or helper-return widths, mixed-origin or mixed-width
 branch-selected borrowed-slice returns, and host ABI coverage remain tracked by
 issue #1124.
 

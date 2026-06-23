@@ -3857,6 +3857,16 @@ fn lower_i64_runtime_let_stmts(
         ..
     } = stmt
     {
+        if let Some(assigns) = lower_i64_runtime_projection_let_stmts(
+            stmt,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
+            return Some(assigns);
+        }
         return lower_i64_slice_projection_aliases(
             name,
             expr,
@@ -5263,6 +5273,32 @@ fn lower_i64_runtime_projection_let_stmts(
             local_conditions,
             helper_signatures,
             static_bindings,
+        ),
+        (
+            Type::Slice(_) | Type::MutSlice(_),
+            Expr::Call {
+                name: call_name,
+                args,
+                ..
+            },
+        ) => lower_i64_slice_call_let_stmts(
+            name,
+            call_name,
+            args,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ),
+        (Type::Slice(_) | Type::MutSlice(_), expr) => lower_i64_slice_projection_aliases(
+            name,
+            expr,
+            locals,
+            local_indexes,
+            local_conditions,
+            static_bindings,
+            true,
         ),
         _ => None,
     }
@@ -15161,7 +15197,15 @@ fn i64_function_static_slice_return_width(
             local_slice_widths.insert(param.name.clone(), width);
         }
     }
-    for stmt in &function.body {
+    i64_static_slice_return_width_for_stmts(&function.body, local_slice_widths, static_bindings)
+}
+
+fn i64_static_slice_return_width_for_stmts(
+    stmts: &[Stmt],
+    mut local_slice_widths: HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<usize> {
+    for (index, stmt) in stmts.iter().enumerate() {
         match stmt {
             Stmt::Let {
                 name,
@@ -15174,6 +15218,29 @@ fn i64_function_static_slice_return_width(
             }
             Stmt::Return { expr, .. } => {
                 return i64_static_slice_arg_width(expr, &local_slice_widths, static_bindings);
+            }
+            Stmt::If {
+                then_block,
+                else_block: Some(else_block),
+                ..
+            } => {
+                if index + 1 != stmts.len() {
+                    return None;
+                }
+                let then_width = i64_static_slice_return_width_for_stmts(
+                    then_block,
+                    local_slice_widths.clone(),
+                    static_bindings,
+                )?;
+                let else_width = i64_static_slice_return_width_for_stmts(
+                    else_block,
+                    local_slice_widths.clone(),
+                    static_bindings,
+                )?;
+                if then_width == else_width {
+                    return Some(then_width);
+                }
+                return None;
             }
             _ => {}
         }
@@ -22764,6 +22831,43 @@ mod tests {
                 &static_bindings
             ),
             Some(CraneliftI64Expr::Literal(20))
+        );
+    }
+
+    #[test]
+    fn static_slice_return_width_rejects_nonterminal_branch_return() {
+        let span = crate::mir::SourceSpan { line: 1, column: 1 };
+        let slice_ty = Type::Slice(Box::new(Type::Int));
+        let var_ref = |name: &str| Expr::VarRef {
+            name: String::from(name),
+            ty: slice_ty.clone(),
+        };
+        let return_var = |name: &str| Stmt::Return {
+            expr: var_ref(name),
+            span,
+        };
+        let stmts = vec![
+            Stmt::If {
+                cond: Expr::Literal(LiteralValue::Bool(true)),
+                then_block: vec![return_var("left")],
+                else_block: Some(vec![return_var("right")]),
+                span,
+            },
+            return_var("fallback"),
+        ];
+        let local_slice_widths = HashMap::from([
+            (String::from("left"), 1),
+            (String::from("right"), 1),
+            (String::from("fallback"), 2),
+        ]);
+
+        assert_eq!(
+            i64_static_slice_return_width_for_stmts(
+                &stmts,
+                local_slice_widths,
+                &I64StaticBindings::default()
+            ),
+            None
         );
     }
 
