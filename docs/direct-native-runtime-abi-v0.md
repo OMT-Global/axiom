@@ -259,7 +259,8 @@ boolean locals and scalar or boolean helper-call arguments by materializing the
 helper return into hidden element-slot locals before indexing, including numeric
 indexes cast to wider scalar helper-call arguments. The same materialization
 also supports scalar, numeric-casted, and boolean helper returns plus final
-branch returns from direct fixed-array helper-call indexes.
+branch returns and branch-condition comparisons from direct fixed-array
+helper-call indexes.
 Fixed-array `len`,
 `first`, and `last` over scalar and bool element
 arrays also lower through the same projected element-slot representation for
