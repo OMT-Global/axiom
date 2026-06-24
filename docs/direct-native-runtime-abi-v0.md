@@ -133,6 +133,7 @@ stage1 capability and stdlib surface:
 - network DNS, TCP, UDP, HTTP client, HTTP server, and async HTTP service
   operations;
 - process status execution;
+- ambient process argument reads through `std/cli.ax`;
 - environment reads with manifest allowlists;
 - clock and sleep operations;
 - crypto hash, MAC, random, signature, and AEAD helpers;
@@ -187,6 +188,10 @@ computed value as the process exit status at runtime without generated Rust.
 The public scalar aggregate, numeric cross-width, and static scalar smokes now
 also assert that the build JSON reports `generated_rust: null`, so this evidence
 cannot silently drift back through generated Rust.
+The focused evidence manifest now also links the static scalar smoke to the
+numeric, boolean, and string rows, proving string, int, typed integer, and bool
+static globals can flow through the produced native binary's stdout surface
+without generated Rust.
 The focused evidence manifest now also links the `main(): i64` runtime-exit
 smoke to the numeric row so that direct i64 entrypoint process-status lowering
 is counted explicitly.
@@ -274,7 +279,8 @@ length and comparison path, and known-input `encoding_url_component_decode(...)`
 can lower direct `Option<string>` matches by compile-time arm selection.
 Imported public `std/encoding.ax` wrappers now alias those same known-input
 encode, decode, query-pair, and path-join lowering paths; the focused evidence
-manifest now links the encoding wrapper runtime-exit smoke to this row.
+manifest now links the encoding wrapper runtime-exit smoke and the
+`std/encoding.ax` binary smoke to this row.
 Imported public `std/string_builder.ax` builder, seed, push, line-push, and
 finish wrappers now alias known text facts that can feed direct-native string
 comparisons, length projections, and process exit status without generated
@@ -706,6 +712,16 @@ command string length and the `ok`/`denied` outcome without recording command
 text. Arguments, broader command policy, environment control, and host-process
 policy coverage remain open under #1001.
 
+The CLI arguments row now has narrow direct-native evidence: the native
+`std/cli.ax` no-argument smoke builds with `generated_rust: null`, runs the
+produced binary, and proves `arg_count()`, `args()`, and `arg(0)` cover the
+empty forwarded-argument surface by printing `0`, `0`, and the `None` arm's
+`missing` text. This row tracks ambient process input separately from
+`std/process.ax` command execution because the CLI surface does not require the
+filesystem, network, process, environment, clock, or crypto capability gates.
+Forwarded arguments through `axiomc run --`, broader argv string storage, and
+host-audit treatment remain open under #1001.
+
 The regex row now has partial direct-native evidence: the Cranelift spike covers
 `std/regex.ax` `is_match`, `find`, and `replace_all` for the stage1-safe NFA
 subset without generated Rust, and the public stdlib smoke now asserts
@@ -816,6 +832,10 @@ Imported public `std/collections.ax` tuple-keyed `contains`, `get`, and
 without generated Rust, and `keys` wrappers over static tuple-keyed maps can
 also feed literal and dynamic scalar/bool component projections from
 `keys(...)[index].field` without materializing a general tuple key-array value.
+The focused evidence manifest now also links the broader
+`std/collections.ax` lookup binary smoke to this row, covering successful
+native execution of contains, lookup, defaulted miss, key counts, and known
+string key projections without generated Rust.
 Literal indexes into static string key arrays can also feed
 known string length lowering, and non-literal scalar indexes into those static
 string key arrays can select among known key byte lengths. Dynamic key-array value
@@ -1098,8 +1118,9 @@ native stdout JSON-line writes without generated Rust, including event messages
 and `field_string(...)` values backed by `std/json.ax` `stringify_string(...)`
 over supported scalar/bool projection locals. The focused evidence manifest now
 links the selected projection, dynamic scalar length, dynamic `info_attrs`
-stderr, and dynamic event stdout smokes to this stdio row so the evidence
-runner exercises those public logging paths explicitly. It also lowers known-string public
+stderr, dynamic event stdout, and broader `std/log.ax` binary smokes to this
+stdio row so the evidence runner exercises those public logging paths
+explicitly. It also lowers known-string public
 `std/io.ax`
 `eprintln` lets in direct-native i64 `main` functions and helper functions,
 including runtime-scope lets after assignments and inside branches, into native
