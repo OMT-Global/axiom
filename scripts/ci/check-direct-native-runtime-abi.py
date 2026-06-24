@@ -121,6 +121,7 @@ def validate_rows(
         validate_evidence_paths(
             row, row_id, group_name, "runtime_evidence", errors, contract_root
         )
+        validate_denial_applicability(row, row_id, group_name, errors)
         if status in {"implemented", "partial"} and "evidence" not in row:
             errors.append(
                 f"{group_name} row {row_id!r} must name evidence for status {status!r}"
@@ -155,6 +156,111 @@ def validate_rows(
     if extra:
         errors.append(f"{group_name} has unknown rows: {', '.join(extra)}")
     return seen, incomplete_rows, blocked_rows, status_counts, blocker_issues
+
+
+def evidence_summary(rows: object) -> dict[str, int]:
+    summary = {
+        "with_evidence": 0,
+        "without_evidence": 0,
+        "with_runtime_evidence": 0,
+        "without_runtime_evidence": 0,
+        "with_denial_evidence": 0,
+        "denial_evidence_not_applicable": 0,
+        "without_denial_evidence": 0,
+    }
+    if not isinstance(rows, list):
+        return summary
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for field_name, present_key, missing_key in (
+            ("evidence", "with_evidence", "without_evidence"),
+            (
+                "runtime_evidence",
+                "with_runtime_evidence",
+                "without_runtime_evidence",
+            ),
+        ):
+            value = row.get(field_name)
+            if isinstance(value, list) and value:
+                summary[present_key] += 1
+            else:
+                summary[missing_key] += 1
+
+        denial_evidence = row.get("denial_evidence")
+        if isinstance(denial_evidence, list) and denial_evidence:
+            summary["with_denial_evidence"] += 1
+        elif (
+            isinstance(row.get("denial_evidence_not_applicable"), str)
+            and row["denial_evidence_not_applicable"].strip()
+        ):
+            summary["denial_evidence_not_applicable"] += 1
+        else:
+            summary["without_denial_evidence"] += 1
+    return summary
+
+
+def empty_report(*, errors: list[str]) -> dict[str, Any]:
+    return {
+        "schema": "axiom.direct_native.runtime_abi.check.v1",
+        "ready": False,
+        "target_id": None,
+        "contract_status": None,
+        "status_counts": {
+            "value_features": {status: 0 for status in sorted(VALID_STATUSES)},
+            "capability_shims": {status: 0 for status in sorted(VALID_STATUSES)},
+        },
+        "value_feature_count": 0,
+        "capability_shim_count": 0,
+        "incomplete_rows": [],
+        "incomplete_rows_by_group": {
+            "value_features": [],
+            "capability_shims": [],
+        },
+        "blocked_rows": [],
+        "blocked_rows_by_group": {
+            "value_features": [],
+            "capability_shims": [],
+        },
+        "blocker_issues": [],
+        "evidence_test_manifest": {
+            "present": False,
+            "value_feature_rows": 0,
+            "value_feature_test_count": 0,
+            "capability_shim_rows": 0,
+            "capability_shim_test_count": 0,
+        },
+        "evidence_summary": {
+            "value_features": evidence_summary(None),
+            "capability_shims": evidence_summary(None),
+        },
+        "errors": errors,
+    }
+
+
+def validate_denial_applicability(
+    row: dict[str, Any],
+    row_id: str,
+    group_name: str,
+    errors: list[str],
+) -> None:
+    if "denial_evidence_not_applicable" not in row:
+        return
+
+    if "denial_evidence" in row:
+        errors.append(
+            f"{group_name} row {row_id!r} must not combine denial_evidence "
+            "with denial_evidence_not_applicable"
+        )
+        return
+
+    reason = row["denial_evidence_not_applicable"]
+    if not isinstance(reason, str) or not reason.strip():
+        errors.append(
+            f"{group_name} row {row_id!r} denial_evidence_not_applicable "
+            "must be a non-empty string"
+        )
 
 
 def validate_evidence_paths(
@@ -501,6 +607,14 @@ def build_report(
     incomplete_rows = sorted(value_incomplete_rows + capability_incomplete_rows)
     blocked_rows = sorted(value_blocked_rows + capability_blocked_rows)
     blocker_issues = sorted(value_blocker_issues | capability_blocker_issues)
+    incomplete_rows_by_group = {
+        "value_features": sorted(value_incomplete_rows),
+        "capability_shims": sorted(capability_incomplete_rows),
+    }
+    blocked_rows_by_group = {
+        "value_features": sorted(value_blocked_rows),
+        "capability_shims": sorted(capability_blocked_rows),
+    }
     ready = not errors and not incomplete_rows and contract.get("status") == "implemented"
     report = {
         "schema": "axiom.direct_native.runtime_abi.check.v1",
@@ -518,7 +632,9 @@ def build_report(
         if isinstance(contract.get("capability_shims"), list)
         else 0,
         "incomplete_rows": incomplete_rows,
+        "incomplete_rows_by_group": incomplete_rows_by_group,
         "blocked_rows": blocked_rows,
+        "blocked_rows_by_group": blocked_rows_by_group,
         "blocker_issues": blocker_issues,
         "evidence_test_manifest": {
             "present": evidence_test_manifest is not None,
@@ -534,6 +650,10 @@ def build_report(
             "capability_shim_test_count": sum(
                 (evidence_test_counts or {}).get("capability_shims", {}).values()
             ),
+        },
+        "evidence_summary": {
+            "value_features": evidence_summary(contract.get("value_features")),
+            "capability_shims": evidence_summary(contract.get("capability_shims")),
         },
         "errors": errors,
     }
@@ -583,29 +703,7 @@ def main() -> int:
         )
         evidence_test_manifest = load_optional_manifest(manifest_path)
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        report = {
-            "schema": "axiom.direct_native.runtime_abi.check.v1",
-            "ready": False,
-            "target_id": None,
-            "contract_status": None,
-            "status_counts": {
-                "value_features": {status: 0 for status in sorted(VALID_STATUSES)},
-                "capability_shims": {status: 0 for status in sorted(VALID_STATUSES)},
-            },
-            "value_feature_count": 0,
-            "capability_shim_count": 0,
-            "incomplete_rows": [],
-            "blocked_rows": [],
-            "blocker_issues": [],
-            "evidence_test_manifest": {
-                "present": False,
-                "value_feature_rows": 0,
-                "value_feature_test_count": 0,
-                "capability_shim_rows": 0,
-                "capability_shim_test_count": 0,
-            },
-            "errors": [str(error)],
-        }
+        report = empty_report(errors=[str(error)])
         if args.json:
             print(json.dumps(report, indent=2))
         else:
@@ -670,6 +768,9 @@ def main() -> int:
         )
         if report["incomplete_rows"]:
             print(f"incomplete rows: {', '.join(report['incomplete_rows'])}")
+            for group_name, rows in report["incomplete_rows_by_group"].items():
+                if rows:
+                    print(f"incomplete {group_name}: {', '.join(rows)}")
         if report["blocked_rows"]:
             print(f"blocked rows: {', '.join(report['blocked_rows'])}")
         if report["blocker_issues"]:

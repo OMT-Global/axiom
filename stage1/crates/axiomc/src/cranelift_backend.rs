@@ -6,10 +6,11 @@ use crate::mir::{
 };
 use crate::syntax::NumericType;
 use axiomc_backend_cranelift::{
-    I64AuditSuccess as CraneliftI64AuditSuccess, I64BinaryOp as CraneliftI64BinaryOp,
-    I64Cast as CraneliftI64Cast, I64Compare as CraneliftI64Compare,
-    I64CompareOp as CraneliftI64CompareOp, I64Condition as CraneliftI64Condition, I64ExitBody,
-    I64ExitProgram, I64Expr as CraneliftI64Expr, I64Function as CraneliftI64Function,
+    I64_STDIN_BUFFER_BYTES, I64AuditSuccess as CraneliftI64AuditSuccess,
+    I64BinaryOp as CraneliftI64BinaryOp, I64Cast as CraneliftI64Cast,
+    I64Compare as CraneliftI64Compare, I64CompareOp as CraneliftI64CompareOp,
+    I64Condition as CraneliftI64Condition, I64ExitBody, I64ExitProgram,
+    I64Expr as CraneliftI64Expr, I64Function as CraneliftI64Function,
     I64ReturnBlock as CraneliftI64ReturnBlock, I64Stmt as CraneliftI64Stmt,
     I64ValueBody as CraneliftI64ValueBody, I64ValueReturnBlock as CraneliftI64ValueReturnBlock,
     OutputLine, OutputStream,
@@ -46,6 +47,9 @@ struct I64StaticBindings {
     env_allowed_names: HashSet<String>,
     env_unrestricted: bool,
     time_wrappers: HashSet<String>,
+    time_now_wrappers: HashSet<String>,
+    time_now_ms_wrappers: HashSet<String>,
+    time_elapsed_ms_wrappers: HashSet<String>,
     time_duration_ms_wrappers: HashSet<String>,
     time_sleep_wrappers: HashSet<String>,
     fs_read_wrappers: HashSet<String>,
@@ -83,6 +87,8 @@ struct I64StaticBindings {
     json_stringify_bool_wrappers: HashSet<String>,
     json_stringify_string_wrappers: HashSet<String>,
     io_eprintln_wrappers: HashSet<String>,
+    io_readline_wrappers: HashSet<String>,
+    io_read_to_string_wrappers: HashSet<String>,
     log_wrappers: HashSet<String>,
     log_field_string_wrappers: HashSet<String>,
     log_field_int_wrappers: HashSet<String>,
@@ -371,6 +377,24 @@ fn lower_i64_exit_program(
         .filter(|function| function.path == "<stdlib>/time.ax")
         .map(|function| function.name.clone())
         .collect();
+    static_bindings.time_now_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "now"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.time_now_ms_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "now_ms"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.time_elapsed_ms_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_time_wrapper(function, "elapsed_ms"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
     static_bindings.time_duration_ms_wrappers = program
         .functions
         .iter()
@@ -598,6 +622,18 @@ fn lower_i64_exit_program(
         .functions
         .iter()
         .filter(|function| is_i64_std_io_wrapper(function, "eprintln"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.io_readline_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_io_wrapper(function, "readline"))
+        .flat_map(|function| [function.name.clone(), function.source_name.clone()])
+        .collect();
+    static_bindings.io_read_to_string_wrappers = program
+        .functions
+        .iter()
+        .filter(|function| is_i64_std_io_wrapper(function, "read_to_string"))
         .flat_map(|function| [function.name.clone(), function.source_name.clone()])
         .collect();
     static_bindings.log_wrappers = program
@@ -1686,6 +1722,16 @@ fn lower_i64_aggregate_return_body(
                 && !seen_runtime_stmt =>
             {
                 if let Some(assigns) = lower_i64_env_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_readline_option_call_let_stmts(
                     name,
                     inner.as_ref(),
                     expr,
@@ -3035,6 +3081,16 @@ fn lower_i64_body(
                 ) {
                     lowered_stmts.extend(assigns);
                     seen_runtime_stmt = true;
+                } else if let Some(assigns) = lower_i64_readline_option_call_let_stmts(
+                    name,
+                    inner.as_ref(),
+                    expr,
+                    &mut locals,
+                    &mut local_indexes,
+                    static_bindings,
+                ) {
+                    lowered_stmts.extend(assigns);
+                    seen_runtime_stmt = true;
                 } else if let Some(assigns) = lower_i64_fs_read_option_call_let_stmts(
                     name,
                     inner.as_ref(),
@@ -3877,6 +3933,23 @@ fn lower_i64_runtime_let_stmts(
         ..
     } = stmt
         && let Some(assigns) = lower_i64_env_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        )
+    {
+        return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr,
+        ..
+    } = stmt
+        && let Some(assigns) = lower_i64_readline_option_call_let_stmts(
             name,
             inner.as_ref(),
             expr,
@@ -5446,6 +5519,61 @@ fn lower_i64_env_option_call_let_stmts(
         CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
             local: payload_local,
             value: env_len,
+        }),
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: tag_local,
+            value: tag,
+        }),
+    ])
+}
+
+fn lower_i64_readline_option_call_let_stmts(
+    name: &str,
+    inner: &Type,
+    expr: &Expr,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &mut HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<CraneliftI64Stmt>> {
+    if !matches!(inner, Type::String | Type::Str) {
+        return None;
+    }
+    let Expr::Call {
+        name: call_name,
+        args,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if !is_i64_io_readline_name(call_name, static_bindings) || !args.is_empty() {
+        return None;
+    }
+    let payload_local = local_indexes.len();
+    local_indexes.insert(i64_option_payload_slot_key(name, 0), payload_local);
+    local_indexes.insert(i64_option_payload_key(name), payload_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let tag_local = local_indexes.len();
+    local_indexes.insert(i64_option_tag_key(name), tag_local);
+    locals.push(CraneliftI64Expr::Literal(0));
+
+    let line_len = CraneliftI64Expr::StdinLineLen {
+        max_bytes: I64_STDIN_BUFFER_BYTES,
+    };
+    let tag = CraneliftI64Expr::Select {
+        cond: Box::new(CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: CraneliftI64Expr::Local(payload_local),
+            rhs: CraneliftI64Expr::Literal(0),
+        })),
+        then_result: Box::new(CraneliftI64Expr::Literal(1)),
+        else_result: Box::new(CraneliftI64Expr::Literal(0)),
+    };
+    Some(vec![
+        CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
+            local: payload_local,
+            value: line_len,
         }),
         CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign {
             local: tag_local,
@@ -9240,9 +9368,14 @@ fn lower_i64_condition(
             args,
             ty: Type::Bool,
         } => {
-            if let Some(condition) =
-                lower_i64_map_contains_key_condition(name, args, static_bindings)
-            {
+            if let Some(condition) = lower_i64_map_contains_key_condition(
+                name,
+                args,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            ) {
                 return Some(condition);
             }
             if let Some(condition) = lower_i64_known_bool_intrinsic_condition(
@@ -10465,6 +10598,8 @@ fn i64_known_pure_intrinsic_call(name: &str, static_bindings: &I64StaticBindings
         "len"
             | "first"
             | "last"
+            | "get"
+            | "map_get"
             | "string_clone"
             | "string_starts_with"
             | "string_strip_prefix"
@@ -10489,11 +10624,22 @@ fn i64_known_pure_intrinsic_call(name: &str, static_bindings: &I64StaticBindings
             | "json_serdes_to_json"
             | "contains"
             | "map_contains_key"
-            | "get"
-            | "map_get"
             | "get_or_default"
             | "keys"
             | "map_keys"
+            | "std_serdes_is_null"
+            | "std_serdes_as_bool"
+            | "std_serdes_as_int"
+            | "std_serdes_as_text"
+            | "std_serdes_as_array"
+            | "std_serdes_as_object"
+            | "std_serdes_field"
+            | "std_serdes_bool_field"
+            | "std_serdes_text_field"
+            | "std_serdes_int_field"
+            | "std_serdes_array_field"
+            | "std_serdes_object_field"
+            | "std_serdes_value_item"
     ) || is_i64_encoding_percent_encode_name(name, static_bindings)
         || is_i64_encoding_url_query_pair_encode_name(name, static_bindings)
         || is_i64_encoding_path_join_segment_name(name, static_bindings)
@@ -12772,6 +12918,46 @@ fn lower_i64_clock_intrinsic_expr(
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Expr> {
     let milliseconds = match name {
+        "clock_now_ms" => {
+            let [] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockNowMs);
+        }
+        name if is_i64_time_now_ms_name(name, static_bindings) => {
+            let [] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockNowMs);
+        }
+        "clock_elapsed_ms" => {
+            let [start] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockElapsedMs {
+                start: Box::new(lower_i64_expr(
+                    start,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            });
+        }
+        name if is_i64_time_elapsed_ms_name(name, static_bindings) => {
+            let [start] = args else {
+                return None;
+            };
+            return Some(CraneliftI64Expr::ClockElapsedMs {
+                start: Box::new(lower_i64_instant_ms_expr(
+                    start,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )?),
+            });
+        }
         "clock_sleep_ms" => {
             let [milliseconds] = args else {
                 return None;
@@ -12841,6 +13027,41 @@ fn lower_i64_duration_ms_expr(
                     static_bindings,
                 )
             }),
+        _ => None,
+    }
+}
+
+fn lower_i64_instant_ms_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match expr {
+        Expr::VarRef { name, .. } => local_indexes
+            .get(i64_struct_projection_key(name, "ms").as_str())
+            .copied()
+            .map(CraneliftI64Expr::Local),
+        Expr::StructLiteral { fields, .. } => fields
+            .iter()
+            .find(|field| field.name == "ms")
+            .and_then(|field| {
+                lower_i64_expr(
+                    &field.expr,
+                    local_indexes,
+                    local_conditions,
+                    helper_signatures,
+                    static_bindings,
+                )
+            }),
+        Expr::Call { name, args, .. } if is_i64_time_now_name(name, static_bindings) => {
+            if args.is_empty() {
+                Some(CraneliftI64Expr::ClockNowMs)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -13450,21 +13671,53 @@ fn lower_i64_map_get_or_default_expr(
         return None;
     };
     let entries = i64_map_literal_entries(map, static_bindings)?;
-    let key = lower_i64_map_key_expr(key, static_bindings)?;
-    let mut selected = None;
-    for entry in entries.iter().rev() {
-        if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
-            selected = Some(&entry.value);
-            break;
+    if let Some(key) = lower_i64_map_key_expr(key, static_bindings) {
+        let mut selected = None;
+        for entry in entries.iter().rev() {
+            if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
+                selected = Some(&entry.value);
+                break;
+            }
         }
+        return lower_i64_expr(
+            selected.unwrap_or(default),
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        );
     }
-    lower_i64_expr(
-        selected.unwrap_or(default),
+    let mut result = lower_i64_expr(
+        default,
         local_indexes,
         local_conditions,
         helper_signatures,
         static_bindings,
-    )
+    )?;
+    for entry in entries {
+        let candidate = lower_i64_map_key_expr(&entry.key, static_bindings)?;
+        let cond = lower_i64_map_key_match_condition(
+            key,
+            &candidate,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        let value = lower_i64_expr(
+            &entry.value,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        result = CraneliftI64Expr::Select {
+            cond: Box::new(cond),
+            then_result: Box::new(value),
+            else_result: Box::new(result),
+        };
+    }
+    Some(result)
 }
 
 fn lower_i64_map_index_expr(
@@ -13516,6 +13769,9 @@ fn i64_map_get_value_expr<'a>(
 fn lower_i64_map_contains_key_condition(
     name: &str,
     args: &[Expr],
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
     static_bindings: &I64StaticBindings,
 ) -> Option<CraneliftI64Condition> {
     if name != "map_contains_key"
@@ -13528,13 +13784,60 @@ fn lower_i64_map_contains_key_condition(
         return None;
     };
     let entries = i64_map_literal_entries(map, static_bindings)?;
-    let key = lower_i64_map_key_expr(key, static_bindings)?;
-    for entry in entries.iter().rev() {
-        if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
-            return Some(CraneliftI64Condition::Literal(true));
+    if let Some(key) = lower_i64_map_key_expr(key, static_bindings) {
+        for entry in entries.iter().rev() {
+            if lower_i64_map_key_expr(&entry.key, static_bindings)? == key {
+                return Some(CraneliftI64Condition::Literal(true));
+            }
         }
+        return Some(CraneliftI64Condition::Literal(false));
     }
-    Some(CraneliftI64Condition::Literal(false))
+    let mut result = CraneliftI64Condition::Literal(false);
+    for entry in entries {
+        let candidate = lower_i64_map_key_expr(&entry.key, static_bindings)?;
+        let cond = lower_i64_map_key_match_condition(
+            key,
+            &candidate,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        result = CraneliftI64Condition::Or {
+            lhs: Box::new(cond),
+            rhs: Box::new(result),
+        };
+    }
+    Some(result)
+}
+
+fn lower_i64_map_key_match_condition(
+    key: &Expr,
+    candidate: &I64MapKey,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Condition> {
+    if let Some(key) = lower_i64_map_key_expr(key, static_bindings) {
+        return Some(CraneliftI64Condition::Literal(key == *candidate));
+    }
+    let I64MapKey::Text(candidate) = candidate else {
+        return None;
+    };
+    let selected = lower_i64_map_key_array_string_index_match_expr(
+        key,
+        candidate,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    Some(CraneliftI64Condition::Compare(CraneliftI64Compare {
+        op: CraneliftI64CompareOp::Eq,
+        lhs: selected,
+        rhs: CraneliftI64Expr::Literal(1),
+    }))
 }
 
 fn lower_i64_map_keys_len_expr(
@@ -13684,6 +13987,18 @@ fn is_i64_std_time_wrapper(function: &Function, source_name: &str) -> bool {
 
 fn is_i64_time_duration_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     static_bindings.time_duration_ms_wrappers.contains(name)
+}
+
+fn is_i64_time_now_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_now_wrappers.contains(name)
+}
+
+fn is_i64_time_now_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_now_ms_wrappers.contains(name)
+}
+
+fn is_i64_time_elapsed_ms_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    static_bindings.time_elapsed_ms_wrappers.contains(name)
 }
 
 fn is_i64_time_sleep_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
@@ -13885,6 +14200,14 @@ fn is_i64_std_io_wrapper(function: &Function, source_name: &str) -> bool {
 
 fn is_i64_io_eprintln_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
     name == "io_eprintln" || static_bindings.io_eprintln_wrappers.contains(name)
+}
+
+fn is_i64_io_readline_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "io_readline" || static_bindings.io_readline_wrappers.contains(name)
+}
+
+fn is_i64_io_read_to_string_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
+    name == "io_read_to_string" || static_bindings.io_read_to_string_wrappers.contains(name)
 }
 
 fn is_i64_log_field_string_name(name: &str, static_bindings: &I64StaticBindings) -> bool {
@@ -14357,6 +14680,14 @@ fn lower_i64_string_len_expr(
                 static_bindings,
                 CraneliftI64AuditSuccess::NonNegative,
             )
+        }
+        Expr::Call { name, args, .. } if is_i64_io_read_to_string_name(name, static_bindings) => {
+            if !args.is_empty() {
+                return None;
+            }
+            Some(CraneliftI64Expr::StdinLen {
+                max_bytes: I64_STDIN_BUFFER_BYTES,
+            })
         }
         Expr::BinaryAdd {
             op: ArithmeticOp::Add,
@@ -17142,6 +17473,9 @@ fn eval_call(
     if is_json_serdes_call(name) {
         return eval_json_serdes_call(name, args, functions, env, lines);
     }
+    if is_std_serdes_call(name) {
+        return eval_std_serdes_call(name, args, functions, env, lines);
+    }
     if is_crypto_call(name) {
         return eval_crypto_call(name, args, functions, env, lines);
     }
@@ -18100,6 +18434,204 @@ fn eval_json_serdes_call(
             "unsupported cranelift spike JSON serdes call {name:?}"
         ))),
     }
+}
+
+fn is_std_serdes_call(name: &str) -> bool {
+    matches!(
+        name,
+        "std_serdes_is_null"
+            | "std_serdes_as_bool"
+            | "std_serdes_as_int"
+            | "std_serdes_as_text"
+            | "std_serdes_as_array"
+            | "std_serdes_as_object"
+            | "std_serdes_field"
+            | "std_serdes_bool_field"
+            | "std_serdes_text_field"
+            | "std_serdes_int_field"
+            | "std_serdes_array_field"
+            | "std_serdes_object_field"
+            | "std_serdes_value_item"
+    )
+}
+
+fn eval_std_serdes_call(
+    name: &str,
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<SpikeValue, Diagnostic> {
+    match name {
+        "std_serdes_is_null" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            let (variant, payloads) = expect_std_serdes_value(&value, name)?;
+            Ok(SpikeValue::Bool(variant == "Null" && payloads.is_empty()))
+        }
+        "std_serdes_as_bool" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_bool_value(&value)?))
+        }
+        "std_serdes_as_int" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_int_value(&value)?))
+        }
+        "std_serdes_as_text" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_text_value(&value)?))
+        }
+        "std_serdes_as_array" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_array_value(&value)?))
+        }
+        "std_serdes_as_object" => {
+            let value = eval_json_unary(name, args, functions, env, lines)?;
+            Ok(spike_option(std_serdes_as_object_value(&value)?))
+        }
+        "std_serdes_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(value))
+        }
+        "std_serdes_bool_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_bool_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_text_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_text_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_int_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_int_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_array_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_array_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_object_field" => {
+            let value = eval_std_serdes_field_value(name, args, functions, env, lines)?;
+            Ok(spike_option(match value {
+                Some(value) => std_serdes_as_object_value(&value)?,
+                None => None,
+            }))
+        }
+        "std_serdes_value_item" => {
+            let [value, index] = args else {
+                return Err(unsupported("std_serdes_value_item expects two arguments"));
+            };
+            let value = eval_expr(value, functions, env, lines)?;
+            let index = expect_signed_integer(eval_expr(index, functions, env, lines)?)?;
+            let (variant, payloads) = expect_std_serdes_value(&value, name)?;
+            let item = match (variant, payloads) {
+                ("Array", [SpikeValue::Array(items)]) if index >= 0 => usize::try_from(index)
+                    .ok()
+                    .and_then(|index| items.get(index).cloned()),
+                _ => None,
+            };
+            Ok(spike_option(item))
+        }
+        _ => Err(unsupported(&format!(
+            "unsupported cranelift spike std/serdes call {name:?}"
+        ))),
+    }
+}
+
+fn eval_std_serdes_field_value(
+    name: &str,
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<Option<SpikeValue>, Diagnostic> {
+    let [value, key] = args else {
+        return Err(unsupported(&format!("{name} expects two arguments")));
+    };
+    let value = eval_expr(value, functions, env, lines)?;
+    let key = match eval_expr(key, functions, env, lines)? {
+        SpikeValue::Text(value) => value,
+        _ => return Err(unsupported(&format!("{name} expects a string key"))),
+    };
+    let (variant, payloads) = expect_std_serdes_value(&value, name)?;
+    let ("Object", [SpikeValue::Map(entries)]) = (variant, payloads) else {
+        return Ok(None);
+    };
+    for (candidate, value) in entries {
+        if map_keys_equal(candidate, &SpikeValue::Text(key.clone()))? {
+            return Ok(Some(value.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn expect_std_serdes_value<'a>(
+    value: &'a SpikeValue,
+    name: &str,
+) -> Result<(&'a str, &'a [SpikeValue]), Diagnostic> {
+    let SpikeValue::Enum {
+        enum_name,
+        variant,
+        payloads,
+        ..
+    } = value
+    else {
+        return Err(unsupported(&format!("{name} expects std/serdes Value")));
+    };
+    if enum_name != "std_serdes_Value" {
+        return Err(unsupported(&format!("{name} expects std/serdes Value")));
+    }
+    Ok((variant.as_str(), payloads.as_slice()))
+}
+
+fn std_serdes_as_bool_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_bool")?;
+    Ok(match (variant, payloads) {
+        ("Bool", [SpikeValue::Bool(value)]) => Some(SpikeValue::Bool(*value)),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_int_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_int")?;
+    Ok(match (variant, payloads) {
+        ("Int", [SpikeValue::Int(value)]) => Some(SpikeValue::Int(*value)),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_text_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_text")?;
+    Ok(match (variant, payloads) {
+        ("Text", [SpikeValue::Text(value)]) => Some(SpikeValue::Text(value.clone())),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_array_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_array")?;
+    Ok(match (variant, payloads) {
+        ("Array", [SpikeValue::Array(values)]) => Some(SpikeValue::Array(values.clone())),
+        _ => None,
+    })
+}
+
+fn std_serdes_as_object_value(value: &SpikeValue) -> Result<Option<SpikeValue>, Diagnostic> {
+    let (variant, payloads) = expect_std_serdes_value(value, "std_serdes_as_object")?;
+    Ok(match (variant, payloads) {
+        ("Object", [SpikeValue::Map(entries)]) => Some(SpikeValue::Map(entries.clone())),
+        _ => None,
+    })
 }
 
 fn json_serdes_result(value: Result<SpikeValue, String>) -> SpikeValue {
@@ -22511,13 +23043,23 @@ mod tests {
             Some(Some(&expected_value))
         );
         assert_eq!(
-            lower_i64_map_contains_key_condition("contains", &args, &static_bindings),
+            lower_i64_map_contains_key_condition(
+                "contains",
+                &args,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &static_bindings
+            ),
             Some(CraneliftI64Condition::Literal(true))
         );
         assert_eq!(
             lower_i64_map_contains_key_condition(
                 "contains",
                 &[map.clone(), missing_key],
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
                 &static_bindings
             ),
             Some(CraneliftI64Condition::Literal(false))
