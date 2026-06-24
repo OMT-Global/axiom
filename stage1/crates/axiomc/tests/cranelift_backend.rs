@@ -1921,7 +1921,9 @@ fn cranelift_backend_rejects_non_scalar_helper_call_slice_base_before_lowering()
     assert_eq!(payload["ok"], Value::Bool(false));
     let message = payload["error"]["message"].as_str().expect("error message");
     assert!(
-        message.contains("borrowed slices currently require a named array"),
+        message.contains(
+            "helper-call array indexing currently requires a scalar or bool element type"
+        ),
         "unexpected non-scalar helper-call slice base error: {message}"
     );
 }
@@ -9174,8 +9176,9 @@ return [Step { value: 1, enabled: true }, Step { value: 2, enabled: false }]
 }
 
 fn main(): int {
+let first: Step = make_steps()[0]
 let tail: &[Step] = make_steps()[1:]
-return len(tail)
+return first.value + len(tail)
 }
 "#,
     )
