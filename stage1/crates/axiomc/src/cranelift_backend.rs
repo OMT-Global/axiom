@@ -1340,9 +1340,8 @@ fn lower_i64_aggregate_return_body(
                 expr: Expr::MapLiteral { entries, .. },
                 ..
             } if !seen_runtime_stmt => {
-                static_bindings
-                    .map_literals
-                    .insert(name.clone(), entries.clone());
+                let entries = i64_static_map_literal_entries(entries, static_bindings)?;
+                static_bindings.map_literals.insert(name.clone(), entries);
             }
             Stmt::Let {
                 name,
@@ -2599,9 +2598,8 @@ fn lower_i64_body(
                 expr: Expr::MapLiteral { entries, .. },
                 ..
             } if !seen_runtime_stmt => {
-                static_bindings
-                    .map_literals
-                    .insert(name.clone(), entries.clone());
+                let entries = i64_static_map_literal_entries(entries, static_bindings)?;
+                static_bindings.map_literals.insert(name.clone(), entries);
             }
             Stmt::Let {
                 name,
@@ -6353,10 +6351,50 @@ fn record_i64_known_map_let(stmt: &Stmt, static_bindings: &mut I64StaticBindings
     else {
         return None;
     };
-    static_bindings
-        .map_literals
-        .insert(name.clone(), entries.clone());
+    let Some(entries) = i64_static_map_literal_entries(entries, static_bindings) else {
+        return Some(false);
+    };
+    static_bindings.map_literals.insert(name.clone(), entries);
     Some(true)
+}
+
+fn i64_static_map_literal_entries(
+    entries: &[MapEntry],
+    static_bindings: &I64StaticBindings,
+) -> Option<Vec<MapEntry>> {
+    entries
+        .iter()
+        .map(|entry| {
+            Some(MapEntry {
+                key: i64_static_map_key_literal_expr(&entry.key, static_bindings)?,
+                value: i64_static_map_value_literal_expr(&entry.value, static_bindings)?,
+            })
+        })
+        .collect()
+}
+
+fn i64_static_map_key_literal_expr(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<Expr> {
+    Some(match lower_i64_map_key_expr(expr, static_bindings)? {
+        I64MapKey::Int(value) => Expr::Literal(LiteralValue::Int(value)),
+        I64MapKey::Bool(value) => Expr::Literal(LiteralValue::Bool(value)),
+        I64MapKey::Text(value) => Expr::Literal(LiteralValue::String(value)),
+    })
+}
+
+fn i64_static_map_value_literal_expr(
+    expr: &Expr,
+    static_bindings: &I64StaticBindings,
+) -> Option<Expr> {
+    if let Some(value) = i64_static_scalar_value(expr, static_bindings) {
+        return Some(Expr::Literal(LiteralValue::Int(value)));
+    }
+    if let Some(value) = i64_static_bool_value(expr, static_bindings) {
+        return Some(Expr::Literal(LiteralValue::Bool(value)));
+    }
+    i64_string_text(expr, static_bindings).map(|value| Expr::Literal(LiteralValue::String(value)))
 }
 
 fn record_i64_known_map_key_array_let(
@@ -21863,6 +21901,64 @@ mod tests {
                 &I64StaticBindings::default()
             ),
             Some(vec![I64MapKey::Int(2), I64MapKey::Int(1)])
+        );
+    }
+
+    #[test]
+    fn static_map_literal_entries_snapshot_static_var_values() {
+        let mut static_bindings = I64StaticBindings::default();
+        static_bindings
+            .values
+            .insert(String::from("code"), CraneliftI64Expr::Literal(7));
+        let entries = vec![MapEntry {
+            key: Expr::Literal(LiteralValue::String(String::from("deploy"))),
+            value: Expr::VarRef {
+                name: String::from("code"),
+                ty: Type::Int,
+            },
+        }];
+
+        let recorded =
+            i64_static_map_literal_entries(&entries, &static_bindings).expect("static map entries");
+
+        static_bindings
+            .values
+            .insert(String::from("code"), CraneliftI64Expr::Literal(48));
+        static_bindings
+            .map_literals
+            .insert(String::from("codes"), recorded);
+
+        assert_eq!(
+            lower_i64_map_get_or_default_expr(
+                "get_or_default",
+                &[
+                    Expr::VarRef {
+                        name: String::from("codes"),
+                        ty: Type::Map(Box::new(Type::String), Box::new(Type::Int)),
+                    },
+                    Expr::Literal(LiteralValue::String(String::from("deploy"))),
+                    Expr::Literal(LiteralValue::Int(0)),
+                ],
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &static_bindings,
+            ),
+            Some(CraneliftI64Expr::Literal(7))
+        );
+
+        assert_eq!(
+            i64_static_map_literal_entries(
+                &[MapEntry {
+                    key: Expr::Literal(LiteralValue::String(String::from("deploy"))),
+                    value: Expr::VarRef {
+                        name: String::from("runtime_code"),
+                        ty: Type::Int,
+                    },
+                }],
+                &I64StaticBindings::default(),
+            ),
+            None
         );
     }
 
