@@ -18,14 +18,6 @@ python3 scripts/ci/test-issue-pr-traceability.py
 bash scripts/ci/run-stdlib-property-checks.sh
 bash scripts/ci/run-compiler-property-checks.sh
 
-cargo test --manifest-path stage1/Cargo.toml -p axiomc render_rust_verifies_https_tls_certificates -- --nocapture
-cargo test --manifest-path stage1/Cargo.toml -p axiomc render_rust_uses_trusted_crypto_symbol_loading -- --nocapture
-
-if [[ "${AXIOM_FAST_CI_PROOF_WORKLOADS:-1}" != "1" ]]; then
-  echo "error: proof workload execution is required for PR fast checks." >&2
-  exit 1
-fi
-
 rust_linker="${AXIOM_FAST_CI_RUST_LINKER:-}"
 smoke_linker() {
   local linker="$1"
@@ -65,6 +57,16 @@ fi
 
 if [[ -z "$rust_linker" ]]; then
   echo "error: no usable cc, gcc, clang, rust-lld, or AXIOM_FAST_CI_RUST_LINKER was found for PR fast checks." >&2
+  exit 1
+fi
+
+export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${rust_linker}"
+
+cargo test --manifest-path stage1/Cargo.toml -p axiomc render_rust_verifies_https_tls_certificates -- --nocapture
+cargo test --manifest-path stage1/Cargo.toml -p axiomc render_rust_uses_trusted_crypto_symbol_loading -- --nocapture
+
+if [[ "${AXIOM_FAST_CI_PROOF_WORKLOADS:-1}" != "1" ]]; then
+  echo "error: proof workload execution is required for PR fast checks." >&2
   exit 1
 fi
 
