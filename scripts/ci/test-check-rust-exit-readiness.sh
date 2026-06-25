@@ -38,15 +38,8 @@ rust-exit-readiness-test:
 MAKE
 
 cat >"$temp_dir/partial-issues.txt" <<'ISSUES'
-927 CLOSED
-929 CLOSED
 1191 CLOSED
-1001 OPEN
-930 CLOSED
-931 CLOSED
-562 CLOSED
-563 CLOSED
-564 CLOSED
+731 OPEN
 ISSUES
 
 python3 - "$case_dir/stage1/runtime-abi/direct-native-v0.json" <<'PY'
@@ -60,7 +53,7 @@ with open(path, encoding="utf-8") as handle:
 contract["status"] = "partial"
 for row in contract["value_features"] + contract["capability_shims"]:
     row["status"] = "partial"
-    row["blockers"] = [1001]
+    row["blockers"] = [731]
 
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(contract, handle)
@@ -73,14 +66,6 @@ import sys
 path = sys.argv[1]
 with open(path, encoding="utf-8") as handle:
     payload = json.load(handle)
-
-payload["blockingIssues"].append(
-    {
-        "issue": 1001,
-        "lane": "backend",
-        "check": "Direct-native runtime ABI remains partial for regression coverage.",
-    }
-)
 
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle)
@@ -127,14 +112,8 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 
 cat >"$temp_dir/open-issues.txt" <<'ISSUES'
-927 OPEN
-929 OPEN
 1191 OPEN
-930 OPEN
-931 OPEN
-562 OPEN
-563 OPEN
-564 OPEN
+731 OPEN
 ISSUES
 
 (
@@ -164,14 +143,8 @@ PY
 )
 
 cat >"$temp_dir/issues.txt" <<'ISSUES'
-927 CLOSED
-929 CLOSED
 1191 CLOSED
-930 CLOSED
-931 CLOSED
-562 CLOSED
-563 CLOSED
-564 CLOSED
+731 CLOSED
 ISSUES
 
 (
@@ -191,8 +164,8 @@ assert payload["ready"] is True
 statuses = {check["name"]: check["status"] for check in payload["checks"]}
 assert statuses["readiness_blockers_closed"] == "pass"
 assert statuses["readiness_blockers_live_when_not_ready"] == "pass"
-assert statuses["rust_exit_issue_927_closed"] == "pass"
 assert statuses["rust_exit_issue_1191_closed"] == "pass"
+assert statuses["rust_exit_issue_731_closed"] == "pass"
 assert statuses["direct_native_runtime_abi_ready"] == "pass"
 assert statuses["command_lsp_release_boundary"] == "pass"
 assert statuses["mir_backend_direct_native_boundary"] == "pass"

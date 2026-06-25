@@ -48,12 +48,11 @@ review gates to be satisfied.
 
 | Surface | Required state | Current disposition | Governing issue |
 | --- | --- | --- | --- |
-| AxiOM compiler source layout | Parser, checker, lowering, MIR, backend selection, diagnostics, packages, manifests, lockfiles, and command dispatch have AxiOM package boundaries. | Implemented as [AxiOM Compiler Source Layout and Self-Hosting Boundary](axiom-compiler-source-layout.md); source migration remains owned by child issues. | [#930](https://github.com/OMT-Global/axiomlang/issues/930) |
-| Snapshot bootstrap | A previously shipped `axiomc` snapshot builds the next working `axiomc` binary without invoking Cargo. | `blocked` | [#931](https://github.com/OMT-Global/axiomlang/issues/931) |
-| Final readiness gate | The Rust-exit command proves supported workflows, release builds, tests, docs, and LSP no longer require Rust-only infrastructure. | Implemented as `make rust-exit-readiness`; the gate still fails until the rows above and below are complete. | [#932](https://github.com/OMT-Global/axiomlang/issues/932) |
-| Compiler verification | Compiler-internal coverage is expressed in AxiOM property form instead of Rust-only tests. | `blocked` | [#562](https://github.com/OMT-Global/axiomlang/issues/562) |
-| Documentation generator | `axiomc doc` and structured/Markdown output are produced by AxiOM-owned code. | `blocked` | [#563](https://github.com/OMT-Global/axiomlang/issues/563) |
-| LSP server | `axiomc lsp` runs an AxiOM-owned LSP server and protocol stack. | `blocked` | [#564](https://github.com/OMT-Global/axiomlang/issues/564) |
+| AxiOM compiler source layout | Parser, checker, lowering, MIR, backend selection, diagnostics, packages, manifests, lockfiles, and command dispatch have AxiOM package boundaries. | Implemented as [AxiOM Compiler Source Layout and Self-Hosting Boundary](axiom-compiler-source-layout.md); final source migration remains governed by the Rust bootstrap gate. | [#721](https://github.com/OMT-Global/axiomlang/issues/721) |
+| Snapshot bootstrap | A previously shipped `axiomc` snapshot builds the next working `axiomc` binary without invoking Cargo. | `blocked` until the final Rust bootstrap removal gate is satisfied. | [#721](https://github.com/OMT-Global/axiomlang/issues/721) |
+| Final readiness gate | The Rust-exit command proves supported workflows, release builds, tests, docs, and LSP no longer require Rust-only infrastructure. | Implemented as `make rust-exit-readiness`; the gate still fails until the live blockers in `docs/rust-exit-readiness.json` are closed and ABI/boundary checks pass. | [#721](https://github.com/OMT-Global/axiomlang/issues/721) |
+| Compiler verification | Compiler-internal coverage is expressed in AxiOM property form instead of Rust-only tests. | Shipped through the property-test gate; remaining Rust-bootstrap release-chain work stays with #721. | [#721](https://github.com/OMT-Global/axiomlang/issues/721) |
+| Documentation generator | `axiomc doc` and structured/Markdown output are produced by AxiOM-owned code. | Doc and LSP self-hosting are tracked through the current tooling gate. | [#731](https://github.com/OMT-Global/axiomlang/issues/731) |
 
 ## Closure Rules
 

@@ -257,10 +257,14 @@ if payload["finalBootstrapIssue"] in issues:
     print("finalBootstrapIssue must not also be listed as a blocker", file=sys.stderr)
     sys.exit(1)
 
-required = {562, 563, 564, 927, 929, 930, 931, 1191}
+required = {731, 1191}
 missing = sorted(required - set(issues))
 if missing:
     print("missing required blocking issues: " + ", ".join(f"#{issue}" for issue in missing), file=sys.stderr)
+    sys.exit(1)
+unexpected = sorted(set(issues) - required)
+if unexpected:
+    print("unexpected stale blocking issues: " + ", ".join(f"#{issue}" for issue in unexpected), file=sys.stderr)
     sys.exit(1)
 if len(set(issues)) != len(issues):
     print("blocking issue list contains duplicates", file=sys.stderr)
