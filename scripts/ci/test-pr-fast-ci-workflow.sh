@@ -47,7 +47,7 @@ ci_gate_section="$({
 ci_gate_checkout_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | grep 'actions/checkout@' | head -n1 | awk '{print $1}')
 ci_gate_run_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | grep 'bash scripts/ci/check-pr-fast-ci-gate.sh' | head -n1 | awk '{print $1}')
 benchmark_gate_reference=$(grep -nE 'check-stage1-benchmarks\.py|stage1-comparison-report\.json' "$workflow" || true)
-runtime_abi_summary_check=$(grep -nF 'scripts/ci/render-direct-native-runtime-abi-summary.py --check' "$fast_checks_script" || true)
+runtime_abi_status_check=$(grep -nF 'scripts/ci/render-direct-native-runtime-abi-status.py --check-doc docs/direct-native-runtime-abi-v0.md' "$fast_checks_script" || true)
 
 if [[ -z "$checkout_line" ]]; then
   echo "validate-pr-description job must checkout the repo before running validation" >&2
@@ -111,8 +111,8 @@ if [[ -n "$benchmark_gate_reference" ]]; then
   exit 1
 fi
 
-if [[ -z "$runtime_abi_summary_check" ]]; then
-  echo "run-fast-checks must validate that the direct-native runtime ABI summary matches the JSON contract" >&2
+if [[ -z "$runtime_abi_status_check" ]]; then
+  echo "run-fast-checks must validate that the direct-native runtime ABI status block matches the JSON contract" >&2
   exit 1
 fi
 

@@ -131,7 +131,7 @@ _Generated from `stage1/runtime-abi/direct-native-v0.json`; run `make stage1-dir
 | `array.fixed` | `partial` | #1124 | evidence:1, runtime:1 | The direct-native path now has narrow runtime evidence for immediate array-literal scalar indexing with literal indexes and scalar projection from... |
 | `boolean` | `partial` | #1124 | evidence:1, runtime:1 | The Cranelift spike covers boolean values. |
 | `enum.payload` | `partial` | #1124 | evidence:1, runtime:1 | The Cranelift spike builds and runs custom enum matches with tuple, named, and string payloads without generated Rust. |
-| `map.lookup` | `partial` | #1124 | evidence:1, runtime:1 | The Cranelift spike covers direct map indexing, get, get_or_default, map_contains_key, map_keys, and public std/collections.ax contains, get, get_o... |
+| `map.lookup` | `partial` | #1124 | evidence:1, runtime:1 | The Cranelift spike covers direct map indexing, get, get_or_default, map_contains_key, map_keys, helper-returned direct index, contains-key, and de... |
 | `numeric.scalars` | `partial` | #1124 | evidence:1, runtime:1 | The Cranelift spike covers several scalar widths and casts. |
 | `option` | `partial` | #1124 | evidence:1, runtime:1 | The direct-native path now has narrow runtime evidence for local Option<int> and Option<bool> construction as tag/payload locals, scalar option rea... |
 | `owned.move_state` | `partial` | #1124 | evidence:1, runtime:1 | The Cranelift spike builds and runs projection-sensitive owned field moves while preserving access to disjoint sibling projections, and the public... |
