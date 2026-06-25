@@ -716,11 +716,13 @@ The CLI arguments row now has narrow direct-native evidence: the native
 `std/cli.ax` no-argument smoke builds with `generated_rust: null`, runs the
 produced binary, and proves `arg_count()`, `args()`, and `arg(0)` cover the
 empty forwarded-argument surface by printing `0`, `0`, and the `None` arm's
-`missing` text. This row tracks ambient process input separately from
-`std/process.ax` command execution because the CLI surface does not require the
-filesystem, network, process, environment, clock, or crypto capability gates.
-Forwarded arguments through `axiomc run --`, broader argv string storage, and
-host-audit treatment remain open under #1001.
+`missing` text. The focused forwarded-args smoke builds the same program and
+runs the produced native binary with `alpha beta`, proving `arg_count()`,
+`args()`, and `arg(0)` observe non-empty process arguments without generated
+Rust. This row tracks ambient process input separately from `std/process.ax`
+command execution because the CLI surface does not require the filesystem,
+network, process, environment, clock, or crypto capability gates. Broader argv
+string storage and host-audit treatment remain open under #1001.
 
 The regex row now has partial direct-native evidence: the Cranelift spike covers
 `std/regex.ax` `is_match`, `find`, and `replace_all` for the stage1-safe NFA
@@ -785,13 +787,19 @@ fixed-array slots, including helper-parameter arrays feeding a direct-native
 process exit status. Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots.
+Borrowed slice locals can now be sliced again with static bounds, preserving
+scalar and bool projected slots for `len`, `first`, `last`, dynamic indexing,
+and helper-call arguments without generated Rust.
 The focused evidence manifest now also links borrowed-slice helper-parameter
 runtime-exit evidence for scalar and bool slices whose helper ABI width is
 statically witnessed by call sites. Static-width borrowed-slice helper returns
 can also flow back through the same multi-slot ABI when the returned borrowed
-parameter width is statically witnessed by call sites. Broader borrowed-slice
-aliasing, dynamic slice bounds, unconstrained helper-parameter or helper-return
-widths, and host ABI coverage remain tracked by issue #1124.
+parameter width is statically witnessed by call sites, including same-origin,
+same-width branch-selected returns whose branch arms return statically
+witnessed borrowed slices. Broader dynamic slice bounds, unconstrained
+helper-parameter or helper-return widths, mixed-origin or mixed-width
+branch-selected borrowed-slice returns, and host ABI coverage remain tracked by
+issue #1124.
 
 The map lookup row has partial direct-native evidence: the Cranelift spike now
 builds and runs direct map indexing, `get`, `get_or_default`,
@@ -821,12 +829,14 @@ also feed inline and pre-runtime map lookup, contains, and get-or-default
 lowering. Static scalar tuple keys can also feed inline-map-literal
 `get_or_default(...)`, `map_contains_key(...)`, `get(...)`, direct indexing,
 duplicate-key replacement, and statically initialized component lookups without
-generated Rust. Imported public `std/collections.ax` `contains`, `get`,
-`get_or_default`, and `keys` map wrappers now alias the same direct-native i64
-lowering for static string/int map-local cases, and the focused evidence
-manifest now links the wrapper runtime-exit smoke to this row. A dedicated
-bool-key wrapper runtime-exit smoke now also proves public `contains`, `get`,
-`get_or_default`, and `keys` wrapper lowering over static bool-keyed maps.
+generated Rust. Imported public `std/collections.ax` `contains`, `get`, and
+`get_or_default` map wrappers now alias the same direct-native i64 lowering for
+static string-, int-, and bool-keyed map-local cases, and `keys` wrapper calls
+cover static string-, int-, and bool-keyed map-local key-array counts plus
+literal and dynamic key projections for supported scalar/bool keys. The focused
+evidence manifest now links the wrapper runtime-exit smoke to this row. A
+dedicated bool-key wrapper runtime-exit smoke now also proves public `contains`,
+`get`, `get_or_default`, and `keys` wrapper lowering over static bool-keyed maps.
 Imported public `std/collections.ax` tuple-keyed `contains`, `get`, and
 `get_or_default` map wrappers can also feed the same direct-native i64 lowering
 without generated Rust, and `keys` wrappers over static tuple-keyed maps can

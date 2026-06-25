@@ -2441,6 +2441,86 @@ fn cranelift_backend_lowers_slice_helper_returns_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_slice_branch_returns_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("slice-branch-returns-main-exit");
+    write_slice_branch_returns_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift slice branch returns main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift slice branch returns main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
+fn cranelift_backend_lowers_slice_subrange_aliases_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("slice-subrange-aliases-main-exit");
+    write_slice_subrange_aliases_main_exit_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift slice subrange aliases main build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .output()
+        .expect("run cranelift slice subrange aliases main binary");
+    assert_eq!(run.status.code(), Some(48));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_string_literal_len_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -8310,6 +8390,57 @@ missing
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_builds_std_cli_forwarded_args_binary() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("std-cli-forwarded-args");
+    write_std_cli_project(&project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+        .args([
+            "build",
+            project.to_str().expect("project path"),
+            "--backend",
+            "cranelift",
+            "--json",
+        ])
+        .output()
+        .expect("run axiomc build --backend cranelift");
+    assert!(
+        output.status.success(),
+        "cranelift std/cli forwarded-args build failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+    assert_eq!(payload["backend"], "cranelift");
+    assert_eq!(payload["generated_rust"], Value::Null);
+    let binary = payload["binary"].as_str().expect("binary path");
+    let run = Command::new(binary)
+        .args(["alpha", "beta"])
+        .output()
+        .expect("run cranelift std/cli forwarded-args binary");
+    assert!(
+        run.status.success(),
+        "cranelift std/cli forwarded-args binary failed: stderr={}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "2
+2
+alpha
+"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_rejects_float_map_keys() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("float-map-key");
@@ -10492,9 +10623,49 @@ fn write_slice_helper_returns_main_exit_project(project: &Path) {
     .expect("write slice helper returns main exit lockfile");
     fs::write(
         project.join("src/main.ax"),
-        "fn identity(values: &[int]): &[int] {\nreturn values\n}\n\nfn main(): int {\nlet values: [int; 4] = [1, 20, 26, 9]\nlet window: &[int] = values[1:3]\nlet pick_index: int = 1\nlet returned: &[int] = identity(window)\nif len(returned) + first(returned) + last(returned) == 48 && returned[pick_index] + 22 == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+        "fn identity(values: &[int]): &[int] {\nreturn values\n}\n\nfn main(): int {\nlet values: [int; 4] = [1, 20, 26, 9]\nlet window: &[int] = values[1:3]\nlet pick_index: int = 1\nif pick_index == 1 {\nlet returned: &[int] = identity(window)\nlet code: int = len(returned) + first(returned) + last(returned)\nreturn code + returned[pick_index] - 26\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write slice helper returns main exit source");
+}
+
+fn write_slice_branch_returns_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create slice branch returns main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-slice-branch-returns-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write slice branch returns main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-slice-branch-returns-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write slice branch returns main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "fn choose_values(flag: bool, values: &[int]): &[int] {\nif flag {\nreturn values[0:2]\n} else {\nreturn values[1:3]\n}\n}\n\nfn choose_flags(flag: bool, flags: &[bool]): &[bool] {\nif flag {\nlet chosen: &[bool] = flags[0:2]\nreturn chosen\n} else {\nlet backup: &[bool] = flags[1:3]\nreturn backup\n}\n}\n\nfn main(): int {\nlet input: [int; 3] = [20, 26, 20]\nlet values: &[int] = input[:]\nlet flags_input: [bool; 3] = [false, true, false]\nlet flags: &[bool] = flags_input[:]\nlet pick_index: int = 1\nlet selected_values: &[int] = choose_values(true, values)\nlet fallback_values: &[int] = choose_values(false, values)\nlet selected_flags: &[bool] = choose_flags(true, flags)\nlet fallback_flags: &[bool] = choose_flags(false, flags)\nlet selected_code: int = len(selected_values) + first(selected_values) + last(selected_values)\nlet selected_pick: int = selected_values[pick_index] + 22\nlet fallback_code: int = len(fallback_values) + first(fallback_values) + last(fallback_values)\nlet selected_gate: bool = first(selected_flags) == false && last(selected_flags) && selected_flags[pick_index]\nlet fallback_gate: bool = first(fallback_flags) && last(fallback_flags) == false\nif selected_gate && fallback_gate && selected_code == 48 && selected_pick == 48 && fallback_code == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write slice branch returns main exit source");
+}
+
+fn write_slice_subrange_aliases_main_exit_project(project: &Path) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create slice subrange aliases main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        "[package]\nname = \"cranelift-slice-subrange-aliases-main-exit\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n",
+    )
+    .expect("write slice subrange aliases main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        "version = 1\n\n[[package]]\nname = \"cranelift-slice-subrange-aliases-main-exit\"\nversion = \"0.1.0\"\nsource = \"path\"\n",
+    )
+    .expect("write slice subrange aliases main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        "fn score(values: &[int]): int {\nreturn len(values) + first(values) + last(values)\n}\n\nfn gate(flags: &[bool], index: int): bool {\nreturn first(flags) == false && last(flags) && flags[index]\n}\n\nfn main(): int {\nlet selected_input: [int; 4] = [1, 20, 26, 9]\nlet fallback_input: [int; 4] = [20, 26, 1, 9]\nlet selected_window: &[int] = selected_input[1:3]\nlet fallback_window: &[int] = fallback_input[:2]\nlet selected_values: &[int] = selected_window[0:2]\nlet fallback_values: &[int] = fallback_window[0:2]\nlet selected_flags_input: [bool; 3] = [true, false, true]\nlet fallback_flags_input: [bool; 3] = [false, false, false]\nlet selected_flag_window: &[bool] = selected_flags_input[1:]\nlet fallback_flag_window: &[bool] = fallback_flags_input[:2]\nlet flag_index: int = 1\nlet selected_flags: &[bool] = selected_flag_window[0:2]\nlet fallback_flags: &[bool] = fallback_flag_window[0:2]\nlet selected_code: int = len(selected_values) + first(selected_values) + last(selected_values)\nlet selected_pick: int = selected_values[flag_index] + 22\nlet fallback_code: int = len(fallback_values) + first(fallback_values) + last(fallback_values)\nlet helper_code: int = score(selected_window[0:2])\nlet selected_gate: bool = first(selected_flags) == false && last(selected_flags) && selected_flags[flag_index]\nlet fallback_gate: bool = first(fallback_flags) == false && last(fallback_flags) == false\nlet helper_gate: bool = gate(selected_flag_window[0:2], flag_index)\nif selected_gate && fallback_gate && helper_gate && selected_code == 48 && selected_pick == 48 && fallback_code == 48 && helper_code == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
+    )
+    .expect("write slice subrange aliases main exit source");
 }
 
 fn write_string_literal_len_main_exit_project(project: &Path) {
@@ -13485,6 +13656,40 @@ let get_miss_scores: {string: int} = {"build": 7, "deploy": 9}
 let get_miss_code: int = match get<string, int>(get_miss_scores, "test") { Some(value) => value, None => 13 }
 let fallback_scores: {string: int} = {"build": 7, "deploy": 9}
 let fallback: int = get_or_default<string, int>(fallback_scores, "test", 13)
+let bool_contains_scores: {bool: int} = {false: 7, true: 29}
+let bool_contains_hit: bool = contains<bool, int>(bool_contains_scores, true)
+let bool_contains_miss_scores: {bool: int} = {true: 29}
+let bool_contains_miss: bool = contains<bool, int>(bool_contains_miss_scores, false) == false
+let bool_get_hit_scores: {bool: int} = {false: 7, true: 29}
+let bool_get_hit_code: int = match get<bool, int>(bool_get_hit_scores, true) { Some(value) => value, None => 1 }
+let bool_get_miss_scores: {bool: int} = {true: 29}
+let bool_get_miss_code: int = match get<bool, int>(bool_get_miss_scores, false) { Some(value) => value, None => 13 }
+let bool_fallback_scores: {bool: int} = {true: 29}
+let bool_fallback: int = get_or_default<bool, int>(bool_fallback_scores, false, 13)
+let bool_value_scores: {bool: bool} = {false: false, true: true}
+let bool_value_hit: bool = match get<bool, bool>(bool_value_scores, true) { Some(value) => value, None => false }
+let int_contains_scores: {int: int} = {1: 7, 2: 29}
+let int_contains_hit: bool = contains<int, int>(int_contains_scores, 2)
+let int_contains_miss_scores: {int: int} = {2: 29}
+let int_contains_miss: bool = contains<int, int>(int_contains_miss_scores, 1) == false
+let int_get_hit_scores: {int: int} = {1: 7, 2: 29}
+let int_get_hit_code: int = match get<int, int>(int_get_hit_scores, 2) { Some(value) => value, None => 1 }
+let int_get_miss_scores: {int: int} = {2: 29}
+let int_get_miss_code: int = match get<int, int>(int_get_miss_scores, 1) { Some(value) => value, None => 13 }
+let int_fallback_scores: {int: int} = {2: 29}
+let int_fallback: int = get_or_default<int, int>(int_fallback_scores, 1, 13)
+let int_key_scores: {int: int} = {1: 7, 2: 29}
+let int_key_names: [int] = keys<int, int>(int_key_scores)
+let int_key_count: int = len(int_key_names)
+let first_int_key: int = int_key_names[0]
+let dynamic_int_key_index: int = choose_key_index(int_contains_hit)
+let selected_int_key: int = int_key_names[dynamic_int_key_index]
+let bool_key_scores: {bool: int} = {false: 7, true: 29}
+let bool_key_names: [bool] = keys<bool, int>(bool_key_scores)
+let bool_key_count: int = len(bool_key_names)
+let first_bool_key_missing: bool = bool_key_names[0] == false
+let dynamic_bool_key_index: int = choose_key_index(bool_contains_hit)
+let selected_bool_key: bool = bool_key_names[dynamic_bool_key_index]
 let key_count_scores: {string: int} = {"build": 7, "deploy": 9, "deploy": 11}
 let key_count_names: [string] = keys<string, int>(key_count_scores)
 let key_count: int = len(key_count_names)
@@ -13539,7 +13744,7 @@ let dynamic_missing_value_names: [string] = keys<string, int>(dynamic_missing_va
 let dynamic_missing_value_key: string = dynamic_missing_value_names[dynamic_key_index]
 let dynamic_missing_value_map: {string: int} = {"build": 7}
 let dynamic_missing_value: int = get_or_default<string, int>(dynamic_missing_value_map, dynamic_missing_value_key, 13)
-if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 && dynamic_key_is_deploy && dynamic_key_not_build && dynamic_key_has_prefix && dynamic_key_trim_len == 6 && dynamic_key_trim_start_len == 7 && dynamic_key_trimmed_has_prefix && dynamic_key_trim_start_has_prefix && dynamic_lookup_contains && dynamic_lookup_value == 9 && dynamic_missing_contains && dynamic_missing_value == 13 {
+if contains_hit && contains_miss && get_hit_code == 9 && get_miss_code == 13 && fallback == 13 && bool_contains_hit && bool_contains_miss && bool_get_hit_code == 29 && bool_get_miss_code == 13 && bool_fallback == 13 && bool_value_hit && int_contains_hit && int_contains_miss && int_get_hit_code == 29 && int_get_miss_code == 13 && int_fallback == 13 && int_key_count == 2 && first_int_key == 1 && selected_int_key == 2 && bool_key_count == 2 && first_bool_key_missing && selected_bool_key && key_count == 2 && first_key_len == 5 && second_key_len == 6 && dynamic_key_len == 6 && dynamic_key_is_deploy && dynamic_key_not_build && dynamic_key_has_prefix && dynamic_key_trim_len == 6 && dynamic_key_trim_start_len == 7 && dynamic_key_trimmed_has_prefix && dynamic_key_trim_start_has_prefix && dynamic_lookup_contains && dynamic_lookup_value == 9 && dynamic_missing_contains && dynamic_missing_value == 13 {
 return 48
 } else {
 return 1

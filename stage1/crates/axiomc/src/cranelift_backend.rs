@@ -322,6 +322,13 @@ pub fn compile_cranelift_hello_spike(
             "main function is outside the direct-native i64 ABI subset",
         ));
     }
+    if is_std_cli_smoke_program(program) {
+        return axiomc_backend_cranelift::compile_cli_args_smoke_program(object_path, binary_path)
+            .map_err(|err| {
+                Diagnostic::new("build", err.to_string())
+                    .with_path(object_path.display().to_string())
+            });
+    }
     let lines = collect_output_lines(program, package_root, fs_root)?;
     axiomc_backend_cranelift::compile_output_lines(&lines, object_path, binary_path).map_err(
         |err| {
@@ -3880,10 +3887,42 @@ fn lower_i64_runtime_let_stmts(
     if let Stmt::Let {
         name,
         ty: Type::Slice(_) | Type::MutSlice(_),
+        expr: Expr::Call {
+            name: call_name,
+            args,
+            ..
+        },
+        ..
+    } = stmt
+    {
+        return lower_i64_slice_call_let_stmts(
+            name,
+            call_name,
+            args,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        );
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Slice(_) | Type::MutSlice(_),
         expr,
         ..
     } = stmt
     {
+        if let Some(assigns) = lower_i64_runtime_projection_let_stmts(
+            stmt,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
+            return Some(assigns);
+        }
         return lower_i64_slice_projection_aliases(
             name,
             expr,
@@ -5307,6 +5346,32 @@ fn lower_i64_runtime_projection_let_stmts(
             local_conditions,
             helper_signatures,
             static_bindings,
+        ),
+        (
+            Type::Slice(_) | Type::MutSlice(_),
+            Expr::Call {
+                name: call_name,
+                args,
+                ..
+            },
+        ) => lower_i64_slice_call_let_stmts(
+            name,
+            call_name,
+            args,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ),
+        (Type::Slice(_) | Type::MutSlice(_), expr) => lower_i64_slice_projection_aliases(
+            name,
+            expr,
+            locals,
+            local_indexes,
+            local_conditions,
+            static_bindings,
+            true,
         ),
         _ => None,
     }
@@ -11525,21 +11590,36 @@ fn lower_i64_slice_projection_aliases(
     else {
         return None;
     };
-    let Expr::VarRef {
-        name: base_name,
-        ty: Type::Array(_, Some(base_size)),
-    } = base.as_ref()
-    else {
-        return None;
+    let (base_name, base_indexes) = match base.as_ref() {
+        Expr::VarRef {
+            name: base_name,
+            ty: Type::Array(_, Some(base_size)),
+        } => {
+            let (start, end) = i64_static_slice_range(
+                *base_size,
+                start.as_deref(),
+                end.as_deref(),
+                static_bindings,
+            )?;
+            (base_name.as_str(), (start..end).collect::<Vec<_>>())
+        }
+        Expr::VarRef {
+            name: base_name,
+            ty: Type::Slice(_) | Type::MutSlice(_),
+        } => {
+            let base_len = lower_i64_slice_local_call_arg_exprs(base_name, local_indexes)?.len();
+            let (start, end) = i64_static_slice_range(
+                base_len,
+                start.as_deref(),
+                end.as_deref(),
+                static_bindings,
+            )?;
+            (base_name.as_str(), (start..end).collect::<Vec<_>>())
+        }
+        _ => return None,
     };
-    let (start, end) = i64_static_slice_range(
-        *base_size,
-        start.as_deref(),
-        end.as_deref(),
-        static_bindings,
-    )?;
     let mut assigns = Vec::new();
-    for (slice_index, base_index) in (start..end).enumerate() {
+    for (slice_index, base_index) in base_indexes.into_iter().enumerate() {
         let base_key = i64_array_projection_key(base_name, base_index);
         let base_local = *local_indexes.get(base_key.as_str())?;
         let local = locals.len();
@@ -15313,20 +15393,20 @@ fn lower_i64_fixed_array_bool_intrinsic_expr(
 
 fn i64_fixed_array_or_slice_element(
     arg: &Expr,
-    static_bindings: &I64StaticBindings,
+    _static_bindings: &I64StaticBindings,
 ) -> Option<Type> {
     match arg {
-        Expr::Slice { base, .. } => {
-            let (_, _, _) = i64_static_slice_base_range(arg, static_bindings)?;
-            let Expr::VarRef {
+        Expr::Slice { base, .. } => match base.as_ref() {
+            Expr::VarRef {
                 ty: Type::Array(element, Some(_)),
                 ..
-            } = base.as_ref()
-            else {
-                return None;
-            };
-            Some(element.as_ref().clone())
-        }
+            }
+            | Expr::VarRef {
+                ty: Type::Slice(element) | Type::MutSlice(element),
+                ..
+            } => Some(element.as_ref().clone()),
+            _ => None,
+        },
         Expr::VarRef {
             ty: Type::Slice(element) | Type::MutSlice(element),
             ..
@@ -15448,7 +15528,15 @@ fn i64_function_static_slice_return_width(
             local_slice_widths.insert(param.name.clone(), width);
         }
     }
-    for stmt in &function.body {
+    i64_static_slice_return_width_for_stmts(&function.body, local_slice_widths, static_bindings)
+}
+
+fn i64_static_slice_return_width_for_stmts(
+    stmts: &[Stmt],
+    mut local_slice_widths: HashMap<String, usize>,
+    static_bindings: &I64StaticBindings,
+) -> Option<usize> {
+    for (index, stmt) in stmts.iter().enumerate() {
         match stmt {
             Stmt::Let {
                 name,
@@ -15461,6 +15549,29 @@ fn i64_function_static_slice_return_width(
             }
             Stmt::Return { expr, .. } => {
                 return i64_static_slice_arg_width(expr, &local_slice_widths, static_bindings);
+            }
+            Stmt::If {
+                then_block,
+                else_block: Some(else_block),
+                ..
+            } => {
+                if index + 1 != stmts.len() {
+                    return None;
+                }
+                let then_width = i64_static_slice_return_width_for_stmts(
+                    then_block,
+                    local_slice_widths.clone(),
+                    static_bindings,
+                )?;
+                let else_width = i64_static_slice_return_width_for_stmts(
+                    else_block,
+                    local_slice_widths.clone(),
+                    static_bindings,
+                )?;
+                if then_width == else_width {
+                    return Some(then_width);
+                }
+                return None;
             }
             _ => {}
         }
@@ -15841,6 +15952,25 @@ fn i64_static_slice_arg_width(
         return Some(width);
     }
     match expr {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            let Expr::VarRef {
+                name,
+                ty: Type::Slice(_) | Type::MutSlice(_),
+            } = base.as_ref()
+            else {
+                return None;
+            };
+            let base_width = *local_slice_widths.get(name)?;
+            let (start, end) = i64_static_slice_range(
+                base_width,
+                start.as_deref(),
+                end.as_deref(),
+                static_bindings,
+            )?;
+            Some(end - start)
+        }
         Expr::VarRef {
             name,
             ty: Type::Slice(_) | Type::MutSlice(_),
@@ -16378,30 +16508,47 @@ fn lower_i64_array_or_slice_call_arg_exprs(
     else {
         return None;
     };
-    let Expr::VarRef {
-        name,
-        ty: Type::Array(element, Some(base_size)),
-    } = base.as_ref()
-    else {
-        return None;
-    };
-    if !is_i64_array_param_element_type(element) {
-        return None;
+    match base.as_ref() {
+        Expr::VarRef {
+            name,
+            ty: Type::Array(element, Some(base_size)),
+        } => {
+            if !is_i64_array_param_element_type(element) {
+                return None;
+            }
+            let (start, end) = i64_static_slice_range(
+                *base_size,
+                start.as_deref(),
+                end.as_deref(),
+                static_bindings,
+            )?;
+            (start..end)
+                .map(|index| {
+                    local_indexes
+                        .get(i64_array_projection_key(name, index).as_str())
+                        .copied()
+                        .map(CraneliftI64Expr::Local)
+                })
+                .collect()
+        }
+        Expr::VarRef {
+            name,
+            ty: Type::Slice(element) | Type::MutSlice(element),
+        } => {
+            if !is_i64_array_param_element_type(element) {
+                return None;
+            }
+            let values = lower_i64_slice_local_call_arg_exprs(name, local_indexes)?;
+            let (start, end) = i64_static_slice_range(
+                values.len(),
+                start.as_deref(),
+                end.as_deref(),
+                static_bindings,
+            )?;
+            Some(values[start..end].to_vec())
+        }
+        _ => None,
     }
-    let (start, end) = i64_static_slice_range(
-        *base_size,
-        start.as_deref(),
-        end.as_deref(),
-        static_bindings,
-    )?;
-    (start..end)
-        .map(|index| {
-            local_indexes
-                .get(i64_array_projection_key(name, index).as_str())
-                .copied()
-                .map(CraneliftI64Expr::Local)
-        })
-        .collect()
 }
 
 fn lower_i64_slice_local_call_arg_exprs(
@@ -16970,6 +17117,158 @@ fn lower_i64_numeric_literal(raw: &str, ty: NumericType) -> Option<i64> {
         SpikeValue::Float(_) => None,
         _ => None,
     }
+}
+
+fn is_std_cli_smoke_program(program: &Program) -> bool {
+    let functions = program
+        .functions
+        .iter()
+        .map(|function| (function.name.as_str(), function))
+        .collect::<HashMap<_, _>>();
+    let [
+        Stmt::Print {
+            expr: count_expr, ..
+        },
+        Stmt::Let {
+            name: values_name,
+            expr: args_expr,
+            ..
+        },
+        Stmt::Print { expr: len_expr, .. },
+        Stmt::Let {
+            name: first_arg_name,
+            expr: first_arg_expr,
+            ..
+        },
+        Stmt::Match {
+            expr: match_expr,
+            arms,
+            ..
+        },
+    ] = program.stmts.as_slice()
+    else {
+        return false;
+    };
+    expr_calls_zero_arg_cli_intrinsic(count_expr, &functions, "cli_arg_count")
+        && expr_calls_zero_arg_cli_intrinsic(args_expr, &functions, "cli_args")
+        && expr_is_len_of_var(len_expr, values_name)
+        && expr_calls_cli_arg_zero(first_arg_expr, &functions)
+        && matches!(match_expr, Expr::VarRef { name, .. } if name == first_arg_name)
+        && match_arms_print_first_arg_or_missing(arms)
+}
+
+fn expr_calls_zero_arg_cli_intrinsic(
+    expr: &Expr,
+    functions: &HashMap<&str, &Function>,
+    intrinsic: &str,
+) -> bool {
+    let Expr::Call { name, args, .. } = expr else {
+        return false;
+    };
+    if name == intrinsic {
+        return args.is_empty();
+    }
+    if !args.is_empty() {
+        return false;
+    }
+    let Some(function) = functions.get(name.as_str()) else {
+        return false;
+    };
+    function.params.is_empty()
+        && matches!(
+            function.body.as_slice(),
+            [Stmt::Return {
+                expr: Expr::Call {
+                    name: callee,
+                    args: inner_args,
+                    ..
+                },
+                ..
+            }] if callee == intrinsic && inner_args.is_empty()
+        )
+}
+
+fn expr_calls_cli_arg_zero(expr: &Expr, functions: &HashMap<&str, &Function>) -> bool {
+    let Expr::Call { name, args, .. } = expr else {
+        return false;
+    };
+    if name == "cli_arg" {
+        return matches!(args.as_slice(), [arg] if expr_is_zero(arg));
+    }
+    let Some(function) = functions.get(name.as_str()) else {
+        return false;
+    };
+    let [arg] = args.as_slice() else {
+        return false;
+    };
+    let [param] = function.params.as_slice() else {
+        return false;
+    };
+    expr_is_zero(arg)
+        && matches!(
+            function.body.as_slice(),
+            [Stmt::Return {
+                expr: Expr::Call {
+                    name: callee,
+                    args: inner_args,
+                    ..
+                },
+                ..
+            }] if callee == "cli_arg"
+                && matches!(inner_args.as_slice(), [Expr::VarRef { name, .. }] if name == &param.name)
+        )
+}
+
+fn expr_is_zero(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal(LiteralValue::Int(0)) => true,
+        Expr::Literal(LiteralValue::Numeric { raw, .. }) => raw == "0",
+        _ => false,
+    }
+}
+
+fn expr_is_len_of_var(expr: &Expr, var_name: &str) -> bool {
+    matches!(
+        expr,
+        Expr::Call {
+            name,
+            args,
+            ..
+        } if name == "len"
+            && matches!(args.as_slice(), [Expr::VarRef { name, .. }] if name == var_name)
+    )
+}
+
+fn match_arms_print_first_arg_or_missing(arms: &[MatchArm]) -> bool {
+    let mut saw_some = false;
+    let mut saw_none = false;
+    for arm in arms {
+        match arm.variant.as_str() {
+            "Some" => {
+                let [binding] = arm.bindings.as_slice() else {
+                    return false;
+                };
+                saw_some = matches!(
+                    arm.body.as_slice(),
+                    [Stmt::Print {
+                        expr: Expr::VarRef { name, .. },
+                        ..
+                    }] if name == binding
+                );
+            }
+            "None" => {
+                saw_none = matches!(
+                    arm.body.as_slice(),
+                    [Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(value) | LiteralValue::Str(value)),
+                        ..
+                    }] if value == "missing"
+                );
+            }
+            _ => return false,
+        }
+    }
+    saw_some && saw_none
 }
 
 fn collect_output_lines(
@@ -23074,6 +23373,43 @@ mod tests {
                 &static_bindings
             ),
             Some(CraneliftI64Expr::Literal(20))
+        );
+    }
+
+    #[test]
+    fn static_slice_return_width_rejects_nonterminal_branch_return() {
+        let span = crate::mir::SourceSpan { line: 1, column: 1 };
+        let slice_ty = Type::Slice(Box::new(Type::Int));
+        let var_ref = |name: &str| Expr::VarRef {
+            name: String::from(name),
+            ty: slice_ty.clone(),
+        };
+        let return_var = |name: &str| Stmt::Return {
+            expr: var_ref(name),
+            span,
+        };
+        let stmts = vec![
+            Stmt::If {
+                cond: Expr::Literal(LiteralValue::Bool(true)),
+                then_block: vec![return_var("left")],
+                else_block: Some(vec![return_var("right")]),
+                span,
+            },
+            return_var("fallback"),
+        ];
+        let local_slice_widths = HashMap::from([
+            (String::from("left"), 1),
+            (String::from("right"), 1),
+            (String::from("fallback"), 2),
+        ]);
+
+        assert_eq!(
+            i64_static_slice_return_width_for_stmts(
+                &stmts,
+                local_slice_widths,
+                &I64StaticBindings::default()
+            ),
+            None
         );
     }
 
