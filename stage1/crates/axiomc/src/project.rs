@@ -21,6 +21,8 @@ use std::fs;
 use std::io::ErrorKind;
 use std::io::{self, Read, Write};
 #[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -1166,6 +1168,16 @@ fn read_test_expected_stream(
         )
         .with_path(path.display().to_string())
     })?;
+    if !opened_expected_stream_matches(&metadata, &opened_metadata) {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because it changed while being opened",
+                path.display()
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
     if !opened_metadata.file_type().is_file() {
         return Err(Diagnostic::new(
             "test",
@@ -1209,6 +1221,18 @@ fn read_test_expected_stream(
         .with_path(path.display().to_string()));
     }
     Ok(content)
+}
+
+#[cfg(unix)]
+fn opened_expected_stream_matches(validated: &fs::Metadata, opened: &fs::Metadata) -> bool {
+    validated.dev() == opened.dev() && validated.ino() == opened.ino()
+}
+
+#[cfg(not(unix))]
+fn opened_expected_stream_matches(validated: &fs::Metadata, opened: &fs::Metadata) -> bool {
+    validated.len() == opened.len()
+        && validated.file_type().is_file()
+        && opened.file_type().is_file()
 }
 
 #[cfg(unix)]
@@ -8765,6 +8789,34 @@ mod tests {
         assert_eq!(error.kind, "test");
         assert_eq!(error.path, Some(link.display().to_string()));
         assert!(error.message.contains("failed to open stdout fixture"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opened_expected_stream_identity_must_match_validated_file() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let first = dir.path().join("first.stdout");
+        let second = dir.path().join("second.stdout");
+        fs::write(&first, "first\n").unwrap_or_else(|err| panic!("write first: {err}"));
+        fs::write(&second, "second\n").unwrap_or_else(|err| panic!("write second: {err}"));
+
+        let first_metadata =
+            fs::metadata(&first).unwrap_or_else(|err| panic!("metadata first: {err}"));
+        let same_metadata = fs::File::open(&first)
+            .unwrap_or_else(|err| panic!("open first: {err}"))
+            .metadata()
+            .unwrap_or_else(|err| panic!("opened metadata first: {err}"));
+        let second_metadata =
+            fs::metadata(&second).unwrap_or_else(|err| panic!("metadata second: {err}"));
+
+        assert!(opened_expected_stream_matches(
+            &first_metadata,
+            &same_metadata
+        ));
+        assert!(!opened_expected_stream_matches(
+            &first_metadata,
+            &second_metadata
+        ));
     }
 
     #[cfg(unix)]
