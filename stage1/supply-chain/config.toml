@@ -82,6 +82,66 @@ criteria = "safe-to-deploy"
 version = "1.0.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.cranelift-assembler-x64]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-assembler-x64-meta]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-bforest]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-bitset]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-codegen]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-codegen-meta]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-codegen-shared]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-control]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-entity]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-frontend]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-isle]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-module]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-native]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-object]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.cranelift-srcgen]]
+version = "0.132.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.crc32fast]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
@@ -446,6 +506,18 @@ criteria = "safe-to-run"
 version = "0.2.121"
 criteria = "safe-to-run"
 
+[[exemptions.wasm-encoder]]
+version = "0.244.0"
+criteria = "safe-to-run"
+
+[[exemptions.wasmparser]]
+version = "0.244.0"
+criteria = "safe-to-run"
+
+[[exemptions.wasmtime-internal-core]]
+version = "45.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.web-sys]]
 version = "0.3.98"
 criteria = "safe-to-run"
@@ -461,6 +533,30 @@ criteria = "safe-to-deploy"
 [[exemptions.winnow]]
 version = "0.7.15"
 criteria = "safe-to-deploy"
+
+[[exemptions.wit-bindgen]]
+version = "0.51.0"
+criteria = "safe-to-run"
+
+[[exemptions.wit-bindgen-core]]
+version = "0.51.0"
+criteria = "safe-to-run"
+
+[[exemptions.wit-bindgen-rust]]
+version = "0.51.0"
+criteria = "safe-to-run"
+
+[[exemptions.wit-bindgen-rust-macro]]
+version = "0.51.0"
+criteria = "safe-to-run"
+
+[[exemptions.wit-component]]
+version = "0.244.0"
+criteria = "safe-to-run"
+
+[[exemptions.wit-parser]]
+version = "0.244.0"
+criteria = "safe-to-run"
 
 [[exemptions.writeable]]
 version = "0.6.3"
