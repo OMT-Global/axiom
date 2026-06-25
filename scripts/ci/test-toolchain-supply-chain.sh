@@ -28,6 +28,16 @@ grep -Fq 'cargo-vet --version' "$workflow" || {
   exit 1
 }
 
+grep -Fq 'install_version="0.10.2"' "$workflow" || {
+  echo "workflow must normalize cargo-vet 0.10 to the trusted-publisher-aware 0.10.2 installer" >&2
+  exit 1
+}
+
+grep -Fq '[[ "$installed_version" != "cargo-vet ${install_version}" ]]' "$workflow" || {
+  echo "workflow must only reuse the exact normalized cargo-vet installer version" >&2
+  exit 1
+}
+
 grep -Fq 'cargo install cargo-vet --version "$install_version" --locked --force' "$workflow" || {
   echo "workflow must force-install the normalized cargo-vet version on mismatch" >&2
   exit 1
