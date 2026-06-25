@@ -16325,10 +16325,12 @@ fn eval_call(
         return eval_extern_call(function, args, functions, env, lines);
     }
     let mut local_env = env.clone();
+    let mut receiver_alias_bound = false;
     for (param, arg) in function.params.iter().zip(args) {
         let value = eval_expr(arg, functions, env, lines)?;
-        if param.name == "self_" {
+        if param.name == "self_" && !receiver_alias_bound {
             local_env.insert(String::from("self"), value.clone());
+            receiver_alias_bound = true;
         }
         local_env.insert(param.name.clone(), value);
     }
@@ -21812,11 +21814,11 @@ mod tests {
     }
 
     #[test]
-    fn function_receiver_aliases_self_binding() {
+    fn function_receiver_alias_is_not_overwritten_by_later_self_param() {
         let point_ty = Type::Struct(String::from("Point"));
         let function = Function {
-            name: String::from("Point__eq"),
-            source_name: String::from("eq"),
+            name: String::from("Point__same_x"),
+            source_name: String::from("same_x"),
             path: String::from("test"),
             params: vec![
                 crate::mir::Param {
@@ -21824,7 +21826,7 @@ mod tests {
                     ty: point_ty.clone(),
                 },
                 crate::mir::Param {
-                    name: String::from("other"),
+                    name: String::from("self_"),
                     ty: point_ty.clone(),
                 },
             ],
@@ -21842,7 +21844,7 @@ mod tests {
                     }),
                     rhs: Box::new(Expr::FieldAccess {
                         base: Box::new(Expr::VarRef {
-                            name: String::from("other"),
+                            name: String::from("self_"),
                             ty: point_ty.clone(),
                         }),
                         field: String::from("x"),
@@ -21875,16 +21877,22 @@ mod tests {
                 name: String::from("Point"),
                 fields: vec![crate::mir::StructFieldValue {
                     name: String::from("x"),
-                    expr: Expr::Literal(LiteralValue::Int(7)),
+                    expr: Expr::Literal(LiteralValue::Int(9)),
                 }],
                 ty: point_ty,
             },
         ];
 
         assert_eq!(
-            eval_call("Point__eq", &args, &functions, &HashMap::new(), &mut lines)
-                .expect("receiver alias should evaluate"),
-            SpikeValue::Bool(true)
+            eval_call(
+                "Point__same_x",
+                &args,
+                &functions,
+                &HashMap::new(),
+                &mut lines
+            )
+            .expect("receiver alias should evaluate"),
+            SpikeValue::Bool(false)
         );
     }
 
