@@ -4292,7 +4292,7 @@ fn validate_stdlib_wrapper_capabilities(
     module_path: &Path,
     program: &syntax::Program,
     capabilities: &CapabilityConfig,
-    wrappers: &HashMap<String, CapabilityKind>,
+    wrappers: &HashMap<String, Vec<CapabilityKind>>,
 ) -> Result<(), Diagnostic> {
     if wrappers.is_empty() {
         return Ok(());
@@ -4320,7 +4320,7 @@ fn validate_stmt_stdlib_wrapper_capabilities(
     module_path: &Path,
     stmt: &syntax::Stmt,
     capabilities: &CapabilityConfig,
-    wrappers: &HashMap<String, CapabilityKind>,
+    wrappers: &HashMap<String, Vec<CapabilityKind>>,
 ) -> Result<(), Diagnostic> {
     match stmt {
         syntax::Stmt::Let { expr, .. }
@@ -4421,7 +4421,7 @@ fn validate_expr_stdlib_wrapper_capabilities(
     module_path: &Path,
     expr: &syntax::Expr,
     capabilities: &CapabilityConfig,
-    wrappers: &HashMap<String, CapabilityKind>,
+    wrappers: &HashMap<String, Vec<CapabilityKind>>,
 ) -> Result<(), Diagnostic> {
     match expr {
         syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => Ok(()),
@@ -4432,18 +4432,20 @@ fn validate_expr_stdlib_wrapper_capabilities(
             column,
             ..
         } => {
-            if let Some(kind) = wrappers.get(name).copied()
-                && !capabilities.enabled(kind)
-            {
-                return Err(Diagnostic::new(
-                    "capability",
-                    format!(
-                        "call to stdlib wrapper {name:?} requires [capabilities].{} = true",
-                        kind.name()
-                    ),
-                )
-                .with_path(module_path.display().to_string())
-                .with_span(*line, *column));
+            if let Some(kinds) = wrappers.get(name) {
+                for kind in kinds {
+                    if !capabilities.enabled(*kind) {
+                        return Err(Diagnostic::new(
+                            "capability",
+                            format!(
+                                "call to stdlib wrapper {name:?} requires [capabilities].{} = true",
+                                kind.name()
+                            ),
+                        )
+                        .with_path(module_path.display().to_string())
+                        .with_span(*line, *column));
+                    }
+                }
             }
             for arg in args {
                 validate_expr_stdlib_wrapper_capabilities(
@@ -4567,26 +4569,38 @@ fn validate_expr_stdlib_wrapper_capabilities(
     }
 }
 
-fn stdlib_wrapper_capability(module_path: &Path, function_name: &str) -> Option<CapabilityKind> {
-    let module = module_path.to_string_lossy();
-    match (module.as_ref(), function_name) {
-        ("<stdlib>/net.ax", _)
-        | ("<stdlib>/net_tcp.ax", _)
-        | ("<stdlib>/net_udp.ax", _)
-        | ("<stdlib>/http.ax", _)
-        | ("<stdlib>/async_net.ax", _) => Some(CapabilityKind::Net),
-        ("<stdlib>/time.ax", "now_ms" | "now" | "elapsed_ms" | "sleep")
-        | ("<stdlib>/async_time.ax", _) => Some(CapabilityKind::Clock),
-        ("<stdlib>/env.ax", "get_env") => Some(CapabilityKind::Env),
-        ("<stdlib>/fs.ax", "read_file") => Some(CapabilityKind::Fs),
-        ("<stdlib>/fs.ax", _) => Some(CapabilityKind::FsWrite),
-        ("<stdlib>/process.ax", "run_status") => Some(CapabilityKind::Process),
-        ("<stdlib>/crypto_hash.ax", _)
-        | ("<stdlib>/crypto_mac.ax", _)
-        | ("<stdlib>/crypto_rand.ax", _)
-        | ("<stdlib>/crypto_aead.ax", _)
-        | ("<stdlib>/crypto_sign.ax", _)
-        | ("<stdlib>/crypto.ax", _) => Some(CapabilityKind::Crypto),
+fn stdlib_module_file(module_path: &Path) -> Option<String> {
+    let module = module_path.to_string_lossy().replace('\\', "/");
+    let rest = module.strip_prefix("<stdlib>/")?;
+    (!rest.contains('/')).then(|| rest.to_string())
+}
+
+fn stdlib_wrapper_capabilities(
+    module_path: &Path,
+    function_name: &str,
+) -> Option<Vec<CapabilityKind>> {
+    let module = stdlib_module_file(module_path)?;
+    match (module.as_str(), function_name) {
+        ("net.ax", _) | ("net_tcp.ax", _) | ("net_udp.ax", _) | ("http.ax", _) => {
+            Some(vec![CapabilityKind::Net])
+        }
+        ("async_net.ax", _) => Some(vec![CapabilityKind::Net, CapabilityKind::Async]),
+        ("http_async.ax", "async_serve_route") => {
+            Some(vec![CapabilityKind::Net, CapabilityKind::Async])
+        }
+        ("async.ax", _) => Some(vec![CapabilityKind::Async]),
+        ("time.ax", "now_ms" | "now" | "elapsed_ms" | "sleep") => Some(vec![CapabilityKind::Clock]),
+        ("async_time.ax", _) => Some(vec![CapabilityKind::Clock, CapabilityKind::Async]),
+        ("env.ax", "get_env") => Some(vec![CapabilityKind::Env]),
+        ("fs.ax", "read_file") => Some(vec![CapabilityKind::Fs]),
+        ("fs.ax", _) => Some(vec![CapabilityKind::FsWrite]),
+        ("process.ax", "run_status") => Some(vec![CapabilityKind::Process]),
+        ("crypto_hash.ax", _)
+        | ("crypto_mac.ax", _)
+        | ("crypto_rand.ax", _)
+        | ("crypto_aead.ax", _)
+        | ("crypto_sign.ax", _)
+        | ("crypto.ax", _) => Some(vec![CapabilityKind::Crypto]),
         _ => None,
     }
 }
@@ -5013,8 +5027,8 @@ fn flatten_modules(
                     .with_span(import.line, import.column));
                 }
                 visible_functions.insert(export_name.clone(), internal_name.clone());
-                if let Some(kind) = stdlib_wrapper_capability(&import_path, export_name) {
-                    capability_wrappers.insert(export_name.clone(), kind);
+                if let Some(kinds) = stdlib_wrapper_capabilities(&import_path, export_name) {
+                    capability_wrappers.insert(export_name.clone(), kinds);
                 }
             }
             if same_package {
@@ -8382,6 +8396,224 @@ return LEAKED
             error
                 .message
                 .contains(r#"call to stdlib wrapper "resolve" requires [capabilities].net = true"#),
+            "unexpected diagnostic: {error:?}"
+        );
+        assert!(
+            error
+                .path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("deps/evil/src/leak.ax")),
+            "unexpected diagnostic path: {error:?}"
+        );
+    }
+
+    #[test]
+    fn stdlib_wrapper_capabilities_match_stdlib_paths_portably() {
+        assert_eq!(
+            stdlib_wrapper_capabilities(Path::new("<stdlib>/net.ax"), "resolve"),
+            Some(vec![CapabilityKind::Net])
+        );
+        assert_eq!(
+            stdlib_wrapper_capabilities(Path::new("<stdlib>\\net.ax"), "resolve"),
+            Some(vec![CapabilityKind::Net])
+        );
+        assert_eq!(
+            stdlib_wrapper_capabilities(Path::new("<stdlib>\\http_async.ax"), "async_serve_route"),
+            Some(vec![CapabilityKind::Net, CapabilityKind::Async])
+        );
+    }
+
+    #[test]
+    fn dependency_without_async_cannot_use_stdlib_async_wrapper() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path().join("app");
+        let dep = root.join("deps/evil");
+        fs::create_dir_all(root.join("src")).expect("create app src");
+        fs::create_dir_all(dep.join("src")).expect("create dep src");
+        fs::write(
+            root.join("axiom.toml"),
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.evil]
+path = "deps/evil"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+async = true
+"#,
+        )
+        .expect("write app manifest");
+        fs::write(
+            dep.join("axiom.toml"),
+            r#"[package]
+name = "evil"
+version = "0.1.0"
+
+[build]
+entry = "src/lib.ax"
+out_dir = "dist"
+
+[capabilities]
+async = false
+"#,
+        )
+        .expect("write dep manifest");
+        fs::write(
+            root.join("src/main.ax"),
+            r#"import "evil/leak.ax"
+print await leak()
+"#,
+        )
+        .expect("write app source");
+        fs::write(
+            dep.join("src/leak.ax"),
+            r#"import "std/async.ax"
+pub fn leak(): Task<int> {
+return ready<int>(1)
+}
+"#,
+        )
+        .expect("write dep source");
+        fs::write(
+            dep.join("src/lib.ax"),
+            r#"print "dep"
+"#,
+        )
+        .expect("write dep entry");
+        let app_manifest = load_manifest(&root).expect("load app manifest");
+        let dep_manifest = load_manifest(&dep).expect("load dep manifest");
+        fs::write(
+            root.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&root, &app_manifest)
+                .expect("render app lockfile"),
+        )
+        .expect("write app lockfile");
+        fs::write(
+            dep.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&dep, &dep_manifest)
+                .expect("render dep lockfile"),
+        )
+        .expect("write dep lockfile");
+
+        let graph = load_package_graph(&root).expect("load graph");
+        let package_root =
+            canonicalize_existing_path(&root, "project root").expect("canonical root");
+        let error = match analyze_package(&graph, &package_root) {
+            Ok(_) => panic!("async wrapper denied"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .message
+                .contains(r#"call to stdlib wrapper "ready" requires [capabilities].async = true"#),
+            "unexpected diagnostic: {error:?}"
+        );
+        assert!(
+            error
+                .path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("deps/evil/src/leak.ax")),
+            "unexpected diagnostic path: {error:?}"
+        );
+    }
+
+    #[test]
+    fn dependency_without_async_cannot_use_stdlib_http_async_wrapper() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path().join("app");
+        let dep = root.join("deps/evil");
+        fs::create_dir_all(root.join("src")).expect("create app src");
+        fs::create_dir_all(dep.join("src")).expect("create dep src");
+        fs::write(
+            root.join("axiom.toml"),
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.evil]
+path = "deps/evil"
+
+[build]
+entry = "src/main.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+async = true
+"#,
+        )
+        .expect("write app manifest");
+        fs::write(
+            dep.join("axiom.toml"),
+            r#"[package]
+name = "evil"
+version = "0.1.0"
+
+[build]
+entry = "src/lib.ax"
+out_dir = "dist"
+
+[capabilities]
+net = true
+async = false
+"#,
+        )
+        .expect("write dep manifest");
+        fs::write(
+            root.join("src/main.ax"),
+            r#"import "evil/leak.ax"
+print await leak()
+"#,
+        )
+        .expect("write app source");
+        fs::write(
+            dep.join("src/leak.ax"),
+            r#"import "std/http_async.ax"
+pub fn leak(): Task<bool> {
+return async_serve_route(1, "/", "ok", 1)
+}
+"#,
+        )
+        .expect("write dep source");
+        fs::write(
+            dep.join("src/lib.ax"),
+            r#"print "dep"
+"#,
+        )
+        .expect("write dep entry");
+        let app_manifest = load_manifest(&root).expect("load app manifest");
+        let dep_manifest = load_manifest(&dep).expect("load dep manifest");
+        fs::write(
+            root.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&root, &app_manifest)
+                .expect("render app lockfile"),
+        )
+        .expect("write app lockfile");
+        fs::write(
+            dep.join("axiom.lock"),
+            crate::lockfile::render_lockfile_for_project(&dep, &dep_manifest)
+                .expect("render dep lockfile"),
+        )
+        .expect("write dep lockfile");
+
+        let graph = load_package_graph(&root).expect("load graph");
+        let package_root =
+            canonicalize_existing_path(&root, "project root").expect("canonical root");
+        let error = match analyze_package(&graph, &package_root) {
+            Ok(_) => panic!("http async wrapper denied"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.message.contains(
+                r#"call to stdlib wrapper "async_serve_route" requires [capabilities].async = true"#
+            ),
             "unexpected diagnostic: {error:?}"
         );
         assert!(
