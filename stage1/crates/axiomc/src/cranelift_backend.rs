@@ -15578,11 +15578,14 @@ fn collect_output_program(
         SpikeValue::Text(fs_root.display().to_string()),
     );
     let mut lines = Vec::new();
-    for static_def in &program.statics {
-        let value = eval_expr(&static_def.expr, &functions, &env, &mut lines)?;
-        env.insert(static_def.name.clone(), value);
-    }
-    match eval_block(&program.stmts, &functions, &mut env, &mut lines) {
+    let result = (|| {
+        for static_def in &program.statics {
+            let value = eval_expr(&static_def.expr, &functions, &env, &mut lines)?;
+            env.insert(static_def.name.clone(), value);
+        }
+        eval_block(&program.stmts, &functions, &mut env, &mut lines)
+    })();
+    match result {
         Ok(_) => Ok(StaticOutputProgram {
             lines,
             exit_code: 0,
@@ -21494,6 +21497,43 @@ mod tests {
         assert_eq!(
             collect_output_program(&program, Path::new("."), Path::new("."))
                 .expect("fold bounds trap"),
+            StaticOutputProgram {
+                lines: vec![OutputLine::stderr(
+                    "{\"kind\":\"runtime\",\"message\":\"array index out of bounds\"}"
+                )],
+                exit_code: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn folds_static_array_bounds_trap_into_stderr_exit_program() {
+        let program = Program {
+            statics: vec![StaticDef {
+                name: String::from("answer"),
+                ty: Type::Int,
+                expr: Expr::Index {
+                    base: Box::new(Expr::ArrayLiteral {
+                        elements: vec![Expr::Literal(LiteralValue::Int(1))],
+                        ty: Type::Array(Box::new(Type::Int), None),
+                    }),
+                    index: Box::new(Expr::Literal(LiteralValue::Int(2))),
+                    ty: Type::Int,
+                },
+            }],
+            stmts: vec![Stmt::Print {
+                expr: Expr::VarRef {
+                    name: String::from("answer"),
+                    ty: Type::Int,
+                },
+                span: crate::mir::SourceSpan { line: 1, column: 1 },
+            }],
+            ..hello_program()
+        };
+
+        assert_eq!(
+            collect_output_program(&program, Path::new("."), Path::new("."))
+                .expect("fold static bounds trap"),
             StaticOutputProgram {
                 lines: vec![OutputLine::stderr(
                     "{\"kind\":\"runtime\",\"message\":\"array index out of bounds\"}"
