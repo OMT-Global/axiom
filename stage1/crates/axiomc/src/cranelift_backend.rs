@@ -16194,7 +16194,7 @@ fn eval_match_stmt(
     expr: &Expr,
     arms: &[MatchArm],
     functions: &HashMap<&str, &Function>,
-    env: &SpikeEnv,
+    env: &mut SpikeEnv,
     lines: &mut Vec<OutputLine>,
 ) -> Result<Option<SpikeValue>, Diagnostic> {
     let matched = expect_enum_value(eval_expr(expr, functions, env, lines)?)?;
@@ -16212,7 +16212,9 @@ fn eval_match_stmt(
             &matched.payloads,
         )?;
     }
-    eval_block(&arm.body, functions, &mut arm_env, lines)
+    let returned = eval_block(&arm.body, functions, &mut arm_env, lines)?;
+    *env = arm_env;
+    Ok(returned)
 }
 
 fn eval_match_expr(
@@ -22143,6 +22145,94 @@ mod tests {
                 OutputLine::stdout("hello from stage1"),
                 OutputLine::stdout("42")
             ]
+        );
+    }
+
+    #[test]
+    fn folds_match_arm_assignment_into_print_lines() {
+        let span = crate::mir::SourceSpan { line: 1, column: 1 };
+        let option_int = Type::Option(Box::new(Type::Int));
+        let program = Program {
+            path: String::from("match-assign"),
+            structs: vec![],
+            enums: vec![EnumDef {
+                name: String::from("Option"),
+                variants: vec![
+                    EnumVariantDef {
+                        name: String::from("Some"),
+                        payload_tys: vec![Type::Int],
+                        payload_names: vec![],
+                    },
+                    EnumVariantDef {
+                        name: String::from("None"),
+                        payload_tys: vec![],
+                        payload_names: vec![],
+                    },
+                ],
+            }],
+            statics: vec![],
+            functions: vec![],
+            stmts: vec![
+                Stmt::Let {
+                    name: String::from("value"),
+                    ty: Type::Int,
+                    expr: Expr::Literal(LiteralValue::Int(0)),
+                    span,
+                },
+                Stmt::Match {
+                    expr: Expr::EnumVariant {
+                        enum_name: String::from("Option"),
+                        variant: String::from("Some"),
+                        field_names: vec![],
+                        payloads: vec![Expr::Literal(LiteralValue::Int(1))],
+                        ty: option_int,
+                    },
+                    arms: vec![
+                        MatchArm {
+                            enum_name: String::from("Option"),
+                            variant: String::from("Some"),
+                            bindings: vec![],
+                            is_named: false,
+                            ignore_payloads: true,
+                            body: vec![Stmt::Assign {
+                                target: Expr::VarRef {
+                                    name: String::from("value"),
+                                    ty: Type::Int,
+                                },
+                                expr: Expr::Literal(LiteralValue::Int(1)),
+                                span,
+                            }],
+                        },
+                        MatchArm {
+                            enum_name: String::from("Option"),
+                            variant: String::from("None"),
+                            bindings: vec![],
+                            is_named: false,
+                            ignore_payloads: true,
+                            body: vec![],
+                        },
+                    ],
+                    span,
+                },
+                Stmt::Print {
+                    expr: Expr::VarRef {
+                        name: String::from("value"),
+                        ty: Type::Int,
+                    },
+                    span,
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold match arm assignment"),
+            vec![OutputLine::stdout("1")]
         );
     }
 
