@@ -30,10 +30,10 @@ make stage1-direct-native-example-smoke
 ```
 
 The evidence gate validates the machine-readable ABI contract, runs the
-Cranelift backend evidence suite that backs the current `partial` and
-denial-evidence rows, and verifies the `axiomc run/test --backend cranelift`
-command paths can execute without generated-Rust artifacts. It is intentionally
-not a readiness claim while rows remain `partial` or `blocked`.
+Cranelift backend evidence suite that backs the implemented and denial-evidence
+rows, and verifies the `axiomc run/test --backend cranelift` command paths can
+execute without generated-Rust artifacts. It remains a focused ABI evidence
+gate rather than a replacement for the broader Rust-exit readiness gate.
 
 The example smoke runs a bounded subset of checked-in stdlib examples through
 `check`, `build --backend cranelift`, `run --backend cranelift`, and
