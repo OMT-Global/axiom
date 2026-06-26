@@ -22198,8 +22198,13 @@ mod tests {
         };
 
         assert_eq!(
-            collect_output_lines(&program, Path::new("."), Path::new("."))
-                .expect("fold mutable local write-through"),
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold mutable local write-through"),
             vec![OutputLine::stdout("beta")]
         );
     }
@@ -22269,8 +22274,13 @@ mod tests {
         };
 
         assert_eq!(
-            collect_output_lines(&program, Path::new("."), Path::new("."))
-                .expect("fold mutable slice write-through"),
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold mutable slice write-through"),
             vec![OutputLine::stdout("6")]
         );
     }
@@ -22383,8 +22393,13 @@ mod tests {
         };
 
         assert_eq!(
-            collect_output_lines(&program, Path::new("."), Path::new("."))
-                .expect("fold mutable slice call writeback"),
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold mutable slice call writeback"),
             vec![OutputLine::stdout("6"), OutputLine::stdout("6")]
         );
     }
@@ -22510,8 +22525,13 @@ mod tests {
         };
 
         assert_eq!(
-            collect_output_lines(&program, Path::new("."), Path::new("."))
-                .expect("fold nested mutable slice call writeback"),
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold nested mutable slice call writeback"),
             vec![OutputLine::stdout("6"), OutputLine::stdout("6")]
         );
     }
