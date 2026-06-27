@@ -11787,7 +11787,18 @@ let stored_default_scores: {{string: {ty}}} = {{"build": {fallback_literal}, "de
 let stored_default_hit: int = get_or_default<string, {ty}>(stored_default_scores, "deploy", {fallback_literal}) as int
 let stored_direct_scores: {{string: {ty}}} = {{"build": {fallback_literal}, "deploy": {ready_literal}}}
 let stored_direct_hit: int = match get<string, {ty}>(stored_direct_scores, "deploy") {{ Some(value) => value as int, None => 1 }}
-if string_hit == 48 && string_miss == 1 && int_hit == 48 && bool_hit == 48 && duplicate_hit == 48 && direct_get_hit == 48 && direct_get_miss == 1 && direct_int_get_hit == 48 && direct_bool_get_hit == 48 && stored_default_hit == 48 && stored_direct_hit == 48 {{
+let stored_typed_scores: {{string: {ty}}} = {{"build": {fallback_literal}, "deploy": {ready_literal}}}
+let local_typed_get_hit: Option<{ty}> = get<string, {ty}>({{"build": {fallback_literal}, "deploy": {ready_literal}}}, "deploy")
+let local_typed_get_miss: Option<{ty}> = get<string, {ty}>({{"build": {fallback_literal}, "deploy": {ready_literal}}}, "test")
+let local_typed_int_get_hit: Option<{ty}> = get<int, {ty}>({{LOW_KEY: {fallback_literal}, HIGH_KEY: {ready_literal}}}, HIGH_KEY)
+let local_typed_bool_get_hit: Option<{ty}> = get<bool, {ty}>({{DISABLED: {fallback_literal}, ENABLED: {ready_literal}}}, ENABLED)
+let stored_typed_get_hit: Option<{ty}> = get<string, {ty}>(stored_typed_scores, "deploy")
+let local_typed_hit_code: int = match local_typed_get_hit {{ Some(value) => value as int, None => 1 }}
+let local_typed_miss_code: int = match local_typed_get_miss {{ Some(value) => value as int, None => 1 }}
+let local_typed_int_hit_code: int = match local_typed_int_get_hit {{ Some(value) => value as int, None => 1 }}
+let local_typed_bool_hit_code: int = match local_typed_bool_get_hit {{ Some(value) => value as int, None => 1 }}
+let stored_typed_hit_code: int = match stored_typed_get_hit {{ Some(value) => value as int, None => 1 }}
+if string_hit == 48 && string_miss == 1 && int_hit == 48 && bool_hit == 48 && duplicate_hit == 48 && direct_get_hit == 48 && direct_get_miss == 1 && direct_int_get_hit == 48 && direct_bool_get_hit == 48 && local_typed_hit_code == 48 && local_typed_miss_code == 1 && local_typed_int_hit_code == 48 && local_typed_bool_hit_code == 48 && stored_default_hit == 48 && stored_direct_hit == 48 && stored_typed_hit_code == 48 {{
 return 48
 }} else {{
 return 2

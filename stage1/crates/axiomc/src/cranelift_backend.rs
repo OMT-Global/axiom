@@ -3710,6 +3710,43 @@ fn lower_i64_runtime_let_stmts(
     {
         return Some(assigns);
     }
+    if let Stmt::Let {
+        name,
+        ty: Type::Option(inner),
+        expr:
+            expr @ Expr::Call {
+                name: call_name,
+                args,
+                ..
+            },
+        ..
+    } = stmt
+        && is_i64_option_local_payload_type_static(inner, static_bindings)
+    {
+        if let Some(assigns) = lower_i64_known_scalar_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            expr,
+            locals,
+            local_indexes,
+            static_bindings,
+        ) {
+            return Some(assigns);
+        }
+        if let Some(assigns) = lower_i64_option_call_let_stmts(
+            name,
+            inner.as_ref(),
+            call_name,
+            args,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ) {
+            return Some(assigns);
+        }
+    }
     Some(vec![lower_i64_runtime_let(
         stmt,
         locals,

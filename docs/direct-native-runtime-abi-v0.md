@@ -789,7 +789,9 @@ fallback and duplicate-key replacement behavior. Typed numeric map value
 coverage now proves i64-compatible value widths `i8`, `i16`, `i32`, `i64`,
 `isize`, `u8`, `u16`, and `u32` through `get_or_default` hits and misses,
 duplicate-key replacement, string/int/bool keys, direct `get(...)` matches, and
-pre-runtime local map bindings without generated Rust. Inline-map-literal
+typed `get(...)` results stored as local `Option<T>` bindings, pre-runtime
+local map bindings, and post-runtime scalar `Option<T>` call lets without
+generated Rust. Inline-map-literal
 `map_contains_key(...)` over scalar/string keys now also lowers into native
 boolean conditions that can feed direct-native process exit status.
 Inline-map-literal `get(...)` over scalar/string keys and scalar integer,
@@ -825,10 +827,9 @@ conditions. Dynamic finite string-key projections from `keys(...)` over known
 map literals can now also feed public `std/collections.ax` `contains(...)` and
 `get_or_default(...)` wrappers by lowering the selected-key lookup to native
 candidate-key selection without generated Rust.
-Broader map ownership, runtime map storage, typed numeric `get(...)` results
-stored as local `Option<T>` bindings, general payload lookup bindings, general
-`get(...)` Option payload selection for dynamic keys, key/value ownership, and
-host-boundary representation remain tracked by issue #1124.
+Broader map ABI coverage, runtime map storage, general payload lookup bindings,
+general `get(...)` Option payload selection for dynamic keys, key/value
+ownership, and host-boundary representation remain tracked by issue #1124.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names while the public smoke
