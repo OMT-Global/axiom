@@ -9072,6 +9072,12 @@ value: int
 ready: bool
 }
 
+enum Choice {
+Ready { step: Step }
+Fallback { step: Step }
+Off
+}
+
 fn make_pair(): (int, bool) {
 return (48, true)
 }
@@ -9096,6 +9102,30 @@ fn forward_step(): Step {
 return make_step()
 }
 
+fn make_option(): Option<Step> {
+return Some(Step { value: 48, ready: true })
+}
+
+fn forward_option(): Option<Step> {
+return make_option()
+}
+
+fn make_result(): Result<Step, Step> {
+return Ok(Step { value: 48, ready: true })
+}
+
+fn forward_result(): Result<Step, Step> {
+return make_result()
+}
+
+fn make_choice(): Choice {
+return Ready { step: Step { value: 48, ready: true } }
+}
+
+fn forward_choice(): Choice {
+return make_choice()
+}
+
 fn score_pair(pair: (int, bool)): int {
 if pair.1 {
 return pair.0
@@ -9116,14 +9146,48 @@ return 1
 }
 }
 
+fn score_option(value: Option<Step>): int {
+return match value { Some(step) => step.value, None => 1 }
+}
+
+fn score_result(value: Result<Step, Step>): int {
+return match value { Ok(step) => step.value, Err(step) => step.value }
+}
+
+fn score_choice(choice: Choice): int {
+let code: int = 0
+match choice {
+Ready { step } {
+if step.ready {
+code = step.value
+} else {
+code = 1
+}
+}
+Fallback { step } {
+code = step.value
+}
+Off {
+code = 1
+}
+}
+return code
+}
+
 fn main(): int {
 let pair: (int, bool) = forward_pair()
 let values: [int; 2] = forward_values()
 let step: Step = forward_step()
+let maybe: Option<Step> = forward_option()
+let outcome: Result<Step, Step> = forward_result()
+let choice: Choice = forward_choice()
 let pair_score: int = score_pair(pair)
 let values_score: int = score_values(values)
 let step_score: int = score_step(step)
-if pair_score == 48 && values_score == 48 && step_score == 48 {
+let option_score: int = score_option(maybe)
+let result_score: int = score_result(outcome)
+let choice_score: int = score_choice(choice)
+if pair_score == 48 && values_score == 48 && step_score == 48 && option_score == 48 && result_score == 48 && choice_score == 48 {
 return 48
 } else {
 return 1

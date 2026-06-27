@@ -389,10 +389,11 @@ tag/payload-slot representation now covers `Option<[int; 2]>` construction,
 matching, helper parameters, helper returns, forwarded helper values, and inline
 `Some([..])`/`None` helper arguments. The same representation now covers narrow
 `Option<Step>` struct payload construction, expression and statement matches,
-helper parameters, helper returns, forwarded helper values, and inline
-`Some(Step { ... })`/`None` helper arguments using declared field-order payload
-slots. Existing narrow `Option<Step>` locals can now be reassigned from option
-helper returns using the same tag/payload slots, including inside runtime branch
+helper parameters, helper returns, forwarded helper values, final helper-call
+forwarding returns, and inline `Some(Step { ... })`/`None` helper arguments
+using declared field-order payload slots. Existing narrow `Option<Step>` locals
+can now be reassigned from option helper returns using the same tag/payload slots,
+including inside runtime branch
 blocks. The direct-native path also has narrow evidence for nested
 `Option<Option<int>>` construction, matching, helper parameters, helper returns,
 forwarded helper values, and inline `Some(Some(...))`, `Some(None)`, and outer
@@ -912,10 +913,11 @@ construction, matching, helper parameters, helper returns, forwarded helper
 values, and inline `Ok([..])`/`Err([..])` helper arguments represented as a tag
 plus fixed-array payload slots. It also covers narrow `Result<Step, Step>`
 struct payload construction, expression and statement matches, helper
-parameters, helper returns, forwarded helper values, and inline
-`Ok(Step { ... })`/`Err(Step { ... })` helper arguments using declared
-field-order payload slots. Existing narrow `Result<Step, Step>` locals can now
-be reassigned from result helper returns using the same tag/payload slots,
+parameters, helper returns, forwarded helper values, final helper-call
+forwarding returns, and inline `Ok(Step { ... })`/`Err(Step { ... })` helper
+arguments using declared field-order payload slots. Existing narrow
+`Result<Step, Step>` locals can now be reassigned from result helper returns
+using the same tag/payload slots,
 including inside runtime branch blocks. The nested option payload slice now also
 has narrow direct-native evidence for `Result<Option<int>, int>` construction,
 matching, helper parameters, helper returns, forwarded helper values, and inline
@@ -941,8 +943,9 @@ payloads such as `(int, bool)` and
 `Step { value: int, enabled: bool }`. Scalar/bool custom enum helper parameters
 lower across direct-native function-call boundaries as explicit tag/payload ABI
 slots for local values and inline variant arguments. Narrow custom enum helper
-returns and forwarded local or parameter values also lower through the same
-tag/payload slots for scalar struct payload variants. Existing narrow custom
+returns, forwarded local or parameter values, and final helper-call forwarding
+returns also lower through the same tag/payload slots for scalar struct payload
+variants. Existing narrow custom
 enum locals can now be reassigned from enum helper returns using the same
 tag/payload slots, including inside runtime branch blocks. The same
 representation now has narrow evidence for positional custom enum payloads
