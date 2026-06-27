@@ -19439,11 +19439,8 @@ fn net_tcp_write_string(stream: i64, message: &str) -> i64 {
 }
 
 fn net_tcp_close(stream: i64) -> i64 {
-    if spike_tcp_streams()
-        .lock()
-        .ok()
-        .and_then(|mut streams| streams.remove(&stream))
-        .is_some()
+    if let Ok(mut streams) = spike_tcp_streams().lock()
+        && streams.remove(&stream).is_some()
     {
         0
     } else {
@@ -22136,6 +22133,47 @@ mod tests {
                 &I64StaticBindings::default()
             ),
             Some(vec![I64MapKey::Int(2), I64MapKey::Int(1)])
+        );
+    }
+
+    #[test]
+    fn net_tcp_close_removes_stream_state_before_future_loopback_echoes() {
+        let listener_port = 4242;
+        let stream_handle = 7;
+        let streams = spike_tcp_streams();
+        let listeners = spike_tcp_listeners();
+        {
+            let mut streams = streams.lock().expect("lock tcp streams");
+            streams.insert(
+                stream_handle,
+                SpikeTcpStream {
+                    listener_port,
+                    received: String::from("old"),
+                    written: String::from("stale"),
+                },
+            );
+        }
+        {
+            let mut listeners = listeners.lock().expect("lock tcp listeners");
+            listeners.insert(
+                11,
+                SpikeTcpListener {
+                    port: listener_port,
+                },
+            );
+        }
+
+        assert_eq!(net_tcp_close(stream_handle), 0);
+        assert_eq!(
+            net_tcp_registered_loopback_echo("127.0.0.1", listener_port, "fresh"),
+            Some(String::from("fresh"))
+        );
+        assert_eq!(
+            streams
+                .lock()
+                .expect("lock tcp streams after close")
+                .get(&stream_handle),
+            None
         );
     }
 
