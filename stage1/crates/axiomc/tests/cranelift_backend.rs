@@ -3457,6 +3457,184 @@ fn cranelift_backend_lowers_enum_payload_match_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_enum_numeric_width_payload_match_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    for (name, ty, ready_literal, fallback_literal, variant, expected) in [
+        (
+            "enum-ready-i8-payload-match-main-exit",
+            "i8",
+            "48i8",
+            "49i8",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-i8-payload-match-main-exit",
+            "i8",
+            "48i8",
+            "49i8",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-i16-payload-match-main-exit",
+            "i16",
+            "48i16",
+            "49i16",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-i16-payload-match-main-exit",
+            "i16",
+            "48i16",
+            "49i16",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-i32-payload-match-main-exit",
+            "i32",
+            "48i32",
+            "49i32",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-i32-payload-match-main-exit",
+            "i32",
+            "48i32",
+            "49i32",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-i64-payload-match-main-exit",
+            "i64",
+            "48i64",
+            "49i64",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-i64-payload-match-main-exit",
+            "i64",
+            "48i64",
+            "49i64",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-isize-payload-match-main-exit",
+            "isize",
+            "48isize",
+            "49isize",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-isize-payload-match-main-exit",
+            "isize",
+            "48isize",
+            "49isize",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-u8-payload-match-main-exit",
+            "u8",
+            "48u8",
+            "49u8",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-u8-payload-match-main-exit",
+            "u8",
+            "48u8",
+            "49u8",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-u16-payload-match-main-exit",
+            "u16",
+            "48u16",
+            "49u16",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-u16-payload-match-main-exit",
+            "u16",
+            "48u16",
+            "49u16",
+            "Fallback",
+            49,
+        ),
+        (
+            "enum-ready-u32-payload-match-main-exit",
+            "u32",
+            "48u32",
+            "49u32",
+            "Ready",
+            48,
+        ),
+        (
+            "enum-fallback-u32-payload-match-main-exit",
+            "u32",
+            "48u32",
+            "49u32",
+            "Fallback",
+            49,
+        ),
+    ] {
+        let project = temp.path().join(name);
+        write_enum_numeric_width_payload_match_main_exit_project(
+            &project,
+            name,
+            ty,
+            ready_literal,
+            fallback_literal,
+            variant,
+        );
+
+        let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+            .args([
+                "build",
+                project.to_str().expect("project path"),
+                "--backend",
+                "cranelift",
+                "--json",
+            ])
+            .output()
+            .expect("run axiomc build --backend cranelift");
+        assert!(
+            output.status.success(),
+            "cranelift {variant} enum numeric width payload match main build failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+        assert_eq!(payload["backend"], "cranelift");
+        assert_eq!(payload["generated_rust"], Value::Null);
+        let binary = payload["binary"].as_str().expect("binary path");
+        let run = Command::new(binary)
+            .output()
+            .expect("run cranelift enum numeric width payload match main binary");
+        assert_eq!(run.status.code(), Some(expected));
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    }
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_builds_array_helpers_binary() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -10560,6 +10738,38 @@ fn write_enum_payload_match_main_exit_project(project: &Path, variant: &str) {
         format!("struct Step {{\nvalue: int\nenabled: bool\n}}\n\nenum Choice {{\nReady {{ step: Step }}\nFallback {{ step: Step }}\nOff\n}}\n\nfn choose_choice(mode: int): Choice {{\nif mode == 0 {{\nlet value: int = 48\nreturn Ready {{ step: Step {{ value: value, enabled: true }} }}\n}} else {{\nlet fallback: int = 49\nreturn Fallback {{ step: Step {{ enabled: true, value: fallback }} }}\n}}\n}}\n\nfn forward_choice(value: Choice): Choice {{\nreturn value\n}}\n\nfn score(choice: Choice): int {{\nlet code: int = 0\nmatch choice {{\nReady {{ step }} {{\nif step.enabled {{\ncode = step.value\n}} else {{\ncode = 2\n}}\n}}\nFallback {{ step }} {{\nif step.enabled {{\ncode = step.value\n}} else {{\ncode = 2\n}}\n}}\nOff {{\ncode = 1\n}}\n}}\nreturn code\n}}\n\nfn main(): int {{\nlet helper_choice: Choice = Off\nlet value_choice: Choice = Off\nlet stmt_choice: Choice = Off\nhelper_choice = {value}\nvalue_choice = {value}\nstmt_choice = {value}\nlet returned_ready: Choice = choose_choice(0)\nlet returned_fallback: Choice = choose_choice(1)\nlet ready_to_forward: Choice = choose_choice(0)\nlet fallback_to_forward: Choice = choose_choice(1)\nlet forwarded_ready: Choice = forward_choice(ready_to_forward)\nlet forwarded_fallback: Choice = forward_choice(fallback_to_forward)\nlet helper_code: int = score(helper_choice)\nlet inline_code: int = score({value})\nlet returned_ready_code: int = score(returned_ready)\nlet returned_fallback_code: int = score(returned_fallback)\nlet forwarded_ready_code: int = score(forwarded_ready)\nlet forwarded_fallback_code: int = score(forwarded_fallback)\nlet match_code: int = match value_choice {{ Ready {{ step }} => step.value, Fallback {{ step }} => step.value, Off => 1 }}\nlet statement_code: int = 0\nmatch stmt_choice {{\nReady {{ step }} {{\nif step.enabled {{\nstatement_code = step.value\n}} else {{\nstatement_code = 2\n}}\n}}\nFallback {{ step }} {{\nif step.enabled {{\nstatement_code = step.value\n}} else {{\nstatement_code = 2\n}}\n}}\nOff {{\nstatement_code = 1\n}}\n}}\nif match_code == statement_code && helper_code == match_code && inline_code == match_code && returned_ready_code == 48 && returned_fallback_code == 49 && forwarded_ready_code == 48 && forwarded_fallback_code == 49 {{\nreturn match_code\n}} else {{\nreturn 2\n}}\n}}\n"),
     )
     .expect("write enum payload match source");
+}
+
+fn write_enum_numeric_width_payload_match_main_exit_project(
+    project: &Path,
+    package_name: &str,
+    ty: &str,
+    ready_literal: &str,
+    fallback_literal: &str,
+    variant: &str,
+) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create enum numeric width payload match project src");
+    fs::write(
+        project.join("axiom.toml"),
+        format!("[package]\nname = \"cranelift-{package_name}\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n"),
+    )
+    .expect("write enum numeric width payload match manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        format!("version = 1\n\n[[package]]\nname = \"cranelift-{package_name}\"\nversion = \"0.1.0\"\nsource = \"path\"\n"),
+    )
+    .expect("write enum numeric width payload match lockfile");
+    let value = match variant {
+        "Ready" => format!("Ready({ready_literal})"),
+        "Fallback" => format!("Fallback({fallback_literal})"),
+        other => panic!("unexpected enum numeric width payload variant {other}"),
+    };
+    fs::write(
+        project.join("src/main.ax"),
+        format!("enum Choice {{\nReady({ty})\nFallback({ty})\nOff\n}}\n\nfn choose_choice(mode: int): Choice {{\nif mode == 0 {{\nreturn Ready({ready_literal})\n}} else {{\nreturn Fallback({fallback_literal})\n}}\n}}\n\nfn forward_choice(value: Choice): Choice {{\nreturn value\n}}\n\nfn score(choice: Choice): int {{\nreturn match choice {{ Ready(payload) => payload as int, Fallback(payload) => payload as int, Off => 1 }}\n}}\n\nfn main(): int {{\nlet ready_for_match: Choice = Off\nlet ready_for_statement: Choice = Off\nlet ready_for_helper: Choice = Off\nready_for_match = {value}\nready_for_statement = {value}\nready_for_helper = {value}\nlet returned_ready_for_score: Choice = choose_choice(0)\nlet returned_fallback_for_score: Choice = choose_choice(1)\nlet returned_ready_for_forward: Choice = choose_choice(0)\nlet returned_fallback_for_forward: Choice = choose_choice(1)\nlet forwarded_ready: Choice = forward_choice(returned_ready_for_forward)\nlet forwarded_fallback: Choice = forward_choice(returned_fallback_for_forward)\nlet match_code: int = match ready_for_match {{ Ready(value) => value as int, Fallback(value) => value as int, Off => 1 }}\nlet statement_code: int = 0\nmatch ready_for_statement {{\nReady(value) {{\nstatement_code = value as int\n}}\nFallback(value) {{\nstatement_code = value as int\n}}\nOff {{\nstatement_code = 1\n}}\n}}\nlet helper_code: int = score(ready_for_helper)\nlet inline_code: int = score({value})\nlet returned_ready_code: int = score(returned_ready_for_score)\nlet returned_fallback_code: int = score(returned_fallback_for_score)\nlet forwarded_ready_code: int = score(forwarded_ready)\nlet forwarded_fallback_code: int = score(forwarded_fallback)\nlet literal_ready_code: int = score(Ready({ready_literal}))\nlet literal_fallback_code: int = score(Fallback({fallback_literal}))\nif match_code == statement_code && statement_code == helper_code && inline_code == match_code && returned_ready_code == 48 && returned_fallback_code == 49 && forwarded_ready_code == 48 && forwarded_fallback_code == 49 && literal_ready_code == 48 && literal_fallback_code == 49 {{\nreturn match_code\n}} else {{\nreturn 2\n}}\n}}\n"),
+    )
+    .expect("write enum numeric width payload match source");
 }
 
 fn write_struct_field_project(project: &Path) {

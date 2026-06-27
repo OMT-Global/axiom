@@ -935,7 +935,12 @@ The `enum.payload` row now has narrow direct-native runtime evidence for local
 custom enum construction, reassignment, value-producing matches, and statement
 matches over scalar/bool positional and named payload variants, represented as a
 tag plus payload slots and returned as process exit status without generated
-Rust. The public enum-match smoke also asserts `generated_rust: null` while
+Rust. Typed numeric custom enum payload coverage now proves the i64-compatible
+integer payload widths `i8`, `i16`, `i32`, `i64`, `isize`, `u8`, `u16`, and
+`u32` across both payload variants, including expression matches, statement
+matches, helper parameters, helper returns, forwarded helper values, and inline
+variant arguments without generated Rust. The public enum-match smoke also
+asserts `generated_rust: null` while
 printing string, scalar, and boolean values derived from positional and named
 custom enum payload matches, including string, scalar, and boolean projections
 from helper-returned custom enum values before native stdout. The same
