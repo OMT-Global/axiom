@@ -956,13 +956,13 @@ fn load_manifest_test_stream(
         return Ok(None);
     }
     let path = project_root.join(configured);
-    if !path.exists() {
-        return Ok(None);
-    }
     if fs::symlink_metadata(&path)
         .map(|metadata| metadata.file_type().is_symlink())
         .unwrap_or(false)
     {
+        return Ok(None);
+    }
+    if !path.exists() {
         return Ok(None);
     }
     let package_root = canonicalize_existing_path(project_root, "package root")?;
@@ -8899,6 +8899,20 @@ mod tests {
 
         let loaded = load_manifest_test_stream(&root, Some("stdout.txt"), "stdout")
             .unwrap_or_else(|err| panic!("load symlink: {err:?}"));
+        assert_eq!(loaded, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manifest_test_streams_do_not_follow_dangling_symlinks() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path().join("package");
+        fs::create_dir_all(&root).unwrap_or_else(|err| panic!("create package: {err}"));
+        std::os::unix::fs::symlink(dir.path().join("missing.txt"), root.join("stderr.txt"))
+            .unwrap_or_else(|err| panic!("symlink stderr: {err}"));
+
+        let loaded = load_manifest_test_stream(&root, Some("stderr.txt"), "stderr")
+            .unwrap_or_else(|err| panic!("load dangling symlink: {err:?}"));
         assert_eq!(loaded, None);
     }
 
