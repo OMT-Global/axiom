@@ -24,6 +24,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const SPIKE_FS_ROOT_BINDING: &str = "$axiom_fs_root";
+const SPIKE_ENV_ALLOWLIST_BINDING: &str = "$axiom_env_allowlist";
+const SPIKE_ENV_UNRESTRICTED_BINDING: &str = "$axiom_env_unrestricted";
 const SPIKE_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;
 const SPIKE_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;
 const SPIKE_MAX_CLOCK_SLEEP_MS: i64 = 1_000;
@@ -316,7 +318,7 @@ pub fn compile_cranelift_hello_spike(
             "main function is outside the direct-native i64 ABI subset",
         ));
     }
-    let lines = collect_output_lines(program, package_root, fs_root)?;
+    let lines = collect_output_lines(program, capabilities, package_root, fs_root)?;
     axiomc_backend_cranelift::compile_output_lines(&lines, object_path, binary_path).map_err(
         |err| {
             Diagnostic::new("build", err.to_string()).with_path(object_path.display().to_string())
@@ -15775,6 +15777,7 @@ fn lower_i64_numeric_literal(raw: &str, ty: NumericType) -> Option<i64> {
 
 fn collect_output_lines(
     program: &Program,
+    capabilities: &CapabilityConfig,
     _package_root: &Path,
     fs_root: &Path,
 ) -> Result<Vec<OutputLine>, Diagnostic> {
@@ -15787,6 +15790,21 @@ fn collect_output_lines(
     env.insert(
         SPIKE_FS_ROOT_BINDING.to_string(),
         SpikeValue::Text(fs_root.display().to_string()),
+    );
+    env.insert(
+        SPIKE_ENV_ALLOWLIST_BINDING.to_string(),
+        SpikeValue::Array(
+            capabilities
+                .env_vars
+                .iter()
+                .cloned()
+                .map(SpikeValue::Text)
+                .collect(),
+        ),
+    );
+    env.insert(
+        SPIKE_ENV_UNRESTRICTED_BINDING.to_string(),
+        SpikeValue::Bool(capabilities.env_unrestricted),
     );
     let mut lines = Vec::new();
     for static_def in &program.statics {
@@ -19597,8 +19615,9 @@ fn http_get(url: &str) -> Option<String> {
         return None;
     }
     let request = http_request(&host, &path);
+    let addrs = resolve_public_socket_addrs(host.as_str(), port)?;
     let mut stream = None;
-    for addr in (host.as_str(), port).to_socket_addrs().ok()? {
+    for addr in addrs {
         if let Ok(candidate) =
             std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5))
         {
@@ -19615,6 +19634,47 @@ fn http_get(url: &str) -> Option<String> {
         .ok()?;
     stream.write_all(request.as_bytes()).ok()?;
     http_read_response(&mut stream)
+}
+
+fn resolve_public_socket_addrs(host: &str, port: u16) -> Option<Vec<std::net::SocketAddr>> {
+    let addrs: Vec<std::net::SocketAddr> = (host, port).to_socket_addrs().ok()?.collect();
+    if addrs.is_empty() || addrs.iter().any(|addr| is_blocked_network_ip(addr.ip())) {
+        return None;
+    }
+    Some(addrs)
+}
+
+fn is_blocked_network_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(addr) => {
+            let octets = addr.octets();
+            addr.is_private()
+                || addr.is_loopback()
+                || addr.is_link_local()
+                || addr.is_unspecified()
+                || addr.is_broadcast()
+                || addr.is_multicast()
+                || octets[0] == 0
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                || (octets[0] == 198 && (18..=19).contains(&octets[1]))
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+        }
+        std::net::IpAddr::V6(addr) => {
+            if let Some(mapped) = addr.to_ipv4_mapped() {
+                return is_blocked_network_ip(std::net::IpAddr::V4(mapped));
+            }
+            let segments = addr.segments();
+            addr.is_loopback()
+                || addr.is_unspecified()
+                || addr.is_multicast()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        }
+    }
 }
 
 fn http_strip_crlf(value: &str) -> String {
@@ -19818,7 +19878,14 @@ fn http_serve_route_on_server(
 }
 
 fn http_parse_loopback_bind(bind: &str) -> Option<SocketAddr> {
-    let addr = bind.parse::<SocketAddr>().ok()?;
+    let addr = bind.parse::<SocketAddr>().ok().or_else(|| {
+        let (host, port) = bind.rsplit_once(':')?;
+        if host != "localhost" {
+            return None;
+        }
+        let port = port.parse::<u16>().ok()?;
+        Some(SocketAddr::from(([127, 0, 0, 1], port)))
+    })?;
     if !addr.ip().is_loopback() {
         return None;
     }
@@ -19948,7 +20015,26 @@ fn eval_env_get_call(
         return Err(unsupported("env_get expects exactly one argument"));
     };
     let name = expect_text(eval_expr(name, functions, env, lines)?, "env_get")?;
+    if !spike_env_name_allowed(env, &name) {
+        return Ok(spike_option(None));
+    }
     Ok(spike_option(env::var(name).ok().map(SpikeValue::Text)))
+}
+
+fn spike_env_name_allowed(env: &SpikeEnv, name: &str) -> bool {
+    if matches!(
+        env.get(SPIKE_ENV_UNRESTRICTED_BINDING),
+        Some(SpikeValue::Bool(true))
+    ) {
+        return true;
+    }
+    matches!(
+        env.get(SPIKE_ENV_ALLOWLIST_BINDING),
+        Some(SpikeValue::Array(names))
+            if names
+                .iter()
+                .any(|allowed| matches!(allowed, SpikeValue::Text(allowed) if allowed == name))
+    )
 }
 
 fn is_fs_write_call(name: &str) -> bool {
@@ -21805,14 +21891,34 @@ mod tests {
     #[test]
     fn folds_hello_subset_into_print_lines() {
         assert_eq!(
-            collect_output_lines(&hello_program(), Path::new("."), Path::new("."))
-                .expect("fold hello"),
+            collect_output_lines(
+                &hello_program(),
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold hello"),
             vec![
                 OutputLine::stdout("hello from stage1"),
                 OutputLine::stdout("42")
             ]
         );
     }
+
+    #[test]
+    fn loopback_bind_parser_accepts_localhost() {
+        assert_eq!(
+            http_parse_loopback_bind("localhost:0"),
+            Some(SocketAddr::from(([127, 0, 0, 1], 0)))
+        );
+        assert_eq!(
+            http_parse_loopback_bind("127.0.0.1:8080"),
+            Some(SocketAddr::from(([127, 0, 0, 1], 8080)))
+        );
+        assert_eq!(http_parse_loopback_bind("example.com:80"), None);
+        assert_eq!(http_parse_loopback_bind("192.0.2.1:80"), None);
+    }
+
     #[test]
     fn static_map_lookups_respect_last_duplicate_key() {
         let map = Expr::MapLiteral {
@@ -21996,6 +22102,50 @@ mod tests {
             spike_fs_write_candidate_for_root(root, "dangling.txt", false),
             None
         );
+    }
+
+    #[test]
+    fn cranelift_http_resolver_rejects_blocked_network_addresses() {
+        for ip in [
+            "0.0.0.0",
+            "10.0.0.1",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "192.0.2.1",
+            "192.168.0.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "::",
+            "::1",
+            "::ffff:127.0.0.1",
+            "fc00::1",
+            "fe80::1",
+            "2001:db8::1",
+        ] {
+            assert!(
+                is_blocked_network_ip(ip.parse().expect("valid IP literal")),
+                "{ip} should be blocked"
+            );
+        }
+
+        assert!(
+            resolve_public_socket_addrs("127.0.0.1", 80).is_none(),
+            "loopback HTTP targets must not be reachable during Cranelift folding"
+        );
+    }
+
+    #[test]
+    fn cranelift_http_resolver_allows_public_addresses() {
+        for ip in ["1.1.1.1", "8.8.8.8", "2001:4860:4860::8888"] {
+            assert!(
+                !is_blocked_network_ip(ip.parse().expect("valid IP literal")),
+                "{ip} should be allowed"
+            );
+        }
     }
 
     #[test]
