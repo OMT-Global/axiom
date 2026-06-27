@@ -4866,6 +4866,63 @@ fn cranelift_backend_lowers_map_get_or_default_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_map_numeric_width_values_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    for (name, ty, ready_literal, fallback_literal) in [
+        ("map-i8-value-main-exit", "i8", "48i8", "1i8"),
+        ("map-i16-value-main-exit", "i16", "48i16", "1i16"),
+        ("map-i32-value-main-exit", "i32", "48i32", "1i32"),
+        ("map-i64-value-main-exit", "i64", "48i64", "1i64"),
+        ("map-isize-value-main-exit", "isize", "48isize", "1isize"),
+        ("map-u8-value-main-exit", "u8", "48u8", "1u8"),
+        ("map-u16-value-main-exit", "u16", "48u16", "1u16"),
+        ("map-u32-value-main-exit", "u32", "48u32", "1u32"),
+    ] {
+        let project = temp.path().join(name);
+        write_map_numeric_width_value_main_exit_project(
+            &project,
+            name,
+            ty,
+            ready_literal,
+            fallback_literal,
+        );
+
+        let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+            .args([
+                "build",
+                project.to_str().expect("project path"),
+                "--backend",
+                "cranelift",
+                "--json",
+            ])
+            .output()
+            .expect("run axiomc build --backend cranelift");
+        assert!(
+            output.status.success(),
+            "cranelift {ty} map numeric width value main build failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+        assert_eq!(payload["backend"], "cranelift");
+        assert_eq!(payload["generated_rust"], Value::Null);
+        let binary = payload["binary"].as_str().expect("binary path");
+        let run = Command::new(binary)
+            .output()
+            .expect("run cranelift map numeric width value main binary");
+        assert_eq!(run.status.code(), Some(48));
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    }
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_static_bool_map_keys_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -11688,6 +11745,58 @@ fn write_map_get_or_default_main_exit_project(project: &Path) {
         "static STATIC_LOW_KEY: int = 1\nstatic STATIC_HIGH_KEY: int = 2\nstatic STATIC_MISSING_KEY: int = 3\n\nfn main(): int {\nlet string_hit: int = get_or_default<string, int>({\"build\": 7, \"deploy\": 9}, \"deploy\", 13)\nlet string_miss: int = get_or_default<string, int>({\"build\": 7, \"deploy\": 9}, \"test\", 13)\nlet int_hit: int = get_or_default<int, int>({1: 11, 2: 29}, 2, 13)\nlet static_int_hit: int = get_or_default<int, int>({STATIC_LOW_KEY: 11, STATIC_HIGH_KEY: 29}, STATIC_HIGH_KEY, 13)\nlet bool_hit: int = get_or_default<bool, int>({false: 3, true: 5}, true, 13)\nlet duplicate_hit: int = get_or_default<string, int>({\"deploy\": 9, \"deploy\": 11}, \"deploy\", 13)\nlet duplicate_contains: bool = map_contains_key<string, int>({\"deploy\": 9, \"deploy\": 11}, \"deploy\")\nlet duplicate_direct_get: int = match get<string, int>({\"deploy\": 9, \"deploy\": 11}, \"deploy\") { Some(value) => value, None => 1 }\nlet string_contains: bool = map_contains_key<string, int>({\"build\": 7, \"deploy\": 9}, \"deploy\")\nlet string_missing: bool = map_contains_key<string, int>({\"build\": 7, \"deploy\": 9}, \"test\") == false\nlet int_contains: bool = map_contains_key<int, int>({1: 11, 2: 29}, 1)\nlet static_int_contains: bool = map_contains_key<int, int>({STATIC_LOW_KEY: 11, STATIC_HIGH_KEY: 29}, STATIC_LOW_KEY)\nlet bool_contains: bool = map_contains_key<bool, int>({false: 3, true: 5}, false)\nlet direct_get_hit: int = match get<string, int>({\"build\": 7, \"deploy\": 9}, \"deploy\") { Some(value) => value, None => 1 }\nlet direct_get_miss: int = match get<string, int>({\"build\": 7, \"deploy\": 9}, \"test\") { Some(value) => value, None => 13 }\nlet direct_bool_hit: bool = match get<bool, bool>({false: true, true: false}, false) { Some(value) => value, None => false }\nlet direct_bool_miss: bool = match get<bool, bool>({false: true}, true) { Some(value) => value, None => true }\nlet direct_string_hit_len: int = match get<string, string>({\"build\": \"forge\", \"deploy\": \"ship\"}, \"deploy\") { Some(value) => len(value), None => 1 }\nlet direct_string_miss_len: int = match get<string, string>({\"build\": \"forge\", \"deploy\": \"ship\"}, \"test\") { Some(value) => len(value), None => 13 }\nlet stored_default_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nlet stored_default_hit: int = get_or_default<string, int>(stored_default_scores, \"deploy\", 13)\nlet stored_contains_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nlet stored_contains: bool = map_contains_key<string, int>(stored_contains_scores, \"build\")\nlet stored_direct_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nlet stored_direct_hit: int = match get<string, int>(stored_direct_scores, \"build\") { Some(value) => value, None => 1 }\nlet stored_string_values: {string: string} = {\"build\": \"forge\", \"deploy\": \"ship\"}\nlet stored_string_value_len: int = match get<string, string>(stored_string_values, \"deploy\") { Some(value) => len(value), None => 1 }\nlet stored_key_count_scores: {string: int} = {\"build\": 7, \"deploy\": 9, \"deploy\": 11}\nlet stored_key_count_names: [string] = keys<string, int>(stored_key_count_scores)\nlet stored_key_count: int = len(stored_key_count_names)\nlet first_key_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nlet first_key_names: [string] = keys<string, int>(first_key_scores)\nlet first_key_len: int = len(first_key_names[0])\nlet second_key_scores: {string: int} = {\"build\": 7, \"deploy\": 9}\nlet second_key_names: [string] = keys<string, int>(second_key_scores)\nlet second_key_len: int = len(second_key_names[1])\nlet local_string_value_hit: Option<string> = get<string, string>({\"build\": \"forge\", \"deploy\": \"ship\"}, \"deploy\")\nlet local_string_value_miss: Option<string> = get<string, string>({\"build\": \"forge\", \"deploy\": \"ship\"}, \"test\")\nlet local_get_hit: Option<int> = get<int, int>({1: 11, 2: 29}, 2)\nlet local_get_miss: Option<int> = get<int, int>({1: 11, 2: 29}, 3)\nlet static_local_get_hit: Option<int> = get<int, int>({STATIC_LOW_KEY: 11, STATIC_HIGH_KEY: 29}, STATIC_HIGH_KEY)\nlet static_local_get_miss: Option<int> = get<int, int>({STATIC_LOW_KEY: 11, STATIC_HIGH_KEY: 29}, STATIC_MISSING_KEY)\nlet local_string_get_hit: Option<int> = get<string, int>({\"build\": 7, \"deploy\": 9}, \"deploy\")\nlet local_bool_get_hit: Option<bool> = get<bool, bool>({false: true, true: false}, false)\nlet local_bool_get_miss: Option<bool> = get<bool, bool>({false: true}, true)\nlet local_get_hit_code: int = match local_get_hit { Some(value) => value, None => 1 }\nlet local_get_miss_code: int = match local_get_miss { Some(value) => value, None => 13 }\nlet static_local_get_hit_code: int = match static_local_get_hit { Some(value) => value, None => 1 }\nlet static_local_get_miss_code: int = match static_local_get_miss { Some(value) => value, None => 13 }\nlet local_string_get_hit_code: int = match local_string_get_hit { Some(value) => value, None => 1 }\nlet local_bool_get_hit_code: bool = match local_bool_get_hit { Some(value) => value, None => false }\nlet local_bool_get_miss_code: bool = match local_bool_get_miss { Some(value) => value, None => true }\nlet local_string_value_hit_len: int = match local_string_value_hit { Some(value) => len(value), None => 1 }\nlet local_string_value_miss_len: int = match local_string_value_miss { Some(value) => len(value), None => 13 }\nif string_hit == 9 && string_miss == 13 && int_hit == 29 && static_int_hit == 29 && bool_hit == 5 && duplicate_hit == 11 && duplicate_contains && duplicate_direct_get == 11 && string_contains && string_missing && int_contains && static_int_contains && bool_contains && direct_get_hit == 9 && direct_get_miss == 13 && direct_bool_hit && direct_bool_miss && direct_string_hit_len == 4 && direct_string_miss_len == 13 && stored_default_hit == 9 && stored_contains && stored_direct_hit == 7 && stored_string_value_len == 4 && stored_key_count == 2 && first_key_len == 5 && second_key_len == 6 && local_get_hit_code == 29 && local_get_miss_code == 13 && static_local_get_hit_code == 29 && static_local_get_miss_code == 13 && local_string_get_hit_code == 9 && local_bool_get_hit_code && local_bool_get_miss_code && local_string_value_hit_len == 4 && local_string_value_miss_len == 13 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write map get_or_default source");
+}
+
+fn write_map_numeric_width_value_main_exit_project(
+    project: &Path,
+    package_name: &str,
+    ty: &str,
+    ready_literal: &str,
+    fallback_literal: &str,
+) {
+    fs::create_dir_all(project.join("src")).expect("create map numeric width value project src");
+    fs::write(
+        project.join("axiom.toml"),
+        format!("[package]\nname = \"cranelift-{package_name}\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n"),
+    )
+    .expect("write map numeric width value manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        format!("version = 1\n\n[[package]]\nname = \"cranelift-{package_name}\"\nversion = \"0.1.0\"\nsource = \"path\"\n"),
+    )
+    .expect("write map numeric width value lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        format!(
+            r#"static LOW_KEY: int = 1
+static HIGH_KEY: int = 2
+static ENABLED: bool = true
+static DISABLED: bool = false
+
+fn main(): int {{
+let string_hit: int = get_or_default<string, {ty}>({{"build": {fallback_literal}, "deploy": {ready_literal}}}, "deploy", {fallback_literal}) as int
+let string_miss: int = get_or_default<string, {ty}>({{"build": {fallback_literal}, "deploy": {ready_literal}}}, "test", {fallback_literal}) as int
+let int_hit: int = get_or_default<int, {ty}>({{LOW_KEY: {fallback_literal}, HIGH_KEY: {ready_literal}}}, HIGH_KEY, {fallback_literal}) as int
+let bool_hit: int = get_or_default<bool, {ty}>({{DISABLED: {fallback_literal}, ENABLED: {ready_literal}}}, ENABLED, {fallback_literal}) as int
+let duplicate_hit: int = get_or_default<string, {ty}>({{"deploy": {fallback_literal}, "deploy": {ready_literal}}}, "deploy", {fallback_literal}) as int
+let direct_get_hit: int = match get<string, {ty}>({{"build": {fallback_literal}, "deploy": {ready_literal}}}, "deploy") {{ Some(value) => value as int, None => 1 }}
+let direct_get_miss: int = match get<string, {ty}>({{"build": {fallback_literal}, "deploy": {ready_literal}}}, "test") {{ Some(value) => value as int, None => 1 }}
+let direct_int_get_hit: int = match get<int, {ty}>({{LOW_KEY: {fallback_literal}, HIGH_KEY: {ready_literal}}}, HIGH_KEY) {{ Some(value) => value as int, None => 1 }}
+let direct_bool_get_hit: int = match get<bool, {ty}>({{DISABLED: {fallback_literal}, ENABLED: {ready_literal}}}, ENABLED) {{ Some(value) => value as int, None => 1 }}
+let stored_default_scores: {{string: {ty}}} = {{"build": {fallback_literal}, "deploy": {ready_literal}}}
+let stored_default_hit: int = get_or_default<string, {ty}>(stored_default_scores, "deploy", {fallback_literal}) as int
+let stored_direct_scores: {{string: {ty}}} = {{"build": {fallback_literal}, "deploy": {ready_literal}}}
+let stored_direct_hit: int = match get<string, {ty}>(stored_direct_scores, "deploy") {{ Some(value) => value as int, None => 1 }}
+if string_hit == 48 && string_miss == 1 && int_hit == 48 && bool_hit == 48 && duplicate_hit == 48 && direct_get_hit == 48 && direct_get_miss == 1 && direct_int_get_hit == 48 && direct_bool_get_hit == 48 && stored_default_hit == 48 && stored_direct_hit == 48 {{
+return 48
+}} else {{
+return 2
+}}
+}}
+"#
+        ),
+    )
+    .expect("write map numeric width value source");
 }
 
 fn write_static_bool_map_keys_main_exit_project(project: &Path) {
