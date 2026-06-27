@@ -824,12 +824,14 @@ can also feed `string_starts_with(...)` predicates without materializing runtime
 strings. Direct indexes into known map literals can also feed known string facts
 for helper returns, length projections, and `string_starts_with(...)`
 conditions. Dynamic finite string-key projections from `keys(...)` over known
-map literals can now also feed public `std/collections.ax` `contains(...)` and
-`get_or_default(...)` wrappers by lowering the selected-key lookup to native
-candidate-key selection without generated Rust.
+map literals can now also feed public `std/collections.ax` `contains(...)`,
+`get_or_default(...)`, and scalar `get(...)` `Option<int>`/`Option<bool>` hit
+and miss paths by lowering the selected-key lookup to native candidate-key
+selection without generated Rust.
 Broader map ABI coverage, runtime map storage, general payload lookup bindings,
-general `get(...)` Option payload selection for dynamic keys, key/value
-ownership, and host-boundary representation remain tracked by issue #1124.
+broader `get(...)` Option payload selection for non-finite or non-scalar dynamic
+keys, key/value ownership, and host-boundary representation remain tracked by
+issue #1124.
 
 The `env.read` row now has partial Cranelift evidence for `std/env.ax`
 `get_env` on present and missing environment names while the public smoke
