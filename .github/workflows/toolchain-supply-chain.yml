@@ -102,7 +102,9 @@ jobs:
             exit 1
           fi
           install_version="$required_version"
+          required_is_minor=0
           if [[ "$install_version" =~ ^[0-9]+[.][0-9]+$ ]]; then
+            required_is_minor=1
             install_version="^${install_version}"
           fi
 
@@ -111,9 +113,18 @@ jobs:
             installed_version="$(cargo-vet --version || true)"
           fi
 
-          if [[ "$installed_version" != "cargo-vet ${required_version}" &&
-                "$installed_version" != "cargo-vet ${required_version}."* &&
-                "$installed_version" != "cargo-vet ${install_version}" ]]; then
+          install_cargo_vet=0
+          if [[ -z "$installed_version" ]]; then
+            install_cargo_vet=1
+          elif (( required_is_minor )); then
+            if [[ "$installed_version" != "cargo-vet ${required_version}."* ]]; then
+              install_cargo_vet=1
+            fi
+          elif [[ "$installed_version" != "cargo-vet ${required_version}" ]]; then
+            install_cargo_vet=1
+          fi
+
+          if (( install_cargo_vet )); then
             cargo install cargo-vet --version "$install_version" --locked --force
           fi
       - name: Run supply-chain checks
