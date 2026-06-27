@@ -2288,6 +2288,100 @@ fn cranelift_backend_lowers_static_slice_bounds_to_runtime_exit_code() {
 
 #[cfg(not(windows))]
 #[test]
+fn cranelift_backend_lowers_slice_numeric_width_elements_to_runtime_exit_code() {
+    if which::which("cc").is_err() {
+        eprintln!("skipping cranelift backend smoke test because cc is unavailable");
+        return;
+    }
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    for (name, ty, head_literal, first_literal, last_literal) in [
+        ("slice-i8-element-main-exit", "i8", "1i8", "20i8", "26i8"),
+        (
+            "slice-i16-element-main-exit",
+            "i16",
+            "1i16",
+            "20i16",
+            "26i16",
+        ),
+        (
+            "slice-i32-element-main-exit",
+            "i32",
+            "1i32",
+            "20i32",
+            "26i32",
+        ),
+        (
+            "slice-i64-element-main-exit",
+            "i64",
+            "1i64",
+            "20i64",
+            "26i64",
+        ),
+        (
+            "slice-isize-element-main-exit",
+            "isize",
+            "1isize",
+            "20isize",
+            "26isize",
+        ),
+        ("slice-u8-element-main-exit", "u8", "1u8", "20u8", "26u8"),
+        (
+            "slice-u16-element-main-exit",
+            "u16",
+            "1u16",
+            "20u16",
+            "26u16",
+        ),
+        (
+            "slice-u32-element-main-exit",
+            "u32",
+            "1u32",
+            "20u32",
+            "26u32",
+        ),
+    ] {
+        let project = temp.path().join(name);
+        write_slice_numeric_width_element_main_exit_project(
+            &project,
+            name,
+            ty,
+            head_literal,
+            first_literal,
+            last_literal,
+        );
+
+        let output = Command::new(env!("CARGO_BIN_EXE_axiomc"))
+            .args([
+                "build",
+                project.to_str().expect("project path"),
+                "--backend",
+                "cranelift",
+                "--json",
+            ])
+            .output()
+            .expect("run axiomc build --backend cranelift");
+        assert!(
+            output.status.success(),
+            "cranelift {ty} slice numeric width element main build failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let payload: Value = serde_json::from_slice(&output.stdout).expect("parse build JSON");
+        assert_eq!(payload["backend"], "cranelift");
+        assert_eq!(payload["generated_rust"], Value::Null);
+        let binary = payload["binary"].as_str().expect("binary path");
+        let run = Command::new(binary)
+            .output()
+            .expect("run cranelift slice numeric width element main binary");
+        assert_eq!(run.status.code(), Some(48));
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    }
+}
+
+#[cfg(not(windows))]
+#[test]
 fn cranelift_backend_lowers_string_literal_len_to_runtime_exit_code() {
     if which::which("cc").is_err() {
         eprintln!("skipping cranelift backend smoke test because cc is unavailable");
@@ -9859,6 +9953,74 @@ fn write_static_slice_bounds_main_exit_project(project: &Path) {
         "static TAIL_START: int = 1\nstatic PREFIX_END: int = 2\n\nfn tail_score(values: [int; 3]): int {\nreturn len(values[TAIL_START:]) + first(values[TAIL_START:]) + last(values[TAIL_START:])\n}\n\nfn prefix_score(values: [int; 3]): int {\nreturn len(values[:PREFIX_END]) + first(values[:PREFIX_END]) + last(values[:PREFIX_END])\n}\n\nfn main(): int {\nlet tail_values: [int; 3] = [1, 20, 26]\nlet prefix_values: [int; 3] = [20, 26, 1]\nlet helper_tail_values: [int; 3] = [1, 20, 26]\nlet helper_prefix_values: [int; 3] = [20, 26, 1]\nlet tail_window: &[int] = tail_values[TAIL_START:]\nlet prefix_window: &[int] = prefix_values[:PREFIX_END]\nlet tail_code: int = len(tail_window) + first(tail_window) + last(tail_window)\nlet prefix_code: int = len(prefix_window) + first(prefix_window) + last(prefix_window)\nlet helper_tail: int = tail_score(helper_tail_values)\nlet helper_prefix: int = prefix_score(helper_prefix_values)\nif tail_code == 48 && prefix_code == 48 && helper_tail == 48 && helper_prefix == 48 {\nreturn 48\n} else {\nreturn 1\n}\n}\n",
     )
     .expect("write static slice bounds main exit source");
+}
+
+fn write_slice_numeric_width_element_main_exit_project(
+    project: &Path,
+    package_name: &str,
+    ty: &str,
+    head_literal: &str,
+    first_literal: &str,
+    last_literal: &str,
+) {
+    fs::create_dir_all(project.join("src"))
+        .expect("create slice numeric width element main exit project src");
+    fs::write(
+        project.join("axiom.toml"),
+        format!("[package]\nname = \"cranelift-{package_name}\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.ax\"\nout_dir = \"dist\"\n\n[capabilities]\nfs = false\nnet = false\nprocess = false\nenv = false\nclock = false\ncrypto = false\n"),
+    )
+    .expect("write slice numeric width element main exit manifest");
+    fs::write(
+        project.join("axiom.lock"),
+        format!("version = 1\n\n[[package]]\nname = \"cranelift-{package_name}\"\nversion = \"0.1.0\"\nsource = \"path\"\n"),
+    )
+    .expect("write slice numeric width element main exit lockfile");
+    fs::write(
+        project.join("src/main.ax"),
+        format!(
+            r#"static TAIL_START: int = 1
+static PREFIX_END: int = 2
+
+fn tail_score(values: [{ty}; 3]): int {{
+return len(values[TAIL_START:]) + (first(values[TAIL_START:]) as int) + (last(values[TAIL_START:]) as int)
+}}
+
+fn prefix_score(values: [{ty}; 3]): int {{
+return len(values[:PREFIX_END]) + (first(values[:PREFIX_END]) as int) + (last(values[:PREFIX_END]) as int)
+}}
+
+fn pick_tail(values: [{ty}; 3], index: int): int {{
+return values[TAIL_START:][index] as int
+}}
+
+fn main(): int {{
+let tail_values: [{ty}; 3] = [{head_literal}, {first_literal}, {last_literal}]
+let prefix_values: [{ty}; 3] = [{first_literal}, {last_literal}, {head_literal}]
+let helper_tail_values: [{ty}; 3] = [{head_literal}, {first_literal}, {last_literal}]
+let helper_prefix_values: [{ty}; 3] = [{first_literal}, {last_literal}, {head_literal}]
+let helper_pick_window_values: [{ty}; 3] = [{head_literal}, {first_literal}, {last_literal}]
+let helper_pick_arg_values: [{ty}; 3] = [{head_literal}, {first_literal}, {last_literal}]
+let tail_window: &[{ty}] = tail_values[TAIL_START:]
+let prefix_window: &[{ty}] = prefix_values[:PREFIX_END]
+let pick_window: &[{ty}] = helper_pick_window_values[TAIL_START:]
+let dynamic_index: int = 1
+let tail_code: int = len(tail_window) + (first(tail_window) as int) + (last(tail_window) as int)
+let prefix_code: int = len(prefix_window) + (first(prefix_window) as int) + (last(prefix_window) as int)
+let local_literal_index_code: int = (tail_window[0] as int) + (tail_window[1] as int) + 2
+let local_dynamic_index_code: int = (pick_window[0] as int) + (pick_window[dynamic_index] as int) + 2
+let helper_tail_code: int = tail_score(helper_tail_values)
+let helper_prefix_code: int = prefix_score(helper_prefix_values)
+let helper_pick_code: int = pick_tail(helper_pick_arg_values, dynamic_index) + 22
+if tail_code == 48 && prefix_code == 48 && local_literal_index_code == 48 && local_dynamic_index_code == 48 && helper_tail_code == 48 && helper_prefix_code == 48 && helper_pick_code == 48 {{
+return 48
+}} else {{
+return 1
+}}
+}}
+"#
+        ),
+    )
+    .expect("write slice numeric width element main exit source");
 }
 
 fn write_string_literal_len_main_exit_project(project: &Path) {

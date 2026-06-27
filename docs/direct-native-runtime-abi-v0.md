@@ -765,6 +765,11 @@ fixed-array slots, including helper-parameter arrays feeding a direct-native
 process exit status. Static-range fixed-array slices also support narrow literal
 and dynamic indexing over the sliced window through the same projection slots,
 including pre-runtime slice locals that alias the projected fixed-array slots.
+Typed numeric borrowed-slice element coverage now proves i64-compatible element
+widths `i8`, `i16`, `i32`, `i64`, `isize`, `u8`, `u16`, and `u32` through static
+tail and prefix slice ranges, `len`, `first`, `last`, literal indexes, dynamic
+indexes, pre-runtime slice locals, and helper-parameter arrays without generated
+Rust.
 The public borrowed-slice smoke also prints `len`, `first`, `last`, and indexed
 projection output for both a local slice and a helper-returned slice while
 asserting `generated_rust: null`. Broader borrowed-slice aliasing, dynamic
