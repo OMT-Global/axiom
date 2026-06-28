@@ -12,6 +12,7 @@ bash scripts/ci/check-python-exit-docs.sh
 bash scripts/ci/validate-capability-manifests.sh
 bash scripts/ci/test-validate-capability-manifests.sh
 bash scripts/ci/test-pr-fast-ci-workflow.sh
+python3 scripts/ci/render-direct-native-runtime-abi-status.py --check-doc docs/direct-native-runtime-abi-v0.md
 python3 scripts/ci/test-pr-queue-remediation.py
 python3 scripts/ci/test-report-delivery-signals.py
 python3 scripts/ci/test-issue-pr-traceability.py
@@ -63,5 +64,11 @@ for example in proof_cli proof_worker proof_http_service; do
   if [[ "$example" != "proof_http_service" ]]; then
     cargo run --manifest-path stage1/Cargo.toml -p axiomc -- run "stage1/examples/${example}"
   fi
-  cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test "stage1/examples/${example}" --json
+  if [[ "$example" == "proof_http_service" ]]; then
+    # Manifest HTTP service fixtures still require the generated-Rust runtime
+    # server path; the proof service build/run smoke stays on the Cranelift default.
+    cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test "stage1/examples/${example}" --backend generated-rust --json
+  else
+    cargo run --manifest-path stage1/Cargo.toml -p axiomc -- test "stage1/examples/${example}" --json
+  fi
 done
