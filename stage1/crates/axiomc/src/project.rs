@@ -4364,26 +4364,38 @@ fn validate_program_capabilities(
     program: &syntax::Program,
     capabilities: &CapabilityConfig,
 ) -> Result<(), Diagnostic> {
-    let known_strings = syntax_program_known_strings(program);
+    let visible_consts = program
+        .consts
+        .iter()
+        .map(|decl| (decl.name.clone(), decl.clone()))
+        .collect::<HashMap<_, _>>();
     let stdlib_wrapper_capabilities = stdlib_wrapper_capabilities(program);
     for function in &program.functions {
+        let mut bound_names = function
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
         for stmt in &function.body {
             validate_stmt_capabilities(
                 module_path,
                 stmt,
                 capabilities,
-                &known_strings,
+                &visible_consts,
                 &stdlib_wrapper_capabilities,
+                &mut bound_names,
             )?;
         }
     }
+    let mut bound_names = HashSet::new();
     for stmt in &program.stmts {
         validate_stmt_capabilities(
             module_path,
             stmt,
             capabilities,
-            &known_strings,
+            &visible_consts,
             &stdlib_wrapper_capabilities,
+            &mut bound_names,
         )?;
     }
     Ok(())
@@ -4393,18 +4405,21 @@ fn validate_stmt_capabilities(
     module_path: &Path,
     stmt: &syntax::Stmt,
     capabilities: &CapabilityConfig,
-    known_strings: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
     stdlib_wrapper_capabilities: &HashMap<String, CapabilityKind>,
+    bound_names: &mut HashSet<String>,
 ) -> Result<(), Diagnostic> {
     match stmt {
-        syntax::Stmt::Let { expr, .. } => {
+        syntax::Stmt::Let { name, expr, .. } => {
             validate_expr_capabilities(
                 module_path,
                 expr,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
+            bound_names.insert(name.clone());
         }
         syntax::Stmt::Print { expr, .. }
         | syntax::Stmt::Panic { expr, .. }
@@ -4414,8 +4429,9 @@ fn validate_stmt_capabilities(
                 module_path,
                 expr,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
         }
         syntax::Stmt::Assign { target, expr, .. } => {
@@ -4423,15 +4439,17 @@ fn validate_stmt_capabilities(
                 module_path,
                 target,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             validate_expr_capabilities(
                 module_path,
                 expr,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
         }
         syntax::Stmt::If {
@@ -4444,31 +4462,37 @@ fn validate_stmt_capabilities(
                 module_path,
                 cond,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
+            let mut then_names = bound_names.clone();
             for stmt in then_block {
                 validate_stmt_capabilities(
                     module_path,
                     stmt,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    &mut then_names,
                 )?;
             }
             if let Some(else_block) = else_block {
+                let mut else_names = bound_names.clone();
                 for stmt in else_block {
                     validate_stmt_capabilities(
                         module_path,
                         stmt,
                         capabilities,
-                        known_strings,
+                        visible_consts,
                         stdlib_wrapper_capabilities,
+                        &mut else_names,
                     )?;
                 }
             }
         }
         syntax::Stmt::IfLet {
+            bindings,
             expr,
             then_block,
             else_block,
@@ -4478,26 +4502,32 @@ fn validate_stmt_capabilities(
                 module_path,
                 expr,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
+            let mut then_names = bound_names.clone();
+            then_names.extend(bindings.iter().cloned());
             for stmt in then_block {
                 validate_stmt_capabilities(
                     module_path,
                     stmt,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    &mut then_names,
                 )?;
             }
             if let Some(else_block) = else_block {
+                let mut else_names = bound_names.clone();
                 for stmt in else_block {
                     validate_stmt_capabilities(
                         module_path,
                         stmt,
                         capabilities,
-                        known_strings,
+                        visible_consts,
                         stdlib_wrapper_capabilities,
+                        &mut else_names,
                     )?;
                 }
             }
@@ -4507,16 +4537,19 @@ fn validate_stmt_capabilities(
                 module_path,
                 cond,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
+            let mut body_names = bound_names.clone();
             for stmt in body {
                 validate_stmt_capabilities(
                     module_path,
                     stmt,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    &mut body_names,
                 )?;
             }
         }
@@ -4525,17 +4558,21 @@ fn validate_stmt_capabilities(
                 module_path,
                 expr,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             for arm in arms {
+                let mut arm_names = bound_names.clone();
+                arm_names.extend(arm.bindings.iter().cloned());
                 for stmt in &arm.body {
                     validate_stmt_capabilities(
                         module_path,
                         stmt,
                         capabilities,
-                        known_strings,
+                        visible_consts,
                         stdlib_wrapper_capabilities,
+                        &mut arm_names,
                     )?;
                 }
             }
@@ -4548,8 +4585,9 @@ fn validate_expr_capabilities(
     module_path: &Path,
     expr: &syntax::Expr,
     capabilities: &CapabilityConfig,
-    known_strings: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
     stdlib_wrapper_capabilities: &HashMap<String, CapabilityKind>,
+    bound_names: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
     match expr {
         syntax::Expr::Literal(_) | syntax::Expr::VarRef { .. } => Ok(()),
@@ -4584,7 +4622,8 @@ fn validate_expr_capabilities(
                     name,
                     args,
                     capabilities,
-                    known_strings,
+                    visible_consts,
+                    bound_names,
                     *line,
                     *column,
                 )?;
@@ -4594,8 +4633,9 @@ fn validate_expr_capabilities(
                     module_path,
                     arg,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             Ok(())
@@ -4605,16 +4645,18 @@ fn validate_expr_capabilities(
                 module_path,
                 base,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             for arg in args {
                 validate_expr_capabilities(
                     module_path,
                     arg,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             Ok(())
@@ -4626,23 +4668,26 @@ fn validate_expr_capabilities(
                 module_path,
                 lhs,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             validate_expr_capabilities(
                 module_path,
                 rhs,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )
         }
         syntax::Expr::Cast { expr, .. } => validate_expr_capabilities(
             module_path,
             expr,
             capabilities,
-            known_strings,
+            visible_consts,
             stdlib_wrapper_capabilities,
+            bound_names,
         ),
         syntax::Expr::Try { expr, .. }
         | syntax::Expr::Await { expr, .. }
@@ -4651,8 +4696,9 @@ fn validate_expr_capabilities(
             module_path,
             expr,
             capabilities,
-            known_strings,
+            visible_consts,
             stdlib_wrapper_capabilities,
+            bound_names,
         ),
         syntax::Expr::StructLiteral { fields, .. } => {
             for field in fields {
@@ -4660,8 +4706,9 @@ fn validate_expr_capabilities(
                     module_path,
                     &field.expr,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             Ok(())
@@ -4671,8 +4718,9 @@ fn validate_expr_capabilities(
                 module_path,
                 base,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )
         }
         syntax::Expr::TupleLiteral { elements, .. }
@@ -4682,8 +4730,9 @@ fn validate_expr_capabilities(
                     module_path,
                     element,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             Ok(())
@@ -4694,15 +4743,17 @@ fn validate_expr_capabilities(
                     module_path,
                     &entry.key,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
                 validate_expr_capabilities(
                     module_path,
                     &entry.value,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             Ok(())
@@ -4714,16 +4765,18 @@ fn validate_expr_capabilities(
                 module_path,
                 base,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             if let Some(start) = start {
                 validate_expr_capabilities(
                     module_path,
                     start,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             if let Some(end) = end {
@@ -4731,8 +4784,9 @@ fn validate_expr_capabilities(
                     module_path,
                     end,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    bound_names,
                 )?;
             }
             Ok(())
@@ -4742,39 +4796,50 @@ fn validate_expr_capabilities(
                 module_path,
                 base,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             validate_expr_capabilities(
                 module_path,
                 index,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )
         }
-        syntax::Expr::Closure { body, .. } => validate_expr_capabilities(
-            module_path,
-            body,
-            capabilities,
-            known_strings,
-            stdlib_wrapper_capabilities,
-        ),
+        syntax::Expr::Closure { params, body, .. } => {
+            let mut closure_names = bound_names.clone();
+            closure_names.extend(params.iter().map(|param| param.name.clone()));
+            validate_expr_capabilities(
+                module_path,
+                body,
+                capabilities,
+                visible_consts,
+                stdlib_wrapper_capabilities,
+                &closure_names,
+            )
+        }
         syntax::Expr::Match { expr, arms, .. } => {
             validate_expr_capabilities(
                 module_path,
                 expr,
                 capabilities,
-                known_strings,
+                visible_consts,
                 stdlib_wrapper_capabilities,
+                bound_names,
             )?;
             for arm in arms {
+                let mut arm_names = bound_names.clone();
+                arm_names.extend(arm.bindings.iter().cloned());
                 validate_expr_capabilities(
                     module_path,
                     &arm.expr,
                     capabilities,
-                    known_strings,
+                    visible_consts,
                     stdlib_wrapper_capabilities,
+                    &arm_names,
                 )?;
             }
             Ok(())
@@ -4787,13 +4852,14 @@ fn validate_process_command_allowlist(
     call_name: &str,
     args: &[syntax::Expr],
     capabilities: &CapabilityConfig,
-    known_strings: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
+    bound_names: &HashSet<String>,
     line: usize,
     column: usize,
 ) -> Result<(), Diagnostic> {
     let command = args
         .first()
-        .and_then(|arg| syntax_known_string(arg, known_strings));
+        .and_then(|arg| process_command_static_string(arg, visible_consts, bound_names));
     let Some(allowed_commands) = capabilities.process_commands.allowed_commands() else {
         return if command.is_some() {
             Ok(())
@@ -4857,27 +4923,20 @@ fn stdlib_wrapper_capabilities(program: &syntax::Program) -> HashMap<String, Cap
     capabilities
 }
 
-fn syntax_program_known_strings(program: &syntax::Program) -> HashMap<String, String> {
-    let mut known_strings = HashMap::new();
-    for const_decl in &program.consts {
-        if matches!(
-            const_decl.ty,
-            syntax::TypeName::String | syntax::TypeName::Str
-        ) && let syntax::Expr::Literal(syntax::Literal::String(value)) = &const_decl.expr
-        {
-            known_strings.insert(const_decl.name.clone(), value.clone());
-        }
-    }
-    known_strings
-}
-
-fn syntax_known_string(
+fn process_command_static_string(
     expr: &syntax::Expr,
-    known_strings: &HashMap<String, String>,
+    visible_consts: &HashMap<String, syntax::ConstDecl>,
+    bound_names: &HashSet<String>,
 ) -> Option<String> {
     match expr {
         syntax::Expr::Literal(syntax::Literal::String(value)) => Some(value.clone()),
-        syntax::Expr::VarRef { name, .. } => known_strings.get(name).cloned(),
+        syntax::Expr::VarRef { name, .. } if !bound_names.contains(name) => visible_consts
+            .get(name)
+            .filter(|decl| decl.is_static)
+            .and_then(|decl| match &decl.expr {
+                syntax::Expr::Literal(syntax::Literal::String(value)) => Some(value.clone()),
+                _ => None,
+            }),
         _ => None,
     }
 }
