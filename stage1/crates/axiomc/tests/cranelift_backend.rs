@@ -6275,7 +6275,10 @@ fn cranelift_backend_builds_std_async_net_tcp_binary() {
         "cranelift std async net TCP binary failed: stderr={}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "alpha\nbeta\n");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "alpha\nbeta\nclosed\n"
+    );
 }
 
 #[cfg(not(windows))]
@@ -13717,6 +13720,15 @@ print "second none"
 let _first_done: int = await join<int>(first_handler)
 let _second_done: int = await join<int>(second_handler)
 let _listener_closed: int = close_listener(listener)
+
+match await tcp_dial("127.0.0.1", {port}, "gamma", 1000) {{
+Some(reply) {{
+print reply
+}}
+None {{
+print "closed"
+}}
+}}
 "#,
         ),
     )
