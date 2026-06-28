@@ -4686,7 +4686,7 @@ fn validate_program_capabilities(
         .iter()
         .map(|decl| (decl.name.clone(), decl.clone()))
         .collect::<HashMap<_, _>>();
-    let stdlib_wrapper_capabilities = stdlib_wrapper_capabilities(program);
+    let stdlib_wrapper_capabilities = imported_stdlib_wrapper_capabilities(program);
     for function in &program.functions {
         let mut bound_names = function
             .params
@@ -5218,7 +5218,9 @@ fn validate_process_command_allowlist(
     }
 }
 
-fn stdlib_wrapper_capabilities(program: &syntax::Program) -> HashMap<String, CapabilityKind> {
+fn imported_stdlib_wrapper_capabilities(
+    program: &syntax::Program,
+) -> HashMap<String, CapabilityKind> {
     let mut capabilities = HashMap::new();
     for import in &program.imports {
         if import.path == "std/fs.ax" {
