@@ -404,7 +404,8 @@ impl Default for CheckOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct BuildOptions {
-    /// Preparatory backend plumbing; `generated-rust` remains the only implemented option today.
+    /// Build backend selected by the command surface. Cranelift is the supported default;
+    /// generated-rust is retained only as an explicit compatibility backend.
     pub backend: NativeBackendKind,
     pub target: Option<String>,
     pub package: Option<String>,
@@ -1498,6 +1499,21 @@ fn analyze_entry(
     entry: PathBuf,
     macro_recursion_limit: usize,
 ) -> Result<AnalyzedProject, Diagnostic> {
+    // SECURITY: confine the entry module to the package, resolving symlinks,
+    // before any file is read. The build path canonicalizes the entry before
+    // calling us, but the test-runner entry points (run_test_case and
+    // run_*compile_fail_case) pass project_root.join(entry) unconfined; without
+    // this an untrusted package could ship its entry as a symlink escaping the
+    // package tree (e.g. src/main_test.ax -> /etc/passwd) and have it read as
+    // Axiom source and echoed back through diagnostics. We only gate access
+    // here and keep using `entry` for loading, so module paths and diagnostics
+    // are unchanged for legitimate (non-symlinked) entries.
+    canonicalize_package_path(
+        &entry,
+        package_root,
+        "manifest",
+        "build.entry resolves outside the package",
+    )?;
     let modules = load_modules(graph, package_root, &entry, macro_recursion_limit)?;
     validate_module_capabilities(graph, &modules)?;
     validate_semantic_declarations(&modules)?;
@@ -3404,27 +3420,16 @@ fn run_http_fixture_case(
     test: &crate::manifest::TestTarget,
 ) -> io::Result<std::process::Output> {
     let fixture = test.http.as_ref().expect("http fixture present");
-    let (host, port, injected_bind) = if let Some(bind) = &fixture.bind {
-        let (host, port) = bind.rsplit_once(':').ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("http fixture bind must be host:port, got {bind:?}"),
-            )
-        })?;
-        let port = port.parse::<u16>().map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("http fixture bind has invalid port {port:?}: {err}"),
-            )
-        })?;
-        (host.to_string(), port, None)
+    let (target_addr, injected_bind) = if let Some(bind) = &fixture.bind {
+        (parse_http_fixture_bind(bind)?, None)
     } else {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
-        let port = listener.local_addr()?.port();
+        let target_addr = listener.local_addr()?;
         drop(listener);
-        let bind = format!("127.0.0.1:{port}");
-        (String::from("127.0.0.1"), port, Some(bind))
+        let bind = target_addr.to_string();
+        (target_addr, Some(bind))
     };
+    let path = normalize_http_fixture_path(&fixture.path)?;
 
     let mut command = command_for_build_output(binary, build_output_dir)?;
     if let Some(bind) = injected_bind {
@@ -3435,7 +3440,7 @@ fn run_http_fixture_case(
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut stream = loop {
-        match std::net::TcpStream::connect((host.as_str(), port)) {
+        match std::net::TcpStream::connect(target_addr) {
             Ok(stream) => break stream,
             Err(err) if Instant::now() < deadline => {
                 let _ = err;
@@ -3452,11 +3457,6 @@ fn run_http_fixture_case(
         }
     };
 
-    let path = if fixture.path.starts_with('/') {
-        fixture.path.clone()
-    } else {
-        format!("/{}", fixture.path)
-    };
     stream.write_all(format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").as_bytes())?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
@@ -3465,12 +3465,47 @@ fn run_http_fixture_case(
         let _ = child.kill();
         let _ = child.wait();
         return Err(io::Error::other(format!(
-            "http response body expected {:?}, got {:?}",
-            fixture.expected_body, body
+            "http response body expected {:?}, got {} bytes",
+            fixture.expected_body,
+            body.len()
         )));
     }
 
     child.wait_with_output()
+}
+
+fn parse_http_fixture_bind(bind: &str) -> io::Result<std::net::SocketAddr> {
+    let addr = bind.parse::<std::net::SocketAddr>().map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("http fixture bind must be a loopback IP socket address, got {bind:?}: {err}"),
+        )
+    })?;
+    if !addr.ip().is_loopback() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("http fixture bind must use a loopback address, got {bind:?}"),
+        ));
+    }
+    Ok(addr)
+}
+
+fn normalize_http_fixture_path(path: &str) -> io::Result<String> {
+    if path.is_empty()
+        || path
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ' || byte == b'\t')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "http fixture path must be a non-empty HTTP request target without whitespace or control characters",
+        ));
+    }
+    if path.starts_with('/') {
+        Ok(path.to_string())
+    } else {
+        Ok(format!("/{path}"))
+    }
 }
 
 fn run_manifest_compile_fail_case(
@@ -8097,6 +8132,35 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
+    #[test]
+    fn http_fixture_bind_accepts_only_loopback_socket_addresses() {
+        assert_eq!(
+            parse_http_fixture_bind("127.0.0.1:18080").expect("loopback ipv4"),
+            "127.0.0.1:18080".parse().expect("socket addr")
+        );
+        assert_eq!(
+            parse_http_fixture_bind("[::1]:18080").expect("loopback ipv6"),
+            "[::1]:18080".parse().expect("socket addr")
+        );
+        assert!(parse_http_fixture_bind("169.254.169.254:80").is_err());
+        assert!(parse_http_fixture_bind("example.com:80").is_err());
+    }
+
+    #[test]
+    fn http_fixture_path_rejects_request_shaping_characters() {
+        assert_eq!(
+            normalize_http_fixture_path("health").expect("relative path"),
+            "/health"
+        );
+        assert_eq!(
+            normalize_http_fixture_path("/health?ok=true").expect("absolute path"),
+            "/health?ok=true"
+        );
+        assert!(normalize_http_fixture_path("/metadata\r\nX-Injected: yes").is_err());
+        assert!(normalize_http_fixture_path("/has space").is_err());
+        assert!(normalize_http_fixture_path("").is_err());
+    }
+
     fn workspace_only_manifest() -> Manifest {
         Manifest {
             package: None,
@@ -8950,6 +9014,53 @@ mod tests {
 
         assert_eq!(error.kind, "import");
         assert_eq!(error.message, "stage1 imports must stay inside the package");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn analyze_entry_rejects_symlinked_entry_outside_package() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let package_dir = dir.path().join("package");
+        fs::create_dir_all(&package_dir).unwrap_or_else(|err| panic!("create package: {err}"));
+        let root =
+            fs::canonicalize(&package_dir).unwrap_or_else(|err| panic!("canonical root: {err}"));
+        let source_root = root.join("src");
+        fs::create_dir_all(&source_root).unwrap_or_else(|err| panic!("create src: {err}"));
+        // A sensitive file outside the package that the untrusted package wants read.
+        let outside = dir.path().join("outside.ax");
+        fs::write(&outside, "fn leaked(): int {\nreturn 7\n}\n")
+            .unwrap_or_else(|err| panic!("write outside module: {err}"));
+        // The package ships its entry as a symlink escaping the package tree.
+        let entry = source_root.join("main_test.ax");
+        std::os::unix::fs::symlink(&outside, &entry)
+            .unwrap_or_else(|err| panic!("symlink entry: {err}"));
+
+        let mut graph = PackageGraph::default();
+        graph.packages.insert(
+            root.clone(),
+            PackageContext {
+                root: root.clone(),
+                manifest: package_manifest(),
+                source_root: fs::canonicalize(&source_root)
+                    .unwrap_or_else(|err| panic!("canonical source root: {err}")),
+                dependencies: BTreeMap::new(),
+                workspace_members: Vec::new(),
+            },
+        );
+
+        let error = match analyze_entry(
+            &graph,
+            &root,
+            package_manifest(),
+            entry.clone(),
+            syntax::DEFAULT_MACRO_RECURSION_LIMIT,
+        ) {
+            Ok(_) => panic!("symlinked entry outside package was analyzed"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "manifest");
+        assert_eq!(error.message, "build.entry resolves outside the package");
     }
 
     #[cfg(unix)]

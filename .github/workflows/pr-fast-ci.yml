@@ -24,7 +24,7 @@ defaults:
 jobs:
   changes:
     name: Detect Relevant Changes
-    runs-on: ['self-hosted', 'linux', 'shell-only', 'public']
+    runs-on: ubuntu-latest
     outputs:
       app: ${{ steps.filter.outputs.app }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -60,8 +60,8 @@ jobs:
 
   fast-checks:
     name: Fast Checks
-    runs-on: ['self-hosted', 'linux', 'shell-only', 'public']
-    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     needs: changes
     if: >-
       github.event.pull_request.draft == false &&
@@ -128,10 +128,8 @@ jobs:
               apt_get=(sudo "${apt_get[@]}")
             fi
 
-            # Some self-hosted runner images keep apt state/cache directories
-            # with restrictive ownership from prior jobs. Use job-local apt
-            # cache/list paths so provisioning does not depend on mutable host
-            # apt cache permissions.
+            # Use job-local apt cache/list paths so provisioning does not depend
+            # on mutable runner apt cache permissions.
             "${apt_get[@]}" update || true
             DEBIAN_FRONTEND=noninteractive "${apt_get[@]}" install -y --no-install-recommends gcc libc6-dev || true
           fi
@@ -154,7 +152,7 @@ jobs:
 
   validate-pr-description:
     name: Validate PR Description
-    runs-on: ['self-hosted', 'linux', 'shell-only', 'public']
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-
       github.event.pull_request.draft == false &&
@@ -250,7 +248,7 @@ jobs:
 
   validate-secrets:
     name: Validate Secrets
-    runs-on: ['self-hosted', 'linux', 'shell-only', 'public']
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     if: >-
       github.event.pull_request.draft == false &&
@@ -264,7 +262,7 @@ jobs:
 
   ci-gate:
     name: CI Gate
-    runs-on: ['self-hosted', 'linux', 'shell-only', 'public']
+    runs-on: ubuntu-latest
     if: always()
     needs:
       - changes
@@ -272,9 +270,15 @@ jobs:
       - validate-pr-description
       - validate-secrets
     steps:
+      # SECURITY: ci-gate runs on a persistent self-hosted runner with no fork
+      # guard (if: always), so it must never execute code from the PR head tree.
+      # The gate only needs the result envs below plus the trusted gate helper,
+      # so check out the base ref (target-repo, trusted) instead of the fork head
+      # and drop persisted credentials. See scripts/ci/check-pr-fast-ci-gate.sh.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 pinned 2026-05-30
         with:
           ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
       - name: Validate fork PR description from trusted base
         if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         env:
