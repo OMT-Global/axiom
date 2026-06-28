@@ -13743,7 +13743,14 @@ print takes_two(three)
         )
         .expect("write source");
 
-        let release = build_project(&project).expect("release build");
+        let release = build_project_with_options(
+            &project,
+            &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("release build");
         assert_eq!(release.cache_misses, 1);
         assert!(!release.debug);
         let release_generated =
@@ -14035,14 +14042,19 @@ print takes_two(three)
         )
         .expect("write source");
 
-        let first = build_project(&project).expect("initial build");
+        let options = BuildOptions {
+            backend: NativeBackendKind::GeneratedRust,
+            ..BuildOptions::default()
+        };
+
+        let first = build_project_with_options(&project, &options).expect("initial build");
         assert_eq!(first.cache_hits, 0);
         assert_eq!(first.cache_misses, 1);
         assert_eq!(first.packages[0].cache_status, BuildCacheStatus::Miss);
         let generated =
             fs::read_to_string(generated_rust_path(&first)).expect("read generated rust");
 
-        let second = build_project(&project).expect("cached build");
+        let second = build_project_with_options(&project, &options).expect("cached build");
         assert_eq!(second.cache_hits, 1);
         assert_eq!(second.cache_misses, 0);
         assert_eq!(second.packages[0].cache_status, BuildCacheStatus::Hit);
@@ -14053,7 +14065,8 @@ print takes_two(three)
 
         fs::write(generated_rust_path(&second), "// stale generated rust\n")
             .expect("corrupt generated rust");
-        let repaired_rust = build_project(&project).expect("repair generated rust");
+        let repaired_rust =
+            build_project_with_options(&project, &options).expect("repair generated rust");
         assert_eq!(repaired_rust.cache_hits, 0);
         assert_eq!(repaired_rust.cache_misses, 1);
         assert_eq!(
@@ -14066,7 +14079,8 @@ print takes_two(three)
         );
 
         fs::write(&repaired_rust.binary, "not a compiled binary").expect("corrupt binary");
-        let repaired_binary = build_project(&project).expect("repair binary");
+        let repaired_binary =
+            build_project_with_options(&project, &options).expect("repair binary");
         assert_eq!(repaired_binary.cache_hits, 0);
         assert_eq!(repaired_binary.cache_misses, 1);
         assert_eq!(
@@ -14084,7 +14098,8 @@ print takes_two(three)
             "pub fn answer(): int {\nreturn 42\n}\n",
         )
         .expect("update module");
-        let third = build_project(&project).expect("rebuild after module change");
+        let third =
+            build_project_with_options(&project, &options).expect("rebuild after module change");
         assert_eq!(third.cache_hits, 0);
         assert_eq!(third.cache_misses, 1);
         assert_eq!(third.packages[0].cache_status, BuildCacheStatus::Miss);

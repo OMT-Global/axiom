@@ -3296,7 +3296,7 @@ fn build_cache_file(
     graph: &PackageGraph,
     package_root: &Path,
     analyzed: &AnalyzedProject,
-    rust_source: &str,
+    backend_input_hash: &str,
     backend: NativeBackendKind,
     target: Option<String>,
     debug: bool,
@@ -3310,7 +3310,7 @@ fn build_cache_file(
         debug,
         manifest_hash: hash_file(&manifest_path(package_root))?,
         lockfile_hash: hash_file(&crate::manifest::lockfile_path(package_root))?,
-        rust_hash: hash_text(rust_source),
+        rust_hash: backend_input_hash.to_string(),
         stdin_hash,
         binary_hash: None,
         modules: cached_modules(graph, &analyzed.modules)?,
@@ -9474,7 +9474,7 @@ return async_serve_route(1, "/", "ok", 1)
     }
 
     #[test]
-    fn generated_rust_cache_matches_hashed_source_not_raw_source() {
+    fn build_cache_does_not_trust_project_controlled_binary_hash() {
         let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
         let generated_rust = dir.path().join("dist/main.rs");
         let binary = dir.path().join("dist/main");
@@ -9512,7 +9512,7 @@ return async_serve_route(1, "/", "ok", 1)
 
         let raw_source_expected = BuildCacheFile {
             rust_hash: generated_source.to_string(),
-            ..expected
+            ..expected.clone()
         };
         assert!(!cache_matches(
             &stored,
@@ -9521,6 +9521,21 @@ return async_serve_route(1, "/", "ok", 1)
             &generated_rust,
             &binary,
         ));
+
+        let wrong_trusted_input = BuildCacheFile {
+            manifest_hash: String::from("different-manifest"),
+            ..expected
+        };
+        assert!(
+            !cache_matches(
+                &stored,
+                &wrong_trusted_input,
+                NativeBackendKind::GeneratedRust,
+                &generated_rust,
+                &binary,
+            ),
+            "project-local cache metadata must not override trusted input fields"
+        );
     }
 
     #[cfg(not(windows))]
