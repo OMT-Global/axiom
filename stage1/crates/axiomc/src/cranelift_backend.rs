@@ -210,6 +210,12 @@ enum SpikeValue {
     Tuple(Vec<SpikeValue>),
     Map(Vec<(SpikeValue, SpikeValue)>),
     Array(Vec<SpikeValue>),
+    MutRef(String),
+    MutSlice {
+        target: String,
+        start: usize,
+        end: usize,
+    },
     Task {
         value: Option<Box<SpikeValue>>,
         canceled: bool,
@@ -16010,12 +16016,12 @@ fn eval_stmt(
 ) -> Result<Option<SpikeValue>, Diagnostic> {
     match stmt {
         Stmt::Let { name, expr, .. } => {
-            let value = eval_expr(expr, functions, env, lines)?;
+            let value = eval_expr_effectful(expr, functions, env, lines)?;
             env.insert(name.clone(), value);
             Ok(None)
         }
         Stmt::Print { expr, .. } => {
-            let value = eval_expr(expr, functions, env, lines)?;
+            let value = eval_expr_effectful(expr, functions, env, lines)?;
             lines.push(OutputLine::stdout(render_value(&value)));
             Ok(None)
         }
@@ -16025,7 +16031,7 @@ fn eval_stmt(
             else_block,
             ..
         } => {
-            let branch = match eval_expr(cond, functions, env, lines)? {
+            let branch = match eval_expr_effectful(cond, functions, env, lines)? {
                 SpikeValue::Bool(true) => Some(then_block.as_slice()),
                 SpikeValue::Bool(false) => else_block.as_deref(),
                 _ => return Err(unsupported("if conditions must be boolean")),
@@ -16036,7 +16042,7 @@ fn eval_stmt(
                 Ok(None)
             }
         }
-        Stmt::While { cond, .. } => match eval_expr(cond, functions, env, lines)? {
+        Stmt::While { cond, .. } => match eval_expr_effectful(cond, functions, env, lines)? {
             SpikeValue::Bool(false) => Ok(None),
             SpikeValue::Bool(true) => Err(unsupported(
                 "runtime loops are not part of the cranelift hello spike",
@@ -16044,10 +16050,108 @@ fn eval_stmt(
             _ => Err(unsupported("while conditions must be boolean")),
         },
         Stmt::Match { expr, arms, .. } => eval_match_stmt(expr, arms, functions, env, lines),
-        Stmt::Return { expr, .. } => Ok(Some(eval_expr(expr, functions, env, lines)?)),
-        Stmt::Assign { .. } | Stmt::Panic { .. } | Stmt::Defer { .. } => Err(unsupported(
-            "only let, print, if, while false, match, and return statements are supported by the cranelift hello spike",
+        Stmt::Return { expr, .. } => Ok(Some(eval_expr_effectful(expr, functions, env, lines)?)),
+        Stmt::Assign { target, expr, .. } => {
+            eval_assign(target, expr, functions, env, lines)?;
+            Ok(None)
+        }
+        Stmt::Panic { .. } | Stmt::Defer { .. } => Err(unsupported(
+            "only let, print, if, while false, match, return, and local assignment statements are supported by the cranelift hello spike",
         )),
+    }
+}
+
+fn eval_assign(
+    target: &Expr,
+    expr: &Expr,
+    functions: &HashMap<&str, &Function>,
+    env: &mut SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<(), Diagnostic> {
+    let value = eval_expr_effectful(expr, functions, env, lines)?;
+    match target {
+        Expr::VarRef { name, .. } => {
+            env.insert(name.clone(), value);
+            Ok(())
+        }
+        Expr::Deref { expr, .. } => {
+            let SpikeValue::MutRef(name) = eval_expr(expr, functions, env, lines)? else {
+                return Err(unsupported(
+                    "dereference assignment requires a mutable local reference",
+                ));
+            };
+            env.insert(name, value);
+            Ok(())
+        }
+        Expr::Index { base, index, .. } => {
+            let index = expect_non_negative_index(eval_expr(index, functions, env, lines)?)?;
+            match eval_expr(base, functions, env, lines)? {
+                SpikeValue::MutSlice { target, start, end } => {
+                    let real_index = start
+                        .checked_add(index)
+                        .ok_or_else(|| unsupported("slice index overflow"))?;
+                    if real_index >= end {
+                        return Err(unsupported("slice index is outside the slice length"));
+                    }
+                    assign_array_index(env, &target, real_index, value)
+                }
+                SpikeValue::Array(mut elements) => {
+                    let Some(slot) = elements.get_mut(index) else {
+                        return Err(unsupported("array index is outside the array length"));
+                    };
+                    *slot = value;
+                    if let Expr::VarRef { name, .. } = base.as_ref() {
+                        env.insert(name.clone(), SpikeValue::Array(elements));
+                        Ok(())
+                    } else {
+                        Err(unsupported(
+                            "array index assignment requires a local array target",
+                        ))
+                    }
+                }
+                _ => Err(unsupported(
+                    "index assignment requires a mutable slice or local array target",
+                )),
+            }
+        }
+        _ => Err(unsupported(
+            "assignment requires a local variable, mutable local dereference, or mutable slice index target",
+        )),
+    }
+}
+
+fn assign_array_index(
+    env: &mut SpikeEnv,
+    name: &str,
+    index: usize,
+    value: SpikeValue,
+) -> Result<(), Diagnostic> {
+    let Some(SpikeValue::Array(elements)) = env.get_mut(name) else {
+        return Err(unsupported(
+            "mutable slice assignment requires a live local array",
+        ));
+    };
+    let Some(slot) = elements.get_mut(index) else {
+        return Err(unsupported("array index is outside the array length"));
+    };
+    *slot = value;
+    Ok(())
+}
+
+fn eval_expr_effectful(
+    expr: &Expr,
+    functions: &HashMap<&str, &Function>,
+    env: &mut SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<SpikeValue, Diagnostic> {
+    match expr {
+        Expr::Call { name, args, .. } => eval_call_effectful(name, args, functions, env, lines),
+        Expr::BinaryAdd { op, lhs, rhs, ty } => {
+            let left = eval_expr_effectful(lhs, functions, env, lines)?;
+            let right = eval_expr_effectful(rhs, functions, env, lines)?;
+            eval_arithmetic_values(*op, ty, left, right)
+        }
+        _ => eval_expr(expr, functions, env, lines),
     }
 }
 
@@ -16158,7 +16262,10 @@ fn eval_expr(
             .collect::<Result<Vec<_>, _>>()
             .map(SpikeValue::Array),
         Expr::Slice {
-            base, start, end, ..
+            base,
+            start,
+            end,
+            ty,
         } => {
             let elements = match eval_expr(base, functions, env, lines)? {
                 SpikeValue::Array(elements) => elements,
@@ -16179,6 +16286,15 @@ fn eval_expr(
             if start > end || end > elements.len() {
                 return Err(unsupported("slice range is outside the array length"));
             }
+            if matches!(ty, Type::MutSlice(_))
+                && let Expr::VarRef { name, .. } = base.as_ref()
+            {
+                return Ok(SpikeValue::MutSlice {
+                    target: name.clone(),
+                    start,
+                    end,
+                });
+            }
             Ok(SpikeValue::Array(elements[start..end].to_vec()))
         }
         Expr::Index { base, index, .. } => match eval_expr(base, functions, env, lines)? {
@@ -16188,6 +16304,24 @@ fn eval_expr(
                     .get(index)
                     .cloned()
                     .ok_or_else(|| unsupported("array index is outside the array length"))
+            }
+            SpikeValue::MutSlice { target, start, end } => {
+                let index = expect_non_negative_index(eval_expr(index, functions, env, lines)?)?;
+                let real_index = start
+                    .checked_add(index)
+                    .ok_or_else(|| unsupported("slice index overflow"))?;
+                if real_index >= end {
+                    return Err(unsupported("slice index is outside the slice length"));
+                }
+                match env.get(&target) {
+                    Some(SpikeValue::Array(elements)) => elements
+                        .get(real_index)
+                        .cloned()
+                        .ok_or_else(|| unsupported("array index is outside the array length")),
+                    _ => Err(unsupported(
+                        "mutable slice indexing requires a live local array",
+                    )),
+                }
             }
             SpikeValue::Map(entries) => {
                 let key = eval_expr(index, functions, env, lines)?;
@@ -16203,6 +16337,26 @@ fn eval_expr(
         },
         Expr::Await { expr, .. } => await_spike_task(eval_expr(expr, functions, env, lines)?),
         Expr::StringBorrow { expr, .. } => eval_expr(expr, functions, env, lines),
+        Expr::MutBorrow { expr, .. } => match expr.as_ref() {
+            Expr::VarRef { name, .. } if env.contains_key(name) => {
+                Ok(SpikeValue::MutRef(name.clone()))
+            }
+            Expr::VarRef { name, .. } => Err(unsupported(&format!(
+                "unknown cranelift spike variable {name:?}"
+            ))),
+            _ => Err(unsupported(
+                "mutable borrow supports local variables in the cranelift spike",
+            )),
+        },
+        Expr::Deref { expr, .. } => match eval_expr(expr, functions, env, lines)? {
+            SpikeValue::MutRef(name) => env
+                .get(&name)
+                .cloned()
+                .ok_or_else(|| unsupported(&format!("unknown cranelift spike variable {name:?}"))),
+            _ => Err(unsupported(
+                "dereference requires a mutable local reference in the cranelift spike",
+            )),
+        },
         _ => Err(unsupported(
             "this expression is outside the cranelift hello spike subset",
         )),
@@ -16213,7 +16367,7 @@ fn eval_match_stmt(
     expr: &Expr,
     arms: &[MatchArm],
     functions: &HashMap<&str, &Function>,
-    env: &SpikeEnv,
+    env: &mut SpikeEnv,
     lines: &mut Vec<OutputLine>,
 ) -> Result<Option<SpikeValue>, Diagnostic> {
     let matched_value = eval_expr(expr, functions, env, lines)?;
@@ -16235,7 +16389,9 @@ fn eval_match_stmt(
             &matched.payloads,
         )?;
     }
-    eval_block(&arm.body, functions, &mut arm_env, lines)
+    let returned = eval_block(&arm.body, functions, &mut arm_env, lines)?;
+    *env = arm_env;
+    Ok(returned)
 }
 
 fn eval_const_match_stmt(
@@ -16560,6 +16716,66 @@ fn eval_call(
     }
     let returned = eval_block(&function.body, functions, &mut local_env, lines)?
         .ok_or_else(|| unsupported("cranelift spike functions must return a value"))?;
+    if function.is_async {
+        Ok(spike_task(returned))
+    } else {
+        Ok(returned)
+    }
+}
+
+fn eval_call_effectful(
+    name: &str,
+    args: &[Expr],
+    functions: &HashMap<&str, &Function>,
+    env: &mut SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<SpikeValue, Diagnostic> {
+    let Some(function) = functions.get(name) else {
+        return eval_call(name, args, functions, env, lines);
+    };
+    if function.params.len() != args.len() {
+        return Err(unsupported("function argument count mismatch"));
+    }
+    if function.is_extern {
+        return eval_extern_call(function, args, functions, env, lines);
+    }
+
+    let mut local_env = env.clone();
+    let mut writebacks = Vec::new();
+    for (index, (param, arg)) in function.params.iter().zip(args).enumerate() {
+        let value = eval_expr(arg, functions, env, lines)?;
+        if let SpikeValue::MutSlice { target, start, end } = value {
+            let backing_name = format!("__arg{index}_{target}");
+            let Some(SpikeValue::Array(elements)) = env.get(&target) else {
+                return Err(unsupported(
+                    "mutable slice call argument requires a live local array",
+                ));
+            };
+            local_env.insert(backing_name.clone(), SpikeValue::Array(elements.clone()));
+            local_env.insert(
+                param.name.clone(),
+                SpikeValue::MutSlice {
+                    target: backing_name.clone(),
+                    start,
+                    end,
+                },
+            );
+            writebacks.push((backing_name, target));
+        } else {
+            local_env.insert(param.name.clone(), value);
+        }
+    }
+
+    let returned = eval_block(&function.body, functions, &mut local_env, lines)?
+        .ok_or_else(|| unsupported("cranelift spike functions must return a value"))?;
+    for (backing_name, target) in writebacks {
+        let Some(SpikeValue::Array(elements)) = local_env.get(&backing_name) else {
+            return Err(unsupported(
+                "mutable slice call lost its local backing array",
+            ));
+        };
+        env.insert(target, SpikeValue::Array(elements.clone()));
+    }
     if function.is_async {
         Ok(spike_task(returned))
     } else {
@@ -16954,6 +17170,7 @@ fn eval_len_call(
         // for non-ASCII strings (e.g. `len("é")` is 2, not 1).
         SpikeValue::Text(value) => value.len(),
         SpikeValue::Tuple(values) | SpikeValue::Array(values) => values.len(),
+        SpikeValue::MutSlice { start, end, .. } => end.saturating_sub(start),
         _ => return Err(unsupported("len supports strings, tuples, and arrays")),
     };
     Ok(SpikeValue::Int(len as i64))
@@ -16972,22 +17189,36 @@ fn eval_first_last_call(
     // HIR restricts `first`/`last` to arrays and slices and returns the element
     // directly (it panics at runtime on an empty collection). The spike models
     // owned arrays and evaluated array slices with the same value shape.
-    let elements = match eval_expr(arg, functions, env, lines)? {
-        SpikeValue::Array(elements) => elements,
+    let selected = match eval_expr(arg, functions, env, lines)? {
+        SpikeValue::Array(elements) => {
+            if name == "first" {
+                elements.first().cloned()
+            } else {
+                elements.last().cloned()
+            }
+        }
+        SpikeValue::MutSlice { target, start, end } => {
+            let Some(SpikeValue::Array(elements)) = env.get(&target) else {
+                return Err(unsupported(
+                    "mutable slice access requires a live local array",
+                ));
+            };
+            let slice = elements
+                .get(start..end)
+                .ok_or_else(|| unsupported("slice range is outside the array length"))?;
+            if name == "first" {
+                slice.first().cloned()
+            } else {
+                slice.last().cloned()
+            }
+        }
         _ => {
             return Err(unsupported(&format!(
                 "{name} supports arrays in the cranelift spike"
             )));
         }
     };
-    let selected = if name == "first" {
-        elements.first()
-    } else {
-        elements.last()
-    };
-    selected
-        .cloned()
-        .ok_or_else(|| unsupported(&format!("{name} on an empty array")))
+    selected.ok_or_else(|| unsupported(&format!("{name} on an empty array")))
 }
 
 fn eval_map_contains_call(
@@ -21476,6 +21707,15 @@ fn eval_arithmetic(
 ) -> Result<SpikeValue, Diagnostic> {
     let left = eval_expr(lhs, functions, env, lines)?;
     let right = eval_expr(rhs, functions, env, lines)?;
+    eval_arithmetic_values(op, ty, left, right)
+}
+
+fn eval_arithmetic_values(
+    op: ArithmeticOp,
+    ty: &Type,
+    left: SpikeValue,
+    right: SpikeValue,
+) -> Result<SpikeValue, Diagnostic> {
     match (ty, left, right) {
         (Type::Int, SpikeValue::Int(left), SpikeValue::Int(right)) => {
             let value = match op {
@@ -21709,7 +21949,9 @@ fn spike_values_equal(left: &SpikeValue, right: &SpikeValue) -> Result<bool, Dia
             SpikeValue::Task { .. }
             | SpikeValue::JoinHandle(_)
             | SpikeValue::AsyncChannel { .. }
-            | SpikeValue::SelectResult { .. },
+            | SpikeValue::SelectResult { .. }
+            | SpikeValue::MutRef(_)
+            | SpikeValue::MutSlice { .. },
             _,
         )
         | (
@@ -21717,7 +21959,9 @@ fn spike_values_equal(left: &SpikeValue, right: &SpikeValue) -> Result<bool, Dia
             SpikeValue::Task { .. }
             | SpikeValue::JoinHandle(_)
             | SpikeValue::AsyncChannel { .. }
-            | SpikeValue::SelectResult { .. },
+            | SpikeValue::SelectResult { .. }
+            | SpikeValue::MutRef(_)
+            | SpikeValue::MutSlice { .. },
         ) => Err(unsupported(
             "runtime handle equality is not supported by the cranelift spike",
         )),
@@ -21875,6 +22119,8 @@ fn validate_map_key(value: &SpikeValue) -> Result<(), Diagnostic> {
         | SpikeValue::Struct { .. }
         | SpikeValue::Map(_)
         | SpikeValue::Array(_)
+        | SpikeValue::MutRef(_)
+        | SpikeValue::MutSlice { .. }
         | SpikeValue::Task { .. }
         | SpikeValue::JoinHandle(_)
         | SpikeValue::AsyncChannel { .. }
@@ -21918,6 +22164,10 @@ fn render_value(value: &SpikeValue) -> String {
         SpikeValue::Tuple(values) => render_sequence("(", ")", values),
         SpikeValue::Map(entries) => render_map(entries),
         SpikeValue::Array(values) => render_sequence("[", "]", values),
+        SpikeValue::MutRef(name) => format!("&mut {name}"),
+        SpikeValue::MutSlice { target, start, end } => {
+            format!("&mut {target}[{start}..{end}]")
+        }
         SpikeValue::Task { canceled, .. } => {
             format!("Task {{ canceled: {canceled} }}")
         }
@@ -22130,6 +22380,356 @@ mod tests {
     }
 
     #[test]
+    fn folds_match_arm_assignment_into_print_lines() {
+        let span = crate::mir::SourceSpan { line: 1, column: 1 };
+        let option_int = Type::Option(Box::new(Type::Int));
+        let program = Program {
+            path: String::from("match-assign"),
+            structs: vec![],
+            enums: vec![EnumDef {
+                name: String::from("Option"),
+                variants: vec![
+                    EnumVariantDef {
+                        name: String::from("Some"),
+                        payload_tys: vec![Type::Int],
+                        payload_names: vec![],
+                    },
+                    EnumVariantDef {
+                        name: String::from("None"),
+                        payload_tys: vec![],
+                        payload_names: vec![],
+                    },
+                ],
+            }],
+            statics: vec![],
+            functions: vec![],
+            stmts: vec![
+                Stmt::Let {
+                    name: String::from("value"),
+                    ty: Type::Int,
+                    expr: Expr::Literal(LiteralValue::Int(0)),
+                    span,
+                },
+                Stmt::Match {
+                    expr: Expr::EnumVariant {
+                        enum_name: String::from("Option"),
+                        variant: String::from("Some"),
+                        field_names: vec![],
+                        payloads: vec![Expr::Literal(LiteralValue::Int(1))],
+                        ty: option_int,
+                    },
+                    arms: vec![
+                        MatchArm {
+                            enum_name: String::from("Option"),
+                            variant: String::from("Some"),
+                            bindings: vec![],
+                            is_named: false,
+                            ignore_payloads: true,
+                            body: vec![Stmt::Assign {
+                                target: Expr::VarRef {
+                                    name: String::from("value"),
+                                    ty: Type::Int,
+                                },
+                                expr: Expr::Literal(LiteralValue::Int(1)),
+                                span,
+                            }],
+                        },
+                        MatchArm {
+                            enum_name: String::from("Option"),
+                            variant: String::from("None"),
+                            bindings: vec![],
+                            is_named: false,
+                            ignore_payloads: true,
+                            body: vec![],
+                        },
+                    ],
+                    span,
+                },
+                Stmt::Print {
+                    expr: Expr::VarRef {
+                        name: String::from("value"),
+                        ty: Type::Int,
+                    },
+                    span,
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold match arm assignment"),
+            vec![OutputLine::stdout("1")]
+        );
+    }
+
+    #[test]
+    fn folds_mutable_local_borrow_write_through_into_print_lines() {
+        let program = Program {
+            path: String::from("mut-ref"),
+            structs: vec![],
+            enums: vec![],
+            statics: vec![],
+            functions: vec![],
+            stmts: vec![
+                Stmt::Let {
+                    name: String::from("value"),
+                    ty: Type::String,
+                    expr: Expr::Literal(LiteralValue::String(String::from("alpha"))),
+                    span: crate::mir::SourceSpan { line: 1, column: 1 },
+                },
+                Stmt::Let {
+                    name: String::from("local"),
+                    ty: Type::MutRef(Box::new(Type::String)),
+                    expr: Expr::MutBorrow {
+                        expr: Box::new(Expr::VarRef {
+                            name: String::from("value"),
+                            ty: Type::String,
+                        }),
+                        ty: Type::MutRef(Box::new(Type::String)),
+                    },
+                    span: crate::mir::SourceSpan { line: 2, column: 1 },
+                },
+                Stmt::Assign {
+                    target: Expr::Deref {
+                        expr: Box::new(Expr::VarRef {
+                            name: String::from("local"),
+                            ty: Type::MutRef(Box::new(Type::String)),
+                        }),
+                        ty: Type::String,
+                    },
+                    expr: Expr::Literal(LiteralValue::String(String::from("beta"))),
+                    span: crate::mir::SourceSpan { line: 3, column: 1 },
+                },
+                Stmt::Print {
+                    expr: Expr::Deref {
+                        expr: Box::new(Expr::VarRef {
+                            name: String::from("local"),
+                            ty: Type::MutRef(Box::new(Type::String)),
+                        }),
+                        ty: Type::String,
+                    },
+                    span: crate::mir::SourceSpan { line: 4, column: 1 },
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold mutable local write-through"),
+            vec![OutputLine::stdout("beta")]
+        );
+    }
+
+    #[test]
+    fn folds_mutable_slice_write_through_into_print_lines() {
+        let int_array = Type::Array(Box::new(Type::Int), None);
+        let mut_int_slice = Type::MutSlice(Box::new(Type::Int));
+        let program = Program {
+            path: String::from("mut-slice"),
+            structs: vec![],
+            enums: vec![],
+            statics: vec![],
+            functions: vec![],
+            stmts: vec![
+                Stmt::Let {
+                    name: String::from("values"),
+                    ty: int_array.clone(),
+                    expr: Expr::ArrayLiteral {
+                        elements: vec![
+                            Expr::Literal(LiteralValue::Int(5)),
+                            Expr::Literal(LiteralValue::Int(8)),
+                            Expr::Literal(LiteralValue::Int(13)),
+                        ],
+                        ty: int_array.clone(),
+                    },
+                    span: crate::mir::SourceSpan { line: 1, column: 1 },
+                },
+                Stmt::Let {
+                    name: String::from("view"),
+                    ty: mut_int_slice.clone(),
+                    expr: Expr::Slice {
+                        base: Box::new(Expr::VarRef {
+                            name: String::from("values"),
+                            ty: int_array.clone(),
+                        }),
+                        start: None,
+                        end: None,
+                        ty: mut_int_slice.clone(),
+                    },
+                    span: crate::mir::SourceSpan { line: 2, column: 1 },
+                },
+                Stmt::Assign {
+                    target: Expr::Index {
+                        base: Box::new(Expr::VarRef {
+                            name: String::from("view"),
+                            ty: mut_int_slice,
+                        }),
+                        index: Box::new(Expr::Literal(LiteralValue::Int(0))),
+                        ty: Type::Int,
+                    },
+                    expr: Expr::Literal(LiteralValue::Int(6)),
+                    span: crate::mir::SourceSpan { line: 3, column: 1 },
+                },
+                Stmt::Print {
+                    expr: Expr::Index {
+                        base: Box::new(Expr::VarRef {
+                            name: String::from("values"),
+                            ty: int_array,
+                        }),
+                        index: Box::new(Expr::Literal(LiteralValue::Int(0))),
+                        ty: Type::Int,
+                    },
+                    span: crate::mir::SourceSpan { line: 4, column: 1 },
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold mutable slice write-through"),
+            vec![OutputLine::stdout("6")]
+        );
+    }
+
+    #[test]
+    fn folds_mutable_slice_call_writeback_into_print_lines() {
+        let int_array = Type::Array(Box::new(Type::Int), None);
+        let mut_int_slice = Type::MutSlice(Box::new(Type::Int));
+        let program = Program {
+            path: String::from("mut-slice-call"),
+            structs: vec![],
+            enums: vec![],
+            statics: vec![],
+            functions: vec![Function {
+                name: String::from("bump_first"),
+                source_name: String::from("bump_first"),
+                path: String::from("mut-slice-call"),
+                params: vec![crate::mir::Param {
+                    name: String::from("values"),
+                    ty: mut_int_slice.clone(),
+                }],
+                return_ty: Type::Int,
+                body: vec![
+                    Stmt::Assign {
+                        target: Expr::Index {
+                            base: Box::new(Expr::VarRef {
+                                name: String::from("values"),
+                                ty: mut_int_slice.clone(),
+                            }),
+                            index: Box::new(Expr::Literal(LiteralValue::Int(0))),
+                            ty: Type::Int,
+                        },
+                        expr: Expr::BinaryAdd {
+                            op: ArithmeticOp::Add,
+                            lhs: Box::new(Expr::Call {
+                                name: String::from("first"),
+                                args: vec![Expr::VarRef {
+                                    name: String::from("values"),
+                                    ty: mut_int_slice.clone(),
+                                }],
+                                ty: Type::Int,
+                            }),
+                            rhs: Box::new(Expr::Literal(LiteralValue::Int(1))),
+                            ty: Type::Int,
+                        },
+                        span: crate::mir::SourceSpan { line: 2, column: 1 },
+                    },
+                    Stmt::Return {
+                        expr: Expr::Call {
+                            name: String::from("first"),
+                            args: vec![Expr::VarRef {
+                                name: String::from("values"),
+                                ty: mut_int_slice.clone(),
+                            }],
+                            ty: Type::Int,
+                        },
+                        span: crate::mir::SourceSpan { line: 3, column: 1 },
+                    },
+                ],
+                is_property: false,
+                is_async: false,
+                is_extern: false,
+                extern_abi: None,
+                extern_library: None,
+                line: 1,
+                column: 1,
+            }],
+            stmts: vec![
+                Stmt::Let {
+                    name: String::from("values"),
+                    ty: int_array.clone(),
+                    expr: Expr::ArrayLiteral {
+                        elements: vec![
+                            Expr::Literal(LiteralValue::Int(5)),
+                            Expr::Literal(LiteralValue::Int(8)),
+                            Expr::Literal(LiteralValue::Int(13)),
+                        ],
+                        ty: int_array.clone(),
+                    },
+                    span: crate::mir::SourceSpan { line: 5, column: 1 },
+                },
+                Stmt::Print {
+                    expr: Expr::Call {
+                        name: String::from("bump_first"),
+                        args: vec![Expr::Slice {
+                            base: Box::new(Expr::VarRef {
+                                name: String::from("values"),
+                                ty: int_array.clone(),
+                            }),
+                            start: None,
+                            end: None,
+                            ty: mut_int_slice,
+                        }],
+                        ty: Type::Int,
+                    },
+                    span: crate::mir::SourceSpan { line: 6, column: 1 },
+                },
+                Stmt::Print {
+                    expr: Expr::Call {
+                        name: String::from("first"),
+                        args: vec![Expr::VarRef {
+                            name: String::from("values"),
+                            ty: int_array,
+                        }],
+                        ty: Type::Int,
+                    },
+                    span: crate::mir::SourceSpan { line: 7, column: 1 },
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold mutable slice call writeback"),
+            vec![OutputLine::stdout("6"), OutputLine::stdout("6")]
+        );
+    }
+
+    #[test]
     fn function_receiver_alias_is_not_overwritten_by_later_self_param() {
         let point_ty = Type::Struct(String::from("Point"));
         let function = Function {
@@ -22209,6 +22809,139 @@ mod tests {
             )
             .expect("receiver alias should evaluate"),
             SpikeValue::Bool(false)
+        );
+    }
+
+    #[test]
+    fn folds_nested_mutable_slice_call_writeback_into_print_lines() {
+        let int_array = Type::Array(Box::new(Type::Int), None);
+        let mut_int_slice = Type::MutSlice(Box::new(Type::Int));
+        let program = Program {
+            path: String::from("nested-mut-slice-call"),
+            structs: vec![],
+            enums: vec![],
+            statics: vec![],
+            functions: vec![Function {
+                name: String::from("bump_first"),
+                source_name: String::from("bump_first"),
+                path: String::from("nested-mut-slice-call"),
+                params: vec![crate::mir::Param {
+                    name: String::from("values"),
+                    ty: mut_int_slice.clone(),
+                }],
+                return_ty: Type::Int,
+                body: vec![
+                    Stmt::Assign {
+                        target: Expr::Index {
+                            base: Box::new(Expr::VarRef {
+                                name: String::from("values"),
+                                ty: mut_int_slice.clone(),
+                            }),
+                            index: Box::new(Expr::Literal(LiteralValue::Int(0))),
+                            ty: Type::Int,
+                        },
+                        expr: Expr::BinaryAdd {
+                            op: ArithmeticOp::Add,
+                            lhs: Box::new(Expr::Call {
+                                name: String::from("first"),
+                                args: vec![Expr::VarRef {
+                                    name: String::from("values"),
+                                    ty: mut_int_slice.clone(),
+                                }],
+                                ty: Type::Int,
+                            }),
+                            rhs: Box::new(Expr::Literal(LiteralValue::Int(1))),
+                            ty: Type::Int,
+                        },
+                        span: crate::mir::SourceSpan { line: 2, column: 1 },
+                    },
+                    Stmt::Return {
+                        expr: Expr::Call {
+                            name: String::from("first"),
+                            args: vec![Expr::VarRef {
+                                name: String::from("values"),
+                                ty: mut_int_slice.clone(),
+                            }],
+                            ty: Type::Int,
+                        },
+                        span: crate::mir::SourceSpan { line: 3, column: 1 },
+                    },
+                ],
+                is_property: false,
+                is_async: false,
+                is_extern: false,
+                extern_abi: None,
+                extern_library: None,
+                line: 1,
+                column: 1,
+            }],
+            stmts: vec![
+                Stmt::Let {
+                    name: String::from("values"),
+                    ty: int_array.clone(),
+                    expr: Expr::ArrayLiteral {
+                        elements: vec![
+                            Expr::Literal(LiteralValue::Int(5)),
+                            Expr::Literal(LiteralValue::Int(8)),
+                        ],
+                        ty: int_array.clone(),
+                    },
+                    span: crate::mir::SourceSpan { line: 5, column: 1 },
+                },
+                Stmt::Let {
+                    name: String::from("result"),
+                    ty: Type::Int,
+                    expr: Expr::BinaryAdd {
+                        op: ArithmeticOp::Add,
+                        lhs: Box::new(Expr::Call {
+                            name: String::from("bump_first"),
+                            args: vec![Expr::Slice {
+                                base: Box::new(Expr::VarRef {
+                                    name: String::from("values"),
+                                    ty: int_array.clone(),
+                                }),
+                                start: None,
+                                end: None,
+                                ty: mut_int_slice,
+                            }],
+                            ty: Type::Int,
+                        }),
+                        rhs: Box::new(Expr::Literal(LiteralValue::Int(0))),
+                        ty: Type::Int,
+                    },
+                    span: crate::mir::SourceSpan { line: 6, column: 1 },
+                },
+                Stmt::Print {
+                    expr: Expr::VarRef {
+                        name: String::from("result"),
+                        ty: Type::Int,
+                    },
+                    span: crate::mir::SourceSpan { line: 7, column: 1 },
+                },
+                Stmt::Print {
+                    expr: Expr::Call {
+                        name: String::from("first"),
+                        args: vec![Expr::VarRef {
+                            name: String::from("values"),
+                            ty: int_array,
+                        }],
+                        ty: Type::Int,
+                    },
+                    span: crate::mir::SourceSpan { line: 8, column: 1 },
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold nested mutable slice call writeback"),
+            vec![OutputLine::stdout("6"), OutputLine::stdout("6")]
         );
     }
 
