@@ -12970,6 +12970,13 @@ fn lower_expr_with_expected_inner(
                         )
                         .with_span(*line, *column));
                     }
+                    if !is_supported_helper_call_array_index_base(&lowered_base) {
+                        return Err(Diagnostic::new(
+                            "type",
+                            "helper-call array indexing currently requires a scalar or bool element type",
+                        )
+                        .with_span(*line, *column));
+                    }
                     let element_ty = (*element_ty.clone()).clone();
                     if !element_ty.is_copy() {
                         move_lowered_owner_value(&lowered_base, env)?;
@@ -14776,7 +14783,21 @@ fn is_borrowable_slice_base(expr: &Expr) -> bool {
         Expr::FieldAccess { base, .. } => is_borrowable_slice_base(base),
         Expr::TupleIndex { base, .. } => is_borrowable_slice_base(base),
         Expr::Slice { .. } => true,
+        Expr::Call {
+            ty: Type::Array(element, Some(_)),
+            ..
+        } => is_scalar_local_assignment_type(element),
         _ => false,
+    }
+}
+
+fn is_supported_helper_call_array_index_base(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call {
+            ty: Type::Array(element, Some(_)),
+            ..
+        } => is_scalar_local_assignment_type(element),
+        _ => true,
     }
 }
 
