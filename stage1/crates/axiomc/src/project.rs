@@ -18,7 +18,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fs::{self, OpenOptions};
+use std::io::ErrorKind;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -27,6 +30,7 @@ use std::time::{Duration, Instant};
 
 const BUILD_CACHE_VERSION: u32 = 1;
 const BUILD_CACHE_COMPILER: &str = concat!("axiomc-stage1-", env!("CARGO_PKG_VERSION"));
+const MAX_TEST_EXPECTED_STREAM_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckedPackage {
@@ -901,6 +905,18 @@ fn collect_test_targets(
     if properties_only && !conformance {
         tests.retain(|test| test.kind == TestKind::Property);
     }
+    for test in &mut tests {
+        if let Some(expected_stdout) =
+            load_manifest_test_stream(project_root, test.stdout.as_deref(), "stdout")?
+        {
+            test.stdout = Some(expected_stdout);
+        }
+        if let Some(expected_stderr) =
+            load_manifest_test_stream(project_root, test.stderr.as_deref(), "stderr")?
+        {
+            test.stderr = Some(expected_stderr);
+        }
+    }
     if let Some(expected_stdout) = load_package_expected_output(project_root)? {
         for test in &mut tests {
             if test.kind != TestKind::Benchmark && test.stdout.is_none() {
@@ -930,18 +946,6 @@ fn collect_test_targets(
     if let Some(filter) = filter {
         tests.retain(|test| test_matches_filter(test, filter));
     }
-    for test in &mut tests {
-        if let Some(expected_stdout) =
-            load_manifest_test_stream(project_root, test.stdout.as_deref(), "stdout")?
-        {
-            test.stdout = Some(expected_stdout);
-        }
-        if let Some(expected_stderr) =
-            load_manifest_test_stream(project_root, test.stderr.as_deref(), "stderr")?
-        {
-            test.stderr = Some(expected_stderr);
-        }
-    }
     Ok(tests)
 }
 
@@ -962,27 +966,7 @@ fn load_manifest_test_stream(
         return Ok(None);
     }
     let path = project_root.join(configured);
-    if !path.exists() {
-        return Ok(None);
-    }
-    if fs::symlink_metadata(&path)
-        .map(|metadata| metadata.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Ok(None);
-    }
-    let package_root = canonicalize_existing_path(project_root, "package root")?;
-    let path = canonicalize_existing_path(&path, "test stream fixture")?;
-    if !path.starts_with(&package_root) {
-        return Ok(None);
-    }
-    fs::read_to_string(&path).map(Some).map_err(|err| {
-        Diagnostic::new(
-            "test",
-            format!("failed to read {stream} fixture {}: {err}", path.display()),
-        )
-        .with_path(path.display().to_string())
-    })
+    read_optional_test_expected_stream(project_root, &path, &format!("{stream} fixture"))
 }
 
 fn discover_test_targets(
@@ -1047,31 +1031,18 @@ fn collect_discovered_tests(
         let kind = kind.expect("test kind checked");
         let relative = normalize_path(path.strip_prefix(project_root).unwrap_or(&path));
         let stdout_path = path.with_extension("stdout");
-        let stdout = if stdout_path.exists() {
-            Some(fs::read_to_string(&stdout_path).map_err(|err| {
-                Diagnostic::new(
-                    "test",
-                    format!("failed to read {}: {err}", stdout_path.display()),
-                )
-                .with_path(stdout_path.display().to_string())
-            })?)
+        let stdout = if let Some(stdout) =
+            read_optional_test_expected_stream(project_root, &stdout_path, "stdout fixture")?
+        {
+            Some(stdout)
         } else if kind == TestKind::Benchmark {
             None
         } else {
             package_expected_output.map(str::to_string)
         };
         let stderr_path = path.with_extension("stderr");
-        let stderr = if stderr_path.exists() {
-            Some(fs::read_to_string(&stderr_path).map_err(|err| {
-                Diagnostic::new(
-                    "test",
-                    format!("failed to read {}: {err}", stderr_path.display()),
-                )
-                .with_path(stderr_path.display().to_string())
-            })?)
-        } else {
-            None
-        };
+        let stderr =
+            read_optional_test_expected_stream(project_root, &stderr_path, "stderr fixture")?;
         tests.push(crate::manifest::TestTarget {
             name: relative.with_extension("").display().to_string(),
             entry: relative.display().to_string(),
@@ -1109,12 +1080,196 @@ fn discovered_test_kind(stem: &str, include_benchmarks: bool) -> Option<TestKind
 
 fn load_package_expected_output(project_root: &Path) -> Result<Option<String>, Diagnostic> {
     let path = project_root.join("expected-output.txt");
-    if !path.exists() {
-        return Ok(None);
+    read_optional_test_expected_stream(project_root, &path, "package stdout fixture")
+}
+
+fn read_optional_test_expected_stream(
+    project_root: &Path,
+    path: &Path,
+    label: &str,
+) -> Result<Option<String>, Diagnostic> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => read_test_expected_stream(project_root, path, label).map(Some),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(Diagnostic::new(
+            "test",
+            format!("failed to inspect {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())),
     }
-    fs::read_to_string(&path).map(Some).map_err(|err| {
-        Diagnostic::new("test", format!("failed to read {}: {err}", path.display()))
+}
+
+fn read_test_expected_stream(
+    project_root: &Path,
+    path: &Path,
+    label: &str,
+) -> Result<String, Diagnostic> {
+    let metadata = fs::symlink_metadata(path).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("failed to inspect {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because expected test streams must be regular files, not symlinks",
+                path.display()
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    if !file_type.is_file() {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because expected test streams must be regular files",
+                path.display()
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    if metadata.len() > MAX_TEST_EXPECTED_STREAM_BYTES {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because it is {} bytes, above the {} byte limit",
+                path.display(),
+                metadata.len(),
+                MAX_TEST_EXPECTED_STREAM_BYTES
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    let canonical_root = project_root.canonicalize().map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!(
+                "failed to canonicalize project root {}: {err}",
+                project_root.display()
+            ),
+        )
+        .with_path(project_root.display().to_string())
+    })?;
+    let canonical_path = path.canonicalize().map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("failed to canonicalize {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because it resolves outside project root {}",
+                path.display(),
+                project_root.display()
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    let file = open_test_expected_stream(path, label)?;
+    let opened_metadata = file.metadata().map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("failed to inspect opened {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })?;
+    if !opened_expected_stream_matches(&metadata, &opened_metadata) {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because it changed while being opened",
+                path.display()
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    if !opened_metadata.file_type().is_file() {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because expected test streams must be regular files",
+                path.display()
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    if opened_metadata.len() > MAX_TEST_EXPECTED_STREAM_BYTES {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because it is {} bytes, above the {} byte limit",
+                path.display(),
+                opened_metadata.len(),
+                MAX_TEST_EXPECTED_STREAM_BYTES
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    let mut content = String::new();
+    let mut limited = file.take(MAX_TEST_EXPECTED_STREAM_BYTES + 1);
+    limited.read_to_string(&mut content).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("failed to read {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
+    })?;
+    if content.len() as u64 > MAX_TEST_EXPECTED_STREAM_BYTES {
+        return Err(Diagnostic::new(
+            "test",
+            format!(
+                "refusing to read {label} {} because it exceeds the {} byte limit",
+                path.display(),
+                MAX_TEST_EXPECTED_STREAM_BYTES
+            ),
+        )
+        .with_path(path.display().to_string()));
+    }
+    Ok(content)
+}
+
+#[cfg(unix)]
+fn opened_expected_stream_matches(validated: &fs::Metadata, opened: &fs::Metadata) -> bool {
+    validated.dev() == opened.dev() && validated.ino() == opened.ino()
+}
+
+#[cfg(not(unix))]
+fn opened_expected_stream_matches(validated: &fs::Metadata, opened: &fs::Metadata) -> bool {
+    validated.len() == opened.len()
+        && validated.file_type().is_file()
+        && opened.file_type().is_file()
+}
+
+#[cfg(unix)]
+fn open_test_expected_stream(path: &Path, label: &str) -> Result<fs::File, Diagnostic> {
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|err| {
+            Diagnostic::new(
+                "test",
+                format!("failed to open {label} {}: {err}", path.display()),
+            )
             .with_path(path.display().to_string())
+        })
+}
+
+#[cfg(not(unix))]
+fn open_test_expected_stream(path: &Path, label: &str) -> Result<fs::File, Diagnostic> {
+    fs::File::open(path).map_err(|err| {
+        Diagnostic::new(
+            "test",
+            format!("failed to open {label} {}: {err}", path.display()),
+        )
+        .with_path(path.display().to_string())
     })
 }
 
@@ -9959,6 +10114,40 @@ return async_serve_route(1, "/", "ok", 1)
     }
 
     #[test]
+    fn package_expected_output_is_not_reloaded_as_manifest_fixture_path() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        fs::write(
+            root.join("expected-output.txt"),
+            "{\"event\":\"ingest\",\"ok\":true}\ntrue\n",
+        )
+        .unwrap_or_else(|err| panic!("write package expected output: {err}"));
+
+        let mut manifest = package_manifest();
+        manifest.tests.push(crate::manifest::TestTarget {
+            name: "manifest_unit".to_string(),
+            entry: "src/manifest_unit.ax".to_string(),
+            stdin: None,
+            stdout: None,
+            stderr: None,
+            kind: TestKind::Unit,
+            expected_error: None,
+            http: None,
+            capabilities: Vec::new(),
+            package: None,
+        });
+
+        let tests = collect_test_targets(root, &manifest, None, false, false, false)
+            .unwrap_or_else(|err| panic!("collect tests: {err:?}"));
+
+        assert_eq!(tests.len(), 1);
+        assert_eq!(
+            tests[0].stdout.as_deref(),
+            Some("{\"event\":\"ingest\",\"ok\":true}\ntrue\n")
+        );
+    }
+
+    #[test]
     fn manifest_test_streams_only_load_relative_package_fixtures() {
         let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
         let root = dir.path().join("package");
@@ -10001,6 +10190,74 @@ return async_serve_route(1, "/", "ok", 1)
         let loaded = load_manifest_test_stream(&root, Some("stdout.txt"), "stdout")
             .unwrap_or_else(|err| panic!("load symlink: {err:?}"));
         assert_eq!(loaded, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_expected_stream_open_rejects_symlink() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        let target = root.join("target.stdout");
+        let link = root.join("main_test.stdout");
+        fs::write(&target, "leaked\n").unwrap_or_else(|err| panic!("write target: {err}"));
+        std::os::unix::fs::symlink(&target, &link)
+            .unwrap_or_else(|err| panic!("symlink golden: {err}"));
+
+        let error = match open_test_expected_stream(&link, "stdout fixture") {
+            Ok(_) => panic!("symlinked expected stream was opened"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "test");
+        assert_eq!(error.path, Some(link.display().to_string()));
+        assert!(error.message.contains("failed to open stdout fixture"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opened_expected_stream_identity_must_match_validated_file() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let first = dir.path().join("first.stdout");
+        let second = dir.path().join("second.stdout");
+        fs::write(&first, "first\n").unwrap_or_else(|err| panic!("write first: {err}"));
+        fs::write(&second, "second\n").unwrap_or_else(|err| panic!("write second: {err}"));
+
+        let first_metadata =
+            fs::metadata(&first).unwrap_or_else(|err| panic!("metadata first: {err}"));
+        let same_metadata = fs::File::open(&first)
+            .unwrap_or_else(|err| panic!("open first: {err}"))
+            .metadata()
+            .unwrap_or_else(|err| panic!("opened metadata first: {err}"));
+        let second_metadata =
+            fs::metadata(&second).unwrap_or_else(|err| panic!("metadata second: {err}"));
+
+        assert!(opened_expected_stream_matches(
+            &first_metadata,
+            &same_metadata
+        ));
+        assert!(!opened_expected_stream_matches(
+            &first_metadata,
+            &second_metadata
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn optional_test_expected_stream_rejects_broken_symlink() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let root = dir.path();
+        let link = root.join("main_test.stdout");
+        std::os::unix::fs::symlink(root.join("missing.stdout"), &link)
+            .unwrap_or_else(|err| panic!("broken symlink golden: {err}"));
+
+        let error = match read_optional_test_expected_stream(root, &link, "stdout fixture") {
+            Ok(_) => panic!("broken symlinked expected stream was treated as optional missing"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, "test");
+        assert_eq!(error.path, Some(link.display().to_string()));
+        assert!(error.message.contains("not symlinks"));
     }
 
     #[cfg(unix)]
