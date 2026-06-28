@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-repo_root="${AXIOM_CHECKOUT_PATH:-$script_repo_root}"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$repo_root/.github/workflows/pr-fast-ci.yml"
+fast_checks_script="$repo_root/scripts/ci/run-fast-checks.sh"
 
 if [[ ! -f "$workflow" ]]; then
   echo "missing workflow: $workflow" >&2
+  exit 1
+fi
+
+if [[ ! -f "$fast_checks_script" ]]; then
+  echo "missing fast checks script: $fast_checks_script" >&2
   exit 1
 fi
 
@@ -23,9 +28,10 @@ if [[ -z "$section" ]]; then
   exit 1
 fi
 
-checkout_line=$(printf '%s\n' "$section" | nl -ba | grep 'actions/checkout@' | head -n1 | awk '{print $1}')
-run_line=$(printf '%s\n' "$section" | nl -ba | grep 'bash .trusted-ci/scripts/ci/validate-pr-description.sh' | head -n1 | awk '{print $1}')
-pr_body_env_line=$(printf '%s\n' "$section" | nl -ba | grep -F 'PR_BODY: ${{ github.event.pull_request.body }}' | head -n1 | awk '{print $1}')
+checkout_line=$(printf '%s\n' "$section" | nl -ba | { grep 'actions/checkout@' || true; } | head -n1 | awk '{print $1}')
+inline_run_line=$(printf '%s\n' "$section" | nl -ba | { grep -E 'run:[[:space:]]*\|' || true; } | head -n1 | awk '{print $1}')
+script_run_line=$(printf '%s\n' "$section" | nl -ba | { grep 'bash scripts/ci/validate-pr-description.sh' || true; } | head -n1 | awk '{print $1}')
+pr_body_env_line=$(printf '%s\n' "$section" | nl -ba | { grep -F 'PR_BODY: ${{ github.event.pull_request.body }}' || true; } | head -n1 | awk '{print $1}')
 ci_gate_needs_validate=$(awk '
   /^  ci-gate:$/ { in_job=1; next }
   in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
@@ -39,25 +45,26 @@ ci_gate_section="$({
     in_job { print }
   ' "$workflow"
 })"
-ci_gate_checkout_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | grep 'actions/checkout@' | head -n1 | awk '{print $1}')
-ci_gate_run_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | grep 'bash .trusted-ci/scripts/ci/check-pr-fast-ci-gate.sh' | head -n1 | awk '{print $1}')
-ci_gate_fork_validate_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | grep 'bash .trusted-ci/scripts/ci/validate-pr-description.sh' | head -n1 | awk '{print $1}')
-ci_gate_base_ref_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | grep -F 'ref: ${{ github.event.pull_request.base.sha }}' | head -n1 | awk '{print $1}')
+ci_gate_checkout_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | { grep 'actions/checkout@' || true; } | head -n1 | awk '{print $1}')
+ci_gate_run_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | { grep 'bash scripts/ci/check-pr-fast-ci-gate.sh' || true; } | head -n1 | awk '{print $1}')
+ci_gate_fork_validate_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | { grep 'bash scripts/ci/validate-pr-description.sh' || true; } | head -n1 | awk '{print $1}')
+ci_gate_base_ref_line=$(printf '%s\n' "$ci_gate_section" | nl -ba | { grep -F 'ref: ${{ github.event.pull_request.base.sha }}' || true; } | head -n1 | awk '{print $1}')
 ci_gate_head_ref=$(printf '%s\n' "$ci_gate_section" | grep -F 'github.event.pull_request.head.sha' || true)
 benchmark_gate_reference=$(grep -nE 'check-stage1-benchmarks\.py|stage1-comparison-report\.json' "$workflow" || true)
+runtime_abi_status_check=$(grep -nF 'scripts/ci/render-direct-native-runtime-abi-status.py' "$fast_checks_script" || true)
 
-if [[ -z "$checkout_line" ]]; then
-  echo "validate-pr-description job must checkout the repo before running validation" >&2
+if [[ -n "$checkout_line" ]]; then
+  echo "validate-pr-description job must not checkout untrusted pull request code" >&2
   exit 1
 fi
 
-if [[ -z "$run_line" ]]; then
-  echo "validate-pr-description job must run the PR description validation script" >&2
+if [[ -z "$inline_run_line" ]]; then
+  echo "validate-pr-description job must keep PR description validation inline" >&2
   exit 1
 fi
 
-if (( checkout_line >= run_line )); then
-  echo "validate-pr-description job must checkout the repo before running validation" >&2
+if [[ -n "$script_run_line" ]]; then
+  echo "validate-pr-description job must not execute repository validation scripts" >&2
   exit 1
 fi
 
@@ -87,7 +94,7 @@ if [[ -z "$ci_gate_checkout_line" ]]; then
 fi
 
 if [[ -z "$ci_gate_run_line" ]]; then
-  echo "ci-gate must delegate result policy to trusted scripts/ci/check-pr-fast-ci-gate.sh" >&2
+  echo "ci-gate must delegate result policy to scripts/ci/check-pr-fast-ci-gate.sh" >&2
   exit 1
 fi
 
@@ -113,12 +120,12 @@ fi
 
 RESULTS='changes=success fast-checks=skipped validate-pr-description=skipped validate-secrets=skipped' \
   IS_FORK_PR=false \
-  bash "$script_repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null
+  bash "$repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null
 
 if RESULTS='changes=success fast-checks=skipped validate-pr-description=skipped validate-secrets=skipped' \
   IS_FORK_PR=true \
   TRUSTED_FORK_PR_DESCRIPTION_VALIDATED=false \
-  bash "$script_repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null 2>&1; then
+  bash "$repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null 2>&1; then
   echo "ci-gate must not accept skipped fork PR description validation without the trusted-base validation step" >&2
   exit 1
 fi
@@ -126,43 +133,19 @@ fi
 if ! RESULTS='changes=success fast-checks=skipped validate-pr-description=skipped validate-secrets=skipped' \
   IS_FORK_PR=true \
   TRUSTED_FORK_PR_DESCRIPTION_VALIDATED=true \
-  bash "$script_repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null 2>&1; then
+  bash "$repo_root/scripts/ci/check-pr-fast-ci-gate.sh" >/dev/null 2>&1; then
   echo "ci-gate must allow fork PR branch validation jobs after PR description was validated from the trusted base checkout" >&2
   exit 1
 fi
 
-
-trusted_checkout_count=$(grep -c 'ref: ${{ github.event.pull_request.base.sha }}' "$workflow")
-trusted_script_runs=$(grep -c '\.trusted-ci/scripts/' "$workflow")
-if (( trusted_checkout_count < 4 )); then
-  echo "PR jobs that run repository scripts must checkout trusted base-branch CI scripts" >&2
-  exit 1
-fi
-if (( trusted_script_runs < 4 )); then
-  echo "PR jobs must execute CI helper scripts from the trusted base checkout" >&2
-  exit 1
-fi
-
-if ! grep -Fq 'reserved_trusted_path=".trusted-ci"' "$repo_root/scripts/check-detect-secrets.sh"; then
-  echo "secret scanning must reject tracked .trusted-ci paths before scanning PR contents" >&2
-  exit 1
-fi
-
-if ! grep -Fq 'repo_root="${AXIOM_CHECKOUT_PATH:-$script_repo_root}"' "$repo_root/scripts/ci/validate-capability-manifests.sh"; then
-  echo "capability manifest validation must inspect AXIOM_CHECKOUT_PATH when trusted scripts run from a base checkout" >&2
-  exit 1
-fi
-
-for helper in run-stdlib-property-checks.sh run-compiler-property-checks.sh; do
-  if ! grep -Fq 'repo_root="${AXIOM_CHECKOUT_PATH:-$script_repo_root}"' "$repo_root/scripts/ci/$helper"; then
-    echo "$helper must run content checks against AXIOM_CHECKOUT_PATH when trusted scripts run from a base checkout" >&2
-    exit 1
-  fi
-done
-
 if [[ -n "$benchmark_gate_reference" ]]; then
   echo "pr-fast-ci must not run the Stage 1 comparison benchmark gate; keep it in extended, nightly, or manual validation" >&2
   printf '%s\n' "$benchmark_gate_reference" >&2
+  exit 1
+fi
+
+if [[ -z "$runtime_abi_status_check" ]]; then
+  echo "run-fast-checks must validate that the direct-native runtime ABI status block matches the JSON contract" >&2
   exit 1
 fi
 
