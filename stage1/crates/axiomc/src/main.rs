@@ -6175,13 +6175,8 @@ fn generate_docs(path: &Path, out_dir: &Path, write_html: bool) -> Result<DocOut
                 format!("failed to write {}: {err}", html_path.display()),
             )
         })?;
-    } else if html_path.exists() {
-        fs::remove_file(&html_path).map_err(|err| {
-            Diagnostic::new(
-                "doc",
-                format!("failed to remove {}: {err}", html_path.display()),
-            )
-        })?;
+    } else {
+        remove_stale_doc_file(&html_path)?;
     }
     let capabilities = project_capabilities(path).unwrap_or_default();
     let functions = items
@@ -6323,6 +6318,25 @@ fn reject_symlinked_doc_file(path: &Path) -> Result<(), Diagnostic> {
             ),
         )),
         Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => Err(Diagnostic::new(
+            "doc",
+            format!("documentation output {} is not a file", path.display()),
+        )),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(Diagnostic::new(
+            "doc",
+            format!("failed to inspect {}: {err}", path.display()),
+        )),
+    }
+}
+
+fn remove_stale_doc_file(path: &Path) -> Result<(), Diagnostic> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {
+            fs::remove_file(path).map_err(|err| {
+                Diagnostic::new("doc", format!("failed to remove {}: {err}", path.display()))
+            })
+        }
         Ok(_) => Err(Diagnostic::new(
             "doc",
             format!("documentation output {} is not a file", path.display()),
@@ -10061,8 +10075,9 @@ print serve("127.0.0.1:0", selected_route, 1)
         fs::write(&outside, "do not overwrite").expect("write outside");
         std::os::unix::fs::symlink(&outside, project.join("dist/docs/index.html"))
             .expect("symlink index html");
+        let canonical_project = fs::canonicalize(&project).expect("canonical project");
 
-        let output = generate_docs(&project, &project.join("dist/docs"), false)
+        let output = generate_docs(&project, &canonical_project.join("dist/docs"), false)
             .expect("generate markdown docs");
 
         assert!(output.markdown.exists());
@@ -10071,6 +10086,27 @@ print serve("127.0.0.1:0", selected_route, 1)
             fs::read_to_string(outside).expect("read outside"),
             "do not overwrite"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markdown_doc_generation_removes_broken_symlinked_html() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("doc-md-broken-html-symlink");
+        let outside = dir.path().join("missing.html");
+        fs::create_dir_all(project.join("src")).expect("mkdir project src");
+        fs::create_dir_all(project.join("dist/docs")).expect("mkdir docs");
+        fs::write(project.join("src/main.ax"), "/// Main.\npub fn main() {}\n")
+            .expect("write source");
+        std::os::unix::fs::symlink(&outside, project.join("dist/docs/index.html"))
+            .expect("symlink index html");
+        let canonical_project = fs::canonicalize(&project).expect("canonical project");
+
+        let output = generate_docs(&project, &canonical_project.join("dist/docs"), false)
+            .expect("generate markdown docs");
+
+        assert!(output.markdown.exists());
+        assert!(!project.join("dist/docs/index.html").exists());
     }
 
     #[test]
