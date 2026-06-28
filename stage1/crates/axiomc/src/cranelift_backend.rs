@@ -16154,7 +16154,11 @@ fn eval_match_stmt(
     env: &SpikeEnv,
     lines: &mut Vec<OutputLine>,
 ) -> Result<Option<SpikeValue>, Diagnostic> {
-    let matched = expect_enum_value(eval_expr(expr, functions, env, lines)?)?;
+    let matched_value = eval_expr(expr, functions, env, lines)?;
+    if arms.iter().all(|arm| arm.enum_name.is_empty()) {
+        return eval_const_match_stmt(matched_value, arms, functions, env, lines);
+    }
+    let matched = expect_enum_value(matched_value)?;
     let arm = arms
         .iter()
         .find(|arm| arm.enum_name == matched.enum_name && arm.variant == matched.variant)
@@ -16169,6 +16173,22 @@ fn eval_match_stmt(
             &matched.payloads,
         )?;
     }
+    eval_block(&arm.body, functions, &mut arm_env, lines)
+}
+
+fn eval_const_match_stmt(
+    matched_value: SpikeValue,
+    arms: &[MatchArm],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<Option<SpikeValue>, Diagnostic> {
+    let matched = expect_int(matched_value)?.to_string();
+    let arm = arms
+        .iter()
+        .find(|arm| arm.variant == matched)
+        .ok_or_else(|| unsupported("const match statement has no matching arm"))?;
+    let mut arm_env = env.clone();
     eval_block(&arm.body, functions, &mut arm_env, lines)
 }
 
@@ -22013,6 +22033,51 @@ mod tests {
                 OutputLine::stdout("hello from stage1"),
                 OutputLine::stdout("42")
             ]
+        );
+    }
+
+    #[test]
+    fn folds_const_match_statement_into_print_lines() {
+        let mut program = hello_program();
+        program.functions.clear();
+        program.stmts = vec![Stmt::Match {
+            expr: Expr::Literal(LiteralValue::Int(7)),
+            arms: vec![
+                MatchArm {
+                    enum_name: String::new(),
+                    variant: String::from("3"),
+                    bindings: Vec::new(),
+                    is_named: false,
+                    ignore_payloads: false,
+                    body: vec![Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(String::from("wrong"))),
+                        span: crate::mir::SourceSpan { line: 1, column: 1 },
+                    }],
+                },
+                MatchArm {
+                    enum_name: String::new(),
+                    variant: String::from("7"),
+                    bindings: Vec::new(),
+                    is_named: false,
+                    ignore_payloads: false,
+                    body: vec![Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(String::from("ready"))),
+                        span: crate::mir::SourceSpan { line: 1, column: 1 },
+                    }],
+                },
+            ],
+            span: crate::mir::SourceSpan { line: 1, column: 1 },
+        }];
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold match"),
+            vec![OutputLine::stdout("ready")]
         );
     }
 
