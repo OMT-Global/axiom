@@ -15,6 +15,7 @@ use axiomc_backend_cranelift::{
     I64ValueBody as CraneliftI64ValueBody, I64ValueReturnBlock as CraneliftI64ValueReturnBlock,
     OutputLine, OutputStream,
 };
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{Read, Write};
@@ -282,6 +283,47 @@ struct SpikeTcpStream {
     written: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct SpikeStdin {
+    content: String,
+    offset: usize,
+}
+
+impl SpikeStdin {
+    fn new(content: Option<&str>) -> Self {
+        Self {
+            content: content.unwrap_or_default().to_string(),
+            offset: 0,
+        }
+    }
+
+    fn readline(&mut self) -> Option<String> {
+        if self.offset >= self.content.len() {
+            return None;
+        }
+        let remaining = &self.content[self.offset..];
+        let (line_end, next_offset) = match remaining.find('\n') {
+            Some(newline) => (self.offset + newline, self.offset + newline + 1),
+            None => (self.content.len(), self.content.len()),
+        };
+        let mut line = self.content[self.offset..line_end].to_string();
+        if line.ends_with('\r') {
+            line.pop();
+        }
+        self.offset = next_offset;
+        Some(line)
+    }
+
+    fn read_to_string(&mut self) -> String {
+        if self.offset >= self.content.len() {
+            return String::new();
+        }
+        let remaining = self.content[self.offset..].to_string();
+        self.offset = self.content.len();
+        remaining
+    }
+}
+
 static SPIKE_HTTP_NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
 static SPIKE_HTTP_SERVERS: OnceLock<Mutex<HashMap<i64, SpikeHttpServer>>> = OnceLock::new();
 static SPIKE_HTTP_REQUESTS: OnceLock<Mutex<HashMap<i64, SpikeHttpRequest>>> = OnceLock::new();
@@ -289,11 +331,16 @@ static SPIKE_TCP_NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
 static SPIKE_TCP_LISTENERS: OnceLock<Mutex<HashMap<i64, SpikeTcpListener>>> = OnceLock::new();
 static SPIKE_TCP_STREAMS: OnceLock<Mutex<HashMap<i64, SpikeTcpStream>>> = OnceLock::new();
 
+thread_local! {
+    static SPIKE_STDIN: RefCell<SpikeStdin> = RefCell::new(SpikeStdin::default());
+}
+
 pub fn compile_cranelift_hello_spike(
     program: &Program,
     capabilities: &CapabilityConfig,
     package_root: &Path,
     fs_root: &Path,
+    stdin: Option<&str>,
     object_path: &Path,
     binary_path: &Path,
     target: Option<&str>,
@@ -324,7 +371,7 @@ pub fn compile_cranelift_hello_spike(
             "main function is outside the direct-native i64 ABI subset",
         ));
     }
-    let lines = collect_output_lines(program, capabilities, package_root, fs_root)?;
+    let lines = collect_output_lines(program, capabilities, package_root, fs_root, stdin)?;
     axiomc_backend_cranelift::compile_output_lines(&lines, object_path, binary_path).map_err(
         |err| {
             Diagnostic::new("build", err.to_string()).with_path(object_path.display().to_string())
@@ -1816,17 +1863,31 @@ fn lower_i64_aggregate_return_body(
         }
     }
     let body = match return_stmt {
-        Stmt::Return { expr, .. } => CraneliftI64ValueBody::Return(
-            lower_i64_aggregate_return_values(
+        Stmt::Return { expr, .. } => {
+            if let Some(block) = lower_i64_aggregate_call_return_block(
                 expr,
                 shape,
+                &mut locals,
                 &local_indexes,
                 &local_conditions,
                 helper_signatures,
                 static_bindings,
-            )
-            .filter(|results| results.len() == shape.slot_count())?,
-        ),
+            ) {
+                CraneliftI64ValueBody::BlockReturn(block)
+            } else {
+                CraneliftI64ValueBody::Return(
+                    lower_i64_aggregate_return_values(
+                        expr,
+                        shape,
+                        &local_indexes,
+                        &local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )
+                    .filter(|results| results.len() == shape.slot_count())?,
+                )
+            }
+        }
         Stmt::If {
             cond,
             then_block,
@@ -1904,6 +1965,22 @@ fn lower_i64_aggregate_return_block(
             )?);
         }
     }
+    if let Some(mut block) = lower_i64_aggregate_call_return_block(
+        expr,
+        shape,
+        locals,
+        &local_indexes,
+        &local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        stmts.append(&mut block.stmts);
+        return Some(CraneliftI64ValueReturnBlock {
+            stmts,
+            results: block.results,
+        });
+    }
+
     let results = lower_i64_aggregate_return_values(
         expr,
         shape,
@@ -1928,6 +2005,87 @@ impl I64AggregateReturnShape {
             | I64AggregateReturnShape::Result { payload_slots, .. }
             | I64AggregateReturnShape::Enum { payload_slots, .. } => 1 + payload_slots,
         }
+    }
+}
+
+fn lower_i64_aggregate_call_return_block(
+    expr: &Expr,
+    shape: &I64AggregateReturnShape,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64ValueReturnBlock> {
+    let Expr::Call {
+        name: call_name,
+        args,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let signature = helper_signatures.get(call_name.as_str())?;
+    if args.len() != signature.params
+        || signature.returns != shape.slot_count()
+        || !i64_aggregate_signature_matches_shape(signature, shape)
+    {
+        return None;
+    }
+    let mut return_locals = Vec::with_capacity(shape.slot_count());
+    for _ in 0..shape.slot_count() {
+        let local = locals.len();
+        locals.push(CraneliftI64Expr::Literal(0));
+        return_locals.push(local);
+    }
+    let args = lower_i64_flat_call_args(
+        args,
+        signature,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let results = return_locals
+        .iter()
+        .copied()
+        .map(CraneliftI64Expr::Local)
+        .collect();
+    Some(CraneliftI64ValueReturnBlock {
+        stmts: vec![CraneliftI64Stmt::CallAssign {
+            locals: return_locals,
+            function: signature.function,
+            args,
+        }],
+        results,
+    })
+}
+
+fn i64_aggregate_signature_matches_shape(
+    signature: &I64HelperSignature,
+    shape: &I64AggregateReturnShape,
+) -> bool {
+    match (shape, &signature.return_ty) {
+        (
+            I64AggregateReturnShape::Array { element, size },
+            Type::Array(return_element, Some(return_size)),
+        ) => return_element.as_ref() == element && return_size == size,
+        (I64AggregateReturnShape::Tuple(elements), Type::Tuple(return_elements)) => {
+            return_elements == elements
+        }
+        (I64AggregateReturnShape::Struct { name, .. }, Type::Struct(return_name)) => {
+            return_name == name
+        }
+        (I64AggregateReturnShape::Option { inner, .. }, Type::Option(return_inner)) => {
+            return_inner.as_ref() == inner
+        }
+        (I64AggregateReturnShape::Result { ok, err, .. }, Type::Result(return_ok, return_err)) => {
+            return_ok.as_ref() == ok && return_err.as_ref() == err
+        }
+        (I64AggregateReturnShape::Enum { name, .. }, Type::Enum(return_name)) => {
+            return_name == name
+        }
+        _ => false,
     }
 }
 
@@ -15786,39 +15944,54 @@ fn collect_output_lines(
     capabilities: &CapabilityConfig,
     _package_root: &Path,
     fs_root: &Path,
+    stdin: Option<&str>,
 ) -> Result<Vec<OutputLine>, Diagnostic> {
-    let functions = program
-        .functions
-        .iter()
-        .map(|function| (function.name.as_str(), function))
-        .collect::<HashMap<_, _>>();
-    let mut env = SpikeEnv::new();
-    env.insert(
-        SPIKE_FS_ROOT_BINDING.to_string(),
-        SpikeValue::Text(fs_root.display().to_string()),
-    );
-    env.insert(
-        SPIKE_ENV_ALLOWLIST_BINDING.to_string(),
-        SpikeValue::Array(
-            capabilities
-                .env_vars
-                .iter()
-                .cloned()
-                .map(SpikeValue::Text)
-                .collect(),
-        ),
-    );
-    env.insert(
-        SPIKE_ENV_UNRESTRICTED_BINDING.to_string(),
-        SpikeValue::Bool(capabilities.env_unrestricted),
-    );
-    let mut lines = Vec::new();
-    for static_def in &program.statics {
-        let value = eval_expr(&static_def.expr, &functions, &env, &mut lines)?;
-        env.insert(static_def.name.clone(), value);
-    }
-    eval_block(&program.stmts, &functions, &mut env, &mut lines)?;
-    Ok(lines)
+    with_spike_stdin(stdin, || {
+        let functions = program
+            .functions
+            .iter()
+            .map(|function| (function.name.as_str(), function))
+            .collect::<HashMap<_, _>>();
+        let mut env = SpikeEnv::new();
+        env.insert(
+            SPIKE_FS_ROOT_BINDING.to_string(),
+            SpikeValue::Text(fs_root.display().to_string()),
+        );
+        env.insert(
+            SPIKE_ENV_ALLOWLIST_BINDING.to_string(),
+            SpikeValue::Array(
+                capabilities
+                    .env_vars
+                    .iter()
+                    .cloned()
+                    .map(SpikeValue::Text)
+                    .collect(),
+            ),
+        );
+        env.insert(
+            SPIKE_ENV_UNRESTRICTED_BINDING.to_string(),
+            SpikeValue::Bool(capabilities.env_unrestricted),
+        );
+        let mut lines = Vec::new();
+        for static_def in &program.statics {
+            let value = eval_expr(&static_def.expr, &functions, &env, &mut lines)?;
+            env.insert(static_def.name.clone(), value);
+        }
+        eval_block(&program.stmts, &functions, &mut env, &mut lines)?;
+        Ok(lines)
+    })
+}
+
+fn with_spike_stdin<T>(
+    stdin: Option<&str>,
+    body: impl FnOnce() -> Result<T, Diagnostic>,
+) -> Result<T, Diagnostic> {
+    SPIKE_STDIN.with(|state| {
+        let previous = state.replace(SpikeStdin::new(stdin));
+        let result = body();
+        state.replace(previous);
+        result
+    })
 }
 
 fn eval_block(
@@ -16197,7 +16370,11 @@ fn eval_match_stmt(
     env: &mut SpikeEnv,
     lines: &mut Vec<OutputLine>,
 ) -> Result<Option<SpikeValue>, Diagnostic> {
-    let matched = expect_enum_value(eval_expr(expr, functions, env, lines)?)?;
+    let matched_value = eval_expr(expr, functions, env, lines)?;
+    if arms.iter().all(|arm| arm.enum_name.is_empty()) {
+        return eval_const_match_stmt(matched_value, arms, functions, env, lines);
+    }
+    let matched = expect_enum_value(matched_value)?;
     let arm = arms
         .iter()
         .find(|arm| arm.enum_name == matched.enum_name && arm.variant == matched.variant)
@@ -16215,6 +16392,22 @@ fn eval_match_stmt(
     let returned = eval_block(&arm.body, functions, &mut arm_env, lines)?;
     *env = arm_env;
     Ok(returned)
+}
+
+fn eval_const_match_stmt(
+    matched_value: SpikeValue,
+    arms: &[MatchArm],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<Option<SpikeValue>, Diagnostic> {
+    let matched = expect_int(matched_value)?.to_string();
+    let arm = arms
+        .iter()
+        .find(|arm| arm.variant == matched)
+        .ok_or_else(|| unsupported("const match statement has no matching arm"))?;
+    let mut arm_env = env.clone();
+    eval_block(&arm.body, functions, &mut arm_env, lines)
 }
 
 fn eval_match_expr(
@@ -16442,6 +16635,12 @@ fn eval_call(
     if name == "io_eprintln" {
         return eval_io_eprintln_call(args, functions, env, lines);
     }
+    if name == "io_readline" {
+        return eval_io_readline_call(args);
+    }
+    if name == "io_read_to_string" {
+        return eval_io_read_to_string_call(args);
+    }
     if is_json_call(name) {
         return eval_json_call(name, args, functions, env, lines);
     }
@@ -16506,8 +16705,14 @@ fn eval_call(
         return eval_extern_call(function, args, functions, env, lines);
     }
     let mut local_env = env.clone();
+    let mut receiver_alias_bound = false;
     for (param, arg) in function.params.iter().zip(args) {
-        local_env.insert(param.name.clone(), eval_expr(arg, functions, env, lines)?);
+        let value = eval_expr(arg, functions, env, lines)?;
+        if param.name == "self_" && !receiver_alias_bound {
+            local_env.insert(String::from("self"), value.clone());
+            receiver_alias_bound = true;
+        }
+        local_env.insert(param.name.clone(), value);
     }
     let returned = eval_block(&function.body, functions, &mut local_env, lines)?
         .ok_or_else(|| unsupported("cranelift spike functions must return a value"))?;
@@ -20109,7 +20314,14 @@ fn http_serve_route_on_server(
 }
 
 fn http_parse_loopback_bind(bind: &str) -> Option<SocketAddr> {
-    let addr = bind.parse::<SocketAddr>().ok()?;
+    let addr = bind.parse::<SocketAddr>().ok().or_else(|| {
+        let (host, port) = bind.rsplit_once(':')?;
+        if host != "localhost" {
+            return None;
+        }
+        let port = port.parse::<u16>().ok()?;
+        Some(SocketAddr::from(([127, 0, 0, 1], port)))
+    })?;
     if !addr.ip().is_loopback() {
         return None;
     }
@@ -21109,6 +21321,24 @@ fn eval_io_eprintln_call(
     let written = text.len() as i64 + 1;
     lines.push(OutputLine::stderr(text));
     Ok(SpikeValue::Int(written))
+}
+
+fn eval_io_readline_call(args: &[Expr]) -> Result<SpikeValue, Diagnostic> {
+    let [] = args else {
+        return Err(unsupported("io_readline expects no arguments"));
+    };
+    Ok(spike_option(SPIKE_STDIN.with(|state| {
+        state.borrow_mut().readline().map(SpikeValue::Text)
+    })))
+}
+
+fn eval_io_read_to_string_call(args: &[Expr]) -> Result<SpikeValue, Diagnostic> {
+    let [] = args else {
+        return Err(unsupported("io_read_to_string expects no arguments"));
+    };
+    Ok(SpikeValue::Text(
+        SPIKE_STDIN.with(|state| state.borrow_mut().read_to_string()),
+    ))
 }
 
 fn eval_clock_now_ms_call(args: &[Expr]) -> Result<SpikeValue, Diagnostic> {
@@ -22139,6 +22369,7 @@ mod tests {
                 &CapabilityConfig::default(),
                 Path::new("."),
                 Path::new("."),
+                None,
             )
             .expect("fold hello"),
             vec![
@@ -22230,6 +22461,7 @@ mod tests {
                 &CapabilityConfig::default(),
                 Path::new("."),
                 Path::new("."),
+                None,
             )
             .expect("fold match arm assignment"),
             vec![OutputLine::stdout("1")]
@@ -22293,6 +22525,7 @@ mod tests {
                 &CapabilityConfig::default(),
                 Path::new("."),
                 Path::new("."),
+                None,
             )
             .expect("fold mutable local write-through"),
             vec![OutputLine::stdout("beta")]
@@ -22369,6 +22602,7 @@ mod tests {
                 &CapabilityConfig::default(),
                 Path::new("."),
                 Path::new("."),
+                None,
             )
             .expect("fold mutable slice write-through"),
             vec![OutputLine::stdout("6")]
@@ -22488,9 +22722,93 @@ mod tests {
                 &CapabilityConfig::default(),
                 Path::new("."),
                 Path::new("."),
+                None,
             )
             .expect("fold mutable slice call writeback"),
             vec![OutputLine::stdout("6"), OutputLine::stdout("6")]
+        );
+    }
+
+    #[test]
+    fn function_receiver_alias_is_not_overwritten_by_later_self_param() {
+        let point_ty = Type::Struct(String::from("Point"));
+        let function = Function {
+            name: String::from("Point__same_x"),
+            source_name: String::from("same_x"),
+            path: String::from("test"),
+            params: vec![
+                crate::mir::Param {
+                    name: String::from("self_"),
+                    ty: point_ty.clone(),
+                },
+                crate::mir::Param {
+                    name: String::from("self_"),
+                    ty: point_ty.clone(),
+                },
+            ],
+            return_ty: Type::Bool,
+            body: vec![Stmt::Return {
+                expr: Expr::BinaryCompare {
+                    op: CompareOp::Eq,
+                    lhs: Box::new(Expr::FieldAccess {
+                        base: Box::new(Expr::VarRef {
+                            name: String::from("self"),
+                            ty: point_ty.clone(),
+                        }),
+                        field: String::from("x"),
+                        ty: Type::Int,
+                    }),
+                    rhs: Box::new(Expr::FieldAccess {
+                        base: Box::new(Expr::VarRef {
+                            name: String::from("self_"),
+                            ty: point_ty.clone(),
+                        }),
+                        field: String::from("x"),
+                        ty: Type::Int,
+                    }),
+                    ty: Type::Bool,
+                },
+                span: crate::mir::SourceSpan { line: 1, column: 1 },
+            }],
+            is_property: false,
+            is_async: false,
+            is_extern: false,
+            extern_abi: None,
+            extern_library: None,
+            line: 1,
+            column: 1,
+        };
+        let mut lines = Vec::new();
+        let functions = HashMap::from([(function.name.as_str(), &function)]);
+        let args = vec![
+            Expr::StructLiteral {
+                name: String::from("Point"),
+                fields: vec![crate::mir::StructFieldValue {
+                    name: String::from("x"),
+                    expr: Expr::Literal(LiteralValue::Int(7)),
+                }],
+                ty: point_ty.clone(),
+            },
+            Expr::StructLiteral {
+                name: String::from("Point"),
+                fields: vec![crate::mir::StructFieldValue {
+                    name: String::from("x"),
+                    expr: Expr::Literal(LiteralValue::Int(9)),
+                }],
+                ty: point_ty,
+            },
+        ];
+
+        assert_eq!(
+            eval_call(
+                "Point__same_x",
+                &args,
+                &functions,
+                &HashMap::new(),
+                &mut lines
+            )
+            .expect("receiver alias should evaluate"),
+            SpikeValue::Bool(false)
         );
     }
 
@@ -22620,10 +22938,92 @@ mod tests {
                 &CapabilityConfig::default(),
                 Path::new("."),
                 Path::new("."),
+                None,
             )
             .expect("fold nested mutable slice call writeback"),
             vec![OutputLine::stdout("6"), OutputLine::stdout("6")]
         );
+    }
+
+    #[test]
+    fn stdio_stdin_calls_consume_manifest_input() {
+        with_spike_stdin(Some("first\r\nsecond\nremaining"), || {
+            assert_eq!(
+                eval_io_readline_call(&[]).expect("first line"),
+                spike_option(Some(SpikeValue::Text(String::from("first"))))
+            );
+            assert_eq!(
+                eval_io_readline_call(&[]).expect("second line"),
+                spike_option(Some(SpikeValue::Text(String::from("second"))))
+            );
+            assert_eq!(
+                eval_io_read_to_string_call(&[]).expect("remaining input"),
+                SpikeValue::Text(String::from("remaining"))
+            );
+            assert_eq!(eval_io_readline_call(&[]).expect("eof"), spike_option(None));
+            Ok(())
+        })
+        .expect("stdin evaluation");
+    }
+
+    #[test]
+    fn folds_const_match_statement_into_print_lines() {
+        let mut program = hello_program();
+        program.functions.clear();
+        program.stmts = vec![Stmt::Match {
+            expr: Expr::Literal(LiteralValue::Int(7)),
+            arms: vec![
+                MatchArm {
+                    enum_name: String::new(),
+                    variant: String::from("3"),
+                    bindings: Vec::new(),
+                    is_named: false,
+                    ignore_payloads: false,
+                    body: vec![Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(String::from("wrong"))),
+                        span: crate::mir::SourceSpan { line: 1, column: 1 },
+                    }],
+                },
+                MatchArm {
+                    enum_name: String::new(),
+                    variant: String::from("7"),
+                    bindings: Vec::new(),
+                    is_named: false,
+                    ignore_payloads: false,
+                    body: vec![Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(String::from("ready"))),
+                        span: crate::mir::SourceSpan { line: 1, column: 1 },
+                    }],
+                },
+            ],
+            span: crate::mir::SourceSpan { line: 1, column: 1 },
+        }];
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold match"),
+            vec![OutputLine::stdout("ready")]
+        );
+    }
+
+    #[test]
+    fn loopback_bind_parser_accepts_localhost() {
+        assert_eq!(
+            http_parse_loopback_bind("localhost:0"),
+            Some(SocketAddr::from(([127, 0, 0, 1], 0)))
+        );
+        assert_eq!(
+            http_parse_loopback_bind("127.0.0.1:8080"),
+            Some(SocketAddr::from(([127, 0, 0, 1], 8080)))
+        );
+        assert_eq!(http_parse_loopback_bind("example.com:80"), None);
+        assert_eq!(http_parse_loopback_bind("192.0.2.1:80"), None);
     }
 
     #[test]
