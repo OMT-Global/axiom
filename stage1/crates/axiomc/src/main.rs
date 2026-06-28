@@ -10035,14 +10035,21 @@ print serve("127.0.0.1:0", selected_route, 1)
         fs::write(project.join("src/main.ax"), "/// Main.\npub fn main() {}\n")
             .expect("write source");
         std::os::unix::fs::symlink(&outside, project.join("docs")).expect("symlink docs");
+        let canonical_project = project.canonicalize().expect("canonical project");
 
-        let error =
-            generate_docs(&project, &project.join("docs/axiom"), true).expect_err("reject symlink");
+        let error = generate_docs(
+            &canonical_project,
+            &canonical_project.join("docs/axiom"),
+            true,
+        )
+        .expect_err("reject symlink");
 
         assert!(
             error
                 .message
-                .contains("refusing to write documentation through symlink")
+                .contains("refusing to write documentation through symlink"),
+            "{}",
+            error.message
         );
     }
 
@@ -10059,14 +10066,21 @@ print serve("127.0.0.1:0", selected_route, 1)
         fs::write(&outside, "do not overwrite").expect("write outside");
         std::os::unix::fs::symlink(&outside, project.join("docs/axiom/index.md"))
             .expect("symlink index");
+        let canonical_project = project.canonicalize().expect("canonical project");
 
-        let error =
-            generate_docs(&project, &project.join("docs/axiom"), true).expect_err("reject symlink");
+        let error = generate_docs(
+            &canonical_project,
+            &canonical_project.join("docs/axiom"),
+            true,
+        )
+        .expect_err("reject symlink");
 
         assert!(
             error
                 .message
-                .contains("refusing to write documentation through symlink")
+                .contains("refusing to write documentation through symlink"),
+            "{}",
+            error.message
         );
         assert_eq!(
             fs::read_to_string(outside).expect("read outside"),
