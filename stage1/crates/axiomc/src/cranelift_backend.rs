@@ -24,6 +24,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const SPIKE_FS_ROOT_BINDING: &str = "$axiom_fs_root";
+const SPIKE_ENV_ALLOWLIST_BINDING: &str = "$axiom_env_allowlist";
+const SPIKE_ENV_UNRESTRICTED_BINDING: &str = "$axiom_env_unrestricted";
 const SPIKE_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;
 const SPIKE_MAX_FS_WRITE_BYTES: usize = 64 * 1024 * 1024;
 const SPIKE_MAX_CLOCK_SLEEP_MS: i64 = 1_000;
@@ -316,7 +318,7 @@ pub fn compile_cranelift_hello_spike(
             "main function is outside the direct-native i64 ABI subset",
         ));
     }
-    let lines = collect_output_lines(program, package_root, fs_root)?;
+    let lines = collect_output_lines(program, capabilities, package_root, fs_root)?;
     axiomc_backend_cranelift::compile_output_lines(&lines, object_path, binary_path).map_err(
         |err| {
             Diagnostic::new("build", err.to_string()).with_path(object_path.display().to_string())
@@ -1808,17 +1810,31 @@ fn lower_i64_aggregate_return_body(
         }
     }
     let body = match return_stmt {
-        Stmt::Return { expr, .. } => CraneliftI64ValueBody::Return(
-            lower_i64_aggregate_return_values(
+        Stmt::Return { expr, .. } => {
+            if let Some(block) = lower_i64_aggregate_call_return_block(
                 expr,
                 shape,
+                &mut locals,
                 &local_indexes,
                 &local_conditions,
                 helper_signatures,
                 static_bindings,
-            )
-            .filter(|results| results.len() == shape.slot_count())?,
-        ),
+            ) {
+                CraneliftI64ValueBody::BlockReturn(block)
+            } else {
+                CraneliftI64ValueBody::Return(
+                    lower_i64_aggregate_return_values(
+                        expr,
+                        shape,
+                        &local_indexes,
+                        &local_conditions,
+                        helper_signatures,
+                        static_bindings,
+                    )
+                    .filter(|results| results.len() == shape.slot_count())?,
+                )
+            }
+        }
         Stmt::If {
             cond,
             then_block,
@@ -1896,6 +1912,22 @@ fn lower_i64_aggregate_return_block(
             )?);
         }
     }
+    if let Some(mut block) = lower_i64_aggregate_call_return_block(
+        expr,
+        shape,
+        locals,
+        &local_indexes,
+        &local_conditions,
+        helper_signatures,
+        static_bindings,
+    ) {
+        stmts.append(&mut block.stmts);
+        return Some(CraneliftI64ValueReturnBlock {
+            stmts,
+            results: block.results,
+        });
+    }
+
     let results = lower_i64_aggregate_return_values(
         expr,
         shape,
@@ -1920,6 +1952,87 @@ impl I64AggregateReturnShape {
             | I64AggregateReturnShape::Result { payload_slots, .. }
             | I64AggregateReturnShape::Enum { payload_slots, .. } => 1 + payload_slots,
         }
+    }
+}
+
+fn lower_i64_aggregate_call_return_block(
+    expr: &Expr,
+    shape: &I64AggregateReturnShape,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64ValueReturnBlock> {
+    let Expr::Call {
+        name: call_name,
+        args,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let signature = helper_signatures.get(call_name.as_str())?;
+    if args.len() != signature.params
+        || signature.returns != shape.slot_count()
+        || !i64_aggregate_signature_matches_shape(signature, shape)
+    {
+        return None;
+    }
+    let mut return_locals = Vec::with_capacity(shape.slot_count());
+    for _ in 0..shape.slot_count() {
+        let local = locals.len();
+        locals.push(CraneliftI64Expr::Literal(0));
+        return_locals.push(local);
+    }
+    let args = lower_i64_flat_call_args(
+        args,
+        signature,
+        local_indexes,
+        local_conditions,
+        helper_signatures,
+        static_bindings,
+    )?;
+    let results = return_locals
+        .iter()
+        .copied()
+        .map(CraneliftI64Expr::Local)
+        .collect();
+    Some(CraneliftI64ValueReturnBlock {
+        stmts: vec![CraneliftI64Stmt::CallAssign {
+            locals: return_locals,
+            function: signature.function,
+            args,
+        }],
+        results,
+    })
+}
+
+fn i64_aggregate_signature_matches_shape(
+    signature: &I64HelperSignature,
+    shape: &I64AggregateReturnShape,
+) -> bool {
+    match (shape, &signature.return_ty) {
+        (
+            I64AggregateReturnShape::Array { element, size },
+            Type::Array(return_element, Some(return_size)),
+        ) => return_element.as_ref() == element && return_size == size,
+        (I64AggregateReturnShape::Tuple(elements), Type::Tuple(return_elements)) => {
+            return_elements == elements
+        }
+        (I64AggregateReturnShape::Struct { name, .. }, Type::Struct(return_name)) => {
+            return_name == name
+        }
+        (I64AggregateReturnShape::Option { inner, .. }, Type::Option(return_inner)) => {
+            return_inner.as_ref() == inner
+        }
+        (I64AggregateReturnShape::Result { ok, err, .. }, Type::Result(return_ok, return_err)) => {
+            return_ok.as_ref() == ok && return_err.as_ref() == err
+        }
+        (I64AggregateReturnShape::Enum { name, .. }, Type::Enum(return_name)) => {
+            return_name == name
+        }
+        _ => false,
     }
 }
 
@@ -15775,6 +15888,7 @@ fn lower_i64_numeric_literal(raw: &str, ty: NumericType) -> Option<i64> {
 
 fn collect_output_lines(
     program: &Program,
+    capabilities: &CapabilityConfig,
     _package_root: &Path,
     fs_root: &Path,
 ) -> Result<Vec<OutputLine>, Diagnostic> {
@@ -15787,6 +15901,21 @@ fn collect_output_lines(
     env.insert(
         SPIKE_FS_ROOT_BINDING.to_string(),
         SpikeValue::Text(fs_root.display().to_string()),
+    );
+    env.insert(
+        SPIKE_ENV_ALLOWLIST_BINDING.to_string(),
+        SpikeValue::Array(
+            capabilities
+                .env_vars
+                .iter()
+                .cloned()
+                .map(SpikeValue::Text)
+                .collect(),
+        ),
+    );
+    env.insert(
+        SPIKE_ENV_UNRESTRICTED_BINDING.to_string(),
+        SpikeValue::Bool(capabilities.env_unrestricted),
     );
     let mut lines = Vec::new();
     for static_def in &program.statics {
@@ -16025,7 +16154,11 @@ fn eval_match_stmt(
     env: &SpikeEnv,
     lines: &mut Vec<OutputLine>,
 ) -> Result<Option<SpikeValue>, Diagnostic> {
-    let matched = expect_enum_value(eval_expr(expr, functions, env, lines)?)?;
+    let matched_value = eval_expr(expr, functions, env, lines)?;
+    if arms.iter().all(|arm| arm.enum_name.is_empty()) {
+        return eval_const_match_stmt(matched_value, arms, functions, env, lines);
+    }
+    let matched = expect_enum_value(matched_value)?;
     let arm = arms
         .iter()
         .find(|arm| arm.enum_name == matched.enum_name && arm.variant == matched.variant)
@@ -16040,6 +16173,22 @@ fn eval_match_stmt(
             &matched.payloads,
         )?;
     }
+    eval_block(&arm.body, functions, &mut arm_env, lines)
+}
+
+fn eval_const_match_stmt(
+    matched_value: SpikeValue,
+    arms: &[MatchArm],
+    functions: &HashMap<&str, &Function>,
+    env: &SpikeEnv,
+    lines: &mut Vec<OutputLine>,
+) -> Result<Option<SpikeValue>, Diagnostic> {
+    let matched = expect_int(matched_value)?.to_string();
+    let arm = arms
+        .iter()
+        .find(|arm| arm.variant == matched)
+        .ok_or_else(|| unsupported("const match statement has no matching arm"))?;
+    let mut arm_env = env.clone();
     eval_block(&arm.body, functions, &mut arm_env, lines)
 }
 
@@ -19597,8 +19746,9 @@ fn http_get(url: &str) -> Option<String> {
         return None;
     }
     let request = http_request(&host, &path);
+    let addrs = resolve_public_socket_addrs(host.as_str(), port)?;
     let mut stream = None;
-    for addr in (host.as_str(), port).to_socket_addrs().ok()? {
+    for addr in addrs {
         if let Ok(candidate) =
             std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5))
         {
@@ -19615,6 +19765,47 @@ fn http_get(url: &str) -> Option<String> {
         .ok()?;
     stream.write_all(request.as_bytes()).ok()?;
     http_read_response(&mut stream)
+}
+
+fn resolve_public_socket_addrs(host: &str, port: u16) -> Option<Vec<std::net::SocketAddr>> {
+    let addrs: Vec<std::net::SocketAddr> = (host, port).to_socket_addrs().ok()?.collect();
+    if addrs.is_empty() || addrs.iter().any(|addr| is_blocked_network_ip(addr.ip())) {
+        return None;
+    }
+    Some(addrs)
+}
+
+fn is_blocked_network_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(addr) => {
+            let octets = addr.octets();
+            addr.is_private()
+                || addr.is_loopback()
+                || addr.is_link_local()
+                || addr.is_unspecified()
+                || addr.is_broadcast()
+                || addr.is_multicast()
+                || octets[0] == 0
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                || (octets[0] == 198 && (18..=19).contains(&octets[1]))
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+        }
+        std::net::IpAddr::V6(addr) => {
+            if let Some(mapped) = addr.to_ipv4_mapped() {
+                return is_blocked_network_ip(std::net::IpAddr::V4(mapped));
+            }
+            let segments = addr.segments();
+            addr.is_loopback()
+                || addr.is_unspecified()
+                || addr.is_multicast()
+                || (segments[0] & 0xfe00) == 0xfc00
+                || (segments[0] & 0xffc0) == 0xfe80
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+        }
+    }
 }
 
 fn http_strip_crlf(value: &str) -> String {
@@ -19818,7 +20009,14 @@ fn http_serve_route_on_server(
 }
 
 fn http_parse_loopback_bind(bind: &str) -> Option<SocketAddr> {
-    let addr = bind.parse::<SocketAddr>().ok()?;
+    let addr = bind.parse::<SocketAddr>().ok().or_else(|| {
+        let (host, port) = bind.rsplit_once(':')?;
+        if host != "localhost" {
+            return None;
+        }
+        let port = port.parse::<u16>().ok()?;
+        Some(SocketAddr::from(([127, 0, 0, 1], port)))
+    })?;
     if !addr.ip().is_loopback() {
         return None;
     }
@@ -19948,7 +20146,26 @@ fn eval_env_get_call(
         return Err(unsupported("env_get expects exactly one argument"));
     };
     let name = expect_text(eval_expr(name, functions, env, lines)?, "env_get")?;
+    if !spike_env_name_allowed(env, &name) {
+        return Ok(spike_option(None));
+    }
     Ok(spike_option(env::var(name).ok().map(SpikeValue::Text)))
+}
+
+fn spike_env_name_allowed(env: &SpikeEnv, name: &str) -> bool {
+    if matches!(
+        env.get(SPIKE_ENV_UNRESTRICTED_BINDING),
+        Some(SpikeValue::Bool(true))
+    ) {
+        return true;
+    }
+    matches!(
+        env.get(SPIKE_ENV_ALLOWLIST_BINDING),
+        Some(SpikeValue::Array(names))
+            if names
+                .iter()
+                .any(|allowed| matches!(allowed, SpikeValue::Text(allowed) if allowed == name))
+    )
 }
 
 fn is_fs_write_call(name: &str) -> bool {
@@ -21805,14 +22022,79 @@ mod tests {
     #[test]
     fn folds_hello_subset_into_print_lines() {
         assert_eq!(
-            collect_output_lines(&hello_program(), Path::new("."), Path::new("."))
-                .expect("fold hello"),
+            collect_output_lines(
+                &hello_program(),
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold hello"),
             vec![
                 OutputLine::stdout("hello from stage1"),
                 OutputLine::stdout("42")
             ]
         );
     }
+
+    #[test]
+    fn folds_const_match_statement_into_print_lines() {
+        let mut program = hello_program();
+        program.functions.clear();
+        program.stmts = vec![Stmt::Match {
+            expr: Expr::Literal(LiteralValue::Int(7)),
+            arms: vec![
+                MatchArm {
+                    enum_name: String::new(),
+                    variant: String::from("3"),
+                    bindings: Vec::new(),
+                    is_named: false,
+                    ignore_payloads: false,
+                    body: vec![Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(String::from("wrong"))),
+                        span: crate::mir::SourceSpan { line: 1, column: 1 },
+                    }],
+                },
+                MatchArm {
+                    enum_name: String::new(),
+                    variant: String::from("7"),
+                    bindings: Vec::new(),
+                    is_named: false,
+                    ignore_payloads: false,
+                    body: vec![Stmt::Print {
+                        expr: Expr::Literal(LiteralValue::String(String::from("ready"))),
+                        span: crate::mir::SourceSpan { line: 1, column: 1 },
+                    }],
+                },
+            ],
+            span: crate::mir::SourceSpan { line: 1, column: 1 },
+        }];
+
+        assert_eq!(
+            collect_output_lines(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+            )
+            .expect("fold match"),
+            vec![OutputLine::stdout("ready")]
+        );
+    }
+
+    #[test]
+    fn loopback_bind_parser_accepts_localhost() {
+        assert_eq!(
+            http_parse_loopback_bind("localhost:0"),
+            Some(SocketAddr::from(([127, 0, 0, 1], 0)))
+        );
+        assert_eq!(
+            http_parse_loopback_bind("127.0.0.1:8080"),
+            Some(SocketAddr::from(([127, 0, 0, 1], 8080)))
+        );
+        assert_eq!(http_parse_loopback_bind("example.com:80"), None);
+        assert_eq!(http_parse_loopback_bind("192.0.2.1:80"), None);
+    }
+
     #[test]
     fn static_map_lookups_respect_last_duplicate_key() {
         let map = Expr::MapLiteral {
@@ -21996,6 +22278,50 @@ mod tests {
             spike_fs_write_candidate_for_root(root, "dangling.txt", false),
             None
         );
+    }
+
+    #[test]
+    fn cranelift_http_resolver_rejects_blocked_network_addresses() {
+        for ip in [
+            "0.0.0.0",
+            "10.0.0.1",
+            "100.64.0.1",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "192.0.2.1",
+            "192.168.0.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "::",
+            "::1",
+            "::ffff:127.0.0.1",
+            "fc00::1",
+            "fe80::1",
+            "2001:db8::1",
+        ] {
+            assert!(
+                is_blocked_network_ip(ip.parse().expect("valid IP literal")),
+                "{ip} should be blocked"
+            );
+        }
+
+        assert!(
+            resolve_public_socket_addrs("127.0.0.1", 80).is_none(),
+            "loopback HTTP targets must not be reachable during Cranelift folding"
+        );
+    }
+
+    #[test]
+    fn cranelift_http_resolver_allows_public_addresses() {
+        for ip in ["1.1.1.1", "8.8.8.8", "2001:4860:4860::8888"] {
+            assert!(
+                !is_blocked_network_ip(ip.parse().expect("valid IP literal")),
+                "{ip} should be allowed"
+            );
+        }
     }
 
     #[test]
