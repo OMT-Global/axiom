@@ -3,11 +3,6 @@
   "finalBootstrapIssue": 721,
   "blockingIssues": [
     {
-      "issue": 1124,
-      "lane": "backend",
-      "check": "Direct native runtime ABI and capability shims cover the supported stage1 surface."
-    },
-    {
       "issue": 1191,
       "lane": "backend",
       "check": "Generated-Rust backend, rustc targeted-build fallback, and compatibility alias are removed from the supported toolchain."
