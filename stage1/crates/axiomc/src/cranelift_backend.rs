@@ -18776,15 +18776,29 @@ fn eval_expr(
                 }
             };
             let start = match start {
-                Some(expr) => expect_non_negative_index(eval_expr(expr, functions, env, lines)?)?,
+                Some(expr) => expect_non_negative_slice_bound(
+                    eval_expr(expr, functions, env, lines)?,
+                    "start",
+                )?,
                 None => 0,
             };
             let end = match end {
-                Some(expr) => expect_non_negative_index(eval_expr(expr, functions, env, lines)?)?,
+                Some(expr) => {
+                    expect_non_negative_slice_bound(eval_expr(expr, functions, env, lines)?, "end")?
+                }
                 None => elements.len(),
             };
-            if start > end || end > elements.len() {
-                return Err(unsupported("slice range is outside the array length"));
+            if start > end {
+                return Err(cranelift_runtime_trap(
+                    "runtime",
+                    "array slice start must be <= end",
+                ));
+            }
+            if end > elements.len() {
+                return Err(cranelift_runtime_trap(
+                    "runtime",
+                    "array slice end out of bounds",
+                ));
             }
             if matches!(ty, Type::MutSlice(_))
                 && let Expr::VarRef { name, .. } = base.as_ref()
@@ -24948,6 +24962,19 @@ fn expect_non_negative_index(value: SpikeValue) -> Result<usize, Diagnostic> {
     }
 }
 
+fn expect_non_negative_slice_bound(value: SpikeValue, bound: &str) -> Result<usize, Diagnostic> {
+    match value {
+        SpikeValue::Int(value) if value >= 0 => Ok(value as usize),
+        SpikeValue::Int(_) => Err(cranelift_runtime_trap(
+            "runtime",
+            format!("array slice {bound} must be non-negative"),
+        )),
+        SpikeValue::UInt(value) => usize::try_from(value)
+            .map_err(|_| unsupported("array slice bound is outside the host usize range")),
+        _ => Err(unsupported("array slice bound must be an integer")),
+    }
+}
+
 fn encoding_is_unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~')
 }
@@ -25384,6 +25411,42 @@ mod tests {
             StaticOutputProgram {
                 lines: vec![OutputLine::stderr(
                     "{\"kind\":\"runtime\",\"message\":\"array index out of bounds\"}"
+                )],
+                exit_code: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn folds_slice_bounds_trap_into_stderr_exit_program() {
+        let program = Program {
+            stmts: vec![Stmt::Print {
+                expr: Expr::Slice {
+                    base: Box::new(Expr::ArrayLiteral {
+                        elements: vec![Expr::Literal(LiteralValue::Int(1))],
+                        ty: Type::Array(Box::new(Type::Int), None),
+                    }),
+                    start: Some(Box::new(Expr::Literal(LiteralValue::Int(0)))),
+                    end: Some(Box::new(Expr::Literal(LiteralValue::Int(2)))),
+                    ty: Type::Slice(Box::new(Type::Int)),
+                },
+                span: crate::mir::SourceSpan { line: 1, column: 1 },
+            }],
+            ..hello_program()
+        };
+
+        assert_eq!(
+            collect_output_program(
+                &program,
+                &CapabilityConfig::default(),
+                Path::new("."),
+                Path::new("."),
+                None,
+            )
+            .expect("fold slice bounds trap"),
+            StaticOutputProgram {
+                lines: vec![OutputLine::stderr(
+                    "{\"kind\":\"runtime\",\"message\":\"array slice end out of bounds\"}"
                 )],
                 exit_code: 1,
             }
