@@ -24,6 +24,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+const SPIKE_PACKAGE_ROOT_BINDING: &str = "$axiom_package_root";
 const SPIKE_FS_ROOT_BINDING: &str = "$axiom_fs_root";
 const SPIKE_ENV_ALLOWLIST_BINDING: &str = "$axiom_env_allowlist";
 const SPIKE_ENV_UNRESTRICTED_BINDING: &str = "$axiom_env_unrestricted";
@@ -9931,10 +9932,11 @@ fn i64_fs_read_path(expr: &Expr, static_bindings: &I64StaticBindings) -> Option<
     let [path] = args.as_slice() else {
         return None;
     };
+    let package_root = static_bindings.package_root.as_deref()?;
     let fs_root = static_bindings.fs_root.as_deref()?;
     let path = i64_string_text(path, static_bindings)?;
     let requested_len = path.len();
-    spike_fs_write_candidate_for_root(fs_root, &path, false).map(|path| I64FsReadPath {
+    spike_fs_existing_candidate_for_scope(package_root, fs_root, &path).map(|path| I64FsReadPath {
         candidate: path.display().to_string(),
         requested_len,
     })
@@ -12463,6 +12465,12 @@ fn i64_known_helper_call_value(
 
 fn i64_known_static_env(static_bindings: &I64StaticBindings) -> Option<SpikeEnv> {
     let mut env = SpikeEnv::new();
+    if let Some(root) = &static_bindings.package_root {
+        env.insert(
+            SPIKE_PACKAGE_ROOT_BINDING.to_string(),
+            SpikeValue::Text(root.display().to_string()),
+        );
+    }
     if let Some(root) = &static_bindings.fs_root {
         env.insert(
             SPIKE_FS_ROOT_BINDING.to_string(),
@@ -12765,8 +12773,10 @@ fn i64_string_option_text(
             let [path] = args.as_slice() else {
                 return None;
             };
+            let package_root = static_bindings.package_root.as_deref()?;
             let fs_root = static_bindings.fs_root.as_deref()?;
-            Some(spike_fs_read_text_for_root(
+            Some(spike_fs_read_text_for_scope(
+                package_root,
                 fs_root,
                 &i64_string_text(path, static_bindings)?,
             ))
@@ -12808,8 +12818,10 @@ fn i64_string_option_text(
             let [path] = args.as_slice() else {
                 return None;
             };
+            let package_root = static_bindings.package_root.as_deref()?;
             let fs_root = static_bindings.fs_root.as_deref()?;
-            Some(spike_fs_read_text_for_root(
+            Some(spike_fs_read_text_for_scope(
+                package_root,
                 fs_root,
                 &i64_string_text(path, static_bindings)?,
             ))
@@ -14987,8 +14999,11 @@ fn lower_i64_fs_write_intrinsic_expr(
                 static_bindings,
             );
         }
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15026,8 +15041,11 @@ fn lower_i64_fs_write_intrinsic_expr(
                 static_bindings,
             );
         }
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15065,8 +15083,11 @@ fn lower_i64_fs_write_intrinsic_expr(
                 static_bindings,
             );
         }
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15117,8 +15138,11 @@ fn lower_i64_fs_write_intrinsic_expr(
     if name == "fs_create" {
         let path = i64_fs_path(args, static_bindings)?;
         let path_len = path.len();
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15145,8 +15169,11 @@ fn lower_i64_fs_write_intrinsic_expr(
     if name == "fs_mkdir" {
         let path = i64_fs_path(args, static_bindings)?;
         let path_len = path.len();
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15173,8 +15200,11 @@ fn lower_i64_fs_write_intrinsic_expr(
     if name == "fs_mkdir_all" {
         let path = i64_fs_path(args, static_bindings)?;
         let path_len = path.len();
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, true) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, true)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15201,8 +15231,11 @@ fn lower_i64_fs_write_intrinsic_expr(
     if name == "fs_remove_file" {
         let path = i64_fs_path(args, static_bindings)?;
         let path_len = path.len();
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -15229,8 +15262,11 @@ fn lower_i64_fs_write_intrinsic_expr(
     if name == "fs_remove_dir" {
         let path = i64_fs_path(args, static_bindings)?;
         let path_len = path.len();
+        let package_root = static_bindings.package_root.as_deref()?;
         let fs_root = static_bindings.fs_root.as_deref()?;
-        let Some(candidate) = spike_fs_write_candidate_for_root(fs_root, &path, false) else {
+        let Some(candidate) =
+            spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
+        else {
             return i64_audited_fs_expr(
                 name,
                 path_len,
@@ -18394,7 +18430,7 @@ struct StaticOutputProgram {
 fn collect_output_program(
     program: &Program,
     capabilities: &CapabilityConfig,
-    _package_root: &Path,
+    package_root: &Path,
     fs_root: &Path,
     stdin: Option<&str>,
 ) -> Result<StaticOutputProgram, Diagnostic> {
@@ -18405,6 +18441,10 @@ fn collect_output_program(
             .map(|function| (function.name.as_str(), function))
             .collect::<HashMap<_, _>>();
         let mut env = SpikeEnv::new();
+        env.insert(
+            SPIKE_PACKAGE_ROOT_BINDING.to_string(),
+            SpikeValue::Text(package_root.display().to_string()),
+        );
         env.insert(
             SPIKE_FS_ROOT_BINDING.to_string(),
             SpikeValue::Text(fs_root.display().to_string()),
@@ -23359,12 +23399,12 @@ fn eval_fs_read_call(
 }
 
 fn spike_fs_read_text(env: &SpikeEnv, path: &str) -> Result<Option<String>, Diagnostic> {
-    let fs_root = spike_fs_root(env)?;
-    Ok(spike_fs_read_text_for_root(&fs_root, path))
+    let (package_root, fs_root) = spike_fs_scope(env)?;
+    Ok(spike_fs_read_text_for_scope(&package_root, &fs_root, path))
 }
 
-fn spike_fs_read_text_for_root(fs_root: &Path, path: &str) -> Option<String> {
-    let candidate = spike_fs_existing_candidate_for_root(fs_root, path)?;
+fn spike_fs_read_text_for_scope(package_root: &Path, fs_root: &Path, path: &str) -> Option<String> {
+    let candidate = spike_fs_existing_candidate_for_scope(package_root, fs_root, path)?;
     let metadata = std::fs::metadata(&candidate).ok()?;
     if !metadata.is_file() || metadata.len() > SPIKE_MAX_FS_READ_BYTES {
         return None;
@@ -23385,6 +23425,7 @@ fn i64_fs_write_result(
     args: &[Expr],
     static_bindings: &I64StaticBindings,
 ) -> Option<i64> {
+    let package_root = static_bindings.package_root.as_deref()?;
     let fs_root = static_bindings.fs_root.as_deref()?;
     match name {
         "fs_write" => {
@@ -23393,7 +23434,7 @@ fn i64_fs_write_result(
                 return Some(-1);
             }
             Some(
-                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
                     .and_then(|candidate| std::fs::write(candidate, content).ok())
                     .map(|()| 0)
                     .unwrap_or(-1),
@@ -23402,7 +23443,7 @@ fn i64_fs_write_result(
         "fs_create" => {
             let path = i64_fs_path(args, static_bindings)?;
             Some(
-                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
                     .and_then(|candidate| {
                         std::fs::OpenOptions::new()
                             .write(true)
@@ -23420,7 +23461,7 @@ fn i64_fs_write_result(
                 return Some(-1);
             }
             Some(
-                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
                     .and_then(|candidate| {
                         let mut file = std::fs::OpenOptions::new()
                             .append(true)
@@ -23436,7 +23477,7 @@ fn i64_fs_write_result(
         "fs_mkdir" => {
             let path = i64_fs_path(args, static_bindings)?;
             Some(
-                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
                     .and_then(|candidate| std::fs::create_dir(candidate).ok())
                     .map(|()| 0)
                     .unwrap_or(-1),
@@ -23445,7 +23486,7 @@ fn i64_fs_write_result(
         "fs_mkdir_all" => {
             let path = i64_fs_path(args, static_bindings)?;
             Some(
-                spike_fs_write_candidate_for_root(fs_root, &path, true)
+                spike_fs_write_candidate_for_scope(package_root, fs_root, &path, true)
                     .and_then(|candidate| std::fs::create_dir_all(candidate).ok())
                     .map(|()| 0)
                     .unwrap_or(-1),
@@ -23454,7 +23495,7 @@ fn i64_fs_write_result(
         "fs_remove_file" => {
             let path = i64_fs_path(args, static_bindings)?;
             Some(
-                spike_fs_existing_candidate_for_root(fs_root, &path)
+                spike_fs_existing_candidate_for_scope(package_root, fs_root, &path)
                     .and_then(|candidate| {
                         std::fs::metadata(&candidate)
                             .ok()
@@ -23468,7 +23509,7 @@ fn i64_fs_write_result(
         "fs_remove_dir" => {
             let path = i64_fs_path(args, static_bindings)?;
             Some(
-                spike_fs_existing_candidate_for_root(fs_root, &path)
+                spike_fs_existing_candidate_for_scope(package_root, fs_root, &path)
                     .and_then(|candidate| {
                         std::fs::metadata(&candidate)
                             .ok()
@@ -23485,7 +23526,7 @@ fn i64_fs_write_result(
                 return Some(-1);
             }
             Some(
-                spike_fs_write_candidate_for_root(fs_root, &path, false)
+                spike_fs_write_candidate_for_scope(package_root, fs_root, &path, false)
                     .and_then(|candidate| std::fs::write(candidate, content).ok())
                     .map(|()| 0)
                     .unwrap_or(-1),
@@ -23710,18 +23751,39 @@ fn spike_fs_root(env: &SpikeEnv) -> Result<PathBuf, Diagnostic> {
     }
 }
 
-fn spike_fs_existing_candidate(env: &SpikeEnv, path: &str) -> Result<Option<PathBuf>, Diagnostic> {
+fn spike_fs_scope(env: &SpikeEnv) -> Result<(PathBuf, PathBuf), Diagnostic> {
     let fs_root = spike_fs_root(env)?;
-    Ok(spike_fs_existing_candidate_for_root(&fs_root, path))
+    let package_root = match env.get(SPIKE_PACKAGE_ROOT_BINDING) {
+        Some(SpikeValue::Text(root)) => PathBuf::from(root),
+        _ => fs_root.clone(),
+    };
+    Ok((package_root, fs_root))
 }
 
-fn spike_fs_existing_candidate_for_root(fs_root: &Path, path: &str) -> Option<PathBuf> {
-    let candidate = spike_fs_join_candidate(fs_root, path)?;
+fn spike_fs_existing_candidate(env: &SpikeEnv, path: &str) -> Result<Option<PathBuf>, Diagnostic> {
+    let (package_root, fs_root) = spike_fs_scope(env)?;
+    Ok(spike_fs_existing_candidate_for_scope(
+        &package_root,
+        &fs_root,
+        path,
+    ))
+}
+
+fn spike_fs_existing_candidate_for_scope(
+    package_root: &Path,
+    fs_root: &Path,
+    path: &str,
+) -> Option<PathBuf> {
     let canonical_root = std::fs::canonicalize(fs_root).ok()?;
-    let canonical_candidate = std::fs::canonicalize(candidate).ok()?;
-    canonical_candidate
-        .starts_with(canonical_root)
-        .then_some(canonical_candidate)
+    for candidate in spike_fs_join_candidates(package_root, fs_root, path)? {
+        let Ok(canonical_candidate) = std::fs::canonicalize(candidate) else {
+            continue;
+        };
+        if canonical_candidate.starts_with(&canonical_root) {
+            return Some(canonical_candidate);
+        }
+    }
+    None
 }
 
 fn spike_fs_write_candidate(
@@ -23742,7 +23804,16 @@ fn spike_fs_write_candidate_for_root(
     path: &str,
     allow_missing_ancestors: bool,
 ) -> Option<PathBuf> {
-    let candidate = spike_fs_join_candidate(fs_root, path)?;
+    spike_fs_write_candidate_for_scope(fs_root, fs_root, path, allow_missing_ancestors)
+}
+
+fn spike_fs_write_candidate_for_scope(
+    package_root: &Path,
+    fs_root: &Path,
+    path: &str,
+    allow_missing_ancestors: bool,
+) -> Option<PathBuf> {
+    let candidate = spike_fs_join_candidate(package_root, path)?;
     let Ok(canonical_root) = std::fs::canonicalize(fs_root) else {
         return None;
     };
@@ -23782,6 +23853,16 @@ fn spike_fs_write_candidate_for_root(
 }
 
 fn spike_fs_join_candidate(package_root: &Path, path: &str) -> Option<PathBuf> {
+    spike_fs_join_candidates(package_root, package_root, path)?
+        .into_iter()
+        .next()
+}
+
+fn spike_fs_join_candidates(
+    package_root: &Path,
+    fs_root: &Path,
+    path: &str,
+) -> Option<Vec<PathBuf>> {
     let requested = Path::new(path);
     if requested.as_os_str().is_empty()
         || requested
@@ -23790,11 +23871,16 @@ fn spike_fs_join_candidate(package_root: &Path, path: &str) -> Option<PathBuf> {
     {
         return None;
     }
-    Some(if requested.is_absolute() {
+    let primary = if requested.is_absolute() {
         requested.to_path_buf()
     } else {
         package_root.join(requested)
-    })
+    };
+    let mut candidates = vec![primary];
+    if !requested.is_absolute() && fs_root != package_root {
+        candidates.push(fs_root.join(requested));
+    }
+    Some(candidates)
 }
 
 fn eval_process_status_call(
