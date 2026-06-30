@@ -4539,7 +4539,7 @@ print strlen("hello")
 
     #[test]
     #[cfg_attr(not(feature = "run-native-tests"), ignore)]
-    fn env_allowlist_scopes_generated_env_get() {
+    fn env_allowlist_scopes_direct_native_env_get() {
         let dir = tempdir().expect("tempdir");
         let project = dir.path().join("env-scoped");
         create_project(&project, Some("env-scoped-app")).expect("create project");
@@ -4556,29 +4556,27 @@ print strlen("hello")
         .expect("write lockfile");
         fs::write(
             project.join("src/main.ax"),
-            "match env_get(\"FOO\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"missing foo\"\n}\n}\nmatch env_get(\"BAR\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none bar\"\n}\n}\nmatch env_get(\"AWS_SECRET_ACCESS_KEY\") {\nSome(value) {\nprint value\n}\nNone {\nprint \"none secret\"\n}\n}\n",
+            "fn main(): int {\nmatch env_get(\"FOO\") {\nSome(value) {\nprint len(value)\n}\nNone {\nprint 40\n}\n}\nmatch env_get(\"BAR\") {\nSome(value) {\nprint len(value)\n}\nNone {\nprint 0\n}\n}\nmatch env_get(\"AWS_SECRET_ACCESS_KEY\") {\nSome(value) {\nprint len(value)\n}\nNone {\nprint 0\n}\n}\nreturn 0\n}\n",
         )
         .expect("write source");
 
         let built = build_project(&project).expect("build project");
-        let audit_path = project.join("capability-audit.jsonl");
+        let audit_path = project.join("host-audit.jsonl");
         let output = compiled_binary_command(&built.binary)
             .env("FOO", "allowed")
             .env("BAR", "blocked")
             .env("AWS_SECRET_ACCESS_KEY", "blocked-secret")
-            .env("AXIOM_CAPABILITY_AUDIT_JSONL", &audit_path)
+            .env("AXIOM_HOST_AUDIT_LOG", &audit_path)
             .output()
             .expect("run compiled binary");
 
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
-            "allowed\nnone bar\nnone secret\n"
-        );
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n0\n0\n");
         let audit = fs::read_to_string(&audit_path).expect("read audit log");
         assert!(audit.contains("\"intrinsic\":\"env_get\""));
-        assert!(audit.contains("\"args\":\"name_len=3\""));
-        assert!(audit.contains("\"outcome\":\"some\""));
-        assert!(audit.contains("\"args\":\"name_len=21\""));
+        assert!(audit.contains("\"args\":{\"key\":\"string:3\"}"));
+        assert!(audit.contains("\"outcome\":\"ok\""));
+        assert!(audit.contains("\"args\":{\"key\":\"string:21\"}"));
         assert_eq!(audit.matches("\"outcome\":\"denied\"").count(), 2);
         assert!(!audit.contains("BAR"));
         assert!(!audit.contains("AWS_SECRET_ACCESS_KEY"));
@@ -6481,8 +6479,7 @@ net = { hosts = ["127.0.0.1"], ports = [8080] }
 
         let err = check_project(&project).expect_err("expected capability denial");
         assert!(
-            err.message
-                .contains("requires [capabilities].env = [\"NAME\"]"),
+            err.message.contains("requires [capabilities].env = true"),
             "unexpected diagnostic: {err:?}",
         );
     }
@@ -12643,11 +12640,12 @@ print takes_two(three)
         .expect("write source");
 
         let built = build_project(&project).expect("build project");
-        let generated =
-            fs::read_to_string(generated_rust_path(&built)).expect("read generated rust");
-        assert!(generated.contains("let mut value: String"));
-        assert!(generated.contains("let local: &mut String = &mut value;"));
-        assert!(generated.contains("*local = String::from(\"beta\");"));
+        if let Some(generated_rust) = built.generated_rust.as_deref() {
+            let generated = fs::read_to_string(generated_rust).expect("read generated rust");
+            assert!(generated.contains("let mut value: String"));
+            assert!(generated.contains("let local: &mut String = &mut value;"));
+            assert!(generated.contains("*local = String::from(\"beta\");"));
+        }
         let output = compiled_binary_command(&built.binary)
             .output()
             .expect("run compiled binary");
