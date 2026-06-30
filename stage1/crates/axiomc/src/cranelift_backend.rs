@@ -13447,6 +13447,44 @@ fn lower_i64_expr(
             )?;
             lower_i64_cast_expr(expr, ty)
         }
+        Expr::Try { expr, .. } => lower_i64_try_value_expr(
+            expr,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        ),
+        _ => None,
+    }
+}
+
+fn lower_i64_try_value_expr(
+    expr: &Expr,
+    local_indexes: &HashMap<String, usize>,
+    local_conditions: &HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+) -> Option<CraneliftI64Expr> {
+    match expr {
+        Expr::EnumVariant {
+            enum_name,
+            variant,
+            payloads,
+            ..
+        } if (enum_name == "Option" && variant == "Some")
+            || (enum_name == "Result" && variant == "Ok") =>
+        {
+            let [payload] = payloads.as_slice() else {
+                return None;
+            };
+            lower_i64_expr(
+                payload,
+                local_indexes,
+                local_conditions,
+                helper_signatures,
+                static_bindings,
+            )
+        }
         _ => None,
     }
 }
@@ -18739,15 +18777,28 @@ fn eval_expr(
         Expr::StructLiteral { name, fields, .. } => fields
             .iter()
             .map(|field| {
-                Ok((
-                    field.name.clone(),
-                    eval_expr(&field.expr, functions, env, lines)?,
-                ))
+                let mut env = env.clone();
+                let value = eval_expr_effectful(&field.expr, functions, &mut env, lines)?;
+                if is_control_return(&value) {
+                    return Ok((field.name.clone(), value));
+                }
+                Ok((field.name.clone(), value))
             })
             .collect::<Result<Vec<_>, _>>()
-            .map(|fields| SpikeValue::Struct {
-                name: name.clone(),
-                fields,
+            .map(|fields| {
+                fields
+                    .iter()
+                    .find_map(|(_, value)| {
+                        if let SpikeValue::ControlReturn(value) = value {
+                            Some(SpikeValue::ControlReturn(value.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| SpikeValue::Struct {
+                        name: name.clone(),
+                        fields,
+                    })
             }),
         Expr::FieldAccess { base, field, .. } => match eval_expr(base, functions, env, lines)? {
             SpikeValue::Struct { name, fields } => fields
@@ -18768,20 +18819,48 @@ fn eval_expr(
             ..
         } => payloads
             .iter()
-            .map(|payload| eval_expr(payload, functions, env, lines))
+            .map(|payload| {
+                let mut env = env.clone();
+                eval_expr_effectful(payload, functions, &mut env, lines)
+            })
             .collect::<Result<Vec<_>, _>>()
-            .map(|payloads| SpikeValue::Enum {
-                enum_name: enum_name.clone(),
-                variant: variant.clone(),
-                field_names: field_names.clone(),
-                payloads,
+            .map(|payloads| {
+                payloads
+                    .iter()
+                    .find_map(|value| {
+                        if let SpikeValue::ControlReturn(value) = value {
+                            Some(SpikeValue::ControlReturn(value.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| SpikeValue::Enum {
+                        enum_name: enum_name.clone(),
+                        variant: variant.clone(),
+                        field_names: field_names.clone(),
+                        payloads,
+                    })
             }),
         Expr::Match { expr, arms, .. } => eval_match_expr(expr, arms, functions, env, lines),
         Expr::TupleLiteral { elements, .. } => elements
             .iter()
-            .map(|element| eval_expr(element, functions, env, lines))
+            .map(|element| {
+                let mut env = env.clone();
+                eval_expr_effectful(element, functions, &mut env, lines)
+            })
             .collect::<Result<Vec<_>, _>>()
-            .map(SpikeValue::Tuple),
+            .map(|elements| {
+                elements
+                    .iter()
+                    .find_map(|value| {
+                        if let SpikeValue::ControlReturn(value) = value {
+                            Some(SpikeValue::ControlReturn(value.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(SpikeValue::Tuple(elements))
+            }),
         Expr::TupleIndex { base, index, .. } => match eval_expr(base, functions, env, lines)? {
             SpikeValue::Tuple(elements) => elements
                 .get(*index)
@@ -18792,18 +18871,40 @@ fn eval_expr(
         Expr::MapLiteral { entries, .. } => {
             let mut values = Vec::new();
             for entry in entries {
-                let key = eval_expr(&entry.key, functions, env, lines)?;
+                let mut key_env = env.clone();
+                let key = eval_expr_effectful(&entry.key, functions, &mut key_env, lines)?;
+                if is_control_return(&key) {
+                    return Ok(key);
+                }
                 validate_map_key(&key)?;
-                let value = eval_expr(&entry.value, functions, env, lines)?;
+                let mut value_env = env.clone();
+                let value = eval_expr_effectful(&entry.value, functions, &mut value_env, lines)?;
+                if is_control_return(&value) {
+                    return Ok(value);
+                }
                 insert_map_entry(&mut values, key, value)?;
             }
             Ok(SpikeValue::Map(values))
         }
         Expr::ArrayLiteral { elements, .. } => elements
             .iter()
-            .map(|element| eval_expr(element, functions, env, lines))
+            .map(|element| {
+                let mut env = env.clone();
+                eval_expr_effectful(element, functions, &mut env, lines)
+            })
             .collect::<Result<Vec<_>, _>>()
-            .map(SpikeValue::Array),
+            .map(|elements| {
+                elements
+                    .iter()
+                    .find_map(|value| {
+                        if let SpikeValue::ControlReturn(value) = value {
+                            Some(SpikeValue::ControlReturn(value.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(SpikeValue::Array(elements))
+            }),
         Expr::Closure { params, body, .. } => Ok(SpikeValue::Closure {
             params: params.clone(),
             body: body.clone(),
@@ -18886,9 +18987,10 @@ fn eval_expr(
         },
         Expr::Await { expr, .. } => await_spike_task(eval_expr(expr, functions, env, lines)?),
         Expr::StringBorrow { expr, .. } => eval_expr(expr, functions, env, lines),
-        Expr::Try { .. } => Err(unsupported(
-            "`?` requires effectful function context in the cranelift spike",
-        )),
+        Expr::Try { expr, .. } => {
+            let mut env = env.clone();
+            eval_try_expr(expr, functions, &mut env, lines)
+        }
         Expr::MutBorrow { expr, .. } => match expr.as_ref() {
             Expr::VarRef { name, .. } if env.contains_key(name) => {
                 Ok(SpikeValue::MutRef(name.clone()))
