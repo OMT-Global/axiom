@@ -239,7 +239,8 @@
       "resolution": "update_direct_native_contract",
       "blockerIssue": 1255,
       "rationale": "Synthetic stdlib fs-write helper imports need direct-native capability-shim expectations.",
-      "resolutionStatus": "open"
+      "resolutionStatus": "addressed_by_open_stack",
+      "resolvedBy": 1268
     },
     {
       "name": "tests::stage1_project_imports_synthetic_stdlib_net_module",
@@ -341,11 +342,11 @@
   "resolutionTracking": {
     "updated": "2026-06-30",
     "evidence": "https://github.com/OMT-Global/axiomlang/issues/1255#issuecomment-4840906364",
-    "summary": "Integration of the open Rust-exit stack onto main resolves 19/40 rows (addressed_by_open_stack); PRs #1271/#1272/#1273 resolve 4 more (fixed_pending_merge: read-only artifact contract, structured assertion traps, defer). expectedFailureCount stays 40 until these PRs merge to main.",
+    "summary": "Integration of the open Rust-exit stack onto main resolves 20/40 rows (addressed_by_open_stack, incl. fs_write_helpers via the completed #1268 fs-write scoping); PRs #1271/#1272/#1273 resolve 4 more (fixed_pending_merge: read-only artifact contract, structured assertion traps, defer). expectedFailureCount stays 40 until these PRs merge to main.",
     "statuses": {
       "fixed_pending_merge": 4,
-      "open": 17,
-      "addressed_by_open_stack": 19
+      "open": 16,
+      "addressed_by_open_stack": 20
     }
   }
 }
