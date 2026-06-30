@@ -4625,7 +4625,14 @@ print strlen("hello")
         )
         .expect("write source");
 
-        let built = build_project(&project).expect("build project");
+        let built = build_project_with_options(
+            &project,
+            &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("build project with generated runtime");
         let audit_log = project.join("host-audit.jsonl");
         let output = compiled_binary_command(&built.binary)
             .env("FOO_SECRET", "super-secret-value")
@@ -4676,7 +4683,14 @@ print strlen("hello")
         )
         .expect("write source");
 
-        let built = build_project(&project).expect("build project");
+        let built = build_project_with_options(
+            &project,
+            &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("build project with generated runtime");
         let audit_log = project.join("host-audit-write-http.jsonl");
         let output = compiled_binary_command(&built.binary)
             .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
@@ -4746,7 +4760,14 @@ print strlen("hello")
         )
         .expect("write source");
 
-        let built = build_project(&project).expect("build project");
+        let built = build_project_with_options(
+            &project,
+            &BuildOptions {
+                backend: NativeBackendKind::GeneratedRust,
+                ..BuildOptions::default()
+            },
+        )
+        .expect("build project with generated runtime");
         let audit_log = project.join("host-audit-net-failure.jsonl");
         let output = compiled_binary_command(&built.binary)
             .env("AXIOM_HOST_AUDIT_LOG", &audit_log)
