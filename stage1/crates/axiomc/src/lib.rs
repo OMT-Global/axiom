@@ -2033,6 +2033,26 @@ let bad: u8 = byte.wrapping_add(1u16)
     }
 
     #[test]
+    fn build_project_runs_nested_try_operator_expressions() {
+        let dir = tempdir().expect("tempdir");
+        let project = dir.path().join("nested-try-operator");
+        create_project(&project, Some("nested-try-operator-app")).expect("create project");
+        fs::write(
+            project.join("src/main.ax"),
+            "struct CountBox {\nvalue: int\n}\n\nfn load_count(ready: bool): Result<int, string> {\nif ready {\nreturn Ok(7)\n}\nreturn Err(\"boom\")\n}\n\nfn add_one(value: int): int {\nreturn value + 1\n}\n\nfn boxed_count(ready: bool): Result<CountBox, string> {\nreturn Ok(CountBox { value: load_count(ready)? })\n}\n\nfn forwarded_count(ready: bool): Result<int, string> {\nreturn Ok(add_one(load_count(ready)?))\n}\n\nfn static_some_count(): Option<int> {\nreturn Some(Some(41)? + 1)\n}\n\nfn render_box(value: Result<CountBox, string>): string {\nmatch value {\nOk(count) {\nreturn \"box\"\n}\nErr(message) {\nreturn message\n}\n}\n}\n\nfn render_count(value: Result<int, string>): string {\nmatch value {\nOk(count) {\nreturn \"count\"\n}\nErr(message) {\nreturn message\n}\n}\n}\n\nfn render_option_count(value: Option<int>): string {\nmatch value {\nSome(count) {\nreturn \"some\"\n}\nNone {\nreturn \"none\"\n}\n}\n}\n\nprint render_box(boxed_count(true))\nprint render_box(boxed_count(false))\nprint render_count(forwarded_count(true))\nprint render_count(forwarded_count(false))\nprint render_option_count(static_some_count())\n",
+        )
+        .expect("write source");
+        let built = build_project(&project).expect("build project");
+        let output = compiled_binary_command(&built.binary)
+            .output()
+            .expect("run compiled binary");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "box\nboom\ncount\nboom\nsome\n"
+        );
+    }
+
+    #[test]
     fn parser_lowers_enums_and_match() {
         let source = "enum Status {\nReady\nFailed\n}\n\nfn label(status: Status): string {\nmatch status {\nReady {\nreturn \"ready\"\n}\nFailed {\nreturn \"failed\"\n}\n}\n}\n\nlet status: Status = Ready\nprint label(status)\n";
         let parsed = parse_program(source, Path::new("main.ax")).expect("parse");
