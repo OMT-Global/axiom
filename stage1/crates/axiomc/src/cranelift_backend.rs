@@ -4028,6 +4028,16 @@ fn lower_i64_runtime_stmt(
                 allow_stdio_effects,
             ) {
                 Some(stmt)
+            } else if let Some(stmt) = lower_i64_env_option_match_stmt(
+                stmt,
+                locals,
+                local_indexes.clone(),
+                local_conditions.clone(),
+                helper_signatures,
+                static_bindings,
+                allow_stdio_effects,
+            ) {
+                Some(stmt)
             } else if let Some(stmt) = lower_i64_option_match_stmt(
                 stmt,
                 locals,
@@ -4174,6 +4184,175 @@ fn lower_i64_known_string_option_match_stmt(
     }
 }
 
+fn lower_i64_env_option_match_stmt(
+    stmt: &Stmt,
+    locals: &mut Vec<CraneliftI64Expr>,
+    local_indexes: HashMap<String, usize>,
+    local_conditions: HashMap<String, CraneliftI64Condition>,
+    helper_signatures: &HashMap<&str, I64HelperSignature>,
+    static_bindings: &I64StaticBindings,
+    allow_stdio_effects: bool,
+) -> Option<CraneliftI64Stmt> {
+    let Stmt::Match { expr, arms, .. } = stmt else {
+        return None;
+    };
+    let Type::Option(inner) = expr.ty() else {
+        return None;
+    };
+    if !matches!(inner.as_ref(), Type::String | Type::Str) {
+        return None;
+    }
+    let key = i64_env_get_key(expr, static_bindings)?;
+    let env_len = i64_env_len_expr(&key, static_bindings)?;
+    let (some_arm, none_arm) = i64_option_stmt_match_arms(arms)?;
+    let mut some_static_bindings = static_bindings.clone();
+    if !some_arm.ignore_payloads
+        && let Some(binding) = some_arm.bindings.first()
+        && binding != "_"
+    {
+        if !i64_env_option_payload_uses_len_only(&some_arm.body, binding) {
+            return None;
+        }
+        some_static_bindings
+            .values
+            .insert(binding.clone(), env_len.clone());
+    }
+    Some(CraneliftI64Stmt::If {
+        cond: CraneliftI64Condition::Compare(CraneliftI64Compare {
+            op: CraneliftI64CompareOp::Ge,
+            lhs: env_len,
+            rhs: CraneliftI64Expr::Literal(0),
+        }),
+        then_body: lower_i64_runtime_stmts(
+            &some_arm.body,
+            locals,
+            local_indexes.clone(),
+            local_conditions.clone(),
+            helper_signatures,
+            &some_static_bindings,
+            allow_stdio_effects,
+        )?,
+        else_body: lower_i64_runtime_stmts(
+            &none_arm.body,
+            locals,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+            allow_stdio_effects,
+        )?,
+    })
+}
+
+fn i64_env_option_payload_uses_len_only(stmts: &[Stmt], binding: &str) -> bool {
+    stmts
+        .iter()
+        .all(|stmt| i64_env_option_stmt_uses_payload_len_only(stmt, binding))
+}
+
+fn i64_env_option_stmt_uses_payload_len_only(stmt: &Stmt, binding: &str) -> bool {
+    match stmt {
+        Stmt::Let { expr, .. }
+        | Stmt::Assign { expr, .. }
+        | Stmt::Print { expr, .. }
+        | Stmt::Return { expr, .. }
+        | Stmt::Defer { expr, .. } => i64_env_option_expr_uses_payload_len_only(expr, binding),
+        Stmt::Panic { message, .. } => i64_env_option_expr_uses_payload_len_only(message, binding),
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+            ..
+        } => {
+            i64_env_option_expr_uses_payload_len_only(cond, binding)
+                && i64_env_option_payload_uses_len_only(then_block, binding)
+                && else_block
+                    .as_ref()
+                    .is_none_or(|block| i64_env_option_payload_uses_len_only(block, binding))
+        }
+        Stmt::While { cond, body, .. } => {
+            i64_env_option_expr_uses_payload_len_only(cond, binding)
+                && i64_env_option_payload_uses_len_only(body, binding)
+        }
+        Stmt::Match { expr, arms, .. } => {
+            i64_env_option_expr_uses_payload_len_only(expr, binding)
+                && arms
+                    .iter()
+                    .all(|arm| i64_env_option_payload_uses_len_only(&arm.body, binding))
+        }
+    }
+}
+
+fn i64_env_option_expr_uses_payload_len_only(expr: &Expr, binding: &str) -> bool {
+    match expr {
+        Expr::VarRef { name, .. } => name != binding,
+        Expr::Call { name, args, .. } if name == "len" => {
+            if let [Expr::VarRef { name, .. }] = args.as_slice()
+                && name == binding
+            {
+                return true;
+            }
+            args.iter()
+                .all(|arg| i64_env_option_expr_uses_payload_len_only(arg, binding))
+        }
+        Expr::Call { args, .. } => args
+            .iter()
+            .all(|arg| i64_env_option_expr_uses_payload_len_only(arg, binding)),
+        Expr::BinaryAdd { lhs, rhs, .. }
+        | Expr::BinaryCompare { lhs, rhs, .. }
+        | Expr::BinaryLogic { lhs, rhs, .. } => {
+            i64_env_option_expr_uses_payload_len_only(lhs, binding)
+                && i64_env_option_expr_uses_payload_len_only(rhs, binding)
+        }
+        Expr::Cast { expr, .. }
+        | Expr::MutBorrow { expr, .. }
+        | Expr::Deref { expr, .. }
+        | Expr::Try { expr, .. }
+        | Expr::Await { expr, .. }
+        | Expr::StringBorrow { expr, .. } => {
+            i64_env_option_expr_uses_payload_len_only(expr, binding)
+        }
+        Expr::StructLiteral { fields, .. } => fields
+            .iter()
+            .all(|field| i64_env_option_expr_uses_payload_len_only(&field.expr, binding)),
+        Expr::FieldAccess { base, .. } => i64_env_option_expr_uses_payload_len_only(base, binding),
+        Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => elements
+            .iter()
+            .all(|element| i64_env_option_expr_uses_payload_len_only(element, binding)),
+        Expr::TupleIndex { base, .. } => i64_env_option_expr_uses_payload_len_only(base, binding),
+        Expr::MapLiteral { entries, .. } => entries.iter().all(|entry| {
+            i64_env_option_expr_uses_payload_len_only(&entry.key, binding)
+                && i64_env_option_expr_uses_payload_len_only(&entry.value, binding)
+        }),
+        Expr::EnumVariant { payloads, .. } => payloads
+            .iter()
+            .all(|payload| i64_env_option_expr_uses_payload_len_only(payload, binding)),
+        Expr::Closure { body, .. } => i64_env_option_expr_uses_payload_len_only(body, binding),
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            i64_env_option_expr_uses_payload_len_only(base, binding)
+                && start
+                    .as_ref()
+                    .is_none_or(|expr| i64_env_option_expr_uses_payload_len_only(expr, binding))
+                && end
+                    .as_ref()
+                    .is_none_or(|expr| i64_env_option_expr_uses_payload_len_only(expr, binding))
+        }
+        Expr::Index { base, index, .. } => {
+            i64_env_option_expr_uses_payload_len_only(base, binding)
+                && i64_env_option_expr_uses_payload_len_only(index, binding)
+        }
+        Expr::Match { expr, arms, .. } => {
+            i64_env_option_expr_uses_payload_len_only(expr, binding)
+                && arms
+                    .iter()
+                    .all(|arm| i64_env_option_expr_uses_payload_len_only(&arm.expr, binding))
+        }
+        Expr::Literal(_) => true,
+    }
+}
+
 fn lower_i64_option_match_stmt(
     stmt: &Stmt,
     locals: &mut Vec<CraneliftI64Expr>,
@@ -4194,6 +4373,14 @@ fn lower_i64_option_match_stmt(
             &local_conditions,
             static_bindings,
         )?;
+    if matches!(expr.ty(), Type::Option(inner) if matches!(inner.as_ref(), Type::String | Type::Str))
+        && !some_arm.ignore_payloads
+        && let Some(binding) = some_arm.bindings.first()
+        && binding != "_"
+        && !i64_env_option_payload_uses_len_only(&some_arm.body, binding)
+    {
+        return None;
+    }
     Some(CraneliftI64Stmt::If {
         cond,
         then_body: lower_i64_runtime_stmts(
@@ -12749,18 +12936,6 @@ fn i64_string_option_text(
             let text = i64_string_text(text, static_bindings)?;
             Some(regex_find_span(&pattern, &text).map(|(start, end)| text[start..end].to_string()))
         }
-        "env_get" => {
-            let [key] = args.as_slice() else {
-                return None;
-            };
-            Some(std::env::var(i64_string_text(key, static_bindings)?).ok())
-        }
-        name if static_bindings.env_get_wrappers.contains(name) => {
-            let [key] = args.as_slice() else {
-                return None;
-            };
-            Some(std::env::var(i64_string_text(key, static_bindings)?).ok())
-        }
         "fs_read" | "read_file" | "std_fs_read_file" => {
             let [path] = args.as_slice() else {
                 return None;
@@ -16529,6 +16704,14 @@ fn lower_i64_string_len_expr(
         if let Some(value) = i64_string_text(expr, static_bindings) {
             return Some(CraneliftI64Expr::Literal(value.len() as i64));
         }
+    }
+    if let Expr::VarRef {
+        name,
+        ty: Type::String | Type::Str,
+    } = expr
+        && let Some(value) = static_bindings.values.get(name)
+    {
+        return Some(value.clone());
     }
     match expr {
         Expr::Call { name, args, .. } if is_i64_crypto_sha256_name(name, static_bindings) => {
