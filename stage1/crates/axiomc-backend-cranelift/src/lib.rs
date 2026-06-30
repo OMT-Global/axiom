@@ -5794,6 +5794,51 @@ mod tests {
     }
 
     #[test]
+    fn links_i64_exit_program_with_cli_and_stdin_fallback_lines() {
+        if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
+            return;
+        }
+        if Command::new("cc").arg("--version").output().is_err() {
+            eprintln!("skipping cranelift link test because cc is unavailable");
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let object = temp.path().join("i64-runtime-fallbacks.o");
+        let binary = temp.path().join("i64-runtime-fallbacks");
+        compile_i64_exit_program(
+            I64ExitProgram {
+                functions: Vec::new(),
+                locals: Vec::new(),
+                stmts: vec![
+                    I64Stmt::WriteArgLine {
+                        stream: OutputStream::Stdout,
+                        index: 9,
+                        fallback: String::from("missing arg"),
+                    },
+                    I64Stmt::WriteStdinLine {
+                        stream: OutputStream::Stdout,
+                        fallback: String::from("missing stdin"),
+                        max_bytes: 64,
+                    },
+                ],
+                body: I64ExitBody::Return(I64Expr::Literal(0)),
+            },
+            &object,
+            &binary,
+        )
+        .expect("compile i64 runtime fallback program");
+        let output = Command::new(&binary)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run i64 runtime fallback binary");
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "missing arg\nmissing stdin\n"
+        );
+    }
+
+    #[test]
     fn links_i64_exit_program_with_branch() {
         if std::env::var_os("AXIOM_SKIP_CRANELIFT_LINK_TEST").is_some() {
             return;
