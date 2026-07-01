@@ -228,6 +228,10 @@ enum SpikeValue {
     Task {
         value: Option<Box<SpikeValue>>,
         canceled: bool,
+        /// Real time the task's body took to evaluate (the spike drives async
+        /// eagerly with real `sleep_ms`). Used by `async_timeout` to decide
+        /// whether the task outran its deadline.
+        duration_ms: i64,
     },
     JoinHandle(Box<SpikeValue>),
     AsyncChannel {
@@ -20138,10 +20142,12 @@ fn eval_call(
         }
         local_env.insert(param.name.clone(), value);
     }
+    let started = current_time_ms()?;
     let returned = run_function_body(&function.body, functions, &mut local_env, lines)?
         .ok_or_else(|| unsupported("cranelift spike functions must return a value"))?;
     if function.is_async {
-        Ok(spike_task(returned))
+        let duration = current_time_ms()?.saturating_sub(started);
+        Ok(spike_task_with_duration(returned, duration))
     } else {
         Ok(returned)
     }
@@ -20223,8 +20229,10 @@ fn eval_call_effectful(
         }
     }
 
+    let started = current_time_ms()?;
     let returned = run_function_body(&function.body, functions, &mut local_env, lines)?
         .ok_or_else(|| unsupported("cranelift spike functions must return a value"))?;
+    let async_duration = current_time_ms()?.saturating_sub(started);
     for (backing_name, target) in writebacks {
         let Some(SpikeValue::Array(elements)) = local_env.get(&backing_name) else {
             return Err(unsupported(
@@ -20234,7 +20242,7 @@ fn eval_call_effectful(
         env.insert(target, SpikeValue::Array(elements.clone()));
     }
     if function.is_async {
-        Ok(spike_task(returned))
+        Ok(spike_task_with_duration(returned, async_duration))
     } else {
         Ok(returned)
     }
@@ -20480,9 +20488,12 @@ fn eval_async_call(
                 return Err(unsupported("async_cancel expects exactly one argument"));
             };
             match eval_expr(task, functions, env, lines)? {
-                SpikeValue::Task { value, .. } => Ok(SpikeValue::Task {
+                SpikeValue::Task {
+                    value, duration_ms, ..
+                } => Ok(SpikeValue::Task {
                     value,
                     canceled: true,
+                    duration_ms,
                 }),
                 _ => Err(unsupported("async_cancel expects a task")),
             }
@@ -20499,11 +20510,21 @@ fn eval_async_call(
             }
         }
         "async_timeout" => {
-            let [task, _milliseconds] = args else {
+            let [task, milliseconds] = args else {
                 return Err(unsupported("async_timeout expects exactly two arguments"));
             };
+            let timeout_ms =
+                expect_signed_integer(eval_expr(milliseconds, functions, env, lines)?)?;
+            // The spike drives async tasks eagerly with real `sleep_ms`, so each
+            // task carries the real time its body took. A task that ran longer
+            // than the deadline reports a timeout (None).
             match eval_expr(task, functions, env, lines)? {
                 SpikeValue::Task { canceled: true, .. } => Ok(spike_task(spike_option(None))),
+                SpikeValue::Task { duration_ms, .. }
+                    if timeout_ms >= 0 && duration_ms > timeout_ms =>
+                {
+                    Ok(spike_task(spike_option(None)))
+                }
                 task @ SpikeValue::Task { .. } => {
                     await_spike_task(task).map(|value| spike_task(spike_option(Some(value))))
                 }
@@ -20588,9 +20609,14 @@ fn eval_async_call(
 }
 
 fn spike_task(value: SpikeValue) -> SpikeValue {
+    spike_task_with_duration(value, 0)
+}
+
+fn spike_task_with_duration(value: SpikeValue, duration_ms: i64) -> SpikeValue {
     SpikeValue::Task {
         value: Some(Box::new(value)),
         canceled: false,
+        duration_ms,
     }
 }
 
@@ -20606,6 +20632,7 @@ fn await_spike_task(value: SpikeValue) -> Result<SpikeValue, Diagnostic> {
         SpikeValue::Task {
             value: Some(value),
             canceled: false,
+            ..
         } => Ok(*value),
         SpikeValue::Task { canceled: true, .. } => Err(unsupported("awaited task was canceled")),
         SpikeValue::Task { value: None, .. } => {
