@@ -428,22 +428,20 @@ fn main() {
         Command::Parse { path, json } => match parse_project_entry(&path) {
             Ok(output) => {
                 if json {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "schema_version": json_contract::JSON_SCHEMA_VERSION,
-                            "ok": true,
-                            "command": "parse",
-                            "project": path.display().to_string(),
-                            "manifest": output.manifest,
-                            "entry": output.entry,
-                            "statement_count": output.statement_count,
-                        })
-                    );
+                    let payload = serde_json::json!({
+                        "schema_version": json_contract::JSON_SCHEMA_VERSION,
+                        "ok": true,
+                        "command": "parse",
+                        "project": path.display().to_string(),
+                        "manifest": output.manifest,
+                        "entry": output.entry,
+                        "statement_count": output.statement_count,
+                    });
+                    print_json_output_or_error("parse", &payload, 0)
                 } else {
                     eprintln!("OK statements={}", output.statement_count);
+                    0
                 }
-                0
             }
             Err(error) => print_error("parse", error, json),
         },
@@ -483,7 +481,16 @@ fn main() {
                             payload["properties"] =
                                 json_contract::test_property_summary(property_output);
                         }
-                        println!("{payload}");
+                        let code = if property_output
+                            .as_ref()
+                            .map(|output| output.failed == 0)
+                            .unwrap_or(true)
+                        {
+                            0
+                        } else {
+                            1
+                        };
+                        print_json_output_or_error("check", &payload, code)
                     } else {
                         for warning in &output.warnings {
                             eprintln!("{warning}");
@@ -492,15 +499,15 @@ fn main() {
                         if let Some(property_output) = &property_output {
                             print_property_summary(property_output);
                         }
-                    }
-                    if property_output
-                        .as_ref()
-                        .map(|output| output.failed == 0)
-                        .unwrap_or(true)
-                    {
-                        0
-                    } else {
-                        1
+                        if property_output
+                            .as_ref()
+                            .map(|output| output.failed == 0)
+                            .unwrap_or(true)
+                        {
+                            0
+                        } else {
+                            1
+                        }
                     }
                 }
                 Err(error) => print_error("check", error, json),
@@ -532,13 +539,17 @@ fn main() {
             ) {
                 Ok(output) => {
                     if json {
-                        println!("{}", json_contract::build_success(&path, &output));
+                        print_json_output_or_error(
+                            "build",
+                            &json_contract::build_success(&path, &output),
+                            0,
+                        )
                     } else {
                         for line in build_summary_lines(&output, timings) {
                             eprintln!("{line}");
                         }
+                        0
                     }
-                    0
                 }
                 Err(error) => print_error("build", error, json),
             }
@@ -558,8 +569,11 @@ fn main() {
             if json {
                 match run_project_report_with_options(&path, &options) {
                     Ok(output) => {
-                        println!("{}", json_contract::run_success(&path, &output));
-                        output.exit_code
+                        print_json_output_or_error(
+                            "run",
+                            &json_contract::run_success(&path, &output),
+                            output.exit_code,
+                        )
                     }
                     Err(error) => print_error("run", error, true),
                 }
@@ -622,15 +636,16 @@ fn main() {
                 match list_project_tests_with_options(&path, &options) {
                     Ok(output) => {
                         if json {
-                            println!(
-                                "{}",
-                                json_contract::test_list_success(
+                            print_json_output_or_error(
+                                "test",
+                                &json_contract::test_list_success(
                                     &path,
                                     filter.as_deref(),
                                     property_summary,
-                                    &output
-                                )
-                            );
+                                    &output,
+                                ),
+                                0,
+                            )
                         } else {
                             for test in &output.tests {
                                 let package = test.package.as_deref().unwrap_or("<unnamed>");
@@ -640,8 +655,8 @@ fn main() {
                                 );
                             }
                             eprintln!("discovered: {}", output.tests.len());
+                            0
                         }
-                        0
                     }
                     Err(error) => print_error("test", error, json),
                 }
@@ -650,15 +665,16 @@ fn main() {
                     Ok(output) => {
                         let ok = output.failed == 0;
                         if json {
-                            println!(
-                                "{}",
-                                json_contract::test_success(
+                            print_json_output_or_error(
+                                "test",
+                                &json_contract::test_success(
                                     &path,
                                     filter.as_deref(),
                                     property_summary,
-                                    &output
-                                )
-                            );
+                                    &output,
+                                ),
+                                if ok { 0 } else { 1 },
+                            )
                         } else {
                             for case in &output.cases {
                                 let status = if case.ok { "PASS" } else { "FAIL" };
@@ -688,8 +704,8 @@ fn main() {
                                     .count();
                                 eprintln!("{passed}/{total} properties passed");
                             }
+                            if ok { 0 } else { 1 }
                         }
-                        if ok { 0 } else { 1 }
                     }
                     Err(error) => print_error("test", error, json),
                 }
@@ -1633,6 +1649,20 @@ fn print_error(command: &str, error: Diagnostic, json: bool) -> i32 {
         }
     }
     1
+}
+
+fn print_json_output_or_error<T: Serialize>(command: &str, payload: &T, success_code: i32) -> i32 {
+    match format_json_output(payload) {
+        Ok(output) => {
+            println!("{output}");
+            success_code
+        }
+        Err(error) => print_error(command, error, true),
+    }
+}
+
+fn format_json_output<T: Serialize>(payload: &T) -> Result<String, Diagnostic> {
+    json_contract::to_pretty_string(payload)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -8069,6 +8099,21 @@ fn discover_named_files_into(
 mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn json_output_formatter_uses_pretty_json() {
+        let output = format_json_output(&serde_json::json!({
+            "schema_version": json_contract::JSON_SCHEMA_VERSION,
+            "ok": true,
+            "command": "parse",
+        }))
+        .expect("format JSON output");
+
+        assert!(output.starts_with("{\n"));
+        assert!(output.contains("\n  \"schema_version\""));
+        assert!(output.ends_with("\n}"));
+        serde_json::from_str::<serde_json::Value>(&output).expect("parse formatted JSON");
+    }
 
     #[test]
     fn help_describes_supported_stage1_workflows() {
