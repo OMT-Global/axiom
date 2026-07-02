@@ -2293,6 +2293,13 @@ fn lower_i64_aggregate_return_body(
                 expr,
                 ..
             } if !seen_runtime_stmt => {
+                if let Some(diag) = i64_http_non_loopback_bind_diag(expr, static_bindings) {
+                    lowered_stmts.push(CraneliftI64Stmt::WriteLine {
+                        stream: OutputStream::Stderr,
+                        text: diag,
+                    });
+                    seen_runtime_stmt = true;
+                }
                 let local_expr = lower_i64_bool_value_expr(
                     expr,
                     &local_indexes,
@@ -5126,6 +5133,33 @@ fn lower_i64_runtime_let_stmts(
         static_bindings,
     ) {
         return Some(assigns);
+    }
+    if let Stmt::Let {
+        name,
+        ty: Type::Bool,
+        expr,
+        ..
+    } = stmt
+        && let Some(diag) = i64_http_non_loopback_bind_diag(expr, static_bindings)
+    {
+        let value = lower_i64_bool_value_expr(
+            expr,
+            local_indexes,
+            local_conditions,
+            helper_signatures,
+            static_bindings,
+        )?;
+        let local = local_indexes.len();
+        local_indexes.insert(name.clone(), local);
+        locals.push(CraneliftI64Expr::Literal(0));
+        local_conditions.insert(name.clone(), i64_local_truthy_condition(local));
+        return Some(vec![
+            CraneliftI64Stmt::WriteLine {
+                stream: OutputStream::Stderr,
+                text: diag,
+            },
+            CraneliftI64Stmt::Assign(axiomc_backend_cranelift::I64Assign { local, value }),
+        ]);
     }
     if let Some(assigns) = lower_i64_aggregate_local_let_stmts(
         stmt,
