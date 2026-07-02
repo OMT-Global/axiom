@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 mod capabilities;
 mod definitions;
+mod expressions;
 mod generics;
 mod model;
 mod signatures;
@@ -25,6 +26,11 @@ use self::definitions::{
     collect_type_names, validate_recursive_type_cycles, validate_trait_bounds_in_program,
     validate_trait_type_uses_in_program,
 };
+use self::expressions::{
+    coerce_lowered_expr_to_expected, is_castable_numeric, is_ordered_numeric, is_string_like_type,
+    lower_binary_add_chain, lower_call_arg_with_expected, method_owner_name,
+    numeric_method_return_ty, static_bool_value,
+};
 use self::generics::monomorphize_program;
 use self::model::type_assignable_to;
 pub use self::model::*;
@@ -32,9 +38,7 @@ use self::signatures::{
     FunctionSig, MethodSig, collect_function_signatures, collect_method_signatures,
     function_symbol_name, validate_trait_impls,
 };
-use self::types::{
-    lower_arithmetic_op, lower_compare_op, lower_literal, lower_logic_op, lower_type,
-};
+use self::types::{lower_compare_op, lower_literal, lower_logic_op, lower_type};
 
 #[derive(Debug, Clone)]
 struct MatchArmInput {
@@ -149,48 +153,6 @@ const OWNERSHIP_BORROW_RETURN_REQUIRES_PARAM_ORIGIN: &str =
     borrowck::BORROW_RETURN_REQUIRES_PARAM_ORIGIN;
 const OWNERSHIP_MOVE_WHILE_BORROWED: &str = borrowck::MOVE_WHILE_BORROWED;
 const OWNERSHIP_USE_AFTER_MOVE: &str = borrowck::USE_AFTER_MOVE;
-
-fn is_castable_numeric(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Numeric(_))
-}
-
-fn is_ordered_numeric(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Numeric(_))
-}
-
-fn is_addable_numeric(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Numeric(_))
-}
-
-fn numeric_method_return_ty(receiver: &Type, method: &str) -> Option<Type> {
-    let is_integer = match receiver {
-        Type::Int => true,
-        Type::Numeric(numeric) => {
-            !matches!(numeric, syntax::NumericType::F32 | syntax::NumericType::F64)
-        }
-        _ => false,
-    };
-    if !is_integer {
-        return None;
-    }
-    match method {
-        "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "wrapping_div" | "wrapping_rem" => {
-            Some(receiver.clone())
-        }
-        "checked_add" | "checked_sub" | "checked_mul" | "checked_div" | "checked_rem" => {
-            Some(Type::Option(Box::new(receiver.clone())))
-        }
-        "saturating_add" | "saturating_sub" | "saturating_mul" => Some(receiver.clone()),
-        _ => None,
-    }
-}
-
-fn method_owner_name(ty: &Type) -> Option<&str> {
-    match ty {
-        Type::Struct(name) | Type::Enum(name) => Some(name.as_str()),
-        _ => None,
-    }
-}
 
 pub fn lower(program: &syntax::Program) -> Result<Program, Diagnostic> {
     let capabilities = CapabilityConfig::default();
@@ -3145,39 +3107,6 @@ fn lower_expr(
     lower_expr_with_expected(expr, None, env, ctx)
 }
 
-fn is_string_like_type(ty: &Type) -> bool {
-    matches!(ty, Type::String | Type::Str)
-}
-
-fn coerce_expr_to_expected(
-    expr: Expr,
-    expected: Option<&Type>,
-    allow_temporary_string_borrow: bool,
-) -> Result<Expr, Diagnostic> {
-    match expected {
-        Some(Type::Str) if expr.ty() == &Type::String => {
-            if !allow_temporary_string_borrow && !is_stable_string_borrow_owner(&expr) {
-                return Err(Diagnostic::new(
-                    "ownership",
-                    "cannot borrow a temporary String as &str; bind the String to a local first",
-                ));
-            }
-            Ok(Expr::StringBorrow {
-                expr: Box::new(expr),
-                ty: Type::Str,
-            })
-        }
-        _ => Ok(expr),
-    }
-}
-
-fn is_stable_string_borrow_owner(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::VarRef { .. } | Expr::FieldAccess { .. } | Expr::TupleIndex { .. }
-    )
-}
-
 fn lower_expr_with_expected(
     expr: &syntax::Expr,
     expected: Option<&Type>,
@@ -3185,72 +3114,7 @@ fn lower_expr_with_expected(
     ctx: &LowerContext<'_>,
 ) -> Result<Expr, Diagnostic> {
     lower_expr_with_expected_inner(expr, expected, env, ctx)
-        .and_then(|lowered| coerce_expr_to_expected(lowered, expected, false))
-}
-
-fn lower_call_arg_with_expected(
-    expr: &syntax::Expr,
-    expected: Option<&Type>,
-    env: &mut HashMap<String, Binding>,
-    ctx: &LowerContext<'_>,
-    allow_temporary_string_borrow: bool,
-) -> Result<Expr, Diagnostic> {
-    lower_expr_with_expected_inner(expr, expected, env, ctx).and_then(|lowered| {
-        coerce_expr_to_expected(lowered, expected, allow_temporary_string_borrow)
-    })
-}
-
-fn lower_binary_add_chain(
-    expr: &syntax::Expr,
-    env: &mut HashMap<String, Binding>,
-    ctx: &LowerContext<'_>,
-) -> Result<Expr, Diagnostic> {
-    let mut current = expr;
-    let mut pending = Vec::new();
-    while let syntax::Expr::BinaryAdd {
-        op,
-        lhs,
-        rhs,
-        line,
-        column,
-    } = current
-    {
-        pending.push((*op, rhs.as_ref(), *line, *column));
-        current = lhs.as_ref();
-    }
-
-    let mut lowered = lower_expr(current, env, ctx)?;
-    for (op, rhs, line, column) in pending.into_iter().rev() {
-        let lowered_rhs = lower_expr(rhs, env, ctx)?;
-        let lhs_ty = lowered.ty().clone();
-        let rhs_ty = lowered_rhs.ty().clone();
-        let result_ty = if lhs_ty == rhs_ty && is_addable_numeric(&lhs_ty) {
-            lhs_ty.clone()
-        } else if op == syntax::ArithmeticOp::Add
-            && is_string_like_type(&lhs_ty)
-            && is_string_like_type(&rhs_ty)
-        {
-            Type::String
-        } else {
-            return Err(
-                Diagnostic::new(
-                    "type",
-                    format!(
-                        "operator '{}' expects matching numeric or string operands, got {lhs_ty} and {rhs_ty}",
-                        op.lexeme()
-                    ),
-                )
-                .with_span(line, column),
-            );
-        };
-        lowered = Expr::BinaryAdd {
-            op: lower_arithmetic_op(op),
-            lhs: Box::new(lowered),
-            rhs: Box::new(lowered_rhs),
-            ty: result_ty,
-        };
-    }
-    Ok(lowered)
+        .and_then(|lowered| coerce_lowered_expr_to_expected(lowered, expected))
 }
 
 fn lower_expr_with_expected_inner(
@@ -9162,56 +9026,6 @@ fn with_assert_location(args: Vec<Expr>, line: usize, column: usize) -> Vec<Expr
         value: LiteralValue::Int(column as i64),
     });
     args
-}
-
-fn static_bool_value(expr: &Expr) -> Option<bool> {
-    match expr {
-        Expr::Literal {
-            value: LiteralValue::Bool(value),
-            ..
-        } => Some(*value),
-        Expr::BinaryCompare { op, lhs, rhs, .. } => {
-            let lhs = literal_value(lhs)?;
-            let rhs = literal_value(rhs)?;
-            Some(match (lhs, rhs) {
-                (LiteralValue::Int(lhs), LiteralValue::Int(rhs)) => match op {
-                    CompareOp::Eq => lhs == rhs,
-                    CompareOp::Ne => lhs != rhs,
-                    CompareOp::Lt => lhs < rhs,
-                    CompareOp::Le => lhs <= rhs,
-                    CompareOp::Gt => lhs > rhs,
-                    CompareOp::Ge => lhs >= rhs,
-                },
-                (LiteralValue::Bool(lhs), LiteralValue::Bool(rhs)) => match op {
-                    CompareOp::Eq => lhs == rhs,
-                    CompareOp::Ne => lhs != rhs,
-                    _ => return None,
-                },
-                (LiteralValue::String(lhs), LiteralValue::String(rhs)) => match op {
-                    CompareOp::Eq => lhs == rhs,
-                    CompareOp::Ne => lhs != rhs,
-                    _ => return None,
-                },
-                _ => return None,
-            })
-        }
-        Expr::BinaryLogic { op, lhs, rhs, .. } => {
-            let lhs = static_bool_value(lhs)?;
-            let rhs = static_bool_value(rhs)?;
-            Some(match op {
-                LogicOp::And => lhs && rhs,
-                LogicOp::Or => lhs || rhs,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn literal_value(expr: &Expr) -> Option<&LiteralValue> {
-    match expr {
-        Expr::Literal { value, .. } => Some(value),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
