@@ -503,7 +503,7 @@ fn type_assignable_to(actual: &Type, expected: &Type) -> bool {
                     .all(|(actual, expected)| type_assignable_to(actual, expected))
                 && type_assignable_to(actual_return, expected_return)
         }
-        _ => unify_types(actual, expected).is_some_and(|ty| ty == *expected),
+        _ => actual == expected,
     }
 }
 
@@ -16534,6 +16534,14 @@ return ""
             &Type::Option(Box::new(Type::String))
         ));
         assert!(!type_assignable_to(&Type::Int, &Type::Never));
+    }
+
+    #[test]
+    fn type_assignable_fallback_uses_direct_type_equality() {
+        assert!(type_assignable_to(&Type::Bool, &Type::Bool));
+        assert!(!type_assignable_to(&Type::Bool, &Type::Int));
+        assert!(type_assignable_to(&Type::Error, &Type::Int));
+        assert!(type_assignable_to(&Type::Int, &Type::Error));
     }
 
     #[test]
