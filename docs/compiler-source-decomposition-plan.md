@@ -55,7 +55,10 @@ validation, and HIR symbol-name resolution into
 `stage1/crates/axiomc/src/hir/signatures.rs`. The HIR capability extraction
 then moved FFI validation, capability checks, network/process allowlist
 validation, and capability-focused tests into
-`stage1/crates/axiomc/src/hir/capabilities.rs`, lowering both absolute top-file
+`stage1/crates/axiomc/src/hir/capabilities.rs`. The HIR expression typing
+extraction then moved numeric type predicates, method-owner typing, string
+borrow coercion, binary-add typing, and static expression value helpers into
+`stage1/crates/axiomc/src/hir/expressions.rs`, lowering both absolute top-file
 lines and share.
 
 ## Current Top Files
@@ -66,7 +69,7 @@ Snapshot from 2026-07-02:
 | ---: | --- | ---: | --- | --- |
 | 1 | `stage1/crates/axiomc/src/cranelift_backend.rs` | 27,994 | `compiler.backend.native` | Split direct-native lowering by runtime ABI groups: scalar/aggregate value features, capability shims, host imports, object emission, unsupported diagnostics, and evidence helpers. |
 | 2 | `stage1/crates/axiomc/src/project.rs` | 10,812 | `compiler.package_graph`, `compiler.commands`, `compiler.evidence` | Split manifest/workspace loading, command orchestration, provenance/debug records, and build artifact planning along package ownership. |
-| 3 | `stage1/crates/axiomc/src/hir.rs` | 10,001 | `compiler.hir` | Generic inference and monomorphization now live in `stage1/crates/axiomc/src/hir/generics.rs`; public HIR model types now live in `stage1/crates/axiomc/src/hir/model.rs`; syntax-to-HIR type/literal lowering now lives in `stage1/crates/axiomc/src/hir/types.rs`; type-name, aggregate, and trait-use definition checks now live in `stage1/crates/axiomc/src/hir/definitions.rs`; function/method signatures and trait impl signature validation now live in `stage1/crates/axiomc/src/hir/signatures.rs`; capability analysis now lives in `stage1/crates/axiomc/src/hir/capabilities.rs`; next split expression typing, ownership/borrow validation, property clauses, and HIR diagnostics behind the package APIs in `docs/compiler-hir-ownership-capability.md`. |
+| 3 | `stage1/crates/axiomc/src/hir.rs` | 9,815 | `compiler.hir` | Generic inference and monomorphization now live in `stage1/crates/axiomc/src/hir/generics.rs`; public HIR model types now live in `stage1/crates/axiomc/src/hir/model.rs`; syntax-to-HIR type/literal lowering now lives in `stage1/crates/axiomc/src/hir/types.rs`; type-name, aggregate, and trait-use definition checks now live in `stage1/crates/axiomc/src/hir/definitions.rs`; function/method signatures and trait impl signature validation now live in `stage1/crates/axiomc/src/hir/signatures.rs`; capability analysis now lives in `stage1/crates/axiomc/src/hir/capabilities.rs`; expression typing helpers now live in `stage1/crates/axiomc/src/hir/expressions.rs`; next split ownership/borrow validation, property clauses, and HIR diagnostics behind the package APIs in `docs/compiler-hir-ownership-capability.md`. |
 | 4 | `stage1/crates/axiomc/src/main.rs` | 10,678 | `compiler.commands` | Move command parsing, JSON envelope construction, check/build/run/test/doc/trace orchestration, and exit handling behind `docs/compiler-command-lsp-packages.md` APIs. |
 | 5 | `stage1/crates/axiomc/src/codegen.rs` | 7,804 | `compiler.backend.generated_rust`, `compiler.backend.contracts` | Isolate generated-Rust compatibility emission from backend target selection and unsupported-feature contracts. |
 | 6 | `stage1/crates/axiomc/src/syntax.rs` | 6,324 | `compiler.syntax`, `compiler.diagnostics` | Split lexer/parser, parse recovery, source spans, macros, and syntax diagnostics behind the syntax boundary. |
@@ -82,16 +85,17 @@ matching ceiling in this table in the same PR.
 
 | Tracked item | Ceiling |
 | --- | ---: |
-| `summary.top_file_line_share` | 0.8736 |
-| `summary.top_file_lines` | 77818 |
+| `summary.top_file_line_share` | 0.8714 |
+| `summary.top_file_lines` | 77632 |
 | `stage1/crates/axiomc/src/cranelift_backend.rs` | 27994 |
-| `stage1/crates/axiomc/src/hir.rs` | 10001 |
+| `stage1/crates/axiomc/src/hir.rs` | 9815 |
 | `stage1/crates/axiomc/src/project.rs` | 10812 |
 | `stage1/crates/axiomc/src/main.rs` | 10678 |
 | `stage1/crates/axiomc/src/codegen.rs` | 7804 |
 | `stage1/crates/axiomc/src/syntax.rs` | 6324 |
 | `stage1/crates/axiomc/src/hir/capabilities.rs` | 773 |
 | `stage1/crates/axiomc/src/hir/definitions.rs` | 684 |
+| `stage1/crates/axiomc/src/hir/expressions.rs` | 205 |
 | `stage1/crates/axiomc/src/hir/generics.rs` | 4205 |
 | `stage1/crates/axiomc/src/hir/model.rs` | 607 |
 | `stage1/crates/axiomc/src/hir/signatures.rs` | 471 |
@@ -109,9 +113,9 @@ matching ceiling in this table in the same PR.
    gate.
 3. `compiler.hir`: generic inference/monomorphization, public HIR model types,
    syntax-to-HIR type/literal lowering, and type/aggregate definition collection
-   are split; function/method signatures, trait impl signature validation, and
-   capability analysis are split; continue with expression typing, ownership,
-   and property checks in that order so diagnostics stay stable.
+   are split; function/method signatures, trait impl signature validation,
+   capability analysis, and expression typing helpers are split; continue with
+   ownership and property checks in that order so diagnostics stay stable.
 4. `compiler.commands` and `compiler.package_graph`: separate command envelopes
    from package loading so the snapshot bootstrap can invoke package APIs
    without Cargo assumptions.
