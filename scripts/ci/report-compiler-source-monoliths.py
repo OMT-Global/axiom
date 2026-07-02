@@ -198,6 +198,16 @@ def check_ratchet(report: dict[str, Any], plan_path: Path) -> list[str]:
                 f"{current_share:.4f} exceeds ratchet ceiling {share_ceiling:.4f}"
             )
 
+    lines_ceiling = metrics.get("summary.top_file_lines")
+    if lines_ceiling is None:
+        errors.append("ratchet is missing summary.top_file_lines ceiling")
+    else:
+        current_lines = int(report["summary"]["top_file_lines"])
+        if current_lines > int(lines_ceiling):
+            errors.append(
+                f"top file lines {current_lines} exceeds ratchet ceiling {int(lines_ceiling)}"
+            )
+
     for path, ceiling in sorted(file_ceilings.items()):
         current = current_lines_for(path, top_files)
         if current > ceiling:
