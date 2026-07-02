@@ -54,16 +54,17 @@ class CompilerSourceMonolithTests(unittest.TestCase):
             write_lines(hir_dir / "properties.rs", 1)
             write_lines(hir_dir / "reachability.rs", 1)
             write_lines(hir_dir / "signatures.rs", 1)
+            write_lines(hir_dir / "symbols.rs", 1)
             write_lines(hir_dir / "types.rs", 1)
 
-            report = compiler_source_monoliths.build_report(source_root, top=14)
+            report = compiler_source_monoliths.build_report(source_root, top=15)
 
         self.assertEqual(report["schema_version"], "axiom.compiler_source.monoliths.v0")
         self.assertEqual(report["collected_at"], "2026-06-21T10:00:00Z")
-        self.assertEqual(report["summary"]["total_files"], 14)
-        self.assertEqual(report["summary"]["total_lines"], 21)
+        self.assertEqual(report["summary"]["total_files"], 15)
+        self.assertEqual(report["summary"]["total_lines"], 22)
         self.assertEqual(report["summary"]["largest_file_lines"], 5)
-        self.assertEqual(report["summary"]["top_file_lines"], 21)
+        self.assertEqual(report["summary"]["top_file_lines"], 22)
         self.assertEqual(report["summary"]["top_file_line_share"], 1.0)
         boundaries_by_suffix = {
             Path(item["path"]).as_posix().removeprefix(source_root.as_posix() + "/"): item[
@@ -87,6 +88,7 @@ class CompilerSourceMonolithTests(unittest.TestCase):
             "hir/properties.rs",
             "hir/reachability.rs",
             "hir/signatures.rs",
+            "hir/symbols.rs",
             "hir/types.rs",
         ]:
             self.assertEqual(boundaries_by_suffix[path], ["compiler.hir"])
