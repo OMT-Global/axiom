@@ -29,6 +29,7 @@ The report records:
 
 - total hand-written Rust lines under `stage1/crates/axiomc/src`;
 - the largest single compiler file;
+- the total line count for the top files;
 - the top-file share of the compiler source tree;
 - the self-hosted package boundary each large file must move toward.
 
@@ -38,6 +39,11 @@ land. The current ceilings are the maximum allowed values; extraction PRs should
 lower the relevant ceiling in this plan when they remove lines from a tracked
 monolith.
 
+The `lib.rs` test-module extraction lowered the absolute top-seven source line
+count. It also raised the top-seven share because test code left
+`stage1/crates/axiomc/src`, reducing the source denominator. Future
+implementation splits should lower both absolute top-file lines and share.
+
 ## Current Top Files
 
 Snapshot from 2026-07-02:
@@ -46,11 +52,11 @@ Snapshot from 2026-07-02:
 | ---: | --- | ---: | --- | --- |
 | 1 | `stage1/crates/axiomc/src/cranelift_backend.rs` | 27,994 | `compiler.backend.native` | Split direct-native lowering by runtime ABI groups: scalar/aggregate value features, capability shims, host imports, object emission, unsupported diagnostics, and evidence helpers. |
 | 2 | `stage1/crates/axiomc/src/hir.rs` | 16,912 | `compiler.hir` | Split name resolution, type checking, capability analysis, ownership/borrow validation, property clauses, and HIR diagnostics behind the package APIs in `docs/compiler-hir-ownership-capability.md`. |
-| 3 | `stage1/crates/axiomc/src/lib.rs` | 15,017 | compiler package facade | Reduce to package exports and shared test scaffolding while moving implementation logic into package-owned modules. |
-| 4 | `stage1/crates/axiomc/src/project.rs` | 10,812 | `compiler.package_graph`, `compiler.commands`, `compiler.evidence` | Split manifest/workspace loading, command orchestration, provenance/debug records, and build artifact planning along package ownership. |
-| 5 | `stage1/crates/axiomc/src/main.rs` | 10,678 | `compiler.commands` | Move command parsing, JSON envelope construction, check/build/run/test/doc/trace orchestration, and exit handling behind `docs/compiler-command-lsp-packages.md` APIs. |
-| 6 | `stage1/crates/axiomc/src/codegen.rs` | 7,804 | `compiler.backend.generated_rust`, `compiler.backend.contracts` | Isolate generated-Rust compatibility emission from backend target selection and unsupported-feature contracts. |
-| 7 | `stage1/crates/axiomc/src/syntax.rs` | 6,324 | `compiler.syntax`, `compiler.diagnostics` | Split lexer/parser, parse recovery, source spans, macros, and syntax diagnostics behind the syntax boundary. |
+| 3 | `stage1/crates/axiomc/src/project.rs` | 10,812 | `compiler.package_graph`, `compiler.commands`, `compiler.evidence` | Split manifest/workspace loading, command orchestration, provenance/debug records, and build artifact planning along package ownership. |
+| 4 | `stage1/crates/axiomc/src/main.rs` | 10,678 | `compiler.commands` | Move command parsing, JSON envelope construction, check/build/run/test/doc/trace orchestration, and exit handling behind `docs/compiler-command-lsp-packages.md` APIs. |
+| 5 | `stage1/crates/axiomc/src/codegen.rs` | 7,804 | `compiler.backend.generated_rust`, `compiler.backend.contracts` | Isolate generated-Rust compatibility emission from backend target selection and unsupported-feature contracts. |
+| 6 | `stage1/crates/axiomc/src/syntax.rs` | 6,324 | `compiler.syntax`, `compiler.diagnostics` | Split lexer/parser, parse recovery, source spans, macros, and syntax diagnostics behind the syntax boundary. |
+| 7 | `stage1/crates/axiomc/src/registry.rs` | 2,159 | `compiler.package_graph` | Split registry resolution, package metadata access, and registry diagnostics behind package-graph APIs. |
 
 ## Ratchet Ceilings
 
@@ -62,14 +68,16 @@ matching ceiling in this table in the same PR.
 
 | Tracked item | Ceiling |
 | --- | ---: |
-| `summary.top_file_line_share` | 0.9197 |
+| `summary.top_file_line_share` | 0.9302 |
+| `summary.top_file_lines` | 82683 |
 | `stage1/crates/axiomc/src/cranelift_backend.rs` | 27994 |
 | `stage1/crates/axiomc/src/hir.rs` | 16912 |
-| `stage1/crates/axiomc/src/lib.rs` | 15017 |
 | `stage1/crates/axiomc/src/project.rs` | 10812 |
 | `stage1/crates/axiomc/src/main.rs` | 10678 |
 | `stage1/crates/axiomc/src/codegen.rs` | 7804 |
 | `stage1/crates/axiomc/src/syntax.rs` | 6324 |
+| `stage1/crates/axiomc/src/registry.rs` | 2159 |
+| `stage1/crates/axiomc/src/lib.rs` | 21 |
 
 ## Extraction Order
 

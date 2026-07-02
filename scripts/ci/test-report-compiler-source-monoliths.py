@@ -88,6 +88,7 @@ class CompilerSourceMonolithTests(unittest.TestCase):
                 "| Tracked item | Ceiling |\n"
                 "| --- | ---: |\n"
                 "| `summary.top_file_line_share` | 1.0000 |\n"
+                "| `summary.top_file_lines` | 8 |\n"
                 f"| `{first.as_posix()}` | 5 |\n"
                 f"| `{second.as_posix()}` | 3 |\n",
                 encoding="utf-8",
@@ -112,6 +113,7 @@ class CompilerSourceMonolithTests(unittest.TestCase):
                 "| Tracked item | Ceiling |\n"
                 "| --- | ---: |\n"
                 "| `summary.top_file_line_share` | 0.7000 |\n"
+                "| `summary.top_file_lines` | 7 |\n"
                 f"| `{first.as_posix()}` | 4 |\n"
                 f"| `{second.as_posix()}` | 3 |\n",
                 encoding="utf-8",
@@ -120,6 +122,7 @@ class CompilerSourceMonolithTests(unittest.TestCase):
             errors = compiler_source_monoliths.check_ratchet(report, plan)
 
         self.assertTrue(any("top file line share" in error for error in errors))
+        self.assertTrue(any("top file lines" in error for error in errors))
         self.assertTrue(any("cranelift_backend.rs" in error for error in errors))
 
     def test_cli_check_plan_fails_when_plan_is_incomplete(self) -> None:
