@@ -32,23 +32,44 @@ The report records:
 - the top-file share of the compiler source tree;
 - the self-hosted package boundary each large file must move toward.
 
-This is advisory evidence, not a release blocker. The trend target is that the
-largest file and top-seven file share move downward release over release as
-child extraction PRs land.
+This is now a ratcheted gate. The target is that the largest files and
+top-seven file share move downward release over release as child extraction PRs
+land. The current ceilings are the maximum allowed values; extraction PRs should
+lower the relevant ceiling in this plan when they remove lines from a tracked
+monolith.
 
 ## Current Top Files
 
-Snapshot from 2026-06-21:
+Snapshot from 2026-07-02:
 
 | Rank | Current Rust file | Lines | Target package boundary | First extraction slice |
 | ---: | --- | ---: | --- | --- |
-| 1 | `stage1/crates/axiomc/src/cranelift_backend.rs` | 21,536 | `compiler.backend.native` | Split direct-native lowering by runtime ABI groups: scalar/aggregate value features, capability shims, host imports, object emission, unsupported diagnostics, and evidence helpers. |
-| 2 | `stage1/crates/axiomc/src/hir.rs` | 16,758 | `compiler.hir` | Split name resolution, type checking, capability analysis, ownership/borrow validation, property clauses, and HIR diagnostics behind the package APIs in `docs/compiler-hir-ownership-capability.md`. |
-| 3 | `stage1/crates/axiomc/src/lib.rs` | 14,684 | compiler package facade | Reduce to package exports and shared test scaffolding while moving implementation logic into package-owned modules. |
-| 4 | `stage1/crates/axiomc/src/main.rs` | 9,936 | `compiler.commands` | Move command parsing, JSON envelope construction, check/build/run/test/doc/trace orchestration, and exit handling behind `docs/compiler-command-lsp-packages.md` APIs. |
-| 5 | `stage1/crates/axiomc/src/project.rs` | 8,684 | `compiler.package_graph`, `compiler.commands`, `compiler.evidence` | Split manifest/workspace loading, command orchestration, provenance/debug records, and build artifact planning along package ownership. |
-| 6 | `stage1/crates/axiomc/src/codegen.rs` | 7,772 | `compiler.backend.generated_rust`, `compiler.backend.contracts` | Isolate generated-Rust compatibility emission from backend target selection and unsupported-feature contracts. |
+| 1 | `stage1/crates/axiomc/src/cranelift_backend.rs` | 27,994 | `compiler.backend.native` | Split direct-native lowering by runtime ABI groups: scalar/aggregate value features, capability shims, host imports, object emission, unsupported diagnostics, and evidence helpers. |
+| 2 | `stage1/crates/axiomc/src/hir.rs` | 16,912 | `compiler.hir` | Split name resolution, type checking, capability analysis, ownership/borrow validation, property clauses, and HIR diagnostics behind the package APIs in `docs/compiler-hir-ownership-capability.md`. |
+| 3 | `stage1/crates/axiomc/src/lib.rs` | 15,017 | compiler package facade | Reduce to package exports and shared test scaffolding while moving implementation logic into package-owned modules. |
+| 4 | `stage1/crates/axiomc/src/project.rs` | 10,812 | `compiler.package_graph`, `compiler.commands`, `compiler.evidence` | Split manifest/workspace loading, command orchestration, provenance/debug records, and build artifact planning along package ownership. |
+| 5 | `stage1/crates/axiomc/src/main.rs` | 10,678 | `compiler.commands` | Move command parsing, JSON envelope construction, check/build/run/test/doc/trace orchestration, and exit handling behind `docs/compiler-command-lsp-packages.md` APIs. |
+| 6 | `stage1/crates/axiomc/src/codegen.rs` | 7,804 | `compiler.backend.generated_rust`, `compiler.backend.contracts` | Isolate generated-Rust compatibility emission from backend target selection and unsupported-feature contracts. |
 | 7 | `stage1/crates/axiomc/src/syntax.rs` | 6,324 | `compiler.syntax`, `compiler.diagnostics` | Split lexer/parser, parse recovery, source spans, macros, and syntax diagnostics behind the syntax boundary. |
+
+## Ratchet Ceilings
+
+These ceilings are consumed by
+`scripts/ci/report-compiler-source-monoliths.py --check-ratchet`. A PR that
+adds lines above any ceiling fails `make stage1-compiler-source-monoliths`.
+When an extraction PR shrinks a tracked monolith or top-file share, lower the
+matching ceiling in this table in the same PR.
+
+| Tracked item | Ceiling |
+| --- | ---: |
+| `summary.top_file_line_share` | 0.9197 |
+| `stage1/crates/axiomc/src/cranelift_backend.rs` | 27994 |
+| `stage1/crates/axiomc/src/hir.rs` | 16912 |
+| `stage1/crates/axiomc/src/lib.rs` | 15017 |
+| `stage1/crates/axiomc/src/project.rs` | 10812 |
+| `stage1/crates/axiomc/src/main.rs` | 10678 |
+| `stage1/crates/axiomc/src/codegen.rs` | 7804 |
+| `stage1/crates/axiomc/src/syntax.rs` | 6324 |
 
 ## Extraction Order
 

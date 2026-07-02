@@ -73,6 +73,55 @@ class CompilerSourceMonolithTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
+    def test_check_ratchet_passes_when_current_counts_are_within_ceilings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_root = Path(tmp) / "src"
+            source_root.mkdir()
+            first = source_root / "cranelift_backend.rs"
+            second = source_root / "hir.rs"
+            write_lines(first, 5)
+            write_lines(second, 3)
+            report = compiler_source_monoliths.build_report(source_root, top=2)
+            plan = Path(tmp) / "plan.md"
+            plan.write_text(
+                "## Ratchet Ceilings\n\n"
+                "| Tracked item | Ceiling |\n"
+                "| --- | ---: |\n"
+                "| `summary.top_file_line_share` | 1.0000 |\n"
+                f"| `{first.as_posix()}` | 5 |\n"
+                f"| `{second.as_posix()}` | 3 |\n",
+                encoding="utf-8",
+            )
+
+            errors = compiler_source_monoliths.check_ratchet(report, plan)
+
+        self.assertEqual(errors, [])
+
+    def test_check_ratchet_fails_when_counts_rise_above_ceilings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_root = Path(tmp) / "src"
+            source_root.mkdir()
+            first = source_root / "cranelift_backend.rs"
+            second = source_root / "hir.rs"
+            write_lines(first, 5)
+            write_lines(second, 3)
+            report = compiler_source_monoliths.build_report(source_root, top=2)
+            plan = Path(tmp) / "plan.md"
+            plan.write_text(
+                "## Ratchet Ceilings\n\n"
+                "| Tracked item | Ceiling |\n"
+                "| --- | ---: |\n"
+                "| `summary.top_file_line_share` | 0.7000 |\n"
+                f"| `{first.as_posix()}` | 4 |\n"
+                f"| `{second.as_posix()}` | 3 |\n",
+                encoding="utf-8",
+            )
+
+            errors = compiler_source_monoliths.check_ratchet(report, plan)
+
+        self.assertTrue(any("top file line share" in error for error in errors))
+        self.assertTrue(any("cranelift_backend.rs" in error for error in errors))
+
     def test_cli_check_plan_fails_when_plan_is_incomplete(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source_root = Path(tmp) / "src"
@@ -103,6 +152,37 @@ class CompilerSourceMonolithTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertFalse(payload["plan_check"]["passed"])
         self.assertIn("cranelift_backend.rs", payload["plan_check"]["errors"][0])
+
+    def test_cli_check_ratchet_fails_when_plan_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source_root = Path(tmp) / "src"
+            source_root.mkdir()
+            write_lines(source_root / "cranelift_backend.rs", 5)
+            plan = Path(tmp) / "plan.md"
+            plan.write_text("no ratchet table\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--source-root",
+                    str(source_root),
+                    "--plan",
+                    str(plan),
+                    "--top",
+                    "1",
+                    "--check-ratchet",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 1)
+        payload = json.loads(completed.stdout)
+        self.assertFalse(payload["ratchet_check"]["passed"])
+        self.assertIn("Ratchet Ceilings", payload["ratchet_check"]["errors"][0])
 
 
 if __name__ == "__main__":
